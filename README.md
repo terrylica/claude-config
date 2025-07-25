@@ -17,7 +17,7 @@ This directory contains the global configuration for Claude Code, organized into
 
 - **`settings.json`**: Main Claude Code configuration with model settings and hook definitions
 - **`CLAUDE.md`**: User memory system with APCF methodology and workflow preferences  
-- **`sounds/Glass.aiff`**: System notification sound for audio feedback integration
+- **Glass.aiff**: System notification sound (from macOS system sounds)
 - **`.gitignore`**: Version control exclusions for temporary and system files
 
 ## Audio Integration
