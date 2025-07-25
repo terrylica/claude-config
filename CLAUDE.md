@@ -158,7 +158,7 @@ Here in this line, the last line in the commit message, we display the result of
 **Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior
 
 #### Core Files
-- **Main Script**: `.claude/scripts/gfm-link-checker/gfm_link_checker.py`
-- **Command Wrapper**: `.claude/scripts/gfm-link-checker/bin/gfm-check`
-- **Setup Script**: `.claude/scripts/gfm-link-checker/setup-gfm-checker.sh`
-- **Project Config**: `.claude/scripts/gfm-link-checker/pyproject.toml`
+- **Main Script**: `.claude/tools/gfm-link-checker/gfm_link_checker.py`
+- **Command Wrapper**: `.claude/tools/gfm-link-checker/bin/gfm-check`
+- **Setup Script**: `.claude/tools/gfm-link-checker/setup-gfm-checker.sh`
+- **Project Config**: `.claude/tools/gfm-link-checker/pyproject.toml`
