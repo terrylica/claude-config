@@ -6,12 +6,12 @@ This directory contains the global configuration for Claude Code, organized into
 
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
-| **[APCF System](CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
-| **[TTS Integration](claude_response_speaker.sh)** | Text-to-speech for Claude responses | `claude_response_speaker.sh`, `tts_hook_entry.sh` |
+| **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
+| **[TTS Integration](../automation/scripts/claude_response_speaker.sh)** | Text-to-speech for Claude responses | `automation/scripts/claude_response_speaker.sh`, `automation/scripts/tts_hook_entry.sh` |
 | **[Command Hub](commands/)** | Slash command system for workflow automation | `commands/` directory |
-| **[Automation Hooks](hooks/)** | Event-driven automation and integrations | `hooks/` directory, `hook_debug_wrapper.sh` |
+| **[Automation Hooks](../hooks/)** | Event-driven automation and integrations | `hooks/` directory, `automation/scripts/hook_debug_wrapper.sh` |
 | **[Project Memory](projects/)** | Cross-session context and state persistence | `projects/` directory |
-| **[Development Context](settings.json)** | Core configuration and system preferences | `settings.json` |
+| **[Development Context](../settings.json)** | Core configuration and system preferences | `settings.json` |
 
 ## Core Configuration Files
 
@@ -36,4 +36,4 @@ This configuration enables:
 4. **Memory Persistence**: Cross-session project context and preference retention
 5. **Development Integration**: Seamless workflow with git, debugging, and productivity tools
 
-For detailed APCF usage and commit formatting guidelines, see the [APCF section in CLAUDE.md](CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation).
+For detailed APCF usage and commit formatting guidelines, see the [APCF section in CLAUDE.md](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation).

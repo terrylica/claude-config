@@ -121,13 +121,13 @@ Here in this line, the last line in the commit message, we display the result of
 - **Python**: 3.11+, type hints required  
 - **Commands**: Use `make` or `uv run` for operations
 
-### Root README.md Link Farm Policy
+### Documentation & README Audit Requirements
 
-- In the root workspace, README.md must only aggregate links to documentation files or directories. Delegate all content details to target files/directories. When linking to a directory, default is valid—GitHub will auto-render directory's README.md if present. Avoid embedding substantive docs directly; centralize navigation, decentralize details.
-
-## Cache System
-
-- Uses `platformdirs` for platform-appropriate cache directories (not workspace dirs)
+- **Link Validation**: Before editing README.md files, verify all directory links have README.md or point to existing files
+- **GitHub Behavior**: Directory links without README.md show empty pages/404 on GitHub
+- **Broken Link Types**: Check directory references, file paths, anchor links, relative paths
+- **Security Audit**: Validate shell commands, file paths, user input handling in documentation examples
+- **Root README Policy**: Aggregate links only; delegate content to target files/directories
 
 ## Development Environment Preferences
 
@@ -140,7 +140,11 @@ Here in this line, the last line in the commit message, we display the result of
 - **Shell**: zsh
 - **Working Directory**: `/Users/terryli/scripts`
 
-## Claude Code Extensions
+### Cache System
+
+- Uses `platformdirs` for platform-appropriate cache directories (not workspace dirs)
+
+## Claude Code User Custom Extensions
 
 ### Intelligent Text-to-Speech Hook System
 **Purpose**: Audio feedback for Claude Code responses
