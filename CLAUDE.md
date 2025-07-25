@@ -7,6 +7,10 @@
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
 - **Rationale**: Detailed specifications belong in the actual script files to avoid redundancy
 
+## Tool Usage Preferences
+- **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
+- **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
+
 ## User Identity
 
 - Terry Li is the Director of Operations of Eon Labs Ltd., who is responsible for features engineering for downstream see-2-seq model's consumption. 
@@ -17,8 +21,6 @@
 	```bashult
 	TZ='America/Vancouver' date "+%A %Y-%m-%d %H:%M:%S %Z %z"
 	```
-### Tool Usage Preferences
-- **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
 
 ### Usage: Claude Code Interaction
 
