@@ -8,4 +8,4 @@ export CLAUDE_TTS_TO_CLIPBOARD=1
 # Pass the JSON input to the Claude response speaker script in background
 # First capture the input, then process it in background
 input_data=$(cat)
-echo "$input_data" | /Users/terryli/.claude/claude_response_speaker.sh > /dev/null 2>&1 &
+echo "$input_data" | /Users/terryli/.claude/automation/scripts/claude_response_speaker.sh > /dev/null 2>&1 &
