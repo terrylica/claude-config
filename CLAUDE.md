@@ -1,19 +1,21 @@
 # Claude Code User Memory
 
 ## Claude Code User Memory Documentation Principles
-- **Scope**: These principles apply ONLY to this Claude Code user memory file
+- **Scope**: These principles apply ONLY to this Claude Code user memory file Located in `.claude/CLAUDE.md`
 - **Purpose**: This document serves as a high-level pointer/reference only
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
 - **Rationale**: Detailed specifications belong in the actual script files to avoid redundancy
 
 ## Tool Usage Preferences
+- **Remote Viewing**: Prefer `curl` over fetch
 - **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
 - **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
 
-## User Identity
+## User Profiling and Local Path (user-specific info)
 
-- Terry Li is the Director of Operations of Eon Labs Ltd., who is responsible for features engineering for downstream see-2-seq model's consumption. 
+- Terry Li, Director of Operations of Eon Labs Ltd., an advocate to discover the latest SOTA toolings for vide coding and context engineering in Anthropic Claude Code Max environment, is responsible for features engineering for downstream see-2-seq model's consumption.
+- The full macOS system path to user directory: `/Users/terryli/` 
 
 ## APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
@@ -24,7 +26,7 @@
 
 ### Usage: Claude Code Interaction
 
-When you request "APCF", I will analyze ALL changes:
+When you request "APCF" or "apcf", I will analyze ALL changes:
 
 - **Staged files** (`git diff --cached`) - ready to commit
 - **Modified files** (`git diff`) - unstaged changes  
@@ -33,7 +35,7 @@ When you request "APCF", I will analyze ALL changes:
 - Generate logical commit grouping and sequencing strategy
 - Create audit-proof commit messages for each logical group
 
-**Workflow**: Make changes → Request "APCF" → I analyze everything → Suggest commit strategy
+**Workflow**: Make changes → Request "APCF" or "apcf" → I analyze everything → Suggest commit strategy
 
 ### Format Template
 
@@ -123,6 +125,8 @@ Here in this line, the last line in the commit message, we display the result of
 
 ### Documentation & README Audit Requirements
 
+- **Workspace README**: Use `docs/README.md` over root - GitHub auto-fallback renders it anyway
+- **Python Commands**: Always use `uv` prefix (e.g., `uv run`, `uv add`) - never assume pip/python
 - **Link Validation**: Before editing README.md files, verify all directory links have README.md or point to existing files
 - **GitHub Behavior**: Directory links without README.md show empty pages/404 on GitHub
 - **Broken Link Types**: Check directory references, file paths, anchor links, relative paths
@@ -135,11 +139,6 @@ Here in this line, the last line in the commit message, we display the result of
 - **Primary Tool**: `uv` for all Python operations
 - **Avoid**: pip, conda, pipenv
 
-### System Environment
-- **Platform**: macOS
-- **Shell**: zsh
-- **Working Directory**: `/Users/terryli/scripts`
-
 ### Cache System
 
 - Uses `platformdirs` for platform-appropriate cache directories (not workspace dirs)
@@ -150,7 +149,16 @@ Here in this line, the last line in the commit message, we display the result of
 **Purpose**: Audio feedback for Claude Code responses
 
 #### Core Files
-- **Main Script**: `/Users/terryli/.claude/claude_response_speaker.sh`
-- **Entry Point**: `/Users/terryli/.claude/tts_hook_entry.sh`
-- **Configuration**: `/Users/terryli/.claude/settings.json`
+- **Main Script**: `.claude/automation/scripts/claude_response_speaker.sh`
+- **Entry Point**: `.claude/automation/scripts/tts_hook_entry.sh`
+- **Configuration**: `.claude/settings.json`
 - **Debug Logs**: `/tmp/claude_tts_debug.log`
+
+### GitHub Flavored Markdown Link Checker
+**Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior
+
+#### Core Files
+- **Main Script**: `.claude/scripts/gfm-link-checker/gfm_link_checker.py`
+- **Command Wrapper**: `.claude/scripts/gfm-link-checker/bin/gfm-check`
+- **Setup Script**: `.claude/scripts/gfm-link-checker/setup-gfm-checker.sh`
+- **Project Config**: `.claude/scripts/gfm-link-checker/pyproject.toml`
