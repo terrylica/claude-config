@@ -1,18 +1,20 @@
-# Command Hub
+# Commands Directory
 
-Slash command system for workflow automation in Claude Code.
+**Purpose**: Custom slash commands and command definitions
 
-## Available Commands
-
-Custom slash commands stored as markdown files for extended prompt functionality:
-
-- `curate.md` - Content curation workflows
-- `deploy.md` - Deployment automation
-- `discover.md` - Discovery and exploration tasks
-- `stats.md` - Statistics and analytics
-- `sync.md` - Synchronization operations
-- `test.md` - Testing workflows
+## Contents
+- `hub/` - Slash command system for workflow automation
+  - `curate.md` - Content curation workflows
+  - `deploy.md` - Deployment automation
+  - `discover.md` - Discovery and exploration tasks
+  - `stats.md` - Statistics and analytics
+  - `sync.md` - Synchronization operations
+  - `test.md` - Testing workflows
 
 ## Usage
-
 Invoke with `/command-name` syntax in Claude Code for automated workflow execution.
+
+## Claude Code Official Status
+❌ **USER DIRECTORY** - Safe to customize and modify
+
+This directory contains user-defined commands and is not part of Claude Code's core functionality.

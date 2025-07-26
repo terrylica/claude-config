@@ -1,15 +1,21 @@
-# Automation Hooks
+# Hooks Directory
 
-Event-driven automation and integrations for Claude Code.
+**Purpose**: Claude Code event hooks and automation triggers
 
-## Hook System
+## Contents
+- Event-driven automation scripts
+- Hook configuration files
+- Integration points for external systems
 
-Automated responses to Claude Code events and interactions:
-
-- **Followup Logging**: `followup.log` - Tracks automated follow-up actions
-- **Event Processing**: Integration with external systems and workflows
-- **Debug Wrappers**: Located in `automation/scripts/hook_debug_wrapper.sh`
+## Important Files
+- `followup.log` - Tracks automated follow-up actions (auto-generated)
+- Hook execution scripts and configurations
+- Event listeners and triggers
 
 ## Configuration
-
 Hooks are configured through `settings.json` and executed automatically based on Claude Code events and triggers.
+
+## Claude Code Official Status
+⚠️ **CLAUDE CODE INTEGRATION** - Modify with caution
+
+This directory contains hook integrations that work with Claude Code's event system. While customizable, improper modifications may break Claude Code functionality.
