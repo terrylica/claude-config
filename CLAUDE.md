@@ -1,7 +1,7 @@
 # Claude Code User Memory
 
 ## Claude Code User Memory Documentation Principles
-- **Scope**: These principles apply ONLY to this Claude Code user memory file Located in `.claude/CLAUDE.md`
+- **Scope**: These principles apply _ONLY_ to this Claude Code user memory file Located in `.claude/CLAUDE.md`
 - **Purpose**: This document serves as a high-level pointer/reference only
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
@@ -148,11 +148,12 @@ Here in this line, the last line in the commit message, we display the result of
 ### Intelligent Text-to-Speech Hook System
 **Purpose**: Audio feedback for Claude Code responses
 
-#### Core Files
-- **Main Script**: `.claude/automation/tts/claude_response_speaker.sh`
-- **Entry Point**: `.claude/automation/tts/tts_hook_entry.sh`
-- **Configuration**: `.claude/settings.json`
-- **Debug Logs**: `/tmp/claude_tts_debug.log`
+#### Core Files (Modular Architecture - Phase 1 Complete)
+- **Configuration**: `.claude/automation/tts/config/` (JSON-based settings)
+- **Foundation**: `.claude/automation/tts/lib/common/` (config, logging, error handling)
+- **Entry Point**: `.claude/automation/tts/tts_hook_entry.sh` (updated for modular system)
+- **Legacy Script**: `.claude/automation/tts/claude_response_speaker.sh` (monolithic, compatibility)
+- **Debug Logs**: `/tmp/claude_tts_debug.log` (structured logging)
 
 ### GitHub Flavored Markdown Link Checker
 **Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior
