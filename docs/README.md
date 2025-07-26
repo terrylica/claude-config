@@ -8,14 +8,16 @@ This directory contains the global configuration for Claude Code, organized into
 |-----------|---------|-----------|
 | **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
 | **[TTS Integration](../automation/tts/claude_response_speaker.sh)** | Text-to-speech for Claude responses | `automation/tts/claude_response_speaker.sh`, `automation/tts/tts_hook_entry.sh` |
-| **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/hub/` directory |
-| **[Automation Hooks](../hooks/)** | Event-driven automation and integrations | `hooks/` directory, `automation/hooks/hook_debug_wrapper.sh` |
+| **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
+| **[Automation System](../automation/)** | Event-driven automation and integrations | `automation/hooks/`, `automation/tts/`, `automation/logs/` |
+| **[Hook System](../hooks/)** | Legacy hook configurations | `hooks/` directory |
 | **[Development Tools](../tools/)** | Standalone utilities and development aids | `tools/gfm-link-checker/` |
-| **[System Runtime](../system/)** | Session management and todo tracking | `system/sessions/`, `system/todos/` |
+| **[System Runtime](../system/)** | Session management and todo tracking | `system/sessions/`, `system/todos/`, `system/ide/`, `system/statsig/` |
 | **[Development Context](../settings.json)** | Core configuration and system preferences | `settings.json` |
 | **[Agent Configurations](../agents/)** | Custom agent definitions and behaviors | `agents/` directory |
 | **[Tmux Integration](../tmux/)** | Terminal multiplexer and workspace management | `tmux/` directory |
 | **[Historical Data](../history/)** | Archived sessions and development history | `history/` directory |
+| **[Shell Snapshots](../shell-snapshots/)** | Terminal session state captures | `shell-snapshots/` directory |
 
 ## Core Configuration Files
 

@@ -9,6 +9,10 @@
   - `glass_sound_wrapper.sh` - Audio wrapper and sound management
 - `hooks/` - Hook system utilities
   - `hook_debug_wrapper.sh` - Hook debugging and logging utilities
+  - `followup-trigger.py` - Automated follow-up system
+  - `emergency-controls.py` - Emergency safety controls
+- `logs/` - System logs and debugging information
+  - `followup.log` - Follow-up system activity logs
 
 ## Claude Code Official Status
 ❌ **USER DIRECTORY** - Safe to customize and modify
