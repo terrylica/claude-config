@@ -8,17 +8,21 @@ This directory contains the global configuration for Claude Code, organized into
 |-----------|---------|-----------|
 | **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
 | **[TTS Integration](../automation/scripts/claude_response_speaker.sh)** | Text-to-speech for Claude responses | `automation/scripts/claude_response_speaker.sh`, `automation/scripts/tts_hook_entry.sh` |
-| **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
+| **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/hub/` directory |
 | **[Automation Hooks](../hooks/)** | Event-driven automation and integrations | `hooks/` directory, `automation/scripts/hook_debug_wrapper.sh` |
-| **[Project Memory](../projects/)** | Cross-session context and state persistence | `projects/` directory |
+| **[Development Tools](../tools/)** | Standalone utilities and development aids | `tools/gfm-link-checker/` |
+| **[System Runtime](../system/)** | Session management and todo tracking | `system/sessions/`, `system/todos/` |
 | **[Development Context](../settings.json)** | Core configuration and system preferences | `settings.json` |
+| **[Agent Configurations](../agents/)** | Custom agent definitions and behaviors | `agents/` directory |
+| **[Tmux Integration](../tmux/)** | Terminal multiplexer and workspace management | `tmux/` directory |
+| **[Historical Data](../history/)** | Archived sessions and development history | `history/` directory |
 
 ## Core Configuration Files
 
 - **`settings.json`**: Main Claude Code configuration with model settings and hook definitions
 - **`CLAUDE.md`**: User memory system with APCF methodology and workflow preferences  
-- **Glass.aiff**: System notification sound (from macOS system sounds)
 - **`.gitignore`**: Version control exclusions for temporary and system files
+- **`CLAUDE_CODE_OFFICIAL_FILES.md`**: Safety documentation for critical system files
 
 ⚠️ **Claude Code Official Files (DO NOT MOVE):**
 - `CLAUDE.md` - User memory file
@@ -31,8 +35,8 @@ This directory contains the global configuration for Claude Code, organized into
 ## Audio Integration
 
 The TTS system uses:
-- **Glass.aiff**: System notification sound (from macOS)
-- **Hook Integration**: Automated audio feedback on Claude Code events
+- **System sounds**: Audio notifications from macOS system library
+- **Hook Integration**: Automated audio feedback on Claude Code events via `automation/scripts/`
 - **Debug Logging**: Comprehensive TTS operation tracking for troubleshooting
 
 ## Usage
