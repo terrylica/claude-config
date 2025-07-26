@@ -7,7 +7,7 @@ This directory contains the global configuration for Claude Code, organized into
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
 | **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
-| **[TTS Integration](../automation/tts/claude_response_speaker.sh)** | Text-to-speech for Claude responses | `automation/tts/claude_response_speaker.sh`, `automation/tts/tts_hook_entry.sh` |
+| **[TTS Integration](../automation/tts/)** | Modular text-to-speech system with JSON config | `automation/tts/lib/`, `automation/tts/config/`, legacy monolithic script |
 | **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
 | **[Automation System](../automation/)** | Event-driven automation and integrations | `automation/hooks/`, `automation/tts/`, `automation/logs/` |
 | **[Hook System](../hooks/)** | Legacy hook configurations | `hooks/` directory |

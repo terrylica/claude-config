@@ -12,9 +12,14 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 ├── agents/                    # [FIXED] Sub-agent configurations
 ├── commands/                  # [FIXED] Slash commands
 │   └── hub/                   # Command hub system commands
-├── automation/                # [NEW] Automation subsystem
+├── automation/                # [NEW] Automation subsystem  
 │   ├── hooks/                 # Hook system files
-│   ├── scripts/               # Shell scripts (TTS, wrappers)
+│   ├── tts/                   # Modular TTS system
+│   │   ├── config/            # JSON-based configuration
+│   │   ├── lib/               # Modular components (common, input, processing, output)
+│   │   ├── tests/             # Unit and integration tests
+│   │   ├── scripts/           # Utility scripts
+│   │   └── *.sh               # Legacy monolithic scripts (compatibility)
 │   └── logs/                  # Hook logs and debug files
 ├── audio/                     # [NEW] TTS/Audio subsystem
 │   ├── sounds/                # Audio files
@@ -48,10 +53,18 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 
 ### 🤖 Automation Subsystem
 **Location**: `automation/`
-**Purpose**: Hook system, TTS integration, automation scripts
+**Purpose**: Hook system, modular TTS integration, automation scripts
 **Components**:
 - `hooks/`: Python hook scripts (followup-trigger, emergency-controls)
-- `scripts/`: Shell scripts (TTS entry, debug wrappers, audio)
+- `tts/`: **Modular text-to-speech system**
+  - `config/`: JSON-based configuration (timing, speech profiles, processing rules)
+  - `lib/common/`: Foundation infrastructure (config loader, logger, error handler)
+  - `lib/input/`: Input processing modules (JSON parser, transcript monitor)
+  - `lib/processing/`: Text processing pipeline (sanitizer, aggregator) 
+  - `lib/output/`: Output systems (speech synthesizer, debug exporter)
+  - `tests/`: Comprehensive test suite with unit and integration tests
+  - `scripts/`: Maintenance and utility scripts
+  - `*.sh`: Legacy monolithic scripts (maintained for compatibility)
 - `logs/`: Debug logs, hook execution logs
 
 **Integration**: Referenced by `settings.json` hooks configuration
@@ -108,19 +121,33 @@ Claude Code Event → settings.json hooks →
 ```
 
 ### TTS Processing Chain
+**Current (Legacy)**:
 ```
 Hook Event → tts_hook_entry.sh → claude_response_speaker.sh → 
 ├── Extract transcript content
-├── Process user prompt + response
+├── Process user prompt + response  
 ├── Generate optimized TTS content
 └── Execute macOS `say` command
 ```
 
+**Future (Modular)**:
+```
+Hook Event → bin/tts_entry.sh → bin/tts_orchestrator.sh →
+├── lib/input/json_parser.sh (parse hook data)
+├── lib/input/transcript_monitor.sh (wait for transcript)
+├── lib/input/content_extractor.sh (extract user/assistant content)
+├── lib/processing/text_sanitizer.sh (clean text for speech)
+├── lib/processing/paragraph_aggregator.sh (optimize content length)
+├── lib/output/speech_synthesizer.sh (execute TTS)
+└── lib/output/debug_exporter.sh (clipboard & logging)
+```
+
 ### File Path References
 All configuration files use absolute paths to maintain reliability:
-- Settings: `/Users/terryli/.claude/automation/scripts/`
-- Scripts: Reference other scripts via absolute paths
-- Logs: Use centralized `/tmp/claude_tts_debug.log`
+- **Settings**: `/Users/terryli/.claude/automation/tts/` (current hook references)
+- **Configuration**: `/Users/terryli/.claude/automation/tts/config/` (JSON config files)
+- **Scripts**: Reference other components via absolute paths and module loading
+- **Logs**: Use centralized `/tmp/claude_tts_debug.log` with structured logging
 
 ## Maintenance Guidelines
 
@@ -147,10 +174,11 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ```
 
 ### Update Procedures
-1. **Script Updates**: Modify files in `automation/`
-2. **Configuration Changes**: Update `settings.json`, `CLAUDE.md`
-3. **Path Updates**: Maintain absolute paths in all references
-4. **Testing**: Validate functionality after changes
+1. **TTS Module Updates**: Modify files in `automation/tts/lib/` or `automation/tts/config/`
+2. **Configuration Changes**: Update JSON files in `automation/tts/config/`
+3. **Script Updates**: Legacy scripts in `automation/tts/`, new modules in `automation/tts/lib/`  
+4. **Path Updates**: Maintain absolute paths, update module loading paths
+5. **Testing**: Run `automation/tts/scripts/test_foundation.sh` and unit tests
 
 ## SR&ED Integration
 
@@ -191,6 +219,6 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ---
 
-**Last Updated**: July 25, 2025  
-**Architecture Version**: 1.0  
+**Last Updated**: July 26, 2025  
+**Architecture Version**: 1.1 - Modular TTS Foundation  
 **Compatible with**: Claude Code official constraints as of July 2025
