@@ -20,6 +20,14 @@ This directory contains the global configuration for Claude Code, organized into
 - **Glass.aiff**: System notification sound (from macOS system sounds)
 - **`.gitignore`**: Version control exclusions for temporary and system files
 
+⚠️ **Claude Code Official Files (DO NOT MOVE):**
+- `CLAUDE.md` - User memory file
+- `settings.json` - Configuration
+- `system/` directory - Session and runtime data
+
+⚠️ **Integration Files (Modify with caution):**
+- `hooks/` directory - Event system integration
+
 ## Audio Integration
 
 The TTS system uses:
