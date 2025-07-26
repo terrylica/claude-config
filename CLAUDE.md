@@ -47,8 +47,9 @@
 - **Primary Tool**: `uv` for all Python operations
 - **Avoid**: pip, conda, pipenv
 
-### Cache System
+### Python Library Preference
 
+- Prefer `httpx` over `requests` 
 - Uses `platformdirs` for platform-appropriate cache directories (not workspace dirs)
 
 ## Claude Code User Custom Extensions
