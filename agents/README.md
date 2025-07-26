@@ -2,10 +2,28 @@
 
 **Purpose**: Custom agent configurations and specialized sub-agents for Claude Code
 
-## Contents
-- Agent configuration files
-- Custom agent prompts and behaviors
-- Specialized agent definitions
+## Available Agents
+
+### [Research Scout](./research-scout.md) (`research-scout`)
+Explores multiple research directions from seed keywords, generating comprehensive options before deep diving. Creates reports in `docs/research-scout/` directory.
+
+### [Compliance Auditor](./compliance-auditor.md) (`compliance-auditor`)
+Specialized agent for compliance auditing and regulatory analysis.
+
+### [SR&ED Evidence Extractor](./sred-evidence-extractor.md) (`sred-evidence-extractor`)
+Extracts and documents Scientific Research and Experimental Development evidence from codebases.
+
+### [Simple Helper](./simple-helper.md) (`simple-helper`)
+Basic utility agent for straightforward tasks and assistance.
+
+### [Test Agent](./test-agent.md) (`test-agent`)
+Development and testing agent for experimental workflows.
+
+## Usage
+Use agents with the Task tool:
+```
+Task(description="Research task", prompt="Your request", subagent_type="research-scout")
+```
 
 ## Claude Code Official Status
 ❌ **USER DIRECTORY** - Safe to customize and modify
