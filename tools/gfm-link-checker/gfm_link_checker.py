@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 from dataclasses import dataclass
 
+import mistletoe
+from mistletoe import Document
+from mistletoe.span_token import Link, AutoLink
+
 try:
     import httpx
     HAS_HTTPX = True
@@ -47,9 +51,6 @@ class GFMLinkChecker:
         
         # GitHub-specific patterns
         self.github_anchor_pattern = re.compile(r'^[a-z0-9\-_]+$')
-        self.markdown_link_pattern = re.compile(
-            r'\[([^\]]*)\]\(([^)]+)\)|<(https?://[^>]+)>|(?<!\()(https?://\S+)'
-        )
         self.relative_link_pattern = re.compile(r'^(?!https?://|mailto:|#)')
         
     def _find_git_root(self) -> Optional[Path]:
@@ -77,32 +78,64 @@ class GFMLinkChecker:
         return [f for f in markdown_files if not any(part in ignore_dirs for part in f.parts)]
     
     def extract_links(self, content: str, file_path: Path) -> List[Tuple[str, int, str]]:
-        """Extract all links from markdown content with line numbers."""
+        """Extract all links from markdown content using mistletoe AST parser."""
         links = []
-        lines = content.split('\n')
         
-        for line_num, line in enumerate(lines, 1):
-            # Skip code blocks and inline code
-            if re.match(r'^\s*```|^\s*`[^`]*`\s*$', line):
-                continue
+        try:
+            # Parse markdown content into AST
+            doc = Document(content)
+            
+            # Walk the AST to find all links
+            def walk_tokens(token):
+                # Check if this is a Link token
+                if isinstance(token, Link):
+                    link_url = token.target
+                    link_text = self._render_token_content(token)
+                    # mistletoe doesn't track line numbers by default, estimate from content
+                    line_num = self._estimate_line_number(content, link_url, link_text)
+                    links.append((link_url, line_num, link_text))
                 
-            # Find markdown links [text](url)
-            for match in self.markdown_link_pattern.finditer(line):
-                if match.group(2):  # [text](url) format
-                    link = match.group(2)
-                    text = match.group(1)
-                elif match.group(3):  # <url> format
-                    link = match.group(3)
-                    text = link
-                elif match.group(4):  # bare url
-                    link = match.group(4)
-                    text = link
-                else:
-                    continue
-                    
-                links.append((link, line_num, text))
+                # Check if this is an AutoLink token
+                elif isinstance(token, AutoLink):
+                    link_url = token.target
+                    line_num = self._estimate_line_number(content, link_url, link_url)
+                    links.append((link_url, line_num, link_url))
+                
+                # Recursively walk children (mistletoe automatically respects code blocks)
+                if hasattr(token, 'children') and token.children is not None:
+                    for child in token.children:
+                        walk_tokens(child)
+            
+            walk_tokens(doc)
+            
+        except Exception as e:
+            # If mistletoe fails, log error and return empty list
+            print(f"Error: Failed to parse {file_path}: {e}")
+            return []
         
         return links
+    
+    def _render_token_content(self, token) -> str:
+        """Extract text content from a token."""
+        if hasattr(token, 'children') and token.children:
+            parts = []
+            for child in token.children:
+                if hasattr(child, 'content'):
+                    parts.append(child.content)
+                else:
+                    parts.append(self._render_token_content(child))
+            return ''.join(parts)
+        return getattr(token, 'content', '')
+    
+    def _estimate_line_number(self, content: str, url: str, text: str) -> int:
+        """Estimate line number by searching for the link pattern in content."""
+        lines = content.split('\n')
+        # Look for the markdown link pattern
+        for i, line in enumerate(lines, 1):
+            if f']({url})' in line or f'[{text}]' in line:
+                return i
+        return 1  # Default to line 1 if not found
+    
     
     def validate_local_file_link(self, link: str, source_file: Path) -> LinkValidationResult:
         """Validate a local file or directory link."""
@@ -256,7 +289,7 @@ class GFMLinkChecker:
         links = self.extract_links(content, file_path)
         results = []
         
-        for link, line_number, text in links:
+        for link, line_number, _ in links:
             # Skip empty links
             if not link.strip():
                 continue
@@ -277,9 +310,13 @@ class GFMLinkChecker:
                         error_message='Invalid email format', link_type='mailto'
                     ))
             elif link.startswith(('http://', 'https://')):
-                # External link
+                # External link - Report only, no auto-fix
                 if self.config.get('check_external', True):
-                    results.append(self.validate_external_link(link, file_path, line_number))
+                    result = self.validate_external_link(link, file_path, line_number)
+                    # Mark external links as non-fixable
+                    if not result.is_valid:
+                        result.error_message = f"{result.error_message} (External links are not auto-fixed - please check manually)"
+                    results.append(result)
                 else:
                     results.append(LinkValidationResult(
                         link=link, source_file=str(file_path), line_number=line_number,
@@ -366,6 +403,9 @@ class GFMLinkChecker:
         if results['invalid_links'] > 0:
             report.append("ERRORS FOUND:")
             report.append("-" * 40)
+            report.append("📝 Note: Only internal/local links can be auto-fixed.")
+            report.append("    External links are reported for manual review.")
+            report.append("")
             
             for error_type, error_results in results['error_summary'].items():
                 report.append(f"\n{error_type.upper()} ({len(error_results)} errors):")
@@ -383,7 +423,7 @@ class GFMLinkChecker:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="GitHub Flavored Markdown Link Integrity Checker"
+        description="GitHub Flavored Markdown Link Integrity Checker - Auto-fixes internal links, reports external link issues"
     )
     parser.add_argument(
         'workspace', 
@@ -392,18 +432,18 @@ def main():
         help='Workspace directory to check (default: current directory)'
     )
     parser.add_argument(
-        '--no-external', 
-        action='store_true', 
+        '--no-external', '-ne',
+        action='store_true',
         help='Skip external URL validation'
     )
     parser.add_argument(
-        '--format', 
-        choices=['text', 'json'], 
+        '--format', '-f',
+        choices=['text', 'json'],
         default='text',
         help='Output format (default: text)'
     )
     parser.add_argument(
-        '--output', 
+        '--output', '-o',
         help='Output file (default: stdout)'
     )
     
