@@ -3,11 +3,12 @@
 **Purpose**: Automated workflows, hooks, and integration scripts
 
 ## Contents
-- `scripts/` - Shell scripts for TTS, hooks, and automation
-  - `claude_response_speaker.sh` - Text-to-speech for Claude responses
-  - `tts_hook_entry.sh` - TTS hook entry point
-  - `glass_sound_wrapper.sh` - Audio wrapper script
-  - `hook_debug_wrapper.sh` - Hook debugging utilities
+- `tts/` - Text-to-speech automation scripts
+  - `claude_response_speaker.sh` - Main TTS engine for Claude responses
+  - `tts_hook_entry.sh` - TTS hook entry point and configuration
+  - `glass_sound_wrapper.sh` - Audio wrapper and sound management
+- `hooks/` - Hook system utilities
+  - `hook_debug_wrapper.sh` - Hook debugging and logging utilities
 
 ## Claude Code Official Status
 ❌ **USER DIRECTORY** - Safe to customize and modify

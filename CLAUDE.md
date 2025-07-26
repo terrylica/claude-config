@@ -149,8 +149,8 @@ Here in this line, the last line in the commit message, we display the result of
 **Purpose**: Audio feedback for Claude Code responses
 
 #### Core Files
-- **Main Script**: `.claude/automation/scripts/claude_response_speaker.sh`
-- **Entry Point**: `.claude/automation/scripts/tts_hook_entry.sh`
+- **Main Script**: `.claude/automation/tts/claude_response_speaker.sh`
+- **Entry Point**: `.claude/automation/tts/tts_hook_entry.sh`
 - **Configuration**: `.claude/settings.json`
 - **Debug Logs**: `/tmp/claude_tts_debug.log`
 
