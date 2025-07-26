@@ -16,12 +16,12 @@ from typing import Dict, List, Set, Tuple, Optional
 from dataclasses import dataclass
 
 try:
-    import requests
-    HAS_REQUESTS = True
+    import httpx
+    HAS_HTTPX = True
 except ImportError:
-    HAS_REQUESTS = False
-    print("⚠️  Warning: 'requests' module not available. External link checking disabled.")
-    print("   Install with: pip install requests")
+    HAS_HTTPX = False
+    print("⚠️  Warning: 'httpx' module not available. External link checking disabled.")
+    print("   Install with: uv add httpx")
 
 
 @dataclass
@@ -207,19 +207,20 @@ class GFMLinkChecker:
     
     def validate_external_link(self, link: str, source_file: Path, line_number: int) -> LinkValidationResult:
         """Validate external HTTP/HTTPS link."""
-        if not HAS_REQUESTS:
+        if not HAS_HTTPX:
             return LinkValidationResult(
                 link=link, source_file=str(source_file), line_number=line_number,
-                is_valid=True, error_type='', error_message='External check skipped (requests not available)',
+                is_valid=True, error_type='', error_message='External check skipped (httpx not available)',
                 link_type='external'
             )
             
         try:
-            # Use requests with timeout and proper headers
+            # Use httpx with timeout and proper headers
             headers = {
                 'User-Agent': 'GFM-Link-Checker/1.0 (GitHub Flavored Markdown Link Integrity Checker)'
             }
-            response = requests.head(link, headers=headers, timeout=10, allow_redirects=True)
+            with httpx.Client(timeout=10, follow_redirects=True) as client:
+                response = client.head(link, headers=headers)
             
             if response.status_code < 400:
                 return LinkValidationResult(
@@ -234,7 +235,7 @@ class GFMLinkChecker:
                     link_type='external'
                 )
                 
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             return LinkValidationResult(
                 link=link, source_file=str(source_file), line_number=line_number,
                 is_valid=False, error_type='connection_error',
