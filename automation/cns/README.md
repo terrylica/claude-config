@@ -1,15 +1,15 @@
-# Clipboard & Glass Sound Hook System
+# CNS (Conversation Notification System)
 
 Intelligent clipboard tracking and audio completion notification for Claude Code responses.
 
 ## Architecture Overview
 
-**Major Change**: TTS functionality completely removed (2025-07-28). System now focused on clipboard conversation tracking and glass sound notifications.
+**Major Change**: Renamed from TTS system (2025-07-28). CNS focuses on clipboard conversation tracking and glass sound notifications.
 
-### Current System (Post-TTS Removal)
-- **Main Script**: `claude_response_speaker.sh` (168 lines) - Clipboard + glass sound only
-- **Configuration**: `config/tts_config.json` - Simplified clipboard and sound settings  
-- **Entry Point**: `tts_hook_entry.sh` - Hook system integration
+### Current System (CNS Architecture)
+- **Main Script**: `conversation_handler.sh` (168 lines) - Clipboard + glass sound only
+- **Configuration**: `config/cns_config.json` - Simplified clipboard and sound settings  
+- **Entry Point**: `cns_hook_entry.sh` - Hook system integration
 - **Glass Sound**: `glass_sound_wrapper.sh` - Separate audio notification system
 
 ## Functionality
@@ -20,19 +20,19 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 - **Glass Sound**: Audio notification when Claude finishes responding
 - **Combined Format**: Clipboard contains `USER: [prompt]\n\nCLAUDE: [response]`
 
-### ❌ Removed Features  
-- All TTS/speech synthesis functionality
+### ❌ Removed Features (From Previous TTS System)
+- All speech synthesis functionality
 - Speech rate, voice, and volume configurations
 - Complex paragraph aggregation for audio
 - Multi-stage content processing pipelines
 
 ## Configuration
 
-**File**: `config/tts_config.json`
+**File**: `config/cns_config.json`
 
 ```json
 {
-  "note": "TTS functionality removed - now clipboard and glass sound only",
+  "note": "CNS (Conversation Notification System) - clipboard and glass sound only",
   "command_detection": {
     "enabled": true,
     "hash_commands": {
@@ -75,7 +75,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 
 ## Debug Logging
 
-**Location**: `/tmp/claude_tts_debug.log`
+**Location**: `/tmp/claude_cns_debug.log`
 
 **Key Log Markers**:
 - `[CLIPBOARD]` - Clipboard processing events
@@ -94,11 +94,11 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/terryli/.claude/automation/tts/glass_sound_wrapper.sh"
+            "command": "/Users/terryli/.claude/automation/cns/glass_sound_wrapper.sh"
           },
           {
             "type": "command", 
-            "command": "/Users/terryli/.claude/automation/tts/tts_hook_entry.sh"
+            "command": "/Users/terryli/.claude/automation/cns/cns_hook_entry.sh"
           }
         ]
       }
@@ -108,7 +108,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 ```
 
 ### Environment Variables
-- `CLAUDE_TTS_TO_CLIPBOARD=1` - Enable clipboard functionality (default: enabled)
+- `CLAUDE_CNS_CLIPBOARD=1` - Enable clipboard functionality (default: enabled)
 
 ## Troubleshooting
 
@@ -119,7 +119,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 
 ### No Glass Sound
 - Verify `glass_sound_wrapper.sh` is executable
-- Check that both glass and TTS hooks are configured in settings
+- Check that both glass and CNS hooks are configured in settings
 
 ### Command Detection Issues
 - Review `[CLIPBOARD]` log entries for classification results
@@ -128,9 +128,10 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 
 ## Migration Notes
 
-**From TTS System (Pre-2025-07-28)**:
+**From TTS System (Renamed to CNS 2025-07-28)**:
 - All speech synthesis removed
 - Configuration simplified significantly  
 - Script size reduced 81% (892 → 168 lines)
 - Clipboard functionality enhanced with combined format
 - Glass sound preserved as separate system
+- Complete file/directory structure renamed for clarity

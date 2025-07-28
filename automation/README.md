@@ -2,17 +2,17 @@
 **Purpose**: Automated workflows, hooks, and integration scripts
 
 ## Contents
-- `tts/` - **Clipboard & Glass Sound System** (TTS functionality removed 2025-07-28)
+- `cns/` - **CNS (Conversation Notification System)** (Formerly TTS, renamed 2025-07-28)
   - `config/` - Simplified configuration system
-    - `tts_config.json` - Clipboard and glass sound settings (simplified)
+    - `cns_config.json` - Clipboard and glass sound settings (simplified)
   - **Active files**:
-    - `claude_response_speaker.sh` - Main clipboard + glass sound script (168 lines)
-    - `tts_hook_entry.sh` - Hook entry point
+    - `conversation_handler.sh` - Main clipboard + glass sound script (168 lines)
+    - `cns_hook_entry.sh` - Hook entry point
     - `glass_sound_wrapper.sh` - Audio completion notification
   - **Removed/Deprecated**:
     - `lib/` - Modular library components (no longer needed)
-    - `tests/` - TTS-specific test suites (obsolete)
-    - `scripts/` - TTS utility scripts (obsolete)
+    - `tests/` - CNS-specific test suites (obsolete)
+    - `scripts/` - CNS utility scripts (obsolete)
     - `bin/` - Speech synthesis executables (removed)
 - `hooks/` - Hook system utilities
   - `hook_debug_wrapper.sh` - Hook debugging and logging utilities
