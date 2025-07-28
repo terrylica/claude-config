@@ -20,13 +20,6 @@
     - `unit/test_config_loader.sh` - Unit tests for config loader
     - `integration/test_foundation_integration.sh` - Integration tests
   - `scripts/test_foundation.sh` - Test foundation script
-- `hooks/` - Hook system utilities
-  - `hook_debug_wrapper.sh` - Hook debugging and logging utilities
-  - `followup-trigger.py` - Automated follow-up system
-  - `export_hook.sh` - Automated conversation export system
-  - `emergency-controls.py` - Emergency safety controls
-- `logs/` - System logs and debugging information  
-  - `followup.log` - Follow-up system activity logs
 
 ## Claude Code Official Status
 ❌ **USER DIRECTORY** - Safe to customize and modify

@@ -59,7 +59,6 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Location**: `automation/`
 **Purpose**: Hook system, CNS integration, automation scripts
 **Components**:
-- `hooks/`: Python hook scripts (followup-trigger.py, emergency-controls.py, test-followup-system.py)
 - `cns/`: **CNS (Conversation Notification System)** (Clipboard + Toy Story notification + TTS)
   - `config/`: JSON configuration (cns_config.json - clipboard and sound settings)
   - `lib/common/`: Simplified config loader (59 lines, CNS-only variables)
@@ -146,7 +145,6 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 Claude Code Event → settings.json hooks →
 ├── cns_notification_hook.sh (Toy Story notification + TTS)
 ├── cns_hook_entry.sh (clipboard tracking)
-└── followup-trigger.py (automation)
 ```
 
 ### CNS Processing Chain
