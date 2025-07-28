@@ -19,6 +19,50 @@ TARGET_MIN_SECONDS=5              # Target minimum speech duration
 TARGET_MAX_SECONDS=25             # Target maximum speech duration before stopping aggregation
 TARGET_MIN_CHARS=$(echo "$TARGET_MIN_SECONDS * $CHARS_PER_SECOND" | bc -l | awk '{printf "%.0f", $0}')
 TARGET_MAX_CHARS=$(echo "$TARGET_MAX_SECONDS * $CHARS_PER_SECOND" | bc -l | awk '{printf "%.0f", $0}')
+
+# Load separated TTS configuration
+CONFIG_DIR="/Users/terryli/.claude/automation/tts/config"
+TTS_CONFIG_FILE="$CONFIG_DIR/tts_config.json"
+
+# Load configuration values with fallbacks
+if [[ -f "$TTS_CONFIG_FILE" ]]; then
+    # Playback mode: "both", "user_only", "claude_only", "none"
+    PLAYBACK_MODE=$(jq -r '.playback.mode // "both"' "$TTS_CONFIG_FILE")
+    PLAYBACK_SEQUENCE=$(jq -r '.playback.sequence // "user_first"' "$TTS_CONFIG_FILE")
+    PAUSE_BETWEEN_MS=$(jq -r '.playback.pause_between_ms // 500' "$TTS_CONFIG_FILE")
+    USE_LEGACY_COMBINED=$(jq -r '.playback.use_legacy_combined // false' "$TTS_CONFIG_FILE")
+    
+    # User prompt settings
+    USER_ENABLED=$(jq -r '.content_types.user_prompt.enabled // true' "$TTS_CONFIG_FILE")
+    USER_VOICE=$(jq -r '.content_types.user_prompt.voice // "default"' "$TTS_CONFIG_FILE")
+    USER_RATE=$(jq -r '.content_types.user_prompt.rate_wpm // 185' "$TTS_CONFIG_FILE")
+    USER_VOLUME=$(jq -r '.content_types.user_prompt.volume // 0.8' "$TTS_CONFIG_FILE")
+    USER_PREFIX=$(jq -r '.content_types.user_prompt.prefix // "You asked:"' "$TTS_CONFIG_FILE")
+    
+    # Claude response settings
+    CLAUDE_ENABLED=$(jq -r '.content_types.claude_response.enabled // true' "$TTS_CONFIG_FILE")
+    CLAUDE_VOICE=$(jq -r '.content_types.claude_response.voice // "default"' "$TTS_CONFIG_FILE")
+    CLAUDE_RATE=$(jq -r '.content_types.claude_response.rate_wpm // 200' "$TTS_CONFIG_FILE")
+    CLAUDE_VOLUME=$(jq -r '.content_types.claude_response.volume // 0.7' "$TTS_CONFIG_FILE")
+    CLAUDE_PREFIX=$(jq -r '.content_types.claude_response.prefix // "Claude responds:"' "$TTS_CONFIG_FILE")
+else
+    # Fallback to legacy values if config not found
+    PLAYBACK_MODE="both"
+    PLAYBACK_SEQUENCE="user_first"
+    PAUSE_BETWEEN_MS=500
+    USE_LEGACY_COMBINED=true
+    USER_ENABLED=true
+    USER_RATE=185
+    USER_VOLUME=0.8
+    USER_PREFIX="You asked:"
+    CLAUDE_ENABLED=true
+    CLAUDE_RATE=200
+    CLAUDE_VOLUME=0.7
+    CLAUDE_PREFIX="Claude responds:"
+fi
+
+echo "$(date): Loaded TTS config - Mode: $PLAYBACK_MODE, Sequence: $PLAYBACK_SEQUENCE, Legacy: $USE_LEGACY_COMBINED" >> /tmp/claude_tts_debug.log
+
 # Rotate log if it gets too large (>50KB)
 if [[ -f /tmp/claude_tts_debug.log ]] && [[ $(stat -f%z /tmp/claude_tts_debug.log 2>/dev/null || echo 0) -gt 51200 ]]; then
     mv /tmp/claude_tts_debug.log /tmp/claude_tts_debug.log.old
@@ -44,6 +88,200 @@ echo "Hook event name: $hook_event_name" >> /tmp/claude_tts_debug.log
 echo "Stop hook active: $stop_hook_active" >> /tmp/claude_tts_debug.log
 echo "Working directory: $cwd" >> /tmp/claude_tts_debug.log
 echo "=========================" >> /tmp/claude_tts_debug.log
+
+# Separated TTS Processing Functions
+process_user_content() {
+    local user_text="$1"
+    local config_prefix="$2"
+    local config_rate="$3"
+    local config_volume="$4"
+    
+    if [[ -z "$user_text" || ${#user_text} -lt 3 ]]; then
+        echo "$(date): User content too short, skipping" >> /tmp/claude_tts_debug.log
+        return 1
+    fi
+    
+    # Clean user prompt
+    local clean_user_text=$(echo "$user_text" | \
+        sed 's/\\n/ /g' | \
+        sed 's/\*\*\([^*]*\)\*\*/\1/g' | \
+        sed 's/`\([^`]*\)`/\1/g' | \
+        sed 's/<[^>]*>//g' | \
+        sed 's/  \+/ /g' | \
+        sed 's/^ *//; s/ *$//')
+    
+    local final_user_text="$config_prefix $clean_user_text"
+    
+    echo "$(date): Processing user content: ${#final_user_text} chars at ${config_rate} WPM" >> /tmp/claude_tts_debug.log
+    
+    # Execute TTS for user content
+    execute_safe_tts "$final_user_text" "$config_rate" "user"
+}
+
+process_claude_content() {
+    local claude_text="$1"
+    local config_prefix="$2"
+    local config_rate="$3"
+    local config_volume="$4"
+    
+    if [[ -z "$claude_text" || ${#claude_text} -lt 10 ]]; then
+        echo "$(date): Claude content too short, skipping" >> /tmp/claude_tts_debug.log
+        return 1
+    fi
+    
+    # Apply existing paragraph aggregation logic for Claude responses
+    local final_claude_text
+    local estimated_seconds=$(echo "${#claude_text} / $CHARS_PER_SECOND" | bc -l | awk '{printf "%.1f", $0}')
+    
+    echo "$(date): Processing Claude content: ${#claude_text} chars, estimated ${estimated_seconds}s" >> /tmp/claude_tts_debug.log
+    
+    if (( $(echo "$estimated_seconds <= $MAX_FULL_RESPONSE_SECONDS" | bc -l) )); then
+        # Short response - read entire content
+        final_claude_text="$config_prefix $claude_text"
+        echo "$(date): Using full Claude response (${estimated_seconds}s ≤ ${MAX_FULL_RESPONSE_SECONDS}s)" >> /tmp/claude_tts_debug.log
+    else
+        # Long response - use paragraph aggregation
+        echo "$(date): Applying paragraph aggregation to Claude response" >> /tmp/claude_tts_debug.log
+        
+        # Extract key paragraphs using existing logic
+        local aggregated_text=$(aggregate_claude_paragraphs "$claude_text")
+        final_claude_text="$config_prefix $aggregated_text"
+    fi
+    
+    echo "$(date): Final Claude content: ${#final_claude_text} chars" >> /tmp/claude_tts_debug.log
+    
+    # Execute TTS for Claude content
+    execute_safe_tts "$final_claude_text" "$config_rate" "claude"
+}
+
+aggregate_claude_paragraphs() {
+    local text="$1"
+    
+    # Clean text first
+    local clean_text=$(echo "$text" | \
+        sed 's/\\n/ /g' | \
+        sed 's/\*\*\([^*]*\)\*\*/\1/g' | \
+        sed 's/`\([^`]*\)`/\1/g' | \
+        sed 's/<[^>]*>//g')
+    
+    # Apply existing paragraph aggregation logic (simplified version)
+    local normalized_text=$(echo "$clean_text" | sed 's/\\n/\n/g')
+    
+    if echo "$normalized_text" | grep -q $'\n\n'; then
+        local paragraph_list=$(echo "$normalized_text" | awk 'BEGIN{RS="\n\n"} {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if(length > 5) print $0}')
+    else
+        local paragraph_list=$(echo "$normalized_text" | awk 'BEGIN{RS="\n"} {gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if(length > 15) print $0}')
+    fi
+    
+    # Take last few paragraphs up to target length
+    local aggregated_text=""
+    local current_length=0
+    
+    echo "$paragraph_list" | tail -3 | while IFS= read -r paragraph; do
+        if [[ -n "$paragraph" ]]; then
+            if [[ -z "$aggregated_text" ]]; then
+                aggregated_text="$paragraph"
+            else
+                aggregated_text="$paragraph... $aggregated_text"
+            fi
+            current_length=${#aggregated_text}
+            
+            if [[ $current_length -ge $TARGET_MIN_CHARS ]]; then
+                echo "$aggregated_text"
+                break
+            fi
+        fi
+    done | tail -1
+}
+
+execute_safe_tts() {
+    local text="$1"
+    local rate="$2"
+    local content_type="$3"
+    
+    # Apply bulletproof sanitization
+    local sanitized_text=$(echo "$text" | \
+        sed 's/[""''`]/'"'"'/g' | \
+        sed 's/[—–—]/—/g' | \
+        sed 's/[✅❌🔍🎯🔧📝⚡🎉]//g' | \
+        sed 's/\*\*\?//g' | \
+        sed 's/##\?//g' | \
+        tr '\n\r' ' ' | \
+        sed 's/^[[:space:]]*-/The/' | \
+        sed 's/\.\.\. -/. The/g' | \
+        sed 's/  \+/ /g' | \
+        sed 's/^ *//; s/ *$//' | \
+        tr -d '\0-\31\127')
+    
+    if [[ ${#sanitized_text} -lt 3 ]]; then
+        sanitized_text="Content ready"
+        echo "$(date): Sanitization resulted in too-short text for $content_type, using fallback" >> /tmp/claude_tts_debug.log
+    fi
+    
+    echo "$(date): Executing TTS for $content_type: ${#sanitized_text} chars at ${rate} WPM" >> /tmp/claude_tts_debug.log
+    
+    # Create temp file for safe execution
+    local temp_file=$(mktemp /tmp/claude_speech_${content_type}_XXXXXX 2>/dev/null)
+    if [[ -n "$temp_file" ]]; then
+        echo "$sanitized_text" > "$temp_file" 2>/dev/null
+        say -r "$rate" -f "$temp_file" 2>/dev/null
+        rm -f "$temp_file" 2>/dev/null
+        echo "$(date): TTS completed for $content_type using temp file" >> /tmp/claude_tts_debug.log
+    else
+        echo "$sanitized_text" | say -r "$rate" -f - 2>/dev/null
+        echo "$(date): TTS completed for $content_type using stdin" >> /tmp/claude_tts_debug.log
+    fi
+}
+
+execute_separated_tts() {
+    local user_prompt="$1"
+    local claude_response="$2"
+    
+    echo "$(date): Executing separated TTS - Mode: $PLAYBACK_MODE, Sequence: $PLAYBACK_SEQUENCE" >> /tmp/claude_tts_debug.log
+    
+    case "$PLAYBACK_MODE" in
+        "none")
+            echo "$(date): TTS disabled by configuration" >> /tmp/claude_tts_debug.log
+            return 0
+            ;;
+        "user_only")
+            if [[ "$USER_ENABLED" == "true" && -n "$user_prompt" ]]; then
+                process_user_content "$user_prompt" "$USER_PREFIX" "$USER_RATE" "$USER_VOLUME"
+            fi
+            ;;
+        "claude_only")
+            if [[ "$CLAUDE_ENABLED" == "true" && -n "$claude_response" ]]; then
+                process_claude_content "$claude_response" "$CLAUDE_PREFIX" "$CLAUDE_RATE" "$CLAUDE_VOLUME"
+            fi
+            ;;
+        "both")
+            local pause_seconds=$(echo "$PAUSE_BETWEEN_MS / 1000" | bc -l)
+            
+            if [[ "$PLAYBACK_SEQUENCE" == "user_first" ]]; then
+                if [[ "$USER_ENABLED" == "true" && -n "$user_prompt" ]]; then
+                    process_user_content "$user_prompt" "$USER_PREFIX" "$USER_RATE" "$USER_VOLUME"
+                    if [[ "$CLAUDE_ENABLED" == "true" && -n "$claude_response" ]]; then
+                        sleep "$pause_seconds"
+                    fi
+                fi
+                if [[ "$CLAUDE_ENABLED" == "true" && -n "$claude_response" ]]; then
+                    process_claude_content "$claude_response" "$CLAUDE_PREFIX" "$CLAUDE_RATE" "$CLAUDE_VOLUME"
+                fi
+            else
+                # claude_first
+                if [[ "$CLAUDE_ENABLED" == "true" && -n "$claude_response" ]]; then
+                    process_claude_content "$claude_response" "$CLAUDE_PREFIX" "$CLAUDE_RATE" "$CLAUDE_VOLUME"
+                    if [[ "$USER_ENABLED" == "true" && -n "$user_prompt" ]]; then
+                        sleep "$pause_seconds"
+                    fi
+                fi
+                if [[ "$USER_ENABLED" == "true" && -n "$user_prompt" ]]; then
+                    process_user_content "$user_prompt" "$USER_PREFIX" "$USER_RATE" "$USER_VOLUME"
+                fi
+            fi
+            ;;
+    esac
+}
 
 if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     echo "File exists and is readable" >> /tmp/claude_tts_debug.log
@@ -256,16 +494,31 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     echo "First 150 chars: ${last_response:0:150}..." >> /tmp/claude_tts_debug.log
     
     if [[ -n "$last_response" && ${#last_response} -gt 10 ]]; then
-        # Prepare content for TTS - combine user prompt and assistant response if both exist
-        combined_content=""
+        echo "$(date): Content extracted - User: ${#user_prompt} chars, Claude: ${#last_response} chars" >> /tmp/claude_tts_debug.log
         
-        # Define reusable function for creating user-prefixed content
-        create_user_prefixed_content() {
-            local user_text="$1"
-            local assistant_text="$2"
-            echo "Yourhighness the Great, Destroyer of Catastrophically Underwhelming Flesh-Based Social Protocols prompted. $user_text... Claude Code responded as follows. $assistant_text"
-        }
+        # Check if we should use separated TTS or legacy combined mode
+        if [[ "$USE_LEGACY_COMBINED" == "true" ]]; then
+            echo "$(date): Using legacy combined TTS mode" >> /tmp/claude_tts_debug.log
+            # Prepare content for TTS - combine user prompt and assistant response if both exist
+            combined_content=""
+            
+            # Define reusable function for creating user-prefixed content
+            create_user_prefixed_content() {
+                local user_text="$1"
+                local assistant_text="$2"
+                echo "Yourhighness the Great, Destroyer of Catastrophically Underwhelming Flesh-Based Social Protocols prompted. $user_text... Claude Code responded as follows. $assistant_text"
+            }
+        else
+            echo "$(date): Using separated TTS mode" >> /tmp/claude_tts_debug.log
+            # Use the new separated TTS system
+            execute_separated_tts "$user_prompt" "$last_response"
+            
+            # Skip the rest of the legacy processing 
+            echo "$(date): Separated TTS execution completed" >> /tmp/claude_tts_debug.log
+            return 0
+        fi
         
+        # Legacy combined processing continues here
         if [[ -n "$user_prompt" ]]; then
             # Clean user prompt
             clean_user_prompt=$(echo "$user_prompt" | \
