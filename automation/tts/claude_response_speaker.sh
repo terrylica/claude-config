@@ -89,6 +89,56 @@ echo "Stop hook active: $stop_hook_active" >> /tmp/claude_tts_debug.log
 echo "Working directory: $cwd" >> /tmp/claude_tts_debug.log
 echo "=========================" >> /tmp/claude_tts_debug.log
 
+# Command Detection Function - POC Implementation
+detect_user_content_type() {
+    local user_text="$1"
+    
+    # Remove leading/trailing whitespace for analysis
+    local trimmed_text=$(echo "$user_text" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    
+    echo "$(date): [POC] Analyzing user input for command detection: '${trimmed_text:0:50}...'" >> /tmp/claude_tts_debug.log
+    
+    # Slash command detection (highest priority)
+    if [[ "$trimmed_text" =~ ^/[a-zA-Z] ]]; then
+        echo "$(date): [POC] Detected SLASH COMMAND: ${trimmed_text:0:20}" >> /tmp/claude_tts_debug.log
+        echo "command_slash"
+        return 0
+    fi
+    
+    # CLI-style command detection
+    if [[ "$trimmed_text" =~ ^[a-z]+[[:space:]]+[a-zA-Z0-9] ]]; then
+        echo "$(date): [POC] Detected CLI COMMAND: ${trimmed_text:0:20}" >> /tmp/claude_tts_debug.log
+        echo "command_cli"
+        return 0
+    fi
+    
+    # Single word commands (git, npm, etc.)
+    if [[ "$trimmed_text" =~ ^(git|npm|yarn|docker|kubectl|curl|wget|ssh|ls|cd|pwd|cat|grep|find|ps|top|htop|vim|emacs|nano|python|node|java|make|cmake|cargo|rustc|gcc|clang)$ ]]; then
+        echo "$(date): [POC] Detected SINGLE WORD COMMAND: $trimmed_text" >> /tmp/claude_tts_debug.log
+        echo "command_single"
+        return 0
+    fi
+    
+    # Question detection
+    if [[ "$trimmed_text" =~ \?[[:space:]]*$ ]]; then
+        echo "$(date): [POC] Detected QUESTION: ${trimmed_text:0:30}" >> /tmp/claude_tts_debug.log
+        echo "question"
+        return 0
+    fi
+    
+    # Short directive (< 10 chars, no spaces)
+    if [[ ${#trimmed_text} -le 10 && ! "$trimmed_text" =~ [[:space:]] ]]; then
+        echo "$(date): [POC] Detected SHORT DIRECTIVE: $trimmed_text" >> /tmp/claude_tts_debug.log
+        echo "directive"
+        return 0
+    fi
+    
+    # Default to natural language
+    echo "$(date): [POC] Classified as NATURAL LANGUAGE: ${trimmed_text:0:30}" >> /tmp/claude_tts_debug.log
+    echo "natural_language"
+    return 0
+}
+
 # Separated TTS Processing Functions
 process_user_content() {
     local user_text="$1"
@@ -101,6 +151,38 @@ process_user_content() {
         return 1
     fi
     
+    # POC: Detect content type
+    local content_type=$(detect_user_content_type "$user_text")
+    echo "$(date): [POC] User content type: $content_type" >> /tmp/claude_tts_debug.log
+    
+    # Adjust prefix and rate based on content type
+    local adjusted_prefix="$config_prefix"
+    local adjusted_rate="$config_rate"
+    
+    case "$content_type" in
+        "command_slash")
+            adjusted_prefix="Slash command:"
+            adjusted_rate=$((config_rate + 15))  # Slightly faster for commands
+            ;;
+        "command_cli"|"command_single")
+            adjusted_prefix="CLI command:"
+            adjusted_rate=$((config_rate + 10))
+            ;;
+        "question")
+            adjusted_prefix="You asked:"
+            # Keep default rate for questions
+            ;;
+        "directive")
+            adjusted_prefix="Command:"
+            adjusted_rate=$((config_rate + 20))  # Fastest for directives
+            ;;
+        "natural_language")
+            # Keep default prefix and rate
+            ;;
+    esac
+    
+    echo "$(date): [POC] Using prefix: '$adjusted_prefix', rate: ${adjusted_rate} WPM" >> /tmp/claude_tts_debug.log
+    
     # Clean user prompt
     local clean_user_text=$(echo "$user_text" | \
         sed 's/\\n/ /g' | \
@@ -110,12 +192,12 @@ process_user_content() {
         sed 's/  \+/ /g' | \
         sed 's/^ *//; s/ *$//')
     
-    local final_user_text="$config_prefix $clean_user_text"
+    local final_user_text="$adjusted_prefix $clean_user_text"
     
-    echo "$(date): Processing user content: ${#final_user_text} chars at ${config_rate} WPM" >> /tmp/claude_tts_debug.log
+    echo "$(date): Processing user content: ${#final_user_text} chars at ${adjusted_rate} WPM" >> /tmp/claude_tts_debug.log
     
     # Execute TTS for user content
-    execute_safe_tts "$final_user_text" "$config_rate" "user"
+    execute_safe_tts "$final_user_text" "$adjusted_rate" "user"
 }
 
 process_claude_content() {
