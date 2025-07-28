@@ -183,16 +183,50 @@ process_user_content() {
     
     echo "$(date): [POC] Using prefix: '$adjusted_prefix', rate: ${adjusted_rate} WPM" >> /tmp/claude_tts_debug.log
     
-    # Clean user prompt
+    # Clean user prompt with ultra-aggressive content filtering for TTS readability
     local clean_user_text=$(echo "$user_text" | \
-        sed 's/\\n/ /g' | \
+        sed 's/```[^`]*```//g' | \
+        sed 's/`[^`]*`//g' | \
+        sed 's/===.*===//g' | \
+        sed 's/\[\][^a-zA-Z]*//g' | \
+        sed 's/Session: [a-f0-9-]*//g' | \
+        sed 's/Content Type: [^,]*//g' | \
+        sed 's/Length: [0-9]* chars[^,]*//g' | \
+        sed 's/Estimated Duration: [0-9.]*s//g' | \
+        sed 's/Speech Rate: [0-9]* [WP]*M//g' | \
+        sed 's/ORIGINAL TEXT[^a-zA-Z]*//g' | \
+        sed 's/SANITIZED TEXT[^a-zA-Z]*//g' | \
+        sed 's/END DEBUG INFO[^a-zA-Z]*//g' | \
+        sed 's/Will be shown after sanitization//g' | \
+        sed 's/what actually gets spoken//g' | \
+        sed 's/current clipboard[^a-zA-Z]*//g' | \
         sed 's/\*\*\([^*]*\)\*\*/\1/g' | \
-        sed 's/`\([^`]*\)`/\1/g' | \
         sed 's/<[^>]*>//g' | \
+        tr '\n' ' ' | \
         sed 's/  \+/ /g' | \
         sed 's/^ *//; s/ *$//')
     
+    # If content is still too long or technical, create concise summary
+    if [[ ${#clean_user_text} -gt 200 ]] && echo "$clean_user_text" | grep -q -E "(debug|content|TTS|clipboard|chars|duration)"; then
+        # Extract just the main question/request
+        local main_request=$(echo "$user_text" | head -1 | sed 's/[:].*//' | sed 's/^ *//; s/ *$//')
+        if [[ ${#main_request} -gt 10 && ${#main_request} -lt 100 ]]; then
+            clean_user_text="$main_request"  # Clean main request, no suffix needed
+        else
+            clean_user_text="Request about TTS content formatting"
+        fi
+    fi
+    
     local final_user_text="$adjusted_prefix $clean_user_text"
+    
+    # Save clean user prompt to clipboard
+    if [[ "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
+        if echo "$clean_user_text" | pbcopy 2>/dev/null; then
+            echo "$(date): Clean user prompt copied to clipboard: ${#clean_user_text} chars" >> /tmp/claude_tts_debug.log
+        else
+            echo "$(date): Failed to copy clean user prompt to clipboard" >> /tmp/claude_tts_debug.log
+        fi
+    fi
     
     echo "$(date): Processing user content: ${#final_user_text} chars at ${adjusted_rate} WPM" >> /tmp/claude_tts_debug.log
     
@@ -302,34 +336,6 @@ execute_safe_tts() {
     
     echo "$(date): Executing TTS for $content_type: ${#sanitized_text} chars at ${rate} WPM" >> /tmp/claude_tts_debug.log
     
-    # POC: Add clipboard saving for user content
-    if [[ "$content_type" == "user" && "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
-        local clipboard_content="=== Claude TTS Content Debug $(date) ===
-Session: ${session_id:-unknown}
-Content Type: USER PROMPT ($content_type)
-Length: ${#text} chars (original) → ${#sanitized_text} chars (sanitized)
-Estimated Duration: $(echo "${#sanitized_text} / 16.5" | bc -l | awk '{printf "%.1f", $0}')s
-Speech Rate: ${rate} WPM
-
-=== ORIGINAL TEXT ===
-$text
-
-=== SANITIZED TEXT (what actually gets spoken) ===
-$sanitized_text
-
-=== END DEBUG INFO ===
-"
-        if echo "$clipboard_content" | pbcopy 2>/dev/null; then
-            echo "$(date): [POC] User TTS content copied to clipboard for debugging" >> /tmp/claude_tts_debug.log
-            
-            # Also save to persistent debug file
-            local debug_file="/tmp/claude_tts_user_content_$(date +%Y%m%d_%H%M%S).txt"
-            echo "$clipboard_content" > "$debug_file" 2>/dev/null && \
-                echo "$(date): [POC] User TTS content saved to $debug_file" >> /tmp/claude_tts_debug.log
-        else
-            echo "$(date): [POC] Failed to copy user TTS content to clipboard" >> /tmp/claude_tts_debug.log
-        fi
-    fi
     
     # Create temp file for safe execution
     local temp_file=$(mktemp /tmp/claude_speech_${content_type}_XXXXXX 2>/dev/null)
@@ -769,35 +775,7 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         # === CLIPBOARD DEBUGGING FEATURE ===
         # Copy TTS content to clipboard for user examination
         # Enable with: export CLAUDE_TTS_TO_CLIPBOARD=1
-        echo "$(date): Checking clipboard debug flag: CLAUDE_TTS_TO_CLIPBOARD='${CLAUDE_TTS_TO_CLIPBOARD:-UNSET}'" >> /tmp/claude_tts_debug.log
-        if [[ "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
-            # Create comprehensive clipboard content with metadata
-            clipboard_content="=== Claude TTS Content Debug $(date) ===
-Session: $session_id
-Length: ${#final_sentence} chars
-Estimated Duration: $(echo "${#final_sentence} / $CHARS_PER_SECOND" | bc -l | awk '{printf "%.1f", $0}')s
-Speech Rate: ${SPEECH_RATE} WPM
-
-=== ORIGINAL TEXT ===
-$final_sentence
-
-=== SANITIZED TEXT (what actually gets spoken) ===
-[Will be shown after sanitization]
-
-=== END DEBUG INFO ===
-"
-            
-            # Copy to clipboard with error handling
-            if echo "$clipboard_content" | pbcopy 2>/dev/null; then
-                echo "$(date): TTS content copied to clipboard for debugging" >> /tmp/claude_tts_debug.log
-            else
-                echo "$(date): Failed to copy TTS content to clipboard" >> /tmp/claude_tts_debug.log
-            fi
-            
-            # Also save to persistent debug file for examination
-            debug_file="/tmp/claude_tts_content_$(date +%Y%m%d_%H%M%S).txt"
-            echo "$clipboard_content" > "$debug_file" 2>/dev/null && \
-                echo "$(date): TTS content saved to $debug_file" >> /tmp/claude_tts_debug.log
+        echo "$(date): Note: Clipboard functionality handled in user content processing" >> /tmp/claude_tts_debug.log
         fi
         
         # Speak the final sentence using configured speech rate
@@ -828,38 +806,12 @@ $final_sentence
                 echo "Sanitization resulted in too-short text, using fallback" >> /tmp/claude_tts_debug.log
             fi
             
-            # === UPDATE CLIPBOARD WITH SANITIZED TEXT ===
+            # === UPDATE CLIPBOARD WITH CLEAN TEXT ===
             if [[ "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
-                # Update clipboard with both original and sanitized versions
-                updated_clipboard_content="=== Claude TTS Content Debug $(date) ===
-Session: $session_id
-Length: ${#final_sentence} chars (original) → ${#sanitized_text} chars (sanitized)
-Estimated Duration: $(echo "${#sanitized_text} / $CHARS_PER_SECOND" | bc -l | awk '{printf "%.1f", $0}')s
-Speech Rate: ${SPEECH_RATE} WPM
-
-=== ORIGINAL TEXT ===
-$final_sentence
-
-=== SANITIZED TEXT (what actually gets spoken) ===
-$sanitized_text
-
-=== SANITIZATION CHANGES ===
-Original length: ${#final_sentence} chars
-Sanitized length: ${#sanitized_text} chars
-Character difference: $((${#final_sentence} - ${#sanitized_text}))
-
-=== END DEBUG INFO ===
-"
-                
-                # Update clipboard and debug file with complete info
-                if echo "$updated_clipboard_content" | pbcopy 2>/dev/null; then
-                    echo "$(date): Updated clipboard with sanitized TTS content" >> /tmp/claude_tts_debug.log
+                # Update clipboard with clean user prompt only
+                if echo "$final_sentence" | pbcopy 2>/dev/null; then
+                    echo "$(date): Updated clipboard with clean user prompt: ${#final_sentence} chars" >> /tmp/claude_tts_debug.log
                 fi
-                
-                # Update the debug file with complete content
-                debug_file="/tmp/claude_tts_content_$(date +%Y%m%d_%H%M%S).txt"
-                echo "$updated_clipboard_content" > "$debug_file" 2>/dev/null && \
-                    echo "$(date): Updated debug file with sanitized content: $debug_file" >> /tmp/claude_tts_debug.log
             fi
             
             # Layer 5: Safe file-based execution with robust error handling
