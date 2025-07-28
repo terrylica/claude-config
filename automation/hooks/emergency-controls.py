@@ -6,7 +6,6 @@ This script provides emergency controls and safety mechanisms for the follow-up 
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta

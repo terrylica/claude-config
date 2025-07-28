@@ -12,10 +12,9 @@ Output: JSON control commands to stdout
 
 import json
 import sys
-import os
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
 # Import emergency controls

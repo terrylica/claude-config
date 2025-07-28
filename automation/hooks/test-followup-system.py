@@ -148,7 +148,7 @@ def test_emergency_controls():
         
         if result.returncode == 0:
             status_data = json.loads(result.stdout)
-            print(f"   ✅ Emergency controls working")
+            print("   ✅ Emergency controls working")
             print(f"   📊 Status: {status_data}")
             return True
         else:

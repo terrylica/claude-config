@@ -6,16 +6,13 @@ Ultra-comprehensive validation with GitHub-specific behavior awareness.
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
-import urllib.parse
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
-import mistletoe
 from mistletoe import Document
 from mistletoe.span_token import Link, AutoLink
 
