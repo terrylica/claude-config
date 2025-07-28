@@ -4,20 +4,20 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 
 ## Architecture Overview
 
-**Major Change**: Renamed from TTS system (2025-07-28). CNS focuses on clipboard conversation tracking and glass sound notifications.
+**Major Change**: Renamed from TTS system (2025-07-28). CNS focuses on clipboard conversation tracking and audio notifications.
 
 ### Current System (CNS Architecture)
-- **Main Script**: `conversation_handler.sh` (168 lines) - Clipboard + glass sound only
+- **Main Script**: `conversation_handler.sh` (168 lines) - Clipboard processing only
 - **Configuration**: `config/cns_config.json` - Simplified clipboard and sound settings  
 - **Entry Point**: `cns_hook_entry.sh` - Hook system integration
-- **Glass Sound**: `glass_sound_wrapper.sh` - Separate audio notification system
+- **CNS Notification**: `cns_notification_hook.sh` - Toy Story audio notification with folder name TTS
 
 ## Functionality
 
 ### ✅ Active Features
 - **Clipboard Tracking**: Copies both user prompts and Claude responses to clipboard
 - **Command Detection**: Smart handling of hash (`#`) and slash (`/`) commands
-- **Glass Sound**: Audio notification when Claude finishes responding
+- **CNS Notification**: Toy Story audio notification with folder name TTS when Claude finishes responding
 - **Combined Format**: Clipboard contains `USER: [prompt]\n\nCLAUDE: [response]`
 
 ### ❌ Removed Features (From Previous TTS System)
@@ -32,7 +32,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 
 ```json
 {
-  "note": "CNS (Conversation Notification System) - clipboard and glass sound only",
+  "note": "CNS (Conversation Notification System) - clipboard and notification only",
   "command_detection": {
     "enabled": true,
     "hash_commands": {
@@ -50,7 +50,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
   },
   "features": {
     "enable_clipboard_debug": true,
-    "enable_glass_sound": true,
+    "enable_cns_notification": true,
     "tts_removed": true
   }
 }
@@ -80,7 +80,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 **Key Log Markers**:
 - `[CLIPBOARD]` - Clipboard processing events
 - `Combined content copied to clipboard` - Success confirmation
-- `Glass sound should play automatically` - Audio notification trigger
+- `CNS notification should play automatically` - Audio notification trigger
 
 ## Integration
 
@@ -94,7 +94,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/terryli/.claude/automation/cns/glass_sound_wrapper.sh"
+            "command": "/Users/terryli/.claude/automation/cns/cns_notification_hook.sh"
           },
           {
             "type": "command", 
@@ -117,9 +117,9 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 - Verify `pbcopy` is available and functional
 - Ensure transcript file is readable and contains valid JSON
 
-### No Glass Sound
-- Verify `glass_sound_wrapper.sh` is executable
-- Check that both glass and CNS hooks are configured in settings
+### No CNS Notification
+- Verify `cns_notification_hook.sh` is executable
+- Check that both notification and CNS hooks are configured in settings
 
 ### Command Detection Issues
 - Review `[CLIPBOARD]` log entries for classification results
@@ -133,5 +133,5 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 - Configuration simplified significantly  
 - Script size reduced 81% (892 → 168 lines)
 - Clipboard functionality enhanced with combined format
-- Glass sound preserved as separate system
+- CNS notification preserved as separate system
 - Complete file/directory structure renamed for clarity

@@ -55,13 +55,14 @@
 ## Claude Code User Custom Extensions
 
 ### CNS (Conversation Notification System)
-**Purpose**: Clipboard conversation tracking and audio completion notification for Claude Code responses
+**Purpose**: Clipboard conversation tracking and audio notification for Claude Code responses
 
 #### Core Files (Simplified Architecture - CNS System)
-- **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard and sound settings)
-- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (168 lines, clipboard + glass sound only)
+- **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard and notification settings)
+- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (168 lines, clipboard processing)
 - **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
-- **Glass Sound**: `.claude/automation/cns/glass_sound_wrapper.sh` (separate audio notification)
+- **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (Toy Story audio + folder name TTS)
+- **Manual Utility**: `.claude/bin/cns-notify` (manual notification testing)
 - **Debug Logs**: `/tmp/claude_cns_debug.log` (structured logging)
 
 #### CRITICAL PRINCIPLE: Asynchronous Hook Architecture
@@ -70,7 +71,7 @@
 - **Pattern**: `{ actual_work } &` - spawn background and exit immediately
 - **No Timeouts**: Remove timeout values from settings.json for true async hooks
 - **Testing**: Hook execution must be < 10ms (script exit time, not work completion)
-- **Anti-Pattern**: Never wait for clipboard processing, sound playback, or file operations
+- **Anti-Pattern**: Never wait for clipboard processing, audio playback, or file operations
 - **Enforcement**: Any hook causing session ending delays must be refactored to async pattern
 
 ### GitHub Flavored Markdown Link Checker

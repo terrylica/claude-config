@@ -38,7 +38,7 @@ This directory contains the global configuration for Claude Code, organized into
 
 The CNS (Conversation Notification System) provides:
 - **Clipboard Tracking**: Automatic copying of conversation exchanges (USER: + CLAUDE: format)
-- **Glass Sound**: Audio completion notification when Claude finishes responding
+- **CNS Notification**: Toy Story audio notification with folder name TTS when Claude finishes responding
 - **Command Detection**: Smart handling of hash (`#`) and slash (`/`) commands for clipboard optimization
 - **Debug Logging**: Comprehensive operation tracking at `/tmp/claude_cns_debug.log`
 
@@ -47,7 +47,7 @@ The CNS (Conversation Notification System) provides:
 This configuration enables:
 1. **APCF Workflow**: Type "APCF" to generate audit-proof commit messages with SR&ED evidence
 2. **Clipboard Tracking**: Automatic conversation capture for easy sharing and reference
-3. **Audio Notifications**: Glass sound feedback when Claude completes responses
+3. **Audio Notifications**: Toy Story notification with folder name TTS when Claude completes responses
 4. **Slash Commands**: Custom workflow automation through `/command` syntax
 5. **Memory Persistence**: Cross-session project context and preference retention
 6. **Development Integration**: Seamless workflow with git, debugging, and productivity tools

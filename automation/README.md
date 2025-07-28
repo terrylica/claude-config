@@ -4,14 +4,14 @@
 ## Contents
 - `cns/` - **CNS (Conversation Notification System)** (Formerly TTS, renamed 2025-07-28)
   - `config/` - Configuration system
-    - `cns_config.json` - Clipboard and glass sound settings
+    - `cns_config.json` - Clipboard and notification settings
     - `debug_config.json` - Debug logging configuration
     - `speech_profiles.json` - Speech profile settings
     - `text_processing_rules.json` - Text processing rules
   - **Active files**:
-    - `conversation_handler.sh` - Main clipboard + glass sound script
+    - `conversation_handler.sh` - Main clipboard processing script
     - `cns_hook_entry.sh` - Hook entry point
-    - `glass_sound_wrapper.sh` - Audio completion notification
+    - `cns_notification_hook.sh` - Toy Story audio notification with folder name TTS
   - `lib/common/` - Common utility libraries
     - `config_loader.sh` - Configuration loading utilities
     - `error_handler.sh` - Error handling functions

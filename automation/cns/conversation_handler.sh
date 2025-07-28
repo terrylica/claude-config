@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Simplified Claude Response Hook - Clipboard and Glass Sound Only
-# CNS (Conversation Notification System) - clipboard copying and glass sound
+# Simplified Claude Response Hook - Clipboard Processing Only
+# CNS (Conversation Notification System) - clipboard copying with notification support
 
 # Configuration
 CONFIG_DIR="/Users/terryli/.claude/automation/cns/config"
 CNS_CONFIG_FILE="$CONFIG_DIR/cns_config.json"
 
-echo "$(date): Clipboard & Glass hook triggered" >> /tmp/claude_cns_debug.log
+echo "$(date): CNS clipboard hook triggered" >> /tmp/claude_cns_debug.log
 
 # Read input from Claude Code hook
 input_data=$(cat)
@@ -156,8 +156,8 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
             fi
         fi
         
-        # Note: Glass sound is handled separately by the glass_sound_wrapper.sh
-        echo "$(date): Glass sound should play automatically via separate hook" >> /tmp/claude_cns_debug.log
+        # Note: Audio notification is handled separately by cns_notification_hook.sh
+        echo "$(date): CNS notification should play automatically via separate hook" >> /tmp/claude_cns_debug.log
     else
         echo "No valid response found after $max_attempts attempts" >> /tmp/claude_cns_debug.log
     fi
@@ -165,4 +165,4 @@ else
     echo "Transcript file not found or not readable: $transcript_path" >> /tmp/claude_cns_debug.log
 fi
 
-echo "$(date): Clipboard & Glass hook completed" >> /tmp/claude_cns_debug.log
+echo "$(date): CNS clipboard hook completed" >> /tmp/claude_cns_debug.log

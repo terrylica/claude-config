@@ -12,7 +12,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 ├── agents/                    # [FIXED] Sub-agent configurations
 ├── commands/                  # [FIXED] Slash commands (/ruff-fix, /apcf, /gfm-check)
 ├── bin/                       # [NEW] Utility scripts
-│   └── glass-sound            # Manual Mac IIx sound trigger
+│   └── cns-notify             # Manual CNS notification trigger
 ├── automation/                # [NEW] Automation subsystem  
 │   ├── hooks/                 # Hook system files (Python scripts)
 │   ├── cns/                   # CNS (Conversation Notification System)
@@ -60,14 +60,14 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Purpose**: Hook system, CNS integration, automation scripts
 **Components**:
 - `hooks/`: Python hook scripts (followup-trigger.py, emergency-controls.py, test-followup-system.py)
-- `cns/`: **CNS (Conversation Notification System)** (Pure clipboard + glass sound)
+- `cns/`: **CNS (Conversation Notification System)** (Clipboard + Toy Story notification + TTS)
   - `config/`: JSON configuration (cns_config.json - clipboard and sound settings)
   - `lib/common/`: Simplified config loader (59 lines, CNS-only variables)
   - `scripts/`: Test and validation utilities
   - `tests/`: Unit and integration test suites  
   - `conversation_handler.sh`: Main clipboard processing script (168 lines)
   - `cns_hook_entry.sh`: Async hook entry point (fire-and-forget pattern)
-  - `glass_sound_wrapper.sh`: Mac IIx audio notification (async)
+  - `cns_notification_hook.sh`: Toy Story audio notification with folder name TTS (async)
 - `logs/`: Hook execution logs and debug files
 
 **Integration**: Referenced by `settings.json` hooks configuration with async architecture
@@ -76,7 +76,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Location**: `bin/`
 **Purpose**: Manual utility scripts and tools
 **Components**:
-- `glass-sound`: Manual Mac IIx sound trigger for testing CNS functionality
+- `cns-notify`: Manual CNS notification trigger for testing functionality
 
 **Usage**: Independent testing and manual operation of CNS features
 
@@ -101,9 +101,9 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 
 ### 🔊 Audio Notifications
 **Location**: `automation/cns/`
-**Purpose**: Glass sound completion notification
+**Purpose**: Toy Story notification with folder name TTS
 **Components**:
-- `glass_sound_wrapper.sh`: System sound notification when Claude finishes
+- `cns_notification_hook.sh`: Toy Story sound + folder name TTS when Claude finishes
 
 **Integration**: Separate hook system for audio feedback (no TTS)
 
@@ -144,7 +144,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 ### Hook System Flow
 ```
 Claude Code Event → settings.json hooks →
-├── glass_sound_wrapper.sh (audio notification)
+├── cns_notification_hook.sh (Toy Story notification + TTS)
 ├── cns_hook_entry.sh (clipboard tracking)
 └── followup-trigger.py (automation)
 ```
@@ -159,7 +159,7 @@ Claude Code Stop Hook → settings.json →
 │       ├── Command detection (hash/slash patterns)  
 │       ├── Clipboard copy (USER: + CLAUDE: format)
 │       └── Debug logging (/tmp/claude_cns_debug.log)
-└── glass_sound_wrapper.sh (async Mac IIx sound)
+└── cns_notification_hook.sh (async Toy Story sound + TTS)
     └── afplay background process
 ```
 
@@ -168,7 +168,7 @@ Claude Code Stop Hook → settings.json →
 ✅ Fire-and-forget async pattern - hooks exit immediately
 ✅ Background processing - no session delays
 ✅ Simplified 59-line config loader (CNS-only variables)
-✅ Pure clipboard + glass sound functionality
+✅ Clipboard + Toy Story notification + folder name TTS functionality
 ✅ No timeout constraints in settings.json
 ```
 
@@ -220,7 +220,7 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 4. **Command System**: Add new slash commands to `commands/` directory
 5. **Utility Scripts**: Add tools to `bin/` for manual operations
 6. **Development Tools**: Extend `tools/` for new workspace utilities
-7. **Testing**: Use `bin/glass-sound` for manual CNS functionality verification
+7. **Testing**: Use `bin/cns-notify` for manual CNS functionality verification
 
 ## SR&ED Integration
 
@@ -234,7 +234,7 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 - **Slash Commands**: `/ruff-fix`, `/apcf`, `/gfm-check` for workflow automation
 - **Sub-agents**: Specialized agents for compliance, testing, research
 - **Hook Automation**: Async logging and session management (no delays)
-- **Manual Utilities**: `bin/glass-sound` for independent testing
+- **Manual Utilities**: `bin/cns-notify` for independent testing
 - **Link Validation**: `tools/gfm-link-checker/` for documentation integrity
 
 ## Security Considerations

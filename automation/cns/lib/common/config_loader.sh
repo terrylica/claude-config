@@ -2,7 +2,7 @@
 
 # CNS Configuration Loader Module
 # Simplified configuration loader for CNS (Conversation Notification System)
-# Handles clipboard tracking and glass sound notifications only
+# Handles clipboard tracking and CNS notifications only
 
 # Configuration file paths
 readonly CNS_CONFIG_DIR="/Users/terryli/.claude/automation/cns/config"
@@ -27,7 +27,7 @@ load_cns_config() {
     export CNS_DEBUG_LOG_OLD=$(jq -r '.paths.debug_log_old // "/tmp/claude_cns_debug.log.old"' "$config_file")
     
     export CNS_ENABLE_CLIPBOARD_DEBUG=$(jq -r '.features.enable_clipboard_debug // true' "$config_file")
-    export CNS_ENABLE_GLASS_SOUND=$(jq -r '.features.enable_glass_sound // true' "$config_file")
+    export CNS_ENABLE_CNS_NOTIFICATION=$(jq -r '.features.enable_cns_notification // true' "$config_file")
     export CNS_ENABLE_LOG_ROTATION=$(jq -r '.features.enable_log_rotation // true' "$config_file")
     export CNS_LOG_ROTATION_SIZE_KB=$(jq -r '.features.log_rotation_size_kb // 50' "$config_file")
     
