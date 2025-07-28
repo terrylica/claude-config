@@ -7,7 +7,7 @@ This directory contains the global configuration for Claude Code, organized into
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
 | **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
-| **[TTS Integration](../automation/tts/)** | Modular text-to-speech system with JSON config | `automation/tts/lib/`, `automation/tts/config/`, legacy monolithic script |
+| **[Clipboard & Glass Sound](../automation/tts/)** | Conversation tracking and audio notification system | `automation/tts/claude_response_speaker.sh`, `automation/tts/config/` |
 | **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
 | **[Automation System](../automation/)** | Event-driven automation and integrations | `automation/hooks/`, `automation/tts/`, `automation/logs/` |
 | **[Hook System](../hooks/)** | Legacy hook configurations | `hooks/` directory |
@@ -34,20 +34,22 @@ This directory contains the global configuration for Claude Code, organized into
 ⚠️ **Integration Files (Modify with caution):**
 - `hooks/` directory - Event system integration
 
-## Audio Integration
+## Audio & Clipboard Integration
 
-The TTS system uses:
-- **System sounds**: Audio notifications from macOS system library
-- **Hook Integration**: Automated audio feedback on Claude Code events via `automation/tts/`
-- **Debug Logging**: Comprehensive TTS operation tracking for troubleshooting
+The clipboard and glass sound system provides:
+- **Clipboard Tracking**: Automatic copying of conversation exchanges (USER: + CLAUDE: format)
+- **Glass Sound**: Audio completion notification when Claude finishes responding
+- **Command Detection**: Smart handling of hash (`#`) and slash (`/`) commands for clipboard optimization
+- **Debug Logging**: Comprehensive operation tracking at `/tmp/claude_tts_debug.log`
 
 ## Usage
 
 This configuration enables:
 1. **APCF Workflow**: Type "APCF" to generate audit-proof commit messages with SR&ED evidence
-2. **Audio Feedback**: Automatic text-to-speech for Claude responses via hook system
-3. **Slash Commands**: Custom workflow automation through `/command` syntax
-4. **Memory Persistence**: Cross-session project context and preference retention
-5. **Development Integration**: Seamless workflow with git, debugging, and productivity tools
+2. **Clipboard Tracking**: Automatic conversation capture for easy sharing and reference
+3. **Audio Notifications**: Glass sound feedback when Claude completes responses
+4. **Slash Commands**: Custom workflow automation through `/command` syntax
+5. **Memory Persistence**: Cross-session project context and preference retention
+6. **Development Integration**: Seamless workflow with git, debugging, and productivity tools
 
 For detailed APCF usage and commit formatting guidelines, see the [APCF section in CLAUDE.md](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation).

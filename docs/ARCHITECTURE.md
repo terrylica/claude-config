@@ -14,16 +14,10 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 │   └── hub/                   # Command hub system commands
 ├── automation/                # [NEW] Automation subsystem  
 │   ├── hooks/                 # Hook system files
-│   ├── tts/                   # Modular TTS system
-│   │   ├── config/            # JSON-based configuration
-│   │   ├── lib/               # Modular components (common, input, processing, output)
-│   │   ├── tests/             # Unit and integration tests
-│   │   ├── scripts/           # Utility scripts
-│   │   └── *.sh               # Legacy monolithic scripts (compatibility)
+│   ├── tts/                   # Clipboard & Glass Sound system (TTS removed 2025-07-28)
+│   │   ├── config/            # Simplified JSON configuration
+│   │   └── *.sh               # Clipboard + glass sound scripts (168 lines)
 │   └── logs/                  # Hook logs and debug files
-├── audio/                     # [NEW] TTS/Audio subsystem
-│   ├── sounds/                # Audio files
-│   └── configs/               # Audio-related configurations
 ├── history/                   # [NEW] Historical data
 │   ├── shell-snapshots/       # Shell command history
 │   ├── sessions/              # Archived project sessions
@@ -56,27 +50,22 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Purpose**: Hook system, modular TTS integration, automation scripts
 **Components**:
 - `hooks/`: Python hook scripts (followup-trigger, emergency-controls)
-- `tts/`: **Modular text-to-speech system**
-  - `config/`: JSON-based configuration (timing, speech profiles, processing rules)
-  - `lib/common/`: Foundation infrastructure (config loader, logger, error handler)
-  - `lib/input/`: Input processing modules (JSON parser, transcript monitor)
-  - `lib/processing/`: Text processing pipeline (sanitizer, aggregator) 
-  - `lib/output/`: Output systems (speech synthesizer, debug exporter)
-  - `tests/`: Comprehensive test suite with unit and integration tests
-  - `scripts/`: Maintenance and utility scripts
-  - `*.sh`: Legacy monolithic scripts (maintained for compatibility)
+- `tts/`: **Clipboard & Glass Sound system** (TTS functionality removed 2025-07-28)
+  - `config/`: Simplified JSON configuration (clipboard and sound settings)
+  - `claude_response_speaker.sh`: Main clipboard + glass sound script (168 lines)
+  - `tts_hook_entry.sh`: Hook system integration
+  - `glass_sound_wrapper.sh`: Audio completion notification
 - `logs/`: Debug logs, hook execution logs
 
 **Integration**: Referenced by `settings.json` hooks configuration
 
-### 🔊 Audio Subsystem  
-**Location**: `audio/`
-**Purpose**: TTS and audio feedback system
+### 🔊 Audio Notifications
+**Location**: `automation/tts/`
+**Purpose**: Glass sound completion notification
 **Components**:
-- `sounds/`: Audio files for notifications
-- `configs/`: Audio-specific configuration files
+- `glass_sound_wrapper.sh`: System sound notification when Claude finishes
 
-**Integration**: Used by automation scripts for audio feedback
+**Integration**: Separate hook system for audio feedback (no TTS)
 
 ### 📚 History Management
 **Location**: `history/`
@@ -115,31 +104,29 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 ### Hook System Flow
 ```
 Claude Code Event → settings.json hooks →
-├── glass_sound_wrapper.sh (notification)
-├── tts_hook_entry.sh (text-to-speech)
+├── glass_sound_wrapper.sh (audio notification)
+├── tts_hook_entry.sh (clipboard tracking)
 └── followup-trigger.py (automation)
 ```
 
-### TTS Processing Chain
-**Current (Legacy)**:
+### Clipboard & Glass Sound Processing Chain
+**Current (Simplified)**:
 ```
 Hook Event → tts_hook_entry.sh → claude_response_speaker.sh → 
-├── Extract transcript content
-├── Process user prompt + response  
-├── Generate optimized TTS content
-└── Execute macOS `say` command
+├── Extract transcript content (JSON parsing)
+├── Process user prompt + response (content extraction)
+├── Command detection (hash/slash patterns)
+├── Combined clipboard copy (USER: + CLAUDE: format)
+└── Glass sound notification (separate hook)
 ```
 
-**Future (Modular)**:
+**Removed (Former TTS)**:
 ```
-Hook Event → bin/tts_entry.sh → bin/tts_orchestrator.sh →
-├── lib/input/json_parser.sh (parse hook data)
-├── lib/input/transcript_monitor.sh (wait for transcript)
-├── lib/input/content_extractor.sh (extract user/assistant content)
-├── lib/processing/text_sanitizer.sh (clean text for speech)
-├── lib/processing/paragraph_aggregator.sh (optimize content length)
-├── lib/output/speech_synthesizer.sh (execute TTS)
-└── lib/output/debug_exporter.sh (clipboard & logging)
+❌ All speech synthesis functionality
+❌ Complex paragraph aggregation for audio  
+❌ macOS `say` command execution
+❌ Speech rate/voice/volume processing
+❌ Modular library architecture (lib/)
 ```
 
 ### File Path References
@@ -174,11 +161,11 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ```
 
 ### Update Procedures
-1. **TTS Module Updates**: Modify files in `automation/tts/lib/` or `automation/tts/config/`
-2. **Configuration Changes**: Update JSON files in `automation/tts/config/`
-3. **Script Updates**: Legacy scripts in `automation/tts/`, new modules in `automation/tts/lib/`  
-4. **Path Updates**: Maintain absolute paths, update module loading paths
-5. **Testing**: Run `automation/tts/scripts/test_foundation.sh` and unit tests
+1. **Clipboard System Updates**: Modify `automation/tts/claude_response_speaker.sh` (168 lines)
+2. **Configuration Changes**: Update `automation/tts/config/tts_config.json`
+3. **Command Detection**: Modify hash/slash pattern recognition in main script
+4. **Path Updates**: Maintain absolute paths for hook system integration
+5. **Testing**: Verify clipboard functionality and glass sound notification
 
 ## SR&ED Integration
 
@@ -219,6 +206,6 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ---
 
-**Last Updated**: July 26, 2025  
-**Architecture Version**: 1.1 - Modular TTS Foundation  
+**Last Updated**: July 28, 2025  
+**Architecture Version**: 2.0 - Clipboard & Glass Sound System (TTS Removed)  
 **Compatible with**: Claude Code official constraints as of July 2025

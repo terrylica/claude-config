@@ -54,14 +54,14 @@
 
 ## Claude Code User Custom Extensions
 
-### Intelligent Text-to-Speech Hook System
-**Purpose**: Audio feedback for Claude Code responses
+### Intelligent Clipboard & Glass Sound Hook System
+**Purpose**: Clipboard conversation tracking and audio completion notification for Claude Code responses
 
-#### Core Files (Modular Architecture - Phase 1 Complete)
-- **Configuration**: `.claude/automation/tts/config/` (JSON-based settings)
-- **Foundation**: `.claude/automation/tts/lib/common/` (config, logging, error handling)
-- **Entry Point**: `.claude/automation/tts/tts_hook_entry.sh` (updated for modular system)
-- **Legacy Script**: `.claude/automation/tts/claude_response_speaker.sh` (monolithic, compatibility)
+#### Core Files (Simplified Architecture - TTS Removed)
+- **Configuration**: `.claude/automation/tts/config/tts_config.json` (clipboard and sound settings)
+- **Main Script**: `.claude/automation/tts/claude_response_speaker.sh` (168 lines, clipboard + glass sound only)
+- **Entry Point**: `.claude/automation/tts/tts_hook_entry.sh` (hook system integration)
+- **Glass Sound**: `.claude/automation/tts/glass_sound_wrapper.sh` (separate audio notification)
 - **Debug Logs**: `/tmp/claude_tts_debug.log` (structured logging)
 
 ### GitHub Flavored Markdown Link Checker
