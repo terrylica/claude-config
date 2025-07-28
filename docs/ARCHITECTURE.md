@@ -10,26 +10,36 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 ├── settings.json              # [FIXED] Main Claude Code configuration
 ├── CLAUDE.md                  # [FIXED] User memory & APCF methodology
 ├── agents/                    # [FIXED] Sub-agent configurations
-├── commands/                  # [FIXED] Slash commands
-│   └── hub/                   # Command hub system commands
+├── commands/                  # [FIXED] Slash commands (/ruff-fix, /apcf, /gfm-check)
+├── bin/                       # [NEW] Utility scripts
+│   └── glass-sound            # Manual Mac IIx sound trigger
 ├── automation/                # [NEW] Automation subsystem  
-│   ├── hooks/                 # Hook system files
-│   ├── cns/                   # CNS (Conversation Notification System) (Renamed from tts 2025-07-28)
-│   │   ├── config/            # Simplified JSON configuration
-│   │   └── *.sh               # Clipboard + glass sound scripts (168 lines)
-│   └── logs/                  # Hook logs and debug files
+│   ├── hooks/                 # Hook system files (Python scripts)
+│   ├── cns/                   # CNS (Conversation Notification System)
+│   │   ├── config/            # JSON configuration (clipboard + sound)
+│   │   ├── lib/               # Simplified common utilities
+│   │   ├── scripts/           # Test and validation scripts
+│   │   ├── tests/             # Unit and integration tests
+│   │   └── *.sh               # Core CNS scripts (async hook architecture)
+│   └── logs/                  # Hook execution logs
 ├── history/                   # [NEW] Historical data
-│   ├── shell-snapshots/       # Shell command history
-│   ├── sessions/              # Archived project sessions
-│   └── todos-archive/         # Completed todos
+│   └── shell-snapshots/       # Shell command history snapshots
+├── shell-snapshots/           # [FIXED] Current shell snapshots (Claude Code required)
 ├── system/                    # [NEW] System-managed files
-│   ├── ide/                   # IDE integration locks
+│   ├── ide/                   # IDE integration locks (gitignored)
 │   ├── sessions/              # Current project sessions
 │   ├── statsig/               # Telemetry cache
-│   └── todos/                 # Active todo tracking
+│   └── todos/                 # Active todo tracking (JSON files)
+├── tmux/                      # [NEW] Tmux integration system
+│   ├── bin/                   # Tmux management scripts
+│   ├── config/                # Shell integration and aliases
+│   ├── docs/                  # Tmux setup documentation
+│   └── data/                  # Tmux session data
+├── tools/                     # [NEW] Development tools
+│   └── gfm-link-checker/      # GitHub Flavored Markdown link validator
 └── docs/                      # [NEW] Documentation
-    ├── README.md              # Main documentation
-    └── ARCHITECTURE.md        # This file
+    ├── README.md              # Main workspace documentation
+    └── ARCHITECTURE.md        # This architecture document
 ```
 
 ## Subsystem Architecture
@@ -47,17 +57,47 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 
 ### 🤖 Automation Subsystem
 **Location**: `automation/`
-**Purpose**: Hook system, modular TTS integration, automation scripts
+**Purpose**: Hook system, CNS integration, automation scripts
 **Components**:
-- `hooks/`: Python hook scripts (followup-trigger, emergency-controls)
-- `cns/`: **CNS (Conversation Notification System)** (Renamed from TTS 2025-07-28)
-  - `config/`: Simplified JSON configuration (clipboard and sound settings)
-  - `conversation_handler.sh`: Main clipboard + glass sound script (168 lines)
-  - `cns_hook_entry.sh`: Hook system integration
-  - `glass_sound_wrapper.sh`: Audio completion notification
-- `logs/`: Debug logs, hook execution logs
+- `hooks/`: Python hook scripts (followup-trigger.py, emergency-controls.py, test-followup-system.py)
+- `cns/`: **CNS (Conversation Notification System)** (Pure clipboard + glass sound)
+  - `config/`: JSON configuration (cns_config.json - clipboard and sound settings)
+  - `lib/common/`: Simplified config loader (59 lines, CNS-only variables)
+  - `scripts/`: Test and validation utilities
+  - `tests/`: Unit and integration test suites  
+  - `conversation_handler.sh`: Main clipboard processing script (168 lines)
+  - `cns_hook_entry.sh`: Async hook entry point (fire-and-forget pattern)
+  - `glass_sound_wrapper.sh`: Mac IIx audio notification (async)
+- `logs/`: Hook execution logs and debug files
 
-**Integration**: Referenced by `settings.json` hooks configuration
+**Integration**: Referenced by `settings.json` hooks configuration with async architecture
+
+### 🔧 Utility Scripts
+**Location**: `bin/`
+**Purpose**: Manual utility scripts and tools
+**Components**:
+- `glass-sound`: Manual Mac IIx sound trigger for testing CNS functionality
+
+**Usage**: Independent testing and manual operation of CNS features
+
+### 🖥️ Tmux Integration
+**Location**: `tmux/`
+**Purpose**: Tmux session management and shell integration
+**Components**:
+- `bin/`: Session management scripts and installers
+- `config/`: Shell integration, aliases, and tmux configuration
+- `docs/`: Setup documentation and usage examples
+- `data/`: Session data and tmux state files
+
+**Integration**: Provides enhanced terminal multiplexing for development workflows
+
+### 🔗 Development Tools
+**Location**: `tools/`
+**Purpose**: Standalone development utilities
+**Components**:
+- `gfm-link-checker/`: GitHub Flavored Markdown link validation tool with workspace integration
+
+**Features**: Local README.md validation with GitHub-specific behavior awareness
 
 ### 🔊 Audio Notifications
 **Location**: `automation/cns/`
@@ -110,23 +150,36 @@ Claude Code Event → settings.json hooks →
 ```
 
 ### CNS Processing Chain
-**Current (Simplified)**:
+**Current (Async Architecture)**:
 ```
-Hook Event → cns_hook_entry.sh → conversation_handler.sh → 
-├── Extract transcript content (JSON parsing)
-├── Process user prompt + response (content extraction)
-├── Command detection (hash/slash patterns)
-├── Combined clipboard copy (USER: + CLAUDE: format)
-└── Glass sound notification (separate hook)
+Claude Code Stop Hook → settings.json →
+├── cns_hook_entry.sh (captures stdin, spawns background)
+│   └── conversation_handler.sh (async processing)
+│       ├── JSON parsing & content extraction
+│       ├── Command detection (hash/slash patterns)  
+│       ├── Clipboard copy (USER: + CLAUDE: format)
+│       └── Debug logging (/tmp/claude_cns_debug.log)
+└── glass_sound_wrapper.sh (async Mac IIx sound)
+    └── afplay background process
 ```
 
-**Removed (Former TTS)**:
+**Key Architectural Principles**:
+```
+✅ Fire-and-forget async pattern - hooks exit immediately
+✅ Background processing - no session delays
+✅ Simplified 59-line config loader (CNS-only variables)
+✅ Pure clipboard + glass sound functionality
+✅ No timeout constraints in settings.json
+```
+
+**Removed (Former TTS System)**:
 ```
 ❌ All speech synthesis functionality
 ❌ Complex paragraph aggregation for audio  
 ❌ macOS `say` command execution
 ❌ Speech rate/voice/volume processing
-❌ Modular library architecture (lib/)
+❌ 196-line TTS-contaminated config loader
+❌ Synchronous hook execution patterns
 ```
 
 ### File Path References
@@ -162,10 +215,12 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ### Update Procedures
 1. **CNS System Updates**: Modify `automation/cns/conversation_handler.sh` (168 lines)
-2. **Configuration Changes**: Update `automation/cns/config/cns_config.json`
-3. **Command Detection**: Modify hash/slash pattern recognition in main script
-4. **Path Updates**: Maintain absolute paths for hook system integration
-5. **Testing**: Verify clipboard functionality and glass sound notification
+2. **Configuration Changes**: Update `automation/cns/config/cns_config.json` 
+3. **Hook Architecture**: Maintain async fire-and-forget pattern in all hooks
+4. **Command System**: Add new slash commands to `commands/` directory
+5. **Utility Scripts**: Add tools to `bin/` for manual operations
+6. **Development Tools**: Extend `tools/` for new workspace utilities
+7. **Testing**: Use `bin/glass-sound` for manual CNS functionality verification
 
 ## SR&ED Integration
 
@@ -176,9 +231,11 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 - **Research Documentation**: Structured in `docs/`
 
 ### Development Tools
-- **Command Hub**: `/hub:*` commands for workflow automation
-- **Sub-agents**: Specialized agents for compliance, testing
-- **Hook Automation**: Automatic logging and session management
+- **Slash Commands**: `/ruff-fix`, `/apcf`, `/gfm-check` for workflow automation
+- **Sub-agents**: Specialized agents for compliance, testing, research
+- **Hook Automation**: Async logging and session management (no delays)
+- **Manual Utilities**: `bin/glass-sound` for independent testing
+- **Link Validation**: `tools/gfm-link-checker/` for documentation integrity
 
 ## Security Considerations
 
@@ -207,5 +264,5 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ---
 
 **Last Updated**: July 28, 2025  
-**Architecture Version**: 2.1 - CNS (Conversation Notification System) Complete Rename  
+**Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete  
 **Compatible with**: Claude Code official constraints as of July 2025
