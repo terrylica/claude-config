@@ -105,8 +105,8 @@ detect_user_content_type() {
         return 0
     fi
     
-    # CLI-style command detection
-    if [[ "$trimmed_text" =~ ^[a-z]+[[:space:]]+[a-zA-Z0-9] ]]; then
+    # CLI-style command detection (refined - avoid false positives)
+    if [[ "$trimmed_text" =~ ^(git|npm|yarn|docker|kubectl|curl|wget|ssh|python|node|java|make|cmake|cargo|rustc|gcc|clang|pip|brew|apt|yum|systemctl|service)[[:space:]] ]]; then
         echo "$(date): [POC] Detected CLI COMMAND: ${trimmed_text:0:20}" >> /tmp/claude_tts_debug.log
         echo "command_cli"
         return 0
@@ -301,6 +301,35 @@ execute_safe_tts() {
     fi
     
     echo "$(date): Executing TTS for $content_type: ${#sanitized_text} chars at ${rate} WPM" >> /tmp/claude_tts_debug.log
+    
+    # POC: Add clipboard saving for user content
+    if [[ "$content_type" == "user" && "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
+        local clipboard_content="=== Claude TTS Content Debug $(date) ===
+Session: ${session_id:-unknown}
+Content Type: USER PROMPT ($content_type)
+Length: ${#text} chars (original) → ${#sanitized_text} chars (sanitized)
+Estimated Duration: $(echo "${#sanitized_text} / 16.5" | bc -l | awk '{printf "%.1f", $0}')s
+Speech Rate: ${rate} WPM
+
+=== ORIGINAL TEXT ===
+$text
+
+=== SANITIZED TEXT (what actually gets spoken) ===
+$sanitized_text
+
+=== END DEBUG INFO ===
+"
+        if echo "$clipboard_content" | pbcopy 2>/dev/null; then
+            echo "$(date): [POC] User TTS content copied to clipboard for debugging" >> /tmp/claude_tts_debug.log
+            
+            # Also save to persistent debug file
+            local debug_file="/tmp/claude_tts_user_content_$(date +%Y%m%d_%H%M%S).txt"
+            echo "$clipboard_content" > "$debug_file" 2>/dev/null && \
+                echo "$(date): [POC] User TTS content saved to $debug_file" >> /tmp/claude_tts_debug.log
+        else
+            echo "$(date): [POC] Failed to copy user TTS content to clipboard" >> /tmp/claude_tts_debug.log
+        fi
+    fi
     
     # Create temp file for safe execution
     local temp_file=$(mktemp /tmp/claude_speech_${content_type}_XXXXXX 2>/dev/null)
