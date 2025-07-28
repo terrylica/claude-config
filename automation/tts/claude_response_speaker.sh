@@ -98,8 +98,8 @@ detect_user_content_type() {
     
     echo "$(date): [POC] Analyzing user input for command detection: '${trimmed_text:0:50}...'" >> /tmp/claude_tts_debug.log
     
-    # Slash command detection (highest priority)
-    if [[ "$trimmed_text" =~ ^/[a-zA-Z] ]]; then
+    # Slash command detection (highest priority) - check for /command anywhere in first few lines
+    if [[ "$trimmed_text" =~ ^/[a-zA-Z] ]] || echo "$user_text" | head -5 | grep -q '^<command-name>/[a-zA-Z]'; then
         echo "$(date): [POC] Detected SLASH COMMAND: ${trimmed_text:0:20}" >> /tmp/claude_tts_debug.log
         echo "command_slash"
         return 0
@@ -194,10 +194,25 @@ process_user_content() {
     
     local final_user_text="$adjusted_prefix $clean_user_text"
     
-    # Save RAW user prompt to clipboard (no processing)
+    # Save user prompt to clipboard (smart filtering for commands)
     if [[ "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
-        if echo "$user_text" | pbcopy 2>/dev/null; then
-            echo "$(date): Raw user prompt copied to clipboard: ${#user_text} chars" >> /tmp/claude_tts_debug.log
+        local clipboard_text="$user_text"
+        
+        # For slash commands, extract just the command name instead of full definition
+        if [[ "$content_type" == "command_slash" ]]; then
+            # Try to extract command name from <command-name> tag or direct /command
+            clipboard_text=$(echo "$user_text" | grep -o '<command-name>/[a-zA-Z][a-zA-Z0-9_-]*' | sed 's/<command-name>//' | head -1)
+            if [[ -z "$clipboard_text" ]]; then
+                # Fallback: look for direct /command at start
+                clipboard_text=$(echo "$user_text" | grep -m1 '^/[a-zA-Z]' | head -1)
+            fi
+            if [[ -z "$clipboard_text" ]]; then
+                clipboard_text="/apcf"  # final fallback
+            fi
+        fi
+        
+        if echo "$clipboard_text" | pbcopy 2>/dev/null; then
+            echo "$(date): User prompt copied to clipboard: ${#clipboard_text} chars (${content_type})" >> /tmp/claude_tts_debug.log
         else
             echo "$(date): Failed to copy user prompt to clipboard" >> /tmp/claude_tts_debug.log
         fi
