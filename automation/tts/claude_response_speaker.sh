@@ -183,48 +183,23 @@ process_user_content() {
     
     echo "$(date): [POC] Using prefix: '$adjusted_prefix', rate: ${adjusted_rate} WPM" >> /tmp/claude_tts_debug.log
     
-    # Clean user prompt with ultra-aggressive content filtering for TTS readability
+    # Simple cleanup - just remove markdown and normalize whitespace
     local clean_user_text=$(echo "$user_text" | \
         sed 's/```[^`]*```//g' | \
         sed 's/`[^`]*`//g' | \
-        sed 's/===.*===//g' | \
-        sed 's/\[\][^a-zA-Z]*//g' | \
-        sed 's/Session: [a-f0-9-]*//g' | \
-        sed 's/Content Type: [^,]*//g' | \
-        sed 's/Length: [0-9]* chars[^,]*//g' | \
-        sed 's/Estimated Duration: [0-9.]*s//g' | \
-        sed 's/Speech Rate: [0-9]* [WP]*M//g' | \
-        sed 's/ORIGINAL TEXT[^a-zA-Z]*//g' | \
-        sed 's/SANITIZED TEXT[^a-zA-Z]*//g' | \
-        sed 's/END DEBUG INFO[^a-zA-Z]*//g' | \
-        sed 's/Will be shown after sanitization//g' | \
-        sed 's/what actually gets spoken//g' | \
-        sed 's/current clipboard[^a-zA-Z]*//g' | \
         sed 's/\*\*\([^*]*\)\*\*/\1/g' | \
-        sed 's/<[^>]*>//g' | \
         tr '\n' ' ' | \
         sed 's/  \+/ /g' | \
         sed 's/^ *//; s/ *$//')
     
-    # If content is still too long or technical, create concise summary
-    if [[ ${#clean_user_text} -gt 200 ]] && echo "$clean_user_text" | grep -q -E "(debug|content|TTS|clipboard|chars|duration)"; then
-        # Extract just the main question/request
-        local main_request=$(echo "$user_text" | head -1 | sed 's/[:].*//' | sed 's/^ *//; s/ *$//')
-        if [[ ${#main_request} -gt 10 && ${#main_request} -lt 100 ]]; then
-            clean_user_text="$main_request"  # Clean main request, no suffix needed
-        else
-            clean_user_text="Request about TTS content formatting"
-        fi
-    fi
-    
     local final_user_text="$adjusted_prefix $clean_user_text"
     
-    # Save clean user prompt to clipboard
+    # Save RAW user prompt to clipboard (no processing)
     if [[ "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
-        if echo "$clean_user_text" | pbcopy 2>/dev/null; then
-            echo "$(date): Clean user prompt copied to clipboard: ${#clean_user_text} chars" >> /tmp/claude_tts_debug.log
+        if echo "$user_text" | pbcopy 2>/dev/null; then
+            echo "$(date): Raw user prompt copied to clipboard: ${#user_text} chars" >> /tmp/claude_tts_debug.log
         else
-            echo "$(date): Failed to copy clean user prompt to clipboard" >> /tmp/claude_tts_debug.log
+            echo "$(date): Failed to copy user prompt to clipboard" >> /tmp/claude_tts_debug.log
         fi
     fi
     
@@ -265,6 +240,26 @@ process_claude_content() {
     fi
     
     echo "$(date): Final Claude content: ${#final_claude_text} chars" >> /tmp/claude_tts_debug.log
+    
+    # Append Claude response to clipboard (combining with user prompt)
+    if [[ "${CLAUDE_TTS_TO_CLIPBOARD:-0}" == "1" ]]; then
+        # Get current clipboard content (should contain user prompt)
+        local current_clipboard=$(pbpaste 2>/dev/null || echo "")
+        
+        # Combine user prompt + Claude response (raw format)
+        local combined_content=""
+        if [[ -n "$current_clipboard" ]]; then
+            combined_content="$current_clipboard"$'\n\n'"$claude_text"
+        else
+            combined_content="$claude_text"
+        fi
+        
+        if echo "$combined_content" | pbcopy 2>/dev/null; then
+            echo "$(date): Raw Claude response appended to clipboard: ${#claude_text} chars" >> /tmp/claude_tts_debug.log
+        else
+            echo "$(date): Failed to append Claude response to clipboard" >> /tmp/claude_tts_debug.log
+        fi
+    fi
     
     # Execute TTS for Claude content
     execute_safe_tts "$final_claude_text" "$config_rate" "claude"
