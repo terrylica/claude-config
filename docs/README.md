@@ -7,7 +7,7 @@ This directory contains the global configuration for Claude Code, organized into
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
 | **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
-| **[Clipboard & Glass Sound](../automation/tts/)** | Conversation tracking and audio notification system | `automation/tts/claude_response_speaker.sh`, `automation/tts/config/` |
+| **[CNS (Conversation Notification System)](../automation/cns/)** | Conversation tracking and audio notification system | `automation/cns/conversation_handler.sh`, `automation/cns/config/` |
 | **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
 | **[Automation System](../automation/)** | Event-driven automation and integrations | `automation/hooks/`, `automation/tts/`, `automation/logs/` |
 | **[Hook System](../hooks/)** | Legacy hook configurations | `hooks/` directory |
@@ -36,11 +36,11 @@ This directory contains the global configuration for Claude Code, organized into
 
 ## Audio & Clipboard Integration
 
-The clipboard and glass sound system provides:
+The CNS (Conversation Notification System) provides:
 - **Clipboard Tracking**: Automatic copying of conversation exchanges (USER: + CLAUDE: format)
 - **Glass Sound**: Audio completion notification when Claude finishes responding
 - **Command Detection**: Smart handling of hash (`#`) and slash (`/`) commands for clipboard optimization
-- **Debug Logging**: Comprehensive operation tracking at `/tmp/claude_tts_debug.log`
+- **Debug Logging**: Comprehensive operation tracking at `/tmp/claude_cns_debug.log`
 
 ## Usage
 

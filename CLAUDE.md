@@ -54,15 +54,15 @@
 
 ## Claude Code User Custom Extensions
 
-### Intelligent Clipboard & Glass Sound Hook System
+### CNS (Conversation Notification System)
 **Purpose**: Clipboard conversation tracking and audio completion notification for Claude Code responses
 
-#### Core Files (Simplified Architecture - TTS Removed)
-- **Configuration**: `.claude/automation/tts/config/tts_config.json` (clipboard and sound settings)
-- **Main Script**: `.claude/automation/tts/claude_response_speaker.sh` (168 lines, clipboard + glass sound only)
-- **Entry Point**: `.claude/automation/tts/tts_hook_entry.sh` (hook system integration)
-- **Glass Sound**: `.claude/automation/tts/glass_sound_wrapper.sh` (separate audio notification)
-- **Debug Logs**: `/tmp/claude_tts_debug.log` (structured logging)
+#### Core Files (Simplified Architecture - CNS System)
+- **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard and sound settings)
+- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (168 lines, clipboard + glass sound only)
+- **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
+- **Glass Sound**: `.claude/automation/cns/glass_sound_wrapper.sh` (separate audio notification)
+- **Debug Logs**: `/tmp/claude_cns_debug.log` (structured logging)
 
 ### GitHub Flavored Markdown Link Checker
 **Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior

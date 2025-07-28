@@ -14,7 +14,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 │   └── hub/                   # Command hub system commands
 ├── automation/                # [NEW] Automation subsystem  
 │   ├── hooks/                 # Hook system files
-│   ├── tts/                   # Clipboard & Glass Sound system (TTS removed 2025-07-28)
+│   ├── cns/                   # CNS (Conversation Notification System) (Renamed from tts 2025-07-28)
 │   │   ├── config/            # Simplified JSON configuration
 │   │   └── *.sh               # Clipboard + glass sound scripts (168 lines)
 │   └── logs/                  # Hook logs and debug files
@@ -50,10 +50,10 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Purpose**: Hook system, modular TTS integration, automation scripts
 **Components**:
 - `hooks/`: Python hook scripts (followup-trigger, emergency-controls)
-- `tts/`: **Clipboard & Glass Sound system** (TTS functionality removed 2025-07-28)
+- `cns/`: **CNS (Conversation Notification System)** (Renamed from TTS 2025-07-28)
   - `config/`: Simplified JSON configuration (clipboard and sound settings)
-  - `claude_response_speaker.sh`: Main clipboard + glass sound script (168 lines)
-  - `tts_hook_entry.sh`: Hook system integration
+  - `conversation_handler.sh`: Main clipboard + glass sound script (168 lines)
+  - `cns_hook_entry.sh`: Hook system integration
   - `glass_sound_wrapper.sh`: Audio completion notification
 - `logs/`: Debug logs, hook execution logs
 
@@ -105,14 +105,14 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 ```
 Claude Code Event → settings.json hooks →
 ├── glass_sound_wrapper.sh (audio notification)
-├── tts_hook_entry.sh (clipboard tracking)
+├── cns_hook_entry.sh (clipboard tracking)
 └── followup-trigger.py (automation)
 ```
 
-### Clipboard & Glass Sound Processing Chain
+### CNS Processing Chain
 **Current (Simplified)**:
 ```
-Hook Event → tts_hook_entry.sh → claude_response_speaker.sh → 
+Hook Event → cns_hook_entry.sh → conversation_handler.sh → 
 ├── Extract transcript content (JSON parsing)
 ├── Process user prompt + response (content extraction)
 ├── Command detection (hash/slash patterns)
@@ -161,8 +161,8 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ```
 
 ### Update Procedures
-1. **Clipboard System Updates**: Modify `automation/tts/claude_response_speaker.sh` (168 lines)
-2. **Configuration Changes**: Update `automation/tts/config/tts_config.json`
+1. **CNS System Updates**: Modify `automation/cns/conversation_handler.sh` (168 lines)
+2. **Configuration Changes**: Update `automation/cns/config/cns_config.json`
 3. **Command Detection**: Modify hash/slash pattern recognition in main script
 4. **Path Updates**: Maintain absolute paths for hook system integration
 5. **Testing**: Verify clipboard functionality and glass sound notification
@@ -207,5 +207,5 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ---
 
 **Last Updated**: July 28, 2025  
-**Architecture Version**: 2.0 - Clipboard & Glass Sound System (TTS Removed)  
+**Architecture Version**: 2.1 - CNS (Conversation Notification System) Complete Rename  
 **Compatible with**: Claude Code official constraints as of July 2025
