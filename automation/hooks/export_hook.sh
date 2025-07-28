@@ -28,7 +28,7 @@ if [[ -n "$cwd" && "$cwd" != "null" ]]; then
     echo "$(date): Exporting conversation from $cwd to $export_file" >> "$LOG_FILE"
     
     # Export the conversation (prompts only, markdown format)
-    if claude-prompts "$cwd" --output="$export_file" 2>>"$LOG_FILE"; then
+    if timeout 30 claude-prompts "$cwd" --output="$export_file" --non-interactive 2>>"$LOG_FILE"; then
         echo "$(date): Successfully exported conversation to $export_file" >> "$LOG_FILE"
         
         # Optional: Copy to clipboard for immediate use

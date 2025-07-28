@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Advanced hook debugging wrapper
-LOG_FILE="/tmp/claude_tts_debug.log"
+LOG_FILE="/tmp/claude_cns_debug.log"
 HOOK_NAME="$1"
 ACTUAL_COMMAND="$2"
 

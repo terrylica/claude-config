@@ -64,6 +64,15 @@
 - **Glass Sound**: `.claude/automation/cns/glass_sound_wrapper.sh` (separate audio notification)
 - **Debug Logs**: `/tmp/claude_cns_debug.log` (structured logging)
 
+#### CRITICAL PRINCIPLE: Asynchronous Hook Architecture
+**All CNS hooks MUST use fire-and-forget pattern to prevent session delays**
+
+- **Pattern**: `{ actual_work } &` - spawn background and exit immediately
+- **No Timeouts**: Remove timeout values from settings.json for true async hooks
+- **Testing**: Hook execution must be < 10ms (script exit time, not work completion)
+- **Anti-Pattern**: Never wait for clipboard processing, sound playback, or file operations
+- **Enforcement**: Any hook causing session ending delays must be refactored to async pattern
+
 ### GitHub Flavored Markdown Link Checker
 **Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior
 

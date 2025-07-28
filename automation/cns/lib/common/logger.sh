@@ -18,12 +18,12 @@ fi
 LOG_LEVEL="$LOG_LEVEL_INFO"
 
 # Log file path (loaded from config)
-LOG_FILE="/tmp/claude_tts_debug.log"
+LOG_FILE="/tmp/claude_cns_debug.log"
 
 # Initialize logging system
 init_logging() {
     # Load log file path from configuration
-    LOG_FILE=$(get_config_value "paths.debug_log" "/tmp/claude_tts_debug.log")
+    LOG_FILE=$(get_config_value "paths.debug_log" "/tmp/claude_cns_debug.log")
     
     # Set log level based on configuration
     local config_level=$(get_config_value "logging.level" "INFO")
