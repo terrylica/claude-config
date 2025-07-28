@@ -60,7 +60,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Integration**: Referenced by `settings.json` hooks configuration
 
 ### 🔊 Audio Notifications
-**Location**: `automation/tts/`
+**Location**: `automation/cns/`
 **Purpose**: Glass sound completion notification
 **Components**:
 - `glass_sound_wrapper.sh`: System sound notification when Claude finishes
@@ -131,10 +131,10 @@ Hook Event → cns_hook_entry.sh → conversation_handler.sh →
 
 ### File Path References
 All configuration files use absolute paths to maintain reliability:
-- **Settings**: `/Users/terryli/.claude/automation/tts/` (current hook references)
-- **Configuration**: `/Users/terryli/.claude/automation/tts/config/` (JSON config files)
+- **Settings**: `/Users/terryli/.claude/automation/cns/` (current hook references)
+- **Configuration**: `/Users/terryli/.claude/automation/cns/config/` (JSON config files)
 - **Scripts**: Reference other components via absolute paths and module loading
-- **Logs**: Use centralized `/tmp/claude_tts_debug.log` with structured logging
+- **Logs**: Use centralized `/tmp/claude_cns_debug.log` with structured logging
 
 ## Maintenance Guidelines
 
