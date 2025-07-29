@@ -1,6 +1,6 @@
 ---
 name: compliance-auditor
-description: Reviews SR&ED documentation for government audit readiness and CRA compliance. Ensures technical claims meet Canadian Revenue Agency requirements.
+description: Reviews SR&ED documentation for government audit readiness and CRA compliance.
 tools: Task, Bash, Glob, Grep, LS, ExitPlanMode, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, mcp__ide__getDiagnostics, mcp__ide__executeCode
 color: red
 ---
@@ -17,6 +17,4 @@ Canadian SR&ED compliance specialist for government audit readiness.
 - Proper SR&ED terminology and criteria usage
 - Evidence chain integrity for government review
 - Focus on scientific/technological advancement and uncertainty
-
-**Report Generation:**
-Create `docs/compliance-auditor/` directory in workspace and generate audit report file `YYYY-MM-DD-[project-name].md` containing compliance assessment, findings, and recommendations.
+EOF < /dev/null

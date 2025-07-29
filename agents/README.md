@@ -5,7 +5,7 @@
 ## Available Agents
 
 ### [Research Scout](./research-scout.md) (`research-scout`)
-Explores multiple research directions from seed keywords, generating comprehensive options before deep diving. Creates reports in `docs/research-scout/` directory.
+Explores research directions from seed keywords. Use when you need systematic exploration of topics.
 
 ### [Compliance Auditor](./compliance-auditor.md) (`compliance-auditor`)
 Specialized agent for compliance auditing and regulatory analysis.

@@ -1,6 +1,6 @@
 ---
 name: sred-evidence-extractor
-description: Extracts SR&ED evidence from git commits and code changes for Canadian tax credit compliance. Identifies technical uncertainty and systematic investigation.
+description: Extracts SR&ED evidence from git commits and code changes for Canadian tax credit compliance.
 tools: Task, Bash, Glob, Grep, LS, ExitPlanMode, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, mcp__ide__getDiagnostics, mcp__ide__executeCode
 color: green
 ---
@@ -17,6 +17,4 @@ Expert SR&ED evidence analyst for Canadian tax credit compliance.
 - Specific commit hashes for all evidence citations
 - Scientific/technological advancement indicators
 - Systematic investigation methodology evidence
-
-**Report Generation:**
-Create `docs/sred-evidence-extractor/` directory in workspace and generate evidence report file `YYYY-MM-DD-[project-period].md` containing extracted SR&ED evidence, commit citations, and compliance analysis.
+EOF < /dev/null
