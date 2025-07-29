@@ -4,7 +4,7 @@
 # CNS (Conversation Notification System) - clipboard copying with notification support
 
 # Configuration
-CONFIG_DIR="/Users/terryli/.claude/automation/cns/config"
+CONFIG_DIR="$HOME/.claude/automation/cns/config"
 CNS_CONFIG_FILE="$CONFIG_DIR/cns_config.json"
 
 echo "$(date): CNS clipboard hook triggered" >> /tmp/claude_cns_debug.log
@@ -149,15 +149,36 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
             local combined_content
             combined_content=$(printf "USER: %s\n\nCLAUDE: %s" "$user_prompt" "$last_response")
             
-            if printf "%s" "$combined_content" | pbcopy 2>/dev/null; then
-                echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
+            # Platform-specific clipboard copy
+            if command -v pbcopy >/dev/null 2>&1; then
+                # macOS
+                if printf "%s" "$combined_content" | pbcopy 2>/dev/null; then
+                    echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
+                else
+                    echo "$(date): Failed to copy combined content to clipboard (pbcopy)" >> /tmp/claude_cns_debug.log
+                fi
+            elif command -v xclip >/dev/null 2>&1; then
+                # Linux with xclip
+                if printf "%s" "$combined_content" | xclip -selection clipboard 2>/dev/null; then
+                    echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
+                else
+                    echo "$(date): Failed to copy combined content to clipboard (xclip)" >> /tmp/claude_cns_debug.log
+                fi
+            elif command -v xsel >/dev/null 2>&1; then
+                # Linux with xsel
+                if printf "%s" "$combined_content" | xsel --clipboard --input 2>/dev/null; then
+                    echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
+                else
+                    echo "$(date): Failed to copy combined content to clipboard (xsel)" >> /tmp/claude_cns_debug.log
+                fi
             else
-                echo "$(date): Failed to copy combined content to clipboard" >> /tmp/claude_cns_debug.log
+                echo "$(date): No supported clipboard tool found (pbcopy/xclip/xsel)" >> /tmp/claude_cns_debug.log
             fi
         fi
         
-        # Note: Audio notification is handled separately by cns_notification_hook.sh
-        echo "$(date): CNS notification should play automatically via separate hook" >> /tmp/claude_cns_debug.log
+        # Trigger audio notification with working directory context
+        echo "$(date): Triggering notification hook with cwd: $cwd" >> /tmp/claude_cns_debug.log
+        echo "$input_data" | "$HOME/.claude/automation/cns/cns_notification_hook.sh" &
     else
         echo "No valid response found after $max_attempts attempts" >> /tmp/claude_cns_debug.log
     fi

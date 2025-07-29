@@ -6,16 +6,27 @@
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
 - **Rationale**: Detailed specifications belong in the actual script files to avoid redundancy
+- **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
+- **Platform Assumption**: Documentation assumes Unix-like systems; Windows compatibility is explicitly not supported
 
 ## Tool Usage Preferences
 - **Remote Viewing**: Prefer `curl` over fetch
 - **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
 - **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
 
-## User Profiling and Local Path (user-specific info)
+## System Architecture and Assumptions
 
-- Terry Li, Director of Operations of Eon Labs Ltd., an advocate to discover the latest SOTA toolings for vide coding and context engineering in Anthropic Claude Code Max environment, is responsible for features engineering for downstream see-2-seq model's consumption.
-- The full macOS system path to user directory: `/Users/terryli/` 
+**Target Platform**: Unix-like systems (macOS, Linux) - **Not designed for Windows compatibility**
+
+**Standard Unix Conventions**:
+- User home directory: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux)
+- Workspace location: `$HOME/.claude/` (follows dotfile convention)
+- Shell environment: POSIX-compliant shells (zsh, bash)
+
+**Current User Context**: 
+- Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
+- Advocate for SOTA tooling in Claude Code Max environment
+- The full system path to user directory: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux) 
 
 ## APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
@@ -58,10 +69,10 @@
 **Purpose**: Clipboard conversation tracking and audio notification for Claude Code responses
 
 #### Core Files (Simplified Architecture - CNS System)
-- **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard and notification settings)
+- **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard, notification, and volume settings)
 - **Main Script**: `.claude/automation/cns/conversation_handler.sh` (168 lines, clipboard processing)
 - **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
-- **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (Toy Story audio + folder name TTS)
+- **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (Toy Story audio with configurable volume + folder name TTS)
 - **Manual Utility**: `.claude/bin/cns-notify` (manual notification testing)
 - **Debug Logs**: `/tmp/claude_cns_debug.log` (structured logging)
 
