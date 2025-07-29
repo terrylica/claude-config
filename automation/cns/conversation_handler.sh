@@ -9,6 +9,20 @@ CNS_CONFIG_FILE="$CONFIG_DIR/cns_config.json"
 
 echo "$(date): CNS clipboard hook triggered" >> /tmp/claude_cns_debug.log
 
+# Load configuration
+clipboard_enabled="1"  # default enabled
+if [[ -f "$CNS_CONFIG_FILE" ]]; then
+    clipboard_enabled=$(jq -r '.command_detection.clipboard_enabled // true' "$CNS_CONFIG_FILE" 2>/dev/null)
+    if [[ "$clipboard_enabled" == "false" ]]; then
+        clipboard_enabled="0"
+    else
+        clipboard_enabled="1"
+    fi
+    echo "$(date): Clipboard enabled from config: $clipboard_enabled" >> /tmp/claude_cns_debug.log
+else
+    echo "$(date): Config file not found, using default clipboard enabled" >> /tmp/claude_cns_debug.log
+fi
+
 # Read input from Claude Code hook
 input_data=$(cat)
 echo "Input received: $input_data" >> /tmp/claude_cns_debug.log
@@ -144,7 +158,9 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         echo "$(date): Content extracted - User: ${#user_prompt} chars, Claude: ${#last_response} chars" >> /tmp/claude_cns_debug.log
         
         # Copy both user prompt and Claude response to clipboard
-        if [[ "${CLAUDE_CNS_CLIPBOARD:-1}" == "1" && -n "$user_prompt" ]]; then
+        # Check both environment variable and config file setting
+        local should_copy_clipboard="${CLAUDE_CNS_CLIPBOARD:-$clipboard_enabled}"
+        if [[ "$should_copy_clipboard" == "1" && -n "$user_prompt" ]]; then
             # Create combined content with proper formatting
             local combined_content
             combined_content=$(printf "USER: %s\n\nCLAUDE: %s" "$user_prompt" "$last_response")
@@ -174,6 +190,8 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
             else
                 echo "$(date): No supported clipboard tool found (pbcopy/xclip/xsel)" >> /tmp/claude_cns_debug.log
             fi
+        else
+            echo "$(date): Clipboard copying disabled (config: $clipboard_enabled, env: ${CLAUDE_CNS_CLIPBOARD:-unset})" >> /tmp/claude_cns_debug.log
         fi
         
         # Trigger audio notification with working directory context
