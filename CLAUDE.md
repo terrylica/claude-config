@@ -38,9 +38,9 @@
 
 - `uv run python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
 
-- **Tools**: uv, black, ruff, mypy, pytest  
-- **Python**: 3.11+, type hints required  
-- **Commands**: Use `make` or `uv run` for operations
+- **Tools**: uv, ruff (other tools available via uv install)  
+- **Python**: 3.10+, type checking disabled (development environment)  
+- **Commands**: Use `uv run` for operations
 
 ### Documentation & README Audit Requirements
 
@@ -65,12 +65,13 @@
 
 ## Claude Code User Custom Extensions
 
+
 ### CNS (Conversation Notification System)
-**Purpose**: Clipboard conversation tracking and audio notification for Claude Code responses
+**Purpose**: Clipboard conversation tracking and audio notification with context engineering support
 
 #### Core Files (Simplified Architecture - CNS System)
 - **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard, notification, and volume settings)
-- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (168 lines, clipboard processing)
+- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (188 lines, clipboard processing)
 - **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
 - **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (Toy Story audio with configurable volume + folder name TTS)
 - **Manual Utility**: `.claude/bin/cns-notify` (manual notification testing)

@@ -14,14 +14,12 @@ This document describes the refactored architecture of the Claude Code workspace
 ├── bin/                       # [NEW] Utility scripts
 │   └── cns-notify             # Manual CNS notification trigger
 ├── automation/                # [NEW] Automation subsystem  
-│   ├── hooks/                 # Hook system files (Python scripts)
 │   ├── cns/                   # CNS (Conversation Notification System)
 │   │   ├── config/            # JSON configuration (clipboard + sound)
 │   │   ├── lib/               # Simplified common utilities
 │   │   ├── scripts/           # Test and validation scripts
 │   │   ├── tests/             # Unit and integration tests
 │   │   └── *.sh               # Core CNS scripts (async hook architecture)
-│   └── logs/                  # Hook execution logs
 ├── history/                   # [NEW] Historical data
 │   └── shell-snapshots/       # Shell command history snapshots
 ├── shell-snapshots/           # [FIXED] Current shell snapshots (Claude Code required)
@@ -61,10 +59,10 @@ This document describes the refactored architecture of the Claude Code workspace
 **Components**:
 - `cns/`: **CNS (Conversation Notification System)** (Clipboard + Toy Story notification + TTS)
   - `config/`: JSON configuration (cns_config.json - clipboard and sound settings)
-  - `lib/common/`: Simplified config loader (59 lines, CNS-only variables)
+  - `lib/common/`: Simplified config loader (58 lines, CNS-only variables)
   - `scripts/`: Test and validation utilities
   - `tests/`: Unit and integration test suites  
-  - `conversation_handler.sh`: Main clipboard processing script (168 lines)
+  - `conversation_handler.sh`: Main clipboard processing script (188 lines)
   - `cns_hook_entry.sh`: Async hook entry point (fire-and-forget pattern)
   - `cns_notification_hook.sh`: Toy Story audio notification with configurable volume and folder name TTS (async)
 - `logs/`: Hook execution logs and debug files
@@ -99,11 +97,14 @@ This document describes the refactored architecture of the Claude Code workspace
 
 ### 🔊 Audio Notifications
 **Location**: `$HOME/.claude/automation/cns/`
-**Purpose**: Toy Story notification with folder name TTS
+**Purpose**: Cross-platform audio notification with configurable volume
 **Components**:
-- `cns_notification_hook.sh`: Toy Story sound + folder name TTS when Claude finishes
+- `cns_notification_hook.sh`: Platform-aware audio playback + folder name TTS when Claude finishes
+- Platform detection for `afplay` (macOS) / `paplay`/`aplay` (Linux)
+- Volume control via JSON configuration (0.0-1.0 range)
+- Text-to-speech: `say` (macOS) / `espeak`/`festival` (Linux)
 
-**Integration**: Separate hook system for audio feedback (no TTS)
+**Integration**: Async hook system for cross-platform audio feedback
 
 ### 📚 History Management
 **Location**: `history/`
@@ -139,12 +140,22 @@ This document describes the refactored architecture of the Claude Code workspace
 
 ## Integration Patterns
 
-### Hook System Flow
+### Modern Hook System Flow (CNS Architecture)
 ```
 Claude Code Event → settings.json hooks →
-├── cns_notification_hook.sh (Toy Story notification + TTS)
-├── cns_hook_entry.sh (clipboard tracking)
+└── cns_hook_entry.sh (async entry point) →
+    └── conversation_handler.sh (clipboard processing) →
+        └── cns_notification_hook.sh (cross-platform audio + TTS)
 ```
+
+### Platform Compatibility
+**Supported Systems**: Unix-like systems (macOS, Linux)
+**Dependencies**: Automatic platform detection for:
+- Audio: `afplay` / `paplay` / `aplay`
+- Clipboard: `pbcopy` / `xclip` / `xsel`  
+- Text-to-Speech: `say` / `espeak` / `festival`
+
+**Repository**: https://github.com/Eon-Labs/claude-config
 
 ### CNS Processing Chain
 **Current (Async Architecture)**:
@@ -164,7 +175,7 @@ Claude Code Stop Hook → settings.json →
 ```
 ✅ Fire-and-forget async pattern - hooks exit immediately
 ✅ Background processing - no session delays
-✅ Simplified 59-line config loader (CNS-only variables)
+✅ Simplified 58-line config loader (CNS-only variables)
 ✅ Clipboard + Toy Story notification + folder name TTS functionality
 ✅ No timeout constraints in settings.json
 ```
@@ -260,6 +271,6 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ---
 
-**Last Updated**: July 28, 2025  
+**Last Updated**: July 29, 2025  
 **Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete  
 **Compatible with**: Claude Code official constraints as of July 2025
