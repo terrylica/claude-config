@@ -7,12 +7,14 @@
 **Workflow**: Make changes → Request "APCF" or "apcf" → I analyze everything → Suggest commit strategy
 
 ### Analysis Steps
-1. **Staged files** (`git diff --cached`) - ready to commit
-2. **Modified files** (`git diff`) - unstaged changes  
+1. **Staged files** (`git diff --cached --name-status`) - ready to commit
+2. **Modified files** (`git diff --name-status`) - unstaged changes  
 3. **Untracked files** (`git status --porcelain`) - new files
-4. Auto-derive SR&ED evidence from complete change analysis
-5. Generate logical commit grouping and sequencing strategy
-6. Create audit-proof commit messages for each logical group
+4. **Recent commits** (`git log --oneline -5`) - understand commit patterns
+5. Auto-derive SR&ED evidence from complete change analysis
+6. Generate logical commit grouping and sequencing strategy
+7. Execute commits in sequence with user approval
+8. Verify clean working tree completion
 
 ### Timestamp Requirement
 First get the current 'America/Vancouver' time using:
@@ -78,6 +80,8 @@ Here in this line, the last line in the commit message, we display the result of
 - `test_*, *.test.*` → Validation Methodology
 - `Dockerfile, *.sh` → Infrastructure Innovation
 - `*.md, docs/` → Knowledge Capture Investigation
+- `automation/*, hooks/*` → Workflow Integration Research
+- `settings.json, CLAUDE.md` → System Configuration Investigation
 
 ### Workspace Analysis → SR&ED Scope & Priority
 
@@ -89,10 +93,12 @@ Here in this line, the last line in the commit message, we display the result of
 
 ### APCF Evidence Standards
 
-- **Specificity**: Use actual counts, technology names, file types ("modified 3 files" not "comprehensive changes")
+- **Specificity**: Use actual counts, technology names, file types ("modified 5 files" not "comprehensive changes")
 - **Facts over Interpretation**: State direct technical actions ("what was built" not "how well it performs")  
 - **CRA Compliance**: Include failure documentation, work-commit timestamps for contemporaneous evidence
 - **Avoid derived metrics**: No "efficiency ratios", "performance improvements", or calculated benefits
+- **Platform Coverage**: Document cross-platform compatibility investigations when applicable
+- **Portability Evidence**: Include user-specific reference elimination and workspace sharing preparations
 
 ## Search & Audit Trail Integration
 
@@ -100,3 +106,17 @@ Here in this line, the last line in the commit message, we display the result of
 - Cross-repository SR&ED pattern recognition  
 - Automatic evidence chain building for quarterly reports
 - Government audit trail with direct commit verification
+
+## Execution Best Practices
+
+### Successful APCF Patterns
+- **Infrastructure → Core → Documentation** sequencing maximizes audit clarity
+- **Platform detection** investigations provide strong technical uncertainty evidence
+- **File deletion metrics** (e.g., "−2,977 deletions") demonstrate systematic simplification research
+- **User approval workflow** ensures commit strategy alignment before execution
+
+### Common Issues & Solutions
+- **Git command errors**: Use `git diff --cached --name-status` not `git status --cached`
+- **Commit message formatting**: Use HEREDOC with proper quoting for multi-line messages
+- **File staging logic**: Group related functionality, respect dependencies
+- **Clean verification**: Always check `git status` after completion
