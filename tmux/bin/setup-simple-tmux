@@ -1,0 +1,69 @@
+#!/bin/bash
+# One-command setup for simple tmux session manager
+
+set -euo pipefail
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${BLUE}🎯 Simple tmux Session Manager Setup${NC}"
+echo "===================================="
+echo ""
+
+# Check if tmux is installed
+if ! command -v tmux &> /dev/null; then
+    echo -e "${RED}❌ tmux is not installed${NC}"
+    echo "Please install tmux first:"
+    echo "  macOS: brew install tmux"
+    echo "  Ubuntu: sudo apt install tmux"
+    echo "  CentOS: sudo yum install tmux"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ tmux found: $(tmux -V)${NC}"
+
+# Setup tmux.conf symlink
+TMUX_CONF_SOURCE="$HOME/.claude/tmux/config/tmux.conf"
+TMUX_CONF_TARGET="$HOME/.tmux.conf"
+
+if [[ -L "$TMUX_CONF_TARGET" ]]; then
+    echo -e "${GREEN}✅ tmux.conf symlink already exists${NC}"
+elif [[ -f "$TMUX_CONF_TARGET" ]]; then
+    echo -e "${YELLOW}⚠️  Existing tmux.conf found, backing up...${NC}"
+    cp "$TMUX_CONF_TARGET" "$TMUX_CONF_TARGET.backup"
+    ln -sf "$TMUX_CONF_SOURCE" "$TMUX_CONF_TARGET"
+    echo -e "${GREEN}✅ tmux.conf symlink created (backup saved)${NC}"
+else
+    ln -sf "$TMUX_CONF_SOURCE" "$TMUX_CONF_TARGET"
+    echo -e "${GREEN}✅ tmux.conf symlink created${NC}"
+fi
+
+# Check shell integration
+SHELL_INTEGRATION="$HOME/.claude/tmux/config/simple-shell-integration.sh"
+if grep -q "simple-shell-integration.sh" "$HOME/.zshrc" 2>/dev/null; then
+    echo -e "${GREEN}✅ Shell integration already configured${NC}"
+else
+    echo -e "${YELLOW}⚠️  Shell integration not found in ~/.zshrc${NC}"
+    echo "Add this line to your ~/.zshrc:"
+    echo "  source ~/.claude/tmux/config/simple-shell-integration.sh"
+fi
+
+echo ""
+echo -e "${GREEN}🎉 Setup complete!${NC}"
+echo ""
+echo "Available commands:"
+echo "  ts [name]     - Create/attach session"
+echo "  tl           - List sessions"  
+echo "  tk <name>    - Kill session"
+echo "  tmux-help    - Show help"
+echo ""
+echo "Example usage:"
+echo "  cd ~/my-project && ts     # Creates 'my-project' session"
+echo "  Ctrl+b, d                # Detach from session"
+echo "  ts                       # Reattach to session"
+echo ""
+echo -e "${BLUE}📖 For detailed documentation: cat ~/.claude/tmux/SIMPLE-USAGE.md${NC}"

@@ -1,0 +1,70 @@
+#!/bin/bash
+# Simple tmux session listing utility
+# Shows all tmux sessions with status
+
+set -euo pipefail
+
+# Colors (only if output is a terminal)
+if [[ -t 1 ]]; then
+    BLUE='\033[0;34m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+else
+    BLUE=''
+    GREEN=''
+    YELLOW=''
+    RED=''
+    NC=''
+fi
+
+echo -e "${BLUE}🎯 tmux Sessions${NC}"
+echo "=================="
+
+# Check if tmux is running
+if ! pgrep tmux >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️  No tmux server running${NC}"
+    exit 0
+fi
+
+# List sessions
+sessions=$(tmux list-sessions 2>/dev/null || echo "")
+
+if [[ -z "$sessions" ]]; then
+    echo -e "${YELLOW}📭 No active sessions${NC}"
+    echo ""
+    echo "💡 Create a session with: tmux-session [name]"
+else
+    echo ""
+    printf "%-22s | %-8s | %-25s | %s\n" "SESSION" "WINDOWS" "CREATED" "STATUS"
+    printf "%-22s-+-%-8s-+-%-25s-+-%s\n" "----------------------" "--------" "-------------------------" "--------"
+    
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        
+        # Parse session info
+        session_name=$(echo "$line" | cut -d: -f1)
+        session_info=$(echo "$line" | cut -d: -f2-)
+        
+        # Extract details
+        windows=$(echo "$session_info" | grep -o '[0-9]* windows' | cut -d' ' -f1)
+        created=$(echo "$session_info" | sed 's/.*created \([^)]*\).*/\1/')
+        
+        # Check if attached
+        if echo "$session_info" | grep -q "attached"; then
+            status="${GREEN}🟢 active${NC}"
+        else
+            status="${RED}⚫ detached${NC}"
+        fi
+        
+        printf "%-22s | %-8s | %-25s | " \
+            "$session_name" \
+            "${windows}w" \
+            "$created"
+        echo -e "$status"
+            
+    done <<< "$sessions"
+fi
+
+echo ""

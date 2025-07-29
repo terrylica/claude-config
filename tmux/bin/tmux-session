@@ -1,0 +1,103 @@
+#!/bin/bash
+# Simple tmux session manager with smart naming
+# Usage: tmux-session [session-name]
+# 
+# Features:
+# - Uses current folder name as default session name
+# - Handles dot folders (.git -> dotgit)
+# - Creates session if it doesn't exist, attaches if it does
+# - Simple, transparent, debuggable
+
+set -euo pipefail
+
+# Colors for output
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Smart workspace naming function
+get_session_name() {
+    local folder_name=$(basename "$(pwd)")
+    
+    # Handle dot folders specially - prefix with "dot" to preserve their nature
+    if [[ "$folder_name" == .* ]]; then
+        folder_name="dot${folder_name#.}"
+    fi
+    
+    # Normalize the name: lowercase, alphanumeric + hyphens only
+    echo "$folder_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g'
+}
+
+# Main function
+main() {
+    local verbose=false  # Default to quiet - use -v for verbose
+    local session_name=""
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -v|--verbose)
+                verbose=true
+                shift
+                ;;
+            -q|--quiet)
+                verbose=false
+                shift
+                ;;
+            *)
+                session_name="$1"
+                shift
+                ;;
+        esac
+    done
+    
+    # Use folder name if no session name provided
+    if [[ -z "$session_name" ]]; then
+        session_name="$(get_session_name)"
+    fi
+    
+    # Show info if verbose
+    if [[ "$verbose" == true ]]; then
+        echo -e "${BLUE}🎯 tmux Session Manager${NC}"
+        echo "📁 Current directory: $(pwd)"
+        echo "🏷️  Session name: $session_name"
+        echo ""
+    fi
+    
+    # Check if session exists
+    if tmux list-sessions 2>/dev/null | grep -q "^${session_name}:"; then
+        [[ "$verbose" == true ]] && echo -e "${GREEN}✅ Attaching to existing session: $session_name${NC}"
+        tmux attach-session -t "$session_name"
+    else
+        [[ "$verbose" == true ]] && echo -e "${YELLOW}🚀 Creating new session: $session_name${NC}"
+        tmux new-session -s "$session_name"
+    fi
+}
+
+# Show help if requested
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Simple tmux session manager with smart naming"
+    echo ""
+    echo "Usage:"
+    echo "  tmux-session           # Use current folder name (quiet by default)"
+    echo "  tmux-session myapp     # Use custom name"
+    echo "  tmux-session -v        # Verbose mode"
+    echo ""
+    echo "Smart naming examples:"
+    echo "  ~/my-project    →  my-project"
+    echo "  ~/.config       →  dotconfig"
+    echo "  ~/.git          →  dotgit"
+    echo "  /tmp/Test_App   →  test-app"
+    echo ""
+    echo "Features:"
+    echo "  • Creates session if it doesn't exist"
+    echo "  • Attaches to existing session if found"
+    echo "  • Smart folder name normalization"
+    echo "  • Dot folder awareness"
+    echo "  • Quiet by default, verbose mode (-v) available"
+    exit 0
+fi
+
+# Run main function
+main "$@"
