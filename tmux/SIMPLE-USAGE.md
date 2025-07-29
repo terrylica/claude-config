@@ -67,7 +67,7 @@ The session manager automatically creates intelligent session names:
 - `tmux-here` - Same as `ts` (create/attach using folder name)
 
 ### Help
-- `tmux-help` - Show complete usage guide
+- `tmux-help` - Show complete usage guide (shell function)
 
 ## 🎪 Example Workflow
 

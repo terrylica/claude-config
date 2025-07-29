@@ -5,9 +5,9 @@
 - `cns/` - **CNS (Conversation Notification System)** (Formerly TTS, renamed 2025-07-28)
   - `config/` - Configuration system
     - `cns_config.json` - Clipboard and notification settings with volume control
-    - `debug_config.json` - Debug logging configuration
-    - `speech_profiles.json` - Speech profile settings
-    - `text_processing_rules.json` - Text processing rules
+    - `debug_config.json` - **[LEGACY]** Debug logging configuration (testing only)
+    - `speech_profiles.json` - **[LEGACY]** Speech profile settings (testing only)
+    - `text_processing_rules.json` - **[LEGACY]** Text processing rules (testing only)
   - **Active files**:
     - `conversation_handler.sh` - Main clipboard processing script
     - `cns_hook_entry.sh` - Hook entry point

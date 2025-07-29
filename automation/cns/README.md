@@ -7,7 +7,7 @@ Intelligent clipboard tracking and audio completion notification for Claude Code
 **Major Change**: Renamed from TTS system (2025-07-28). CNS focuses on clipboard conversation tracking and audio notifications.
 
 ### Current System (CNS Architecture)
-- **Main Script**: `conversation_handler.sh` (168 lines) - Clipboard processing only
+- **Main Script**: `conversation_handler.sh` (188 lines) - Clipboard processing only
 - **Configuration**: `config/cns_config.json` - Simplified clipboard and sound settings  
 - **Entry Point**: `cns_hook_entry.sh` - Hook system integration
 - **CNS Notification**: `cns_notification_hook.sh` - Toy Story audio notification with folder name TTS

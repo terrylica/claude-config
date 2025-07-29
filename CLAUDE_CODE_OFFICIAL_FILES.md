@@ -15,9 +15,9 @@ This document catalogues critical files and directories that are integral to Cla
   - `system/todos/` - Todo tracking system files
   - **WARNING**: Do not move or delete the `system/` directory
 
-### Hook Integration
-- `hooks/` - ⚠️ **CLAUDE CODE INTEGRATION** - Event system integration
-  - Hook configuration and execution files
+### Automation Integration
+- `automation/cns/` - ⚠️ **CLAUDE CODE INTEGRATION** - CNS hook system
+  - CNS configuration and execution files via `settings.json`
   - Integration with Claude Code's event system
   - **CAUTION**: Modifications may break automation features
 

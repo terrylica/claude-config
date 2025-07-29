@@ -26,6 +26,7 @@ tk <name>       # Kill session
 ## Contents
 ```
 bin/
+├── setup-simple-tmux     # Initial setup script
 ├── tmux-session          # Main session manager
 ├── tmux-list            # Session listing
 └── tmux-kill           # Session termination
