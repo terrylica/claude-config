@@ -2,6 +2,14 @@
 
 This directory contains the global configuration for Claude Code, organized into specialized subsystems for enhanced workflow integration.
 
+## System Requirements
+
+**Supported Platforms**: Unix-like systems only (macOS, Linux)  
+**Shell Requirements**: POSIX-compliant shells (zsh, bash)  
+**Dependencies**: Standard Unix utilities (`jq`, `curl`, `afplay` on macOS)
+
+> **Note**: This workspace is **not designed for Windows compatibility**. All paths and scripts assume Unix conventions (`$HOME`, `/tmp/`, etc.)
+
 ## System Architecture
 
 | Component | Purpose | Key Files |
@@ -15,7 +23,7 @@ This directory contains the global configuration for Claude Code, organized into
 | **[System Runtime](../system/)** | Session management and todo tracking | `system/sessions/`, `system/todos/`, `system/ide/`, `system/statsig/` |
 | **[Development Context](../settings.json)** | Core configuration and system preferences | `settings.json` |
 | **[Agent Configurations](../agents/)** | Custom agent definitions and behaviors | `agents/` directory |
-| **[Tmux Integration](../tmux/)** | Terminal multiplexer and workspace management | `tmux/` directory |
+| **[Tmux Integration](../tmux/)** | Simple session management with smart naming | `tmux/` directory |
 | **[Historical Data](../history/)** | Archived sessions and development history | `history/` directory |
 | **[Shell Snapshots](../shell-snapshots/)** | Terminal session state captures | `shell-snapshots/` directory |
 

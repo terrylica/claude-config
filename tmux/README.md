@@ -1,18 +1,43 @@
-# Tmux Directory
+# Simple Tmux Session Manager
 
-**Purpose**: Tmux configuration and workspace management
+**Purpose**: Clean, minimal tmux session management with smart naming
 
-## Contents
-- Tmux configuration files
-- Workspace session management
-- Terminal multiplexer settings
+## Overview
+Simple tmux session management without plugins, persistence, or complexity. Just smart folder-based naming and clean commands.
+
+## Quick Start
+```bash
+# Load shell integration
+exec zsh
+
+# Basic usage
+ts              # Create/attach session using folder name
+tl              # List sessions
+tk <name>       # Kill session
+```
 
 ## Features
-- Multi-workspace session management
-- Terminal session persistence
-- Development environment automation
+- 🎯 **Smart naming**: Folder-based session names with dot-folder awareness
+- 🚀 **Simple commands**: `ts`, `tl`, `tk` aliases
+- 🧹 **Clean**: No plugins, no persistence, no background processes
+- ⚡ **Fast**: Pure tmux commands under the hood
+- 📋 **Transparent**: You can see exactly what's happening
 
-## Claude Code Official Status
-❌ **USER DIRECTORY** - Safe to customize and modify
+## Contents
+```
+bin/
+├── tmux-session          # Main session manager
+├── tmux-list            # Session listing
+└── tmux-kill           # Session termination
 
-This directory contains user tmux configurations and is not part of Claude Code's core functionality.
+config/
+├── tmux.conf           # Clean tmux configuration
+└── simple-shell-integration.sh  # Shell aliases
+
+SIMPLE-USAGE.md         # Detailed documentation
+```
+
+## Core Philosophy
+**Simple tools for simple needs.** Tmux does session management perfectly - no plugins required.
+
+For detailed usage, see [SIMPLE-USAGE.md](./SIMPLE-USAGE.md)

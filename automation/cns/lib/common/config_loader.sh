@@ -5,7 +5,7 @@
 # Handles clipboard tracking and CNS notifications only
 
 # Configuration file paths
-readonly CNS_CONFIG_DIR="/Users/terryli/.claude/automation/cns/config"
+readonly CNS_CONFIG_DIR="$HOME/.claude/automation/cns/config"
 readonly CNS_CONFIG_FILE="$CNS_CONFIG_DIR/cns_config.json"
 
 # Load CNS configuration

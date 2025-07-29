@@ -1,7 +1,7 @@
 # Claude Code Configuration Architecture
 
 ## Overview
-This document describes the refactored architecture of Terry Li's Claude Code configuration, optimized for SR&ED development workflows while maintaining full compatibility with Claude Code constraints.
+This document describes the refactored architecture of the Claude Code workspace configuration, optimized for development workflows while maintaining full compatibility with Claude Code constraints and Unix system portability.
 
 ## Directory Structure
 
@@ -66,7 +66,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
   - `tests/`: Unit and integration test suites  
   - `conversation_handler.sh`: Main clipboard processing script (168 lines)
   - `cns_hook_entry.sh`: Async hook entry point (fire-and-forget pattern)
-  - `cns_notification_hook.sh`: Toy Story audio notification with folder name TTS (async)
+  - `cns_notification_hook.sh`: Toy Story audio notification with configurable volume and folder name TTS (async)
 - `logs/`: Hook execution logs and debug files
 
 **Integration**: Referenced by `settings.json` hooks configuration with async architecture
@@ -81,14 +81,13 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 
 ### 🖥️ Tmux Integration
 **Location**: `tmux/`
-**Purpose**: Tmux session management and shell integration
+**Purpose**: Simple tmux session management with smart naming
 **Components**:
-- `bin/`: Session management scripts and installers
-- `config/`: Shell integration, aliases, and tmux configuration
-- `docs/`: Setup documentation and usage examples
-- `data/`: Session data and tmux state files
+- `bin/`: Core session management scripts (`tmux-session`, `tmux-list`, `tmux-kill`)
+- `config/`: Clean tmux configuration and shell integration
+- `SIMPLE-USAGE.md`: Complete documentation
 
-**Integration**: Provides enhanced terminal multiplexing for development workflows
+**Philosophy**: Clean, transparent tmux wrapper without plugins or persistence. Pure tmux commands with intelligent folder-based session naming.
 
 ### 🔗 Development Tools
 **Location**: `tools/`
@@ -99,7 +98,7 @@ This document describes the refactored architecture of Terry Li's Claude Code co
 **Features**: Local README.md validation with GitHub-specific behavior awareness
 
 ### 🔊 Audio Notifications
-**Location**: `automation/cns/`
+**Location**: `$HOME/.claude/automation/cns/`
 **Purpose**: Toy Story notification with folder name TTS
 **Components**:
 - `cns_notification_hook.sh`: Toy Story sound + folder name TTS when Claude finishes
@@ -181,9 +180,9 @@ Claude Code Stop Hook → settings.json →
 ```
 
 ### File Path References
-All configuration files use absolute paths to maintain reliability:
-- **Settings**: `/Users/terryli/.claude/automation/cns/` (current hook references)
-- **Configuration**: `/Users/terryli/.claude/automation/cns/config/` (JSON config files)
+All configuration files use $HOME-based paths for portability:
+- **Settings**: `$HOME/.claude/automation/cns/` (current hook references)
+- **Configuration**: `$HOME/.claude/automation/cns/config/` (JSON config files)
 - **Scripts**: Reference other components via absolute paths and module loading
 - **Logs**: Use centralized `/tmp/claude_cns_debug.log` with structured logging
 
