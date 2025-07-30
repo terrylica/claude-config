@@ -5,6 +5,7 @@
 - **Purpose**: This document serves as a high-level pointer/reference only
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
+- **Planning Approach**: Never use time-based planning (hours, days, weeks) or roadmapping; organize by logical dependencies, priorities, and capabilities instead
 - **Rationale**: Detailed specifications belong in the actual script files to avoid redundancy
 - **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
 - **Platform Assumption**: Documentation assumes Unix-like systems; Windows compatibility is explicitly not supported
@@ -28,21 +29,18 @@
 - Advocate for SOTA tooling in Claude Code Max environment
 - The full system path to user directory: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux) 
 
+## DSQ: Direction Steering Questions
+
+- **Clear Discrepancies**: Ask user key direction steering questions (DSQ) to ensure plan stays focused and consolidated toward user's preferred path.
+
 ## APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
-**Usage**: Request "APCF" or "apcf" to trigger automated SR&ED-compliant commit message generation.
-
-**Full Documentation**: See `/apcf` command for complete specifications, templates, and usage guidelines.
+- **Usage**: Request "APCF" or "apcf" to trigger automated SR&ED-compliant commit message generation.
+- **Full Documentation**: See `/apcf` command for complete specifications, templates, and usage guidelines.
 
 ## 🧠 Workspace
 
-- `uv run python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
-
-- **Tools**: uv, ruff (other tools available via uv install)  
-- **Python**: 3.10+, type checking disabled (development environment)  
-- **Commands**: Use `uv run` for operations
-
-### Documentation & README Audit Requirements
+### DRA: Documentation & README Audit
 
 - **Workspace README**: Use `docs/README.md` over root - GitHub auto-fallback renders it anyway
 - **Python Commands**: Always use `uv` prefix (e.g., `uv run`, `uv add`) - never assume pip/python
@@ -51,11 +49,17 @@
 - **Broken Link Types**: Check directory references, file paths, anchor links, relative paths
 - **Security Audit**: Validate shell commands, file paths, user input handling in documentation examples
 - **Root README Policy**: Aggregate links only; delegate content to target files/directories
+- **Related Docs**: GitHub Flavored Markdown Inter-linking (e.g. bi-directional navigation between master plan and research topics)
 
 ## Development Environment Preferences
 
+- `uv run python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
+
 ### Python Package Management
 - **Primary Tool**: `uv` for all Python operations
+- **Commands**: Use `uv run` for operations
+- **Tools**: uv, ruff (other tools available via uv install)  
+- **Python**: 3.10+, type checking disabled (development environment)  
 - **Avoid**: pip, conda, pipenv
 
 ### Python Library Preference
@@ -64,7 +68,6 @@
 - Uses `platformdirs` for platform-appropriate cache directories (not workspace dirs)
 
 ## Claude Code User Custom Extensions
-
 
 ### CNS (Conversation Notification System)
 **Purpose**: Clipboard conversation tracking and audio notification with context engineering support
