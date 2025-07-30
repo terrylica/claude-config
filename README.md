@@ -1,8 +1,18 @@
-# Claude Code Workspace Configuration
+# Claude Code Enhanced Workspace
 
 > **Organizational Repository**: https://github.com/Eon-Labs/claude-config
 
-This workspace contains comprehensive Claude Code configuration for cross-platform development with CNS (Conversation Notification System), APCF methodology, and development tools integration.
+**Transform your Claude Code experience** with automated notifications, audit-proof commits, and intelligent workflow integration.
+
+## 🤔 Is This For You?
+
+**Yes, if you want to:**
+- Get audio notifications when Claude finishes responses
+- Generate professional commit messages automatically  
+- Share configurations with teammates
+- Work more efficiently with Claude Code
+
+**Details**: [System overview and requirements →](docs/README.md)
 
 ## 📁 Quick Navigation
 
@@ -17,17 +27,21 @@ This workspace contains comprehensive Claude Code configuration for cross-platfo
 
 ## 🚀 Quick Start
 
-1. **Setup**: Run `tmux/bin/setup-simple-tmux` for tmux integration
-2. **Configuration**: Review `settings.json` for Claude Code hook settings  
-3. **CNS**: Configure audio and clipboard in `automation/cns/config/cns_config.json`
-4. **Commands**: Use `/apcf` for audit-proof commit message generation
+**New to Claude Code?** [Install guide →](https://docs.anthropic.com/claude/docs/claude-code)
 
-## 🎯 Key Features
+**Ready to enhance your setup:**
+1. **Copy this workspace** to your `~/.claude/` directory
+2. **Run setup**: `tmux/bin/setup-simple-tmux` 
+3. **Try it**: Type `/apcf` in Claude Code to generate commit messages
 
-- **Cross-Platform**: Works on macOS and Linux with automatic platform detection
-- **CNS Integration**: Automatic clipboard tracking and audio notifications  
-- **APCF Methodology**: SR&ED-compliant commit message generation
-- **Simple Tmux**: Clean session management without complex plugins
-- **Organizational**: Ready for team collaboration and co-worker sharing
+**Detailed setup**: [Complete installation guide →](docs/README.md)
 
-For detailed setup and usage instructions, see [docs/README.md](docs/README.md).
+## 🎯 What You Get
+
+- **Never miss Claude responses** with audio notifications → [CNS docs](automation/cns/README.md)
+- **Professional commit messages** generated automatically → [APCF guide](commands/apcf.md)  
+- **Clean tmux sessions** without configuration hassle → [Tmux setup](tmux/README.md)
+- **Team-ready** configurations for sharing → [Architecture details](docs/ARCHITECTURE.md)
+- **Cross-platform** support (macOS, Linux) → [Platform requirements](docs/README.md#system-requirements)
+
+**Full documentation**: [Complete guide →](docs/README.md)
