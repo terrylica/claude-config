@@ -1,8 +1,19 @@
-# Claude Code Workspace
+# Claude Code Global Configuration Template
 
 > **Organizational Repository**: https://github.com/Eon-Labs/claude-config
 
-**Claude Code workspace** with automated notifications, audit-proof commits, and intelligent workflow integration.
+**Personal preferences for all projects** - A comprehensive Claude Code configuration template that provides consistent workflows, automation, and tooling across every project you work on.
+
+## What This Provides
+
+This repository serves as your **global `~/.claude/` directory template**, containing:
+- **Cross-project consistency** - Same tools and workflows everywhere
+- **Automated notifications** - Never miss Claude responses  
+- **Professional commit formatting** - SR&ED-compliant APCF methodology
+- **Intelligent workspace integration** - Seamless tmux, automation, and tooling
+- **Team-shareable configuration** - Standardize workflows across your organization
+
+**Installation**: Copy this entire directory structure to `~/.claude/` for instant global Claude Code configuration.
 
 ## 🤔 Is This For You?
 
