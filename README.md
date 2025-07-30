@@ -20,6 +20,8 @@
 |-----------|---------|---------------|
 | **[Core Configuration](docs/README.md)** | System overview and setup guide | Main documentation |
 | **[Architecture](docs/ARCHITECTURE.md)** | System design and integration details | Technical architecture |
+| **[User Memory & Preferences](CLAUDE.md)** | Global user instructions and APCF methodology | User configuration |
+| **[System Files Documentation](CLAUDE_CODE_OFFICIAL_FILES.md)** | Critical files safety reference | System file guide |
 | **[CNS System](automation/cns/README.md)** | Conversation notification and clipboard tracking | CNS documentation |
 | **[Tmux Integration](tmux/README.md)** | Simple session management | Tmux documentation |
 | **[APCF Commands](commands/apcf.md)** | Audit-proof commit formatting | APCF methodology |

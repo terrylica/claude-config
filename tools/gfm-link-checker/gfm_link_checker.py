@@ -330,6 +330,76 @@ class GFMLinkChecker:
         
         return results
     
+    def check_readme_completeness(self, markdown_files: List[Path]) -> List[LinkValidationResult]:
+        """Check that each README.md contains links to all sibling markdown files."""
+        results = []
+        
+        # Group files by directory
+        dirs_with_files = {}
+        for file_path in markdown_files:
+            dir_path = file_path.parent
+            if dir_path not in dirs_with_files:
+                dirs_with_files[dir_path] = []
+            dirs_with_files[dir_path].append(file_path)
+        
+        # Check each directory that has a README.md
+        for dir_path, files_in_dir in dirs_with_files.items():
+            readme_path = dir_path / 'README.md'
+            
+            # Skip if no README.md in this directory
+            if readme_path not in files_in_dir:
+                continue
+                
+            # Get all non-README markdown files in this directory
+            sibling_files = [f for f in files_in_dir if f.name != 'README.md']
+            
+            if not sibling_files:
+                continue  # No siblings to link to
+            
+            # Read README content
+            try:
+                readme_content = readme_path.read_text(encoding='utf-8')
+            except Exception as e:
+                results.append(LinkValidationResult(
+                    link='', source_file=str(readme_path), line_number=0,
+                    is_valid=False, error_type='read_error',
+                    error_message=f'Cannot read README: {e}', link_type='completeness'
+                ))
+                continue
+            
+            # Check which sibling files are linked
+            for sibling in sibling_files:
+                sibling_name = sibling.name
+                sibling_relative = sibling.relative_to(dir_path)
+                
+                # Check various link formats that could reference this file
+                link_patterns = [
+                    sibling_name,                    # filename.md
+                    f'./{sibling_name}',            # ./filename.md
+                    str(sibling_relative),          # path/filename.md
+                    f'./{sibling_relative}',        # ./path/filename.md
+                ]
+                
+                # Check if any pattern is found in README
+                is_linked = any(pattern in readme_content for pattern in link_patterns)
+                
+                if not is_linked:
+                    results.append(LinkValidationResult(
+                        link=sibling_name, source_file=str(readme_path), line_number=0,
+                        is_valid=False, error_type='missing_navigation',
+                        error_message=f'README does not link to sibling file: {sibling_name}',
+                        link_type='completeness'
+                    ))
+                else:
+                    # Add successful completeness check
+                    results.append(LinkValidationResult(
+                        link=sibling_name, source_file=str(readme_path), line_number=0,
+                        is_valid=True, error_type='', error_message='',
+                        link_type='completeness'
+                    ))
+        
+        return results
+    
     def check_workspace(self) -> Dict:
         """Check all markdown files in the workspace."""
         markdown_files = self.find_markdown_files()
@@ -341,6 +411,12 @@ class GFMLinkChecker:
             print(f"Checking: {file_path.relative_to(self.workspace_path)}")
             file_results = self.check_file(file_path)
             all_results.extend(file_results)
+        
+        # Check README completeness by default
+        if self.config.get('check_completeness', True):
+            print("Checking README completeness...")
+            completeness_results = self.check_readme_completeness(markdown_files)
+            all_results.extend(completeness_results)
         
         # Categorize results
         valid_links = [r for r in all_results if r.is_valid]
@@ -434,6 +510,11 @@ def main():
         help='Skip external URL validation'
     )
     parser.add_argument(
+        '--no-completeness', '-nc',
+        action='store_true',
+        help='Skip README completeness checking (default: completeness checking enabled)'
+    )
+    parser.add_argument(
         '--format', '-f',
         choices=['text', 'json'],
         default='text',
@@ -448,7 +529,8 @@ def main():
     
     # Configuration
     config = {
-        'check_external': not args.no_external
+        'check_external': not args.no_external,
+        'check_completeness': not args.no_completeness
     }
     
     # Initialize checker
