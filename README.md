@@ -18,7 +18,7 @@ This repository serves as your **global `~/.claude/` directory template**, conta
 ## 🤔 Is This For You?
 
 **Yes, if you want to:**
-- Get audio notifications when Claude finishes responses
+- Get audio notifications when Claude finishes responses (clipboard disabled)
 - Generate professional commit messages automatically  
 - Share configurations with teammates
 - Work more efficiently with Claude Code
@@ -33,10 +33,9 @@ This repository serves as your **global `~/.claude/` directory template**, conta
 | **[Architecture](docs/ARCHITECTURE.md)** | System design and integration details | Technical architecture |
 | **[User Memory & Preferences](CLAUDE.md)** | Global user instructions and APCF methodology | User configuration |
 | **[System Files Documentation](CLAUDE_CODE_OFFICIAL_FILES.md)** | Critical files safety reference | System file guide |
-| **[CNS System](automation/cns/README.md)** | Conversation notification and clipboard tracking | CNS documentation |
+| **[CNS System](automation/cns/README.md)** | Audio notification system (clipboard disabled) | CNS documentation |
 | **[Tmux Integration](tmux/README.md)** | Simple session management | Tmux documentation |
 | **[APCF Commands](commands/apcf.md)** | Audit-proof commit formatting | APCF methodology |
-| **[Migration Guide](docs/REPOSITORY_MIGRATION.md)** | Repository migration documentation | Migration details |
 
 ## 🚀 Quick Start
 
@@ -51,7 +50,7 @@ This repository serves as your **global `~/.claude/` directory template**, conta
 
 ## 🎯 What You Get
 
-- **Never miss Claude responses** with audio notifications → [CNS docs](automation/cns/README.md)
+- **Never miss Claude responses** with audio notifications (clipboard disabled) → [CNS docs](automation/cns/README.md)
 - **Professional commit messages** generated automatically → [APCF guide](commands/apcf.md)  
 - **Clean tmux sessions** without configuration hassle → [Tmux setup](tmux/README.md)
 - **Team-ready** configurations for sharing → [Architecture details](docs/ARCHITECTURE.md)

@@ -1,25 +1,27 @@
 # CNS (Conversation Notification System)
 
-Intelligent clipboard tracking and audio completion notification for Claude Code responses.
+Audio completion notification for Claude Code responses (clipboard currently disabled).
 
 ## Architecture Overview
 
-**Major Change**: Renamed from TTS system (2025-07-28). CNS focuses on clipboard conversation tracking and audio notifications.
+**Major Change**: Renamed from TTS system (2025-07-28). CNS currently focuses on audio notifications only (clipboard disabled).
 
 ### Current System (CNS Architecture)
-- **Main Script**: `conversation_handler.sh` (188 lines) - Clipboard processing only
-- **Configuration**: `config/cns_config.json` - Simplified clipboard and sound settings  
+- **Main Script**: `conversation_handler.sh` (188 lines) - Audio notification processing
+- **Configuration**: `config/cns_config.json` - Audio settings (clipboard disabled)  
 - **Entry Point**: `cns_hook_entry.sh` - Hook system integration
 - **CNS Notification**: `cns_notification_hook.sh` - Toy Story audio notification with folder name TTS
 
 ## Functionality
 
 ### ✅ Active Features
-- **Clipboard Tracking**: Copies both user prompts and Claude responses to clipboard
-- **Command Detection**: Smart handling of hash (`#`) and slash (`/`) commands
-- **CNS Notification**: Toy Story audio notification with folder name TTS when Claude finishes responding
+- **Audio Notification**: Toy Story audio notification with folder name TTS when Claude finishes responding
 - **Volume Control**: Configurable notification volume (affects only CNS audio, not system volume)
-- **Combined Format**: Clipboard contains `USER: [prompt]\n\nCLAUDE: [response]`
+
+### ❌ Currently Disabled Features
+- **Clipboard Tracking**: Currently disabled (`clipboard_enabled: false` in config)
+- **Command Detection**: Preserved but not active due to disabled clipboard
+- **Combined Format**: Not active due to disabled clipboard
 
 ### ❌ Removed Features (From Previous TTS System)
 - All speech synthesis functionality
@@ -162,10 +164,9 @@ The CNS notification volume can be adjusted independently of system volume:
 
 ## Troubleshooting
 
-### Empty Clipboard
-- Check debug log for `Combined content copied to clipboard` message
-- Verify clipboard tool is available: `pbcopy` (macOS), `xclip`/`xsel` (Linux)
-- Ensure transcript file is readable and contains valid JSON
+### Clipboard Issues (Currently Disabled)
+> **Note**: Clipboard functionality is currently disabled (`clipboard_enabled: false`).
+To re-enable: Set `"clipboard_enabled": true` in `config/cns_config.json`
 
 ### No CNS Notification
 - Verify `cns_notification_hook.sh` is executable

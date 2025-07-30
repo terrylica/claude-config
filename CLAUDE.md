@@ -86,11 +86,11 @@
 ## Claude Code User Custom Extensions
 
 ### CNS (Conversation Notification System)
-**Purpose**: Clipboard conversation tracking and audio notification with context engineering support
+**Purpose**: Audio notification with context engineering support (clipboard currently disabled)
 
 #### Core Files (Simplified Architecture - CNS System)
-- **Configuration**: `.claude/automation/cns/config/cns_config.json` (clipboard, notification, and volume settings)
-- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (188 lines, clipboard processing)
+- **Configuration**: `.claude/automation/cns/config/cns_config.json` (notification and volume settings, clipboard disabled)
+- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (188 lines, audio processing)
 - **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
 - **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (Toy Story audio with configurable volume + folder name TTS)
 - **Manual Utility**: `.claude/bin/cns-notify` (manual notification testing)

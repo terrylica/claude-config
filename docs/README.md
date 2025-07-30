@@ -19,7 +19,7 @@ This directory contains the global configuration for Claude Code, organized into
 | Component | Purpose | Key Files |
 |-----------|---------|-----------|
 | **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
-| **[CNS (Conversation Notification System)](../automation/cns/)** | Conversation tracking and audio notification system | `automation/cns/conversation_handler.sh`, `automation/cns/config/` |
+| **[CNS (Conversation Notification System)](../automation/cns/)** | Audio notification system (clipboard disabled) | `automation/cns/conversation_handler.sh`, `automation/cns/config/` |
 | **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
 | **[Automation System](../automation/)** | Event-driven automation and CNS integration | `automation/cns/`, `automation/logs/` |
 | **[Development Tools](../tools/)** | Standalone utilities and development aids | `tools/gfm-link-checker/` |
