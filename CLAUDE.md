@@ -1,12 +1,19 @@
 # Claude Code User Memory
 
 ## Claude Code User Memory Documentation Principles
+
+### Document Definition
 - **Scope**: These principles apply _ONLY_ to this Claude Code user memory file Located in `.claude/CLAUDE.md`
 - **Purpose**: This document serves as a high-level pointer/reference only
+- **Rationale**: Detailed specifications belong in the actual script files to avoid redundancy
+
+### Content Standards
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
 - **Planning Approach**: Never use time-based planning (hours, days, weeks) or roadmapping; organize by logical dependencies, priorities, and capabilities instead
-- **Rationale**: Detailed specifications belong in the actual script files to avoid redundancy
+- **Language Evolution**: Never use promotional language ("enhanced", "improved", "optimized") - everything is evolutionary by nature
+
+### Technical Requirements
 - **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
 - **Platform Assumption**: Documentation assumes Unix-like systems; Windows compatibility is explicitly not supported
 

@@ -188,6 +188,6 @@ The CNS notification volume can be adjusted independently of system volume:
 - All speech synthesis removed
 - Configuration simplified significantly  
 - Script size reduced 81% (892 → 168 lines)
-- Clipboard functionality enhanced with combined format
+- Clipboard functionality with combined format
 - CNS notification preserved as separate system
 - Complete file/directory structure renamed for clarity

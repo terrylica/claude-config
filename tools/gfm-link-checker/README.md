@@ -9,7 +9,7 @@ Ultra-comprehensive link validation system for local workspaces with GitHub-spec
 - **Multi-format support** - Handles `.md`, `.markdown`, `.mdown`, `.mkdn` files
 - **Git repository intelligence** - Workspace-aware relative path resolution
 - **Comprehensive error reporting** - Line-precise validation with categorized errors
-- **Performance optimized** - Optional external URL checking for speed
+- **Configurable performance** - Optional external URL checking for speed
 - **Dependency resilient** - Graceful fallback when requests unavailable
 
 ## Installation

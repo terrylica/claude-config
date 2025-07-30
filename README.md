@@ -1,8 +1,8 @@
-# Claude Code Enhanced Workspace
+# Claude Code Workspace
 
 > **Organizational Repository**: https://github.com/Eon-Labs/claude-config
 
-**Transform your Claude Code experience** with automated notifications, audit-proof commits, and intelligent workflow integration.
+**Claude Code workspace** with automated notifications, audit-proof commits, and intelligent workflow integration.
 
 ## 🤔 Is This For You?
 
@@ -29,7 +29,7 @@
 
 **New to Claude Code?** [Install guide →](https://docs.anthropic.com/claude/docs/claude-code)
 
-**Ready to enhance your setup:**
+**Ready to configure your setup:**
 1. **Copy this workspace** to your `~/.claude/` directory
 2. **Run setup**: `tmux/bin/setup-simple-tmux` 
 3. **Try it**: Type `/apcf` in Claude Code to generate commit messages

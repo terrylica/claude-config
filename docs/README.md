@@ -1,6 +1,6 @@
 # Claude Code Global Configuration
 
-This directory contains the global configuration for Claude Code, organized into specialized subsystems for enhanced workflow integration.
+This directory contains the global configuration for Claude Code, organized into specialized subsystems for workflow integration.
 
 ## System Requirements
 
@@ -64,7 +64,7 @@ This configuration enables:
 2. **Cross-Platform Portability**: Supports both macOS and Linux with automatic platform detection
 3. **Clipboard Tracking**: Automatic conversation capture for easy sharing and reference
 4. **Configurable Audio**: Volume-controlled notification system with platform-specific audio players
-5. **Slash Commands**: Custom workflow automation through `/command` syntax including enhanced `/apcf`
+5. **Slash Commands**: Custom workflow automation through `/command` syntax including `/apcf`
 6. **Memory Persistence**: Cross-session project context and preference retention
 7. **Development Integration**: Seamless workflow with git, debugging, and productivity tools
 8. **Organizational Repository**: Hosted at https://github.com/Eon-Labs/claude-config

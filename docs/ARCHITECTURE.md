@@ -1,7 +1,7 @@
 # Claude Code Configuration Architecture
 
 ## Overview
-This document describes the refactored architecture of the Claude Code workspace configuration, optimized for development workflows while maintaining full compatibility with Claude Code constraints and Unix system portability.
+This document describes the refactored architecture of the Claude Code workspace configuration, designed for development workflows while maintaining full compatibility with Claude Code constraints and Unix system portability.
 
 ## Directory Structure
 
