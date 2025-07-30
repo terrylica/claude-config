@@ -18,6 +18,11 @@ allowed-tools: Bash, Task
 - `/gfm-check -f json` - Generate JSON report
 - `/gfm-check -o report.txt` - Save report to file
 
+**Direct Usage (from any workspace):**
+```bash
+$HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]
+```
+
 ```bash
 # Parse arguments
 args=($ARGUMENTS)
@@ -157,9 +162,9 @@ if ! check_and_setup_uv; then
     exit 1
 fi
 
-# Run the GFM link checker Python script with uv from project directory
+# Run the GFM link checker using universal Claude Code path (preserves working directory)
 echo "🔍 Running GFM link integrity check..."
-cd ~/.claude/tools/gfm-link-checker && uv run python gfm_link_checker.py $cmd_args
+$HOME/.claude/tools/gfm-link-checker/bin/gfm-check $cmd_args
 
 # Check exit code and auto-fix if requested
 exit_code=$?
@@ -169,7 +174,7 @@ if [[ $exit_code -ne 0 && "$auto_fix" == "true" ]]; then
     
     # Re-run with JSON output to get structured error data for analysis
     echo "🔧 Generating structured error report for analysis..."
-    json_output=$(uv run python gfm_link_checker.py $cmd_args --format json 2>/dev/null)
+    json_output=$($HOME/.claude/tools/gfm-link-checker/bin/gfm-check $cmd_args --format json 2>/dev/null)
     
     # Save JSON output to temporary file for agent analysis
     temp_file="/tmp/gfm_check_errors_$(date +%s).json"

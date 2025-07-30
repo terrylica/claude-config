@@ -9,7 +9,7 @@
 This repository serves as your **global `~/.claude/` directory template**, containing:
 - **Cross-project consistency** - Same tools and workflows everywhere
 - **Automated notifications** - Never miss Claude responses  
-- **Professional commit formatting** - SR&ED-compliant APCF methodology
+- **Professional commit formatting** - SR&ED (Scientific Research and Experimental Development) compliant APCF (Audit-Proof Commit Format) methodology
 - **Intelligent workspace integration** - Seamless tmux, automation, and tooling
 - **Team-shareable configuration** - Standardize workflows across your organization
 
@@ -19,7 +19,7 @@ This repository serves as your **global `~/.claude/` directory template**, conta
 
 **Yes, if you want to:**
 - Get audio notifications when Claude finishes responses (clipboard disabled)
-- Generate professional commit messages automatically  
+- Generate professional commit messages automatically using APCF (Audit-Proof Commit Format)
 - Share configurations with teammates
 - Work more efficiently with Claude Code
 
@@ -31,11 +31,11 @@ This repository serves as your **global `~/.claude/` directory template**, conta
 |-----------|---------|---------------|
 | **[Core Configuration](docs/README.md)** | System overview and setup guide | Main documentation |
 | **[Architecture](docs/ARCHITECTURE.md)** | System design and integration details | Technical architecture |
-| **[User Memory & Preferences](CLAUDE.md)** | Global user instructions and APCF methodology | User configuration |
+| **[User Memory & Preferences](CLAUDE.md)** | Global user instructions and APCF (Audit-Proof Commit Format) methodology | User configuration |
 | **[System Files Documentation](CLAUDE_CODE_OFFICIAL_FILES.md)** | Critical files safety reference | System file guide |
-| **[CNS System](automation/cns/README.md)** | Audio notification system (clipboard disabled) | CNS documentation |
-| **[Tmux Integration](tmux/README.md)** | Simple session management | Tmux documentation |
-| **[APCF Commands](commands/apcf.md)** | Audit-proof commit formatting | APCF methodology |
+| **[CNS System](automation/cns/README.md)** | CNS (Conversation Notification System) - Audio notification system (clipboard disabled) | CNS documentation |
+| **[Tmux Integration](tmux/README.md)** | Simple session management using tmux (terminal multiplexer) | Tmux documentation |
+| **[APCF Commands](commands/apcf.md)** | APCF (Audit-Proof Commit Format) methodology | APCF documentation |
 
 ## 🚀 Quick Start
 
@@ -50,9 +50,9 @@ This repository serves as your **global `~/.claude/` directory template**, conta
 
 ## 🎯 What You Get
 
-- **Never miss Claude responses** with audio notifications (clipboard disabled) → [CNS docs](automation/cns/README.md)
-- **Professional commit messages** generated automatically → [APCF guide](commands/apcf.md)  
-- **Clean tmux sessions** without configuration hassle → [Tmux setup](tmux/README.md)
+- **Never miss Claude responses** with CNS (Conversation Notification System) audio notifications (clipboard disabled) → [CNS docs](automation/cns/README.md)
+- **Professional commit messages** generated automatically using APCF (Audit-Proof Commit Format) → [APCF guide](commands/apcf.md)  
+- **Clean tmux sessions** without configuration hassle using tmux (terminal multiplexer) → [Tmux setup](tmux/README.md)
 - **Team-ready** configurations for sharing → [Architecture details](docs/ARCHITECTURE.md)
 - **Cross-platform** support (macOS, Linux) → [Platform requirements](docs/README.md#system-requirements)
 

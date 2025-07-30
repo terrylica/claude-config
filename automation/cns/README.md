@@ -4,30 +4,26 @@ Audio completion notification for Claude Code responses (clipboard currently dis
 
 ## Architecture Overview
 
-**Major Change**: Renamed from TTS system (2025-07-28). CNS currently focuses on audio notifications only (clipboard disabled).
+CNS provides audio notifications when Claude Code completes responses, with configurable clipboard functionality.
 
 ### Current System (CNS Architecture)
-- **Main Script**: `conversation_handler.sh` (188 lines) - Audio notification processing
-- **Configuration**: `config/cns_config.json` - Audio settings (clipboard disabled)  
-- **Entry Point**: `cns_hook_entry.sh` - Hook system integration
-- **CNS Notification**: `cns_notification_hook.sh` - Toy Story audio notification with folder name TTS
+- **Main Script**: `conversation_handler.sh` (207 lines) - Clipboard processing and coordination
+- **Configuration**: `config/cns_config.json` - System settings (clipboard disabled)  
+- **Entry Point**: `cns_hook_entry.sh` - Async hook entry point
+- **CNS Notification**: `cns_notification_hook.sh` - Audio notification with folder name text-to-speech
 
 ## Functionality
 
 ### ✅ Active Features
-- **Audio Notification**: Toy Story audio notification with folder name TTS when Claude finishes responding
+- **Audio Notification**: Audio file playback with configurable volume when Claude finishes responding
+- **Text-to-Speech**: Folder name announcement with tmux context detection
 - **Volume Control**: Configurable notification volume (affects only CNS audio, not system volume)
+- **Async Processing**: Fire-and-forget background processing for session performance
 
 ### ❌ Currently Disabled Features
 - **Clipboard Tracking**: Currently disabled (`clipboard_enabled: false` in config)
 - **Command Detection**: Preserved but not active due to disabled clipboard
 - **Combined Format**: Not active due to disabled clipboard
-
-### ❌ Removed Features (From Previous TTS System)
-- All speech synthesis functionality
-- Speech rate, voice, and volume configurations
-- Complex paragraph aggregation for audio
-- Multi-stage content processing pipelines
 
 ## Configuration
 
@@ -53,8 +49,7 @@ Audio completion notification for Claude Code responses (clipboard currently dis
   },
   "features": {
     "enable_clipboard_debug": true,
-    "enable_cns_notification": true,
-    "tts_removed": true
+    "enable_cns_notification": true
   },
   "audio": {
     "notification_volume": 0.3,
@@ -96,7 +91,7 @@ Audio completion notification for Claude Code responses (clipboard currently dis
 - Common: `jq`  
 - Audio (macOS): `afplay` OR Audio (Linux): `paplay`/`aplay`  
 - Clipboard (macOS): `pbcopy` OR Clipboard (Linux): `xclip`/`xsel`  
-- Text-to-Speech (macOS): `say` OR TTS (Linux): `espeak`/`festival`  
+- Text-to-Speech (macOS): `say` OR Speech (Linux): `espeak`/`festival`  
 **Shell**: POSIX-compliant shells (zsh, bash)
 
 > **Note**: Uses Unix conventions (`$HOME`, `/tmp/`) - not Windows-compatible
@@ -107,7 +102,7 @@ The CNS notification system requires an audio file for notifications:
 
 **Required Location**: `$HOME/.claude/media/toy-story-notification.mp3`
 
-> **⚠️ Important**: You must provide your own notification audio file. Place any `.mp3` audio file at the path above. The system will gracefully handle missing audio files by skipping audio playback while continuing with folder name text-to-speech.
+> **⚠️ Important**: You must provide your own notification audio file. Place any `.mp3` audio file at the path above. The system will gracefully handle missing audio files by skipping audio playback while continuing with folder name announcement.
 
 **Setup Example**:
 ```bash
@@ -144,7 +139,7 @@ cp /path/to/your/notification.mp3 "$HOME/.claude/media/toy-story-notification.mp
 ```
 
 ### Environment Variables
-- `CLAUDE_CNS_CLIPBOARD=1` - Enable clipboard functionality (default: enabled)
+- `CLAUDE_CNS_CLIPBOARD=1` - Override clipboard functionality (set by cns_hook_entry.sh)
 
 ## Audio Configuration
 
@@ -158,7 +153,7 @@ The CNS notification volume can be adjusted independently of system volume:
 - `0.5` = Half volume (50%)
 - `1.0` = Full volume (original loudness)
 
-**Testing**: Use `$HOME/.claude/bin/cns-notify` to test volume level
+**Testing**: Use `$HOME/.claude/bin/cns-notify` to test audio playback (note: manual test does not include volume control)
 
 **Important**: This only affects CNS notification audio. System volume and other applications remain unchanged.
 
@@ -183,12 +178,6 @@ To re-enable: Set `"clipboard_enabled": true` in `config/cns_config.json`
 - Verify command starts with `#` or `/` for proper detection
 - Check clipboard content matches expected format
 
-## Migration Notes
+## Legacy Information
 
-**From TTS System (Renamed to CNS 2025-07-28)**:
-- All speech synthesis removed
-- Configuration simplified significantly  
-- Script size reduced 81% (892 → 168 lines)
-- Clipboard functionality with combined format
-- CNS notification preserved as separate system
-- Complete file/directory structure renamed for clarity
+Historical migration from specialized text-to-speech system to current notification-focused CNS architecture.
