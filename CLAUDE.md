@@ -1,5 +1,16 @@
 # Claude Code User Memory
 
+## Workspace-Wide Development Principles
+
+### Language Evolution
+- **Evolutionary Mindset**: Never use promotional language ("enhanced", "improved", "optimized") - everything is evolutionary by nature
+- **Application Scope**: ALL Claude Code workspace content, documentation, commit messages, communications, and development work
+- **Rationale**: Eliminates maintenance burden of constantly updating promotional qualifiers in evolving development environments
+
+### Planning Philosophy
+- **Logical Dependencies**: Never use time-based planning (hours, days, weeks) or roadmapping; organize by logical dependencies, priorities, and capabilities instead
+- **Dynamic Evolution**: Objectives and implementations are dynamically evolutionary by nature
+
 ## Claude Code User Memory Documentation Principles
 
 ### Document Definition
@@ -10,8 +21,6 @@
 ### Content Standards
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
-- **Planning Approach**: Never use time-based planning (hours, days, weeks) or roadmapping; organize by logical dependencies, priorities, and capabilities instead
-- **Language Evolution**: Never use promotional language ("enhanced", "improved", "optimized") - everything is evolutionary by nature
 
 ### Technical Requirements
 - **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
