@@ -139,25 +139,23 @@ if [[ "$run_health" == "true" ]]; then
     # 4. Dependency Check
     echo ""
     echo "📦 Dependency Validation..."
-    cd "$HOME/.claude/tools/gfm-link-checker" 2>/dev/null && {
-        if [[ -f "pyproject.toml" ]]; then
-            report_status "Project Config" "PASS"
-            
-            # Check if dependencies are synced
-            if uv sync --dry-run &>/dev/null; then
-                report_status "Dependency Sync" "PASS"
-            else
-                report_status "Dependency Sync" "WARN" "Dependencies may need sync"
-            fi
+    if [[ -f "$HOME/.claude/tools/gfm-link-checker/pyproject.toml" ]]; then
+        report_status "Project Config" "PASS"
+        
+        # Check if dependencies are synced
+        if uv sync --directory "$HOME/.claude/tools/gfm-link-checker" --dry-run &>/dev/null; then
+            report_status "Dependency Sync" "PASS"
         else
-            report_status "Project Config" "FAIL" "pyproject.toml missing"
+            report_status "Dependency Sync" "WARN" "Dependencies may need sync"
         fi
-    }
+    else
+        report_status "Project Config" "FAIL" "pyproject.toml missing"
+    fi
     
     # 5. Interface Validation
     echo ""
     echo "🔌 Interface Validation..."
-    gfm_check_test=$(cd "$HOME/.claude/tools/gfm-link-checker" && uv run python gfm_link_checker.py --help 2>&1)
+    gfm_check_test=$(uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" --help 2>&1)
     if echo "$gfm_check_test" | grep -q "usage:"; then
         report_status "GFM Script Interface" "PASS"
     else
@@ -183,8 +181,7 @@ if [[ "$run_health" == "true" ]]; then
 [test](missing-file.md)
 EOF
     
-    cd "$HOME/.claude/tools/gfm-link-checker"
-    test_result=$(uv run python gfm_link_checker.py "$test_workspace" 2>&1)
+    test_result=$(uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" "$test_workspace" 2>&1)
     test_exit_code=$?
     
     if [[ $test_exit_code -ne 0 ]]; then

@@ -24,12 +24,16 @@
 
 ### Technical Requirements
 - **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
+- **Universal Tooling Access**: All workspace tools accessible via standardized `$HOME/.claude/` paths without system modifications (no PATH, symlinks, or global installs)
+- **Working Directory Preservation**: All workspace scripts MUST preserve user's current working directory - never use `cd` operations that change user context
 - **Platform Assumption**: Documentation assumes Unix-like systems; Windows compatibility is explicitly not supported
 
 ## Tool Usage Preferences
 - **Remote Viewing**: Prefer `curl` over fetch
 - **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
 - **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
+- **Workspace Tools**: Use direct `$HOME/.claude/` paths for zero-impact cross-user accessibility
+- **Script Execution**: Use `uv run --directory` and universal path construction instead of `cd` operations to preserve working directory
 
 ## System Architecture and Assumptions
 
@@ -90,9 +94,9 @@
 
 #### Core Files (Simplified Architecture - CNS System)
 - **Configuration**: `.claude/automation/cns/config/cns_config.json` (notification and volume settings, clipboard disabled)
-- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (188 lines, audio processing)
+- **Main Script**: `.claude/automation/cns/conversation_handler.sh` (206 lines, audio processing)
 - **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
-- **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (Toy Story audio with configurable volume + folder name TTS)
+- **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (audio notification with configurable volume + folder name announcement)
 - **Manual Utility**: `.claude/bin/cns-notify` (manual notification testing)
 - **Debug Logs**: `/tmp/claude_cns_debug.log` (structured logging)
 
@@ -108,8 +112,11 @@
 ### GitHub Flavored Markdown Link Checker
 **Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior
 
+#### Universal Access
+- **Usage**: `$HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]`
+- **Zero Configuration**: Works from any workspace without system modifications
+
 #### Core Files
 - **Main Script**: `.claude/tools/gfm-link-checker/gfm_link_checker.py`
 - **Command Wrapper**: `.claude/tools/gfm-link-checker/bin/gfm-check`
-- **Setup Script**: `.claude/tools/gfm-link-checker/setup-gfm-checker.sh`
 - **Project Config**: `.claude/tools/gfm-link-checker/pyproject.toml`

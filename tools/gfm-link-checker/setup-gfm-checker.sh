@@ -21,27 +21,17 @@ cd "$PROJECT_DIR"
 echo "📦 Installing dependencies with uv..."
 uv sync
 
-# Create symlink for easier access (optional)
-SYMLINK_PATH="/usr/local/bin/gfm-check"
-if [[ -w "/usr/local/bin" ]]; then
-    ln -sf "$PROJECT_DIR/bin/gfm-check" "$SYMLINK_PATH"
-    echo "🔗 Created global command: gfm-check"
-else
-    echo "⚠️  Cannot create global command (no write access to /usr/local/bin)"
-    echo "   You can use: $PROJECT_DIR/bin/gfm-check"
-fi
+# Universal access approach - no system modifications needed
+echo "🌍 Universal access configured using standardized Claude Code paths"
+echo "   No system modifications required - works across all users"
 
 echo "✅ Setup complete!"
 echo ""
 echo "Usage examples:"
-echo "  # Local execution:"
-echo "  $PROJECT_DIR/bin/gfm-check"
-echo "  $PROJECT_DIR/bin/gfm-check /path/to/workspace --no-external"
-echo "  $PROJECT_DIR/bin/gfm-check --format json --output report.json"
-echo ""
-echo "  # Global command (if symlink created):"
-echo "  gfm-check"
-echo "  gfm-check /path/to/workspace --no-external"
+echo "  # Universal access (works from any workspace):"
+echo "  \$HOME/.claude/tools/gfm-link-checker/bin/gfm-check"
+echo "  \$HOME/.claude/tools/gfm-link-checker/bin/gfm-check /path/to/workspace --no-external"
+echo "  \$HOME/.claude/tools/gfm-link-checker/bin/gfm-check --format json --output report.json"
 echo ""
 echo "  # Direct uv execution:"
 echo "  cd $PROJECT_DIR && uv run gfm_link_checker.py"
