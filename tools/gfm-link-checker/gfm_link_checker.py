@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from mistletoe import Document
 from mistletoe.span_token import Link, AutoLink
+import pathspec
 
 try:
     import httpx
@@ -45,6 +46,7 @@ class GFMLinkChecker:
         self.config = config or {}
         self.git_root = self._find_git_root()
         self.results: List[LinkValidationResult] = []
+        self.gitignore_spec = self._load_gitignore_patterns()
         
         # GitHub-specific patterns
         self.github_anchor_pattern = re.compile(r'^[a-z0-9\-_]+$')
@@ -64,15 +66,72 @@ class GFMLinkChecker:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
     
+    def _load_gitignore_patterns(self) -> pathspec.PathSpec:
+        """Load gitignore patterns from .gitignore files using pathspec."""
+        patterns = []
+        
+        # Default patterns to always ignore
+        default_patterns = [
+            '.git/',
+            'node_modules/',
+            '.venv/',
+            '__pycache__/',
+            '.pytest_cache/',
+            '*.pyc',
+            '.DS_Store',
+            'Thumbs.db',
+        ]
+        patterns.extend(default_patterns)
+        
+        # Find and load .gitignore files walking up from workspace to git root
+        search_paths = [self.workspace_path]
+        if self.git_root and self.git_root != self.workspace_path:
+            # Add all parent directories up to git root
+            current = self.workspace_path
+            while current != self.git_root and current.parent != current:
+                current = current.parent
+                search_paths.append(current)
+            search_paths.append(self.git_root)
+        
+        # Load patterns from all .gitignore files
+        for search_path in search_paths:
+            gitignore_path = search_path / '.gitignore'
+            if gitignore_path.exists():
+                try:
+                    with open(gitignore_path, 'r', encoding='utf-8') as f:
+                        gitignore_patterns = f.read().splitlines()
+                        # Filter out comments and empty lines
+                        gitignore_patterns = [
+                            line.strip() for line in gitignore_patterns 
+                            if line.strip() and not line.strip().startswith('#')
+                        ]
+                        patterns.extend(gitignore_patterns)
+                except Exception as e:
+                    print(f"⚠️  Warning: Could not read {gitignore_path}: {e}")
+        
+        return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
+    
+    def _is_ignored(self, file_path: Path) -> bool:
+        """Check if a file path should be ignored based on gitignore patterns."""
+        # Convert to relative path from git root (or workspace if no git root)
+        base_path = self.git_root if self.git_root else self.workspace_path
+        try:
+            rel_path = file_path.relative_to(base_path)
+            # pathspec expects forward slashes
+            rel_path_str = str(rel_path).replace('\\', '/')
+            return self.gitignore_spec.match_file(rel_path_str)
+        except ValueError:
+            # Path is not relative to base_path, don't ignore
+            return False
+    
     def find_markdown_files(self) -> List[Path]:
-        """Find all markdown files in the workspace."""
+        """Find all markdown files in the workspace, respecting gitignore patterns."""
         markdown_files = []
         for pattern in ['*.md', '*.markdown', '*.mdown', '*.mkdn']:
             markdown_files.extend(self.workspace_path.rglob(pattern))
         
-        # Filter out files in common ignore directories
-        ignore_dirs = {'.git', 'node_modules', '.venv', '__pycache__', '.pytest_cache'}
-        return [f for f in markdown_files if not any(part in ignore_dirs for part in f.parts)]
+        # Filter using gitignore patterns
+        return [f for f in markdown_files if not self._is_ignored(f)]
     
     def extract_links(self, content: str, file_path: Path) -> List[Tuple[str, int, str]]:
         """Extract all links from markdown content using mistletoe AST parser."""
@@ -350,6 +409,10 @@ class GFMLinkChecker:
             if readme_path not in files_in_dir:
                 continue
                 
+            # Skip Claude Code directories - README.md files conflict with slash commands
+            if '.claude' in str(dir_path) and str(dir_path) != str(self.workspace_path):
+                continue
+                
             # Get all non-README markdown files in this directory
             sibling_files = [f for f in files_in_dir if f.name != 'README.md']
             
@@ -400,6 +463,131 @@ class GFMLinkChecker:
         
         return results
     
+    def check_claude_code_restrictions(self, markdown_files: List[Path]) -> List[LinkValidationResult]:
+        """Check Claude Code specific restrictions for .claude directories and root README."""
+        results = []
+        
+        # Check 1: No markdown files in project .claude directories (except global ~/.claude)
+        home_claude = Path.home() / '.claude'
+        for file_path in markdown_files:
+            # Check if file is in a .claude directory
+            if '.claude' in str(file_path):
+                # Allow files in global ~/.claude directory
+                if not str(file_path).startswith(str(home_claude)):
+                    # This is a project .claude directory - no markdown allowed
+                    results.append(LinkValidationResult(
+                        link='', source_file=str(file_path), line_number=0,
+                        is_valid=False, error_type='claude_code_conflict',
+                        error_message=f'Markdown files not allowed in project .claude directories (Claude Code slash command conflict): {file_path}',
+                        link_type='claude_restriction'
+                    ))
+        
+        # Check 2: No root README.md when docs/README.md exists
+        root_readme = self.workspace_path / 'README.md'
+        docs_readme = self.workspace_path / 'docs' / 'README.md'
+        
+        if root_readme.exists() and docs_readme.exists():
+            results.append(LinkValidationResult(
+                link='', source_file=str(root_readme), line_number=0,
+                is_valid=False, error_type='root_readme_delegation',
+                error_message='Root README.md should not exist when docs/README.md is present (use docs/README.md as main documentation)',
+                link_type='claude_restriction'
+            ))
+        elif root_readme.exists() and not docs_readme.exists():
+            results.append(LinkValidationResult(
+                link='', source_file=str(root_readme), line_number=0,
+                is_valid=False, error_type='root_readme_delegation',
+                error_message='Root README.md should be moved to docs/README.md for better organization',
+                link_type='claude_restriction'
+            ))
+        
+        return results
+    
+    def auto_fix_links(self, results: List[LinkValidationResult]) -> int:
+        """Auto-fix broken internal links where possible."""
+        fixes_applied = 0
+        
+        if not self.config.get('auto_fix', False):
+            return fixes_applied
+            
+        # Group results by source file for batch processing
+        files_to_fix = {}
+        for result in results:
+            if not result.is_valid and result.error_type in ['file_not_found', 'missing_readme', 'invalid_anchor']:
+                # Only auto-fix internal link issues
+                if result.link_type in ['local_file', 'directory', 'local_anchor']:
+                    source_file = result.source_file
+                    if source_file not in files_to_fix:
+                        files_to_fix[source_file] = []
+                    files_to_fix[source_file].append(result)
+        
+        for source_file_path, file_results in files_to_fix.items():
+            try:
+                source_path = Path(source_file_path)
+                if not source_path.exists():
+                    continue
+                    
+                # Try to apply fixes for this file
+                file_fixes = self._fix_file_links(source_path, file_results)
+                fixes_applied += file_fixes
+                
+            except Exception as e:
+                print(f"⚠️  Could not auto-fix links in {source_file_path}: {e}")
+        
+        return fixes_applied
+    
+    def _fix_file_links(self, source_path: Path, results: List[LinkValidationResult]) -> int:
+        """Fix links in a specific file."""
+        fixes_applied = 0
+        
+        try:
+            content = source_path.read_text(encoding='utf-8')
+            original_content = content
+            
+            for result in results:
+                if result.error_type == 'missing_readme':
+                    # Create missing README.md for directories
+                    link_parts = result.link.split('#', 1)
+                    file_part = link_parts[0]
+                    
+                    # Resolve the target directory
+                    if file_part.startswith('/'):
+                        if self.git_root:
+                            target_dir = self.git_root / file_part.lstrip('/')
+                        else:
+                            target_dir = Path(file_part)
+                    else:
+                        target_dir = (source_path.parent / file_part).resolve()
+                    
+                    if target_dir.is_dir():
+                        readme_path = target_dir / 'README.md'
+                        if not readme_path.exists():
+                            # Create basic README
+                            readme_content = f"# {target_dir.name}\n\nDocumentation for {target_dir.name}.\n"
+                            readme_path.write_text(readme_content, encoding='utf-8')
+                            print(f"✅ Created missing README: {readme_path}")
+                            fixes_applied += 1
+                
+                elif result.error_type == 'file_not_found':
+                    # Try to find similar files and suggest corrections
+                    # This is more complex - for now, just report
+                    print(f"⚠️  Cannot auto-fix missing file: {result.link} (manual intervention required)")
+                
+                elif result.error_type == 'invalid_anchor':
+                    # Try to fix anchor references by finding similar headings
+                    # This is complex and error-prone - skip for now
+                    print(f"⚠️  Cannot auto-fix invalid anchor: {result.link} (manual intervention required)")
+            
+            # If content was modified, write it back
+            if content != original_content:
+                source_path.write_text(content, encoding='utf-8')
+                print(f"✅ Fixed links in: {source_path}")
+                
+        except Exception as e:
+            print(f"❌ Error fixing links in {source_path}: {e}")
+        
+        return fixes_applied
+    
     def check_workspace(self) -> Dict:
         """Check all markdown files in the workspace."""
         markdown_files = self.find_markdown_files()
@@ -417,6 +605,11 @@ class GFMLinkChecker:
             print("Checking README completeness...")
             completeness_results = self.check_readme_completeness(markdown_files)
             all_results.extend(completeness_results)
+        
+        # Check Claude Code specific restrictions
+        print("Checking Claude Code restrictions...")
+        restriction_results = self.check_claude_code_restrictions(markdown_files)
+        all_results.extend(restriction_results)
         
         # Categorize results
         valid_links = [r for r in all_results if r.is_valid]
@@ -524,13 +717,19 @@ def main():
         '--output', '-o',
         help='Output file (default: stdout)'
     )
+    parser.add_argument(
+        '--fix', '-x',
+        action='store_true',
+        help='Auto-fix broken internal links only (external links are reported for manual review)'
+    )
     
     args = parser.parse_args()
     
     # Configuration
     config = {
         'check_external': not args.no_external,
-        'check_completeness': not args.no_completeness
+        'check_completeness': not args.no_completeness,
+        'auto_fix': args.fix
     }
     
     # Initialize checker
@@ -538,6 +737,18 @@ def main():
     
     # Run checks
     results = checker.check_workspace()
+    
+    # Apply auto-fixes if requested
+    if args.fix and results['invalid_links'] > 0:
+        print("\n🔧 Applying auto-fixes for internal links...")
+        fixes_applied = checker.auto_fix_links(results['all_results'])
+        
+        if fixes_applied > 0:
+            print(f"✅ Applied {fixes_applied} auto-fixes. Re-running validation...")
+            # Re-run checks to verify fixes
+            results = checker.check_workspace()
+        else:
+            print("ℹ️  No auto-fixable issues found.")
     
     # Generate report
     report = checker.generate_report(results, args.format)
