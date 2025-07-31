@@ -51,7 +51,7 @@ sage-status models # SAGE models availability
 
 ## Installation
 
-The tool follows the standard `/Users/terryli/.claude/tools/` pattern:
+The tool follows the standard `~/.claude/tools/` pattern:
 
 1. **Global Access**: Commands available via `~/.local/bin` (industry standard)
 2. **Shell Integration**: Source alias files as needed

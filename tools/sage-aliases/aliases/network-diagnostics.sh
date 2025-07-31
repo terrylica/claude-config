@@ -1,6 +1,6 @@
 #!/bin/bash
 # ZeroTier Network & Connectivity Diagnostics
-# Part of SAGE Aliases Tool - /Users/terryli/.claude/tools/sage-aliases/
+# Part of SAGE Aliases Tool - ~/.claude/tools/sage-aliases/
 
 # =============================================================================
 # ZEROTIER STATUS & MONITORING

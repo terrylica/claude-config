@@ -1,7 +1,7 @@
 # SAGE Aliases Tool - Global Setup
 
 **Tool**: SAGE development aliases and productivity commands  
-**Location**: `/Users/terryli/.claude/tools/sage-aliases/`  
+**Location**: `~/.claude/tools/sage-aliases/`  
 **Access**: Global commands via `~/.local/bin` (industry standard)
 
 ## Installation Status

@@ -53,19 +53,37 @@ class GFMLinkChecker:
         self.verbose = self.config.get('verbose', False)
         self.skipped_directories = []
         
-        # Built-in ignore patterns (case-insensitive)
+        # Comprehensive ignore patterns for directories (case-insensitive)
         self.ignore_patterns = {
             # Third-party dependencies
             'repos', 'vendor', 'third_party', 'third-party', 
             'node_modules', 'packages', 'dependencies',
             # Development environment
             '.git', '.venv', 'venv', 'env', '.tox', 
-            '__pycache__', '.pytest_cache', 'build', 'dist', '.eggs'
+            '__pycache__', '.pytest_cache', 'build', 'dist', '.eggs',
+            # IDE and editor directories
+            '.vscode', '.idea', '.vs', '.sublime-project',
+            # Cache and temporary directories
+            '.ruff_cache', '.mypy_cache', '.coverage', 'htmlcov',
+            # System and runtime directories  
+            'bin', 'lib', 'include', 'share', 'var', 'tmp'
         }
         
         # GitHub-specific patterns
         self.github_anchor_pattern = re.compile(r'^[a-z0-9\-_]+$')
         self.relative_link_pattern = re.compile(r'^(?!https?://|mailto:|#)')
+        
+        # Special directories that need markdown files for functional purposes
+        self.functional_md_dirs = {
+            'commands',      # Executable slash commands for Claude Code - NO docs/README allowed
+            'system',        # System configuration and status files
+            'history',       # Historical documentation and logs
+            'shell-snapshots', # Shell state snapshots
+            'agents',        # Agent configuration files (only README.md allowed)
+            'automation',    # Automation system configs (only README.md allowed)  
+            'tmux',          # Terminal multiplexer configs (only README.md allowed)
+            'tools',         # Tool directories (only README.md allowed)
+        }
         
     def _find_git_root(self) -> Optional[Path]:
         """Find the root of the git repository."""
@@ -80,6 +98,24 @@ class GFMLinkChecker:
             return Path(result.stdout.strip())
         except (subprocess.CalledProcessError, FileNotFoundError):
             return None
+    
+    def _should_ignore_directory(self, dir_path: Path) -> bool:
+        """Check if a directory should be ignored for documentation organization checks."""
+        dir_name = dir_path.name.lower()
+        
+        # Check built-in ignore patterns
+        if dir_name in self.ignore_patterns:
+            return True
+            
+        # Check for hidden directories (starting with .)
+        if dir_name.startswith('.'):
+            return True
+            
+        # Check for functional markdown directories
+        if dir_name in self.functional_md_dirs:
+            return True
+            
+        return False
     
     def _load_gitignore_patterns(self) -> pathspec.PathSpec:
         """Load gitignore patterns from .gitignore files using pathspec."""
@@ -512,6 +548,10 @@ class GFMLinkChecker:
             if '.claude' in str(dir_path) and str(dir_path) != str(self.workspace_path):
                 continue
                 
+            # Skip directories that should be ignored for completeness checks
+            if self._should_ignore_directory(dir_path):
+                continue
+                
             # Get all non-README markdown files in this directory
             sibling_files = [f for f in files_in_dir if f.name != 'README.md']
             
@@ -581,7 +621,23 @@ class GFMLinkChecker:
                         link_type='claude_restriction'
                     ))
         
-        # Check 2: No root README.md when docs/README.md exists
+        # Check 2: No docs/ or README.md in commands directory (they become executable commands)
+        for file_path in markdown_files:
+            path_parts = file_path.parts
+            if 'commands' in path_parts:
+                commands_index = path_parts.index('commands')
+                # Check if this is directly in commands/ or in commands/docs/
+                if len(path_parts) > commands_index + 1:
+                    subpath = path_parts[commands_index + 1]
+                    if subpath in ('docs', 'README.md') or file_path.name == 'README.md':
+                        results.append(LinkValidationResult(
+                            link='', source_file=str(file_path), line_number=0,
+                            is_valid=False, error_type='commands_directory_conflict',
+                            error_message=f'No docs/ or README.md allowed in commands directory - they become executable slash commands: {file_path}',
+                            link_type='claude_restriction'
+                        ))
+        
+        # Check 3: No root README.md when docs/README.md exists
         root_readme = self.workspace_path / 'README.md'
         docs_readme = self.workspace_path / 'docs' / 'README.md'
         
@@ -599,6 +655,65 @@ class GFMLinkChecker:
                 error_message='Root README.md should be moved to docs/README.md for better organization',
                 link_type='claude_restriction'
             ))
+        
+        # Check 4: Documentation organization - root-level docs should be in docs/ directories
+        results.extend(self.check_documentation_organization(markdown_files))
+        
+        return results
+    
+    def check_documentation_organization(self, markdown_files: List[Path]) -> List[LinkValidationResult]:
+        """Check that documentation files are properly organized in docs/ directories."""
+        results = []
+        
+        # Files that should be allowed in root directories
+        allowed_root_files = {
+            'README.md',   # Navigation file
+            'CLAUDE.md',   # Claude Code user memory (special case)
+            'LICENSE.md', 'LICENSE', 'COPYING.md',  # Legal files
+            'CHANGELOG.md', 'HISTORY.md', 'NEWS.md',  # Project history
+            'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md',  # Community files
+        }
+        
+        for file_path in markdown_files:
+            # Check if this is a root-level documentation file (not README.md)
+            relative_path = file_path.relative_to(self.workspace_path)
+            path_parts = relative_path.parts
+            
+            # Skip if already in a docs/ directory
+            if 'docs' in path_parts:
+                continue
+                
+            # Skip if in a deep subdirectory (only check 1-2 levels deep)
+            if len(path_parts) > 2:
+                continue
+                
+            # Skip allowed root files
+            if file_path.name in allowed_root_files:
+                continue
+                
+            # Skip directories that should be ignored for documentation organization
+            parent_dir_path = file_path.parent
+            if self._should_ignore_directory(parent_dir_path):
+                continue
+            
+            # This appears to be a documentation file that should be in docs/
+            if len(path_parts) == 1:  # Root level file
+                results.append(LinkValidationResult(
+                    link='', source_file=str(file_path), line_number=0,
+                    is_valid=False, error_type='documentation_organization',
+                    error_message=f'Documentation file should be moved to docs/ directory: {file_path.name}',
+                    link_type='organization_policy'
+                ))
+            elif len(path_parts) == 2 and file_path.name != 'README.md':  # Subdirectory doc file
+                subdir_path = self.workspace_path / path_parts[0]
+                # Only flag if the subdirectory itself shouldn't be ignored
+                if not self._should_ignore_directory(subdir_path):
+                    results.append(LinkValidationResult(
+                        link='', source_file=str(file_path), line_number=0,
+                        is_valid=False, error_type='documentation_organization',
+                        error_message=f'Documentation file should be moved to {path_parts[0]}/docs/ directory: {file_path.name}',
+                        link_type='organization_policy'
+                    ))
         
         return results
     

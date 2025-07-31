@@ -1,6 +1,6 @@
 #!/bin/bash
 # GPU Workstation Connection & Management Aliases
-# Part of SAGE Aliases Tool - /Users/terryli/.claude/tools/sage-aliases/
+# Part of SAGE Aliases Tool - ~/.claude/tools/sage-aliases/
 
 # =============================================================================
 # QUICK CONNECTION ALIASES

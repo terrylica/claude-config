@@ -13,7 +13,7 @@ Ultra-comprehensive link validation system for local workspaces with GitHub-spec
 - **Dependency resilient** - Graceful fallback when requests unavailable
 - **Claude Code integration** - Enforces .claude directory restrictions and documentation policies
 
-For setup instructions, see [GLOBAL_SETUP.md](../GLOBAL_SETUP.md).
+For setup instructions, see [GLOBAL_SETUP.md](GLOBAL_SETUP.md).
 
 ## Installation
 
