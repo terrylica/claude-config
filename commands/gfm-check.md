@@ -24,7 +24,7 @@ allowed-tools: Bash, Task
 - `/gfm-check -ii -v` - Include ignored directories with verbose output
 
 **Direct Usage (from any workspace):**
-```bash
+```
 $HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]
 ```
 

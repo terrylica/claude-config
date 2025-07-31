@@ -7,14 +7,15 @@
 **Workflow**: Make changes → Request "APCF" or "apcf" → I analyze everything → Suggest commit strategy
 
 ### Analysis Steps
-1. **Staged files** (`git diff --cached --name-status`) - ready to commit
-2. **Modified files** (`git diff --name-status`) - unstaged changes  
-3. **Untracked files** (`git status --porcelain`) - new files
-4. **Recent commits** (`git log --oneline -5`) - understand commit patterns
-5. Auto-derive SR&ED evidence from complete change analysis
-6. Generate logical commit grouping and sequencing strategy
-7. Execute commits in sequence with user approval
-8. Verify clean working tree completion
+1. **Third-party protection check** - Identify and protect third-party submodules from accidental commits
+2. **Staged files** (`git diff --cached --name-status`) - ready to commit
+3. **Modified files** (`git diff --name-status`) - unstaged changes  
+4. **Untracked files** (`git status --porcelain`) - new files
+5. **Recent commits** (`git log --oneline -5`) - understand commit patterns
+6. Auto-derive SR&ED evidence from complete change analysis
+7. Generate logical commit grouping and sequencing strategy
+8. Execute commits in sequence with user approval (using safe commit process)
+9. Verify clean working tree completion
 
 ### Timestamp Requirement
 First get the current 'America/Vancouver' time using:
@@ -68,6 +69,14 @@ Here in this line, the last line in the commit message, we display the result of
 - **Dependency respect** - Infrastructure before features that depend on it
 - **Audit trail clarity** - Each commit tells complete SR&ED story
 - **Rollback safety** - Each commit is independently functional
+
+### Third-Party Submodule Protection Rules
+
+- **Never commit third-party submodule changes** - Protects against tampering with external repositories
+- **Auto-reset protection** - Third-party submodules are automatically reset to prevent accidental commits
+- **Third-party repositories**: `repos/nautilus_trader`, `repos/finplot`, `repos/claude-flow`
+- **Allowed repositories**: `repos/data-source-manager` (Eon-Labs private)
+- **Use safe commit process** - APCF automatically uses `git-commit-safe` script for protection
 
 ## Auto-Derivation Intelligence (Workspace State → SR&ED Evidence)
 
