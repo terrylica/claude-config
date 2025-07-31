@@ -1,0 +1,302 @@
+#!/bin/bash
+# Claude Code Workspace - Complete Tool Installation Script
+# Installs ALL workspace tools to ~/.local/bin for universal access
+
+set -euo pipefail
+
+CLAUDE_DIR="${HOME}/.claude"
+BIN_DIR="${HOME}/.local/bin"
+BACKUP_DIR=""
+
+handle_failure() {
+    echo
+    echo "❌ Installation failed! Rolling back changes..."
+    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+        # Restore backed up files
+        if ls "$BACKUP_DIR"/* >/dev/null 2>&1; then
+            cp "$BACKUP_DIR"/* "$BIN_DIR/" 2>/dev/null || true
+            echo "✅ Restored previous files from backup"
+        fi
+        rm -rf "$BACKUP_DIR"
+    fi
+    echo "🔧 Please check the error above and try again"
+    exit 1
+}
+
+main() {
+    echo "🔧 Claude Code Workspace - Complete Tool Installer v1.1"
+    echo "======================================================"
+    echo
+    echo "💡 This installer sets up ALL workspace tools:"
+    echo "   • SAGE development tools (sage-dev, sage-sync, sage-status, gpu-ws)"
+    echo "   • GFM Link Checker (gfm-check)"
+    echo "   • CNS Notification System (cns-notify)"
+    echo "   • Tmux Session Management (tmux-session, tmux-list, tmux-kill)"
+    echo "   • Configures PATH automatically for global access"
+    echo
+    echo "🎯 After installation, all commands work from any directory!"
+    echo
+    
+    # Create backup directory for rollback capability
+    BACKUP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/claude-install-backup.XXXXXX")
+    trap 'handle_failure' ERR
+    
+    validate_workspace
+    setup_directories
+    install_sage_tools
+    install_gfm_checker
+    install_cns_tools
+    install_tmux_tools
+    setup_path
+    verify_installation
+    
+    # Cleanup backup on success
+    rm -rf "$BACKUP_DIR"
+    
+    echo
+    echo "🎉 Complete Installation Finished!"
+    echo
+    echo "📚 Available Tools:"
+    echo "   SAGE Development:"
+    echo "     sage-dev     - Development environment launcher"
+    echo "     sage-sync    - Workspace/session sync tool"
+    echo "     sage-status  - Infrastructure health check"
+    echo "     gpu-ws       - GPU workstation access"
+    echo
+    echo "   Documentation & Quality:"
+    echo "     gfm-check    - Markdown link integrity checker"
+    echo
+    echo "   System Tools:"
+    echo "     cns-notify   - Audio notification system"
+    echo "     tmux-session - Session management"
+    echo "     tmux-list    - List active sessions"
+    echo "     tmux-kill    - Kill sessions"
+    echo
+    echo "💡 All commands are now available globally!"
+    echo "   Restart your shell or run: source ~/.zshrc"
+}
+
+validate_workspace() {
+    echo "🔍 Step 1: Validating Claude Code Workspace"
+    echo "   Checking if workspace is properly set up..."
+    echo
+    
+    if [[ ! -d "$CLAUDE_DIR" ]]; then
+        echo "❌ Claude Code workspace not found at: $CLAUDE_DIR"
+        echo
+        echo "🚨 Please clone the workspace first:"
+        echo "   git clone <repo-url> ~/.claude"
+        echo
+        exit 1
+    fi
+    
+    local tool_dirs=("tools/sage-aliases" "tools/gfm-link-checker" "automation/cns" "tmux")
+    local missing_tools=()
+    
+    for tool_dir in "${tool_dirs[@]}"; do
+        if [[ ! -d "$CLAUDE_DIR/$tool_dir" ]]; then
+            missing_tools+=("$tool_dir")
+        fi
+    done
+    
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        echo "⚠️  Some tools are missing from workspace:"
+        for missing in "${missing_tools[@]}"; do
+            echo "   - $missing"
+        done
+        echo
+        echo "💡 These tools will be skipped during installation."
+        echo
+    fi
+    
+    echo "✅ Claude Code workspace validated"
+    echo
+}
+
+setup_directories() {
+    echo "📁 Step 2: Setting Up Installation Directories"
+    echo "   Creating ~/.local/bin for global command access..."
+    echo
+    
+    if [[ -d "$BIN_DIR" ]]; then
+        echo "✅ Directory already exists: $BIN_DIR"
+    else
+        mkdir -p "$BIN_DIR"
+        echo "✅ Created directory: $BIN_DIR"
+    fi
+    echo
+}
+
+install_sage_tools() {
+    echo "🧠 Step 3: Installing SAGE Development Tools"
+    echo "   Installing comprehensive SAGE development suite..."
+    echo
+    
+    if [[ ! -d "$CLAUDE_DIR/tools/sage-aliases/bin" ]]; then
+        echo "⚠️  SAGE tools not found, skipping..."
+        echo
+        return
+    fi
+    
+    local sage_commands=("sage-dev" "sage-sync" "sage-status" "gpu-ws")
+    local installed=0
+    
+    for cmd in "${sage_commands[@]}"; do
+        if [[ -f "$CLAUDE_DIR/tools/sage-aliases/bin/$cmd" ]]; then
+            # Backup existing file if present
+            [[ -f "$BIN_DIR/$cmd" ]] && cp "$BIN_DIR/$cmd" "$BACKUP_DIR/$cmd.bak" 2>/dev/null || true
+            cp "$CLAUDE_DIR/tools/sage-aliases/bin/$cmd" "$BIN_DIR/$cmd"
+            chmod +x "$BIN_DIR/$cmd"
+            echo "   ✅ $cmd: Installed"
+            ((installed++))
+        fi
+    done
+    
+    echo "   📊 SAGE tools: $installed/${#sage_commands[@]} installed"
+    echo
+}
+
+install_gfm_checker() {
+    echo "📝 Step 4: Installing GFM Link Checker"
+    echo "   Installing markdown link integrity validation..."
+    echo
+    
+    if [[ ! -f "$CLAUDE_DIR/tools/gfm-link-checker/bin/gfm-check" ]]; then
+        echo "⚠️  GFM checker not found, skipping..."
+        echo
+        return
+    fi
+    
+    [[ -f "$BIN_DIR/gfm-check" ]] && cp "$BIN_DIR/gfm-check" "$BACKUP_DIR/gfm-check.bak" 2>/dev/null || true
+    cp "$CLAUDE_DIR/tools/gfm-link-checker/bin/gfm-check" "$BIN_DIR/gfm-check"
+    chmod +x "$BIN_DIR/gfm-check"
+    echo "   ✅ gfm-check: Installed"
+    echo
+}
+
+install_cns_tools() {
+    echo "🔊 Step 5: Installing CNS Notification System"
+    echo "   Installing audio notification tools..."
+    echo
+    
+    # CNS notify is in the global bin directory
+    if [[ -f "$CLAUDE_DIR/bin/cns-notify" ]]; then
+        [[ -f "$BIN_DIR/cns-notify" ]] && cp "$BIN_DIR/cns-notify" "$BACKUP_DIR/cns-notify.bak" 2>/dev/null || true
+        cp "$CLAUDE_DIR/bin/cns-notify" "$BIN_DIR/cns-notify"
+        chmod +x "$BIN_DIR/cns-notify"
+        echo "   ✅ cns-notify: Installed"
+    else
+        echo "⚠️  CNS tools not found, skipping..."
+    fi
+    echo
+}
+
+install_tmux_tools() {
+    echo "💻 Step 6: Installing Tmux Session Management"
+    echo "   Installing terminal session management tools..."
+    echo
+    
+    if [[ ! -d "$CLAUDE_DIR/tmux/bin" ]]; then
+        echo "⚠️  Tmux tools not found, skipping..."
+        echo
+        return
+    fi
+    
+    local tmux_commands=("tmux-session" "tmux-list" "tmux-kill")
+    local installed=0
+    
+    for cmd in "${tmux_commands[@]}"; do
+        if [[ -f "$CLAUDE_DIR/tmux/bin/$cmd" ]]; then
+            [[ -f "$BIN_DIR/$cmd" ]] && cp "$BIN_DIR/$cmd" "$BACKUP_DIR/$cmd.bak" 2>/dev/null || true
+            cp "$CLAUDE_DIR/tmux/bin/$cmd" "$BIN_DIR/$cmd"
+            chmod +x "$BIN_DIR/$cmd"
+            echo "   ✅ $cmd: Installed"
+            ((installed++))
+        fi
+    done
+    
+    echo "   📊 Tmux tools: $installed/${#tmux_commands[@]} installed"
+    echo
+}
+
+setup_path() {
+    echo "🛤️  Step 7: Configuring PATH for Global Access"
+    echo "   Ensuring ~/.local/bin is in your PATH..."
+    echo
+    
+    if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+        echo "✅ PATH already includes ~/.local/bin"
+        echo
+        return
+    fi
+    
+    local shell_config=""
+    local shell_name=""
+    
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        shell_config="$HOME/.zshrc"
+        shell_name="zsh"
+    elif [[ -n "${BASH_VERSION:-}" ]]; then
+        shell_config="$HOME/.bashrc"
+        shell_name="bash"
+    else
+        echo "⚠️  Unknown shell - please manually add ~/.local/bin to PATH"
+        echo
+        return
+    fi
+    
+    echo "🔧 Adding ~/.local/bin to PATH in $shell_config"
+    echo '' >> "$shell_config"
+    echo '# Claude Code Tools - Added by install-all-tools' >> "$shell_config"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_config"
+    
+    echo "✅ PATH configured for $shell_name"
+    echo
+}
+
+verify_installation() {
+    echo "🔍 Step 8: Verifying Complete Installation"
+    echo "   Testing all installed tools..."
+    echo
+    
+    local all_commands=(
+        "sage-dev" "sage-sync" "sage-status" "gpu-ws"
+        "gfm-check" "cns-notify" 
+        "tmux-session" "tmux-list" "tmux-kill"
+    )
+    
+    local working=0
+    local total=0
+    
+    for cmd in "${all_commands[@]}"; do
+        if [[ -x "$BIN_DIR/$cmd" ]]; then
+            # Test command actually executes
+            if "$BIN_DIR/$cmd" --help >/dev/null 2>&1 || "$BIN_DIR/$cmd" -h >/dev/null 2>&1; then
+                echo "   ✅ $cmd: Working"
+                ((working++))
+            else
+                echo "   ⚠️  $cmd: Installed but not functional"
+            fi
+        else
+            echo "   ⚠️  $cmd: Not installed (tool may be missing from workspace)"
+        fi
+        ((total++))
+    done
+    
+    echo
+    echo "📊 Installation Summary: $working/$total tools available"
+    
+    if [[ $working -gt 0 ]]; then
+        echo "🎯 Installation successful!"
+        if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+            echo "🚀 Commands are immediately available!"
+        else
+            echo "🔄 Commands will be available after shell restart"
+        fi
+    else
+        echo "❌ No tools were installed - check workspace integrity"
+        return 1
+    fi
+}
+
+main "$@"
