@@ -48,6 +48,21 @@ class GFMLinkChecker:
         self.results: List[LinkValidationResult] = []
         self.gitignore_spec = self._load_gitignore_patterns()
         
+        # Sub-repository ignore configuration
+        self.include_ignored = self.config.get('include_ignored', False)
+        self.verbose = self.config.get('verbose', False)
+        self.skipped_directories = []
+        
+        # Built-in ignore patterns (case-insensitive)
+        self.ignore_patterns = {
+            # Third-party dependencies
+            'repos', 'vendor', 'third_party', 'third-party', 
+            'node_modules', 'packages', 'dependencies',
+            # Development environment
+            '.git', '.venv', 'venv', 'env', '.tox', 
+            '__pycache__', '.pytest_cache', 'build', 'dist', '.eggs'
+        }
+        
         # GitHub-specific patterns
         self.github_anchor_pattern = re.compile(r'^[a-z0-9\-_]+$')
         self.relative_link_pattern = re.compile(r'^(?!https?://|mailto:|#)')
@@ -111,6 +126,47 @@ class GFMLinkChecker:
         
         return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
     
+    def _should_skip_directory(self, dir_path: Path) -> Tuple[bool, str]:
+        """Check if a directory should be skipped based on ignore patterns."""
+        if self.include_ignored:
+            return False, ""
+            
+        dir_name = dir_path.name.lower()
+        
+        # Check built-in ignore patterns (case-insensitive)
+        if dir_name in self.ignore_patterns:
+            return True, f"built-in pattern ({dir_name})"
+        
+        # Check if it's a symlink pointing to an ignored directory
+        if dir_path.is_symlink():
+            try:
+                target = dir_path.resolve()
+                if target.is_dir():
+                    target_name = target.name.lower()
+                    if target_name in self.ignore_patterns:
+                        return True, f"symlink to ignored directory ({target_name})"
+            except (OSError, RuntimeError):
+                # Broken symlink or circular reference
+                return True, "broken symlink"
+        
+        # Check .gitmodules for submodule paths
+        if self.git_root:
+            gitmodules_path = self.git_root / '.gitmodules'
+            if gitmodules_path.exists():
+                try:
+                    rel_path = dir_path.relative_to(self.git_root)
+                    gitmodules_content = gitmodules_path.read_text(encoding='utf-8')
+                    if f'path = {rel_path}' in gitmodules_content:
+                        return True, "git submodule"
+                except (ValueError, OSError):
+                    pass
+        
+        # Check gitignore patterns
+        if self._is_ignored(dir_path):
+            return True, "gitignore pattern"
+            
+        return False, ""
+    
     def _is_ignored(self, file_path: Path) -> bool:
         """Check if a file path should be ignored based on gitignore patterns."""
         # Convert to relative path from git root (or workspace if no git root)
@@ -125,13 +181,56 @@ class GFMLinkChecker:
             return False
     
     def find_markdown_files(self) -> List[Path]:
-        """Find all markdown files in the workspace, respecting gitignore patterns."""
+        """Find all markdown files in the workspace, respecting ignore patterns."""
         markdown_files = []
-        for pattern in ['*.md', '*.markdown', '*.mdown', '*.mkdn']:
-            markdown_files.extend(self.workspace_path.rglob(pattern))
+        markdown_extensions = {'.md', '.markdown', '.mdown', '.mkdn'}
         
-        # Filter using gitignore patterns
-        return [f for f in markdown_files if not self._is_ignored(f)]
+        # Walk directories manually to skip ignored ones
+        def walk_directory(current_path: Path):
+            try:
+                # Check if we can read the directory
+                entries = list(current_path.iterdir())
+            except PermissionError as e:
+                if self.verbose:
+                    print(f"⚠️  Permission denied: {current_path} - {e}")
+                return
+            except OSError as e:
+                if self.verbose:
+                    print(f"⚠️  Cannot read directory: {current_path} - {e}")
+                return
+            
+            for entry in entries:
+                if entry.is_file():
+                    # Check if it's a markdown file
+                    if entry.suffix.lower() in markdown_extensions:
+                        # Apply gitignore filtering to files
+                        if not self._is_ignored(entry):
+                            markdown_files.append(entry)
+                elif entry.is_dir():
+                    # Check if directory should be skipped
+                    should_skip, reason = self._should_skip_directory(entry)
+                    if should_skip:
+                        self.skipped_directories.append((entry, reason))
+                        if self.verbose:
+                            print(f"⏭️  Skipping directory: {entry.relative_to(self.workspace_path)} ({reason})")
+                    else:
+                        # Recursively walk non-ignored directories
+                        walk_directory(entry)
+        
+        # Start walking from workspace root
+        walk_directory(self.workspace_path)
+        
+        # Report skipped directories summary
+        if self.verbose and self.skipped_directories:
+            skip_counts = {}
+            for _, reason in self.skipped_directories:
+                skip_counts[reason] = skip_counts.get(reason, 0) + 1
+            
+            print(f"\n📊 Skipped {len(self.skipped_directories)} directories:")
+            for reason, count in skip_counts.items():
+                print(f"   • {count} directories: {reason}")
+        
+        return markdown_files
     
     def extract_links(self, content: str, file_path: Path) -> List[Tuple[str, int, str]]:
         """Extract all links from markdown content using mistletoe AST parser."""
@@ -718,6 +817,16 @@ def main():
         help='Output file (default: stdout)'
     )
     parser.add_argument(
+        '--include-ignored', '-ii',
+        action='store_true',
+        help='Include ignored directories (third-party dependencies, development environment)'
+    )
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='Verbose output showing skipped directories and permission issues'
+    )
+    parser.add_argument(
         '--fix', '-x',
         action='store_true',
         help='Auto-fix broken internal links only (external links are reported for manual review)'
@@ -729,7 +838,9 @@ def main():
     config = {
         'check_external': not args.no_external,
         'check_completeness': not args.no_completeness,
-        'auto_fix': args.fix
+        'auto_fix': args.fix,
+        'include_ignored': args.include_ignored,
+        'verbose': args.verbose
     }
     
     # Initialize checker
