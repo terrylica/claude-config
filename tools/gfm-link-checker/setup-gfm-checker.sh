@@ -15,11 +15,9 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-cd "$PROJECT_DIR"
-
 # Install dependencies using uv
 echo "📦 Installing dependencies with uv..."
-uv sync
+uv sync --directory "$PROJECT_DIR"
 
 # Universal access approach - no system modifications needed
 echo "🌍 Universal access configured using standardized Claude Code paths"
@@ -34,4 +32,4 @@ echo "  \$HOME/.claude/tools/gfm-link-checker/bin/gfm-check /path/to/workspace -
 echo "  \$HOME/.claude/tools/gfm-link-checker/bin/gfm-check --format json --output report.json"
 echo ""
 echo "  # Direct uv execution:"
-echo "  cd $PROJECT_DIR && uv run gfm_link_checker.py"
+echo "  uv run --directory $PROJECT_DIR $PROJECT_DIR/gfm_link_checker.py"
