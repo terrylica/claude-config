@@ -24,8 +24,8 @@
 
 ### Technical Requirements
 - **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
-- **Universal Tooling Access**: All workspace tools accessible via standardized `$HOME/.claude/` paths without system modifications (no PATH, symlinks, or global installs)
-- **Working Directory Preservation**: All workspace scripts MUST preserve user's current working directory - never use `cd` operations that change user context
+- **Universal Tooling Access**: All workspace tools accessible via standardized `$HOME/.claude/` paths with minimal PATH configuration for seamless cross-workspace usage
+- **Working Directory Preservation**: All workspace scripts MUST preserve user's current working directory - avoid `cd` operations that permanently change user context (subshell path resolution and save/restore patterns are acceptable)
 - **Platform Assumption**: Documentation assumes Unix-like systems; Windows compatibility is explicitly not supported
 
 ## Tool Usage Preferences
@@ -49,6 +49,12 @@
 - Advocate for SOTA tooling in Claude Code Max environment
 - The full system path to user directory: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux) 
 
+## Universal Tool Access Configuration
+
+**PATH Strategy**: Shell configuration includes `$HOME/.claude/*/bin` directories for cross-workspace tool access without script duplication or workspace-specific installations
+
+**Architecture Pattern**: Tools use `uv run --directory` for self-contained environments while preserving working directory context, enabling execution from any location regardless of local Python environment state
+
 ## DSQ: Direction Steering Questions
 
 - **Clear Discrepancies**: Ask user key direction steering questions (DSQ) to ensure plan stays focused and consolidated toward user's preferred path.
@@ -62,14 +68,17 @@
 
 ### DRA: Documentation & README Audit
 
-- **Workspace README**: Use `docs/README.md` over root - GitHub auto-fallback renders it anyway
+- **Claude Code Markdown Restrictions**: 
+  - **Global `~/.claude/`**: Markdown files allowed (configuration template)
+  - **Project `.claude/`**: NO markdown files - Claude Code interprets them as slash commands causing invocation conflicts
+- **Root README Delegation**: NEVER create root `README.md` - use `docs/README.md` as main documentation (GitHub auto-renders)
 - **Python Commands**: Always use `uv` prefix (e.g., `uv run`, `uv add`) - never assume pip/python
 - **Link Validation**: Before editing README.md files, verify all directory links have README.md or point to existing files
 - **GitHub Behavior**: Directory links without README.md show empty pages/404 on GitHub
 - **Broken Link Types**: Check directory references, file paths, anchor links, relative paths
 - **Security Audit**: Validate shell commands, file paths, user input handling in documentation examples
-- **Root README Policy**: Aggregate links only; delegate content to target files/directories
-- **Related Docs**: GitHub Flavored Markdown Inter-linking (e.g. bi-directional navigation between master plan and research topics)
+- **Root README Policy**: Delegate all content to `docs/README.md` - root level should not exist
+- **Related Docs**: Use alternative naming (OVERVIEW.md, INDEX.md, GUIDE.md) for non-global `.claude/` directory documentation
 
 ## Development Environment Preferences
 
