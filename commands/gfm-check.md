@@ -1,6 +1,6 @@
 ---
 description: GitHub Flavored Markdown link integrity checker with intelligent auto-fix
-argument-hint: "[workspace-path] [--format|-f text|json] [--no-external|-ne] [--output|-o filename] [--fix|-x]"
+argument-hint: "[workspace-path] [--format|-f text|json] [--no-external|-ne] [--no-completeness|-nc] [--output|-o filename] [--include-ignored|-ii] [--verbose|-v] [--fix|-x]"
 allowed-tools: Bash, Task
 ---
 
@@ -8,8 +8,11 @@ allowed-tools: Bash, Task
 
 **Flags:**
 - `--format|-f text|json` - Output format (default: text)
-- `--no-external|-ne` - Skip external URL checking (faster)  
+- `--no-external|-ne` - Skip external URL checking (faster)
+- `--no-completeness|-nc` - Skip README completeness checking
 - `--output|-o filename` - Write report to file instead of stdout
+- `--include-ignored|-ii` - Include ignored directories (third-party dependencies, dev environment)
+- `--verbose|-v` - Show skipped directories and permission issues
 - `--fix|-x` - Auto-fix broken internal links only (external links are reported for manual review)
 
 **Examples:**
@@ -17,6 +20,8 @@ allowed-tools: Bash, Task
 - `/gfm-check /docs -ne -x` - Check docs, skip external URLs, auto-fix
 - `/gfm-check -f json` - Generate JSON report
 - `/gfm-check -o report.txt` - Save report to file
+- `/gfm-check -v` - Verbose output showing skipped directories
+- `/gfm-check -ii -v` - Include ignored directories with verbose output
 
 **Direct Usage (from any workspace):**
 ```bash
@@ -55,6 +60,15 @@ for arg in "${args[@]:1}"; do
             ;;
         --no-external|-ne)
             cmd_args="$cmd_args --no-external"
+            ;;
+        --no-completeness|-nc)
+            cmd_args="$cmd_args --no-completeness"
+            ;;
+        --include-ignored|-ii)
+            cmd_args="$cmd_args --include-ignored"
+            ;;
+        --verbose|-v)
+            cmd_args="$cmd_args --verbose"
             ;;
         --format|-f)
             cmd_args="$cmd_args --format"
