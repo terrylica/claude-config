@@ -24,7 +24,6 @@ This directory contains the global configuration for Claude Code, organized into
 | **[Automation System](../automation/)** | Event-driven automation and CNS integration | `automation/cns/`, `automation/logs/` |
 | **[Development Tools](../tools/)** | Standalone utilities and development aids | `tools/gfm-link-checker/` |
 | **[System Architecture](ARCHITECTURE.md)** | Detailed system design and integration architecture | `docs/ARCHITECTURE.md` |
-| **[Migration Documentation](REPOSITORY_MIGRATION.md)** | Repository migration guide and verification | `docs/REPOSITORY_MIGRATION.md` |
 | **[System Runtime](../system/)** | Session management and todo tracking | `system/sessions/`, `system/todos/`, `system/ide/`, `system/statsig/` |
 | **[Development Context](../settings.json)** | Core configuration and system preferences | `settings.json` |
 | **[Agent Configurations](../agents/)** | Custom agent definitions and behaviors | `agents/` directory |

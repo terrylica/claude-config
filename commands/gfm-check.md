@@ -24,9 +24,23 @@ $HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]
 ```
 
 ```bash
-# Parse arguments
+# Parse arguments and preserve working directory
 args=($ARGUMENTS)
-workspace_path="${args[0]:-$(pwd)}"
+
+# Determine workspace path while preserving user's working directory
+if [[ -n "${args[0]}" ]]; then
+    # User provided explicit path argument
+    if [[ "${args[0]}" = /* ]]; then
+        # Already absolute path
+        workspace_path="${args[0]}"
+    else
+        # Convert relative path to absolute using user's current working directory
+        workspace_path="$(cd "${PWD}/${args[0]}" 2>/dev/null && pwd || echo "${PWD}/${args[0]}")"
+    fi
+else
+    # No path argument - use user's current working directory
+    workspace_path="${PWD}"
+fi
 
 # Build command arguments and check for --fix flag
 cmd_args="$workspace_path"
@@ -162,9 +176,9 @@ if ! check_and_setup_uv; then
     exit 1
 fi
 
-# Run the GFM link checker using universal Claude Code path (preserves working directory)
+# Run the GFM link checker using universal Claude Code path (preserves working directory)  
 echo "🔍 Running GFM link integrity check..."
-$HOME/.claude/tools/gfm-link-checker/bin/gfm-check $cmd_args
+uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" $cmd_args
 
 # Check exit code and auto-fix if requested
 exit_code=$?
@@ -174,7 +188,7 @@ if [[ $exit_code -ne 0 && "$auto_fix" == "true" ]]; then
     
     # Re-run with JSON output to get structured error data for analysis
     echo "🔧 Generating structured error report for analysis..."
-    json_output=$($HOME/.claude/tools/gfm-link-checker/bin/gfm-check $cmd_args --format json 2>/dev/null)
+    json_output=$(uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" $cmd_args --format json 2>/dev/null)
     
     # Save JSON output to temporary file for agent analysis
     temp_file="/tmp/gfm_check_errors_$(date +%s).json"
