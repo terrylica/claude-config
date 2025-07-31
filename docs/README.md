@@ -1,72 +1,65 @@
-# Claude Code Global Configuration
+# Claude Code Global Configuration Template
 
-This directory contains the global configuration for Claude Code, organized into specialized subsystems for workflow integration.
+This repository serves as a comprehensive template for Claude Code workspace configuration, providing standardized tools, automation, and team setup procedures.
 
-## System Requirements
+## Quick Start
 
-**Supported Platforms**: Unix-like systems only (macOS, Linux)  
-**Shell Requirements**: POSIX-compliant shells (zsh, bash)  
-**Dependencies**: 
-- Common: `jq`, `curl`
-- Audio (macOS): `afplay` OR Audio (Linux): `paplay`/`aplay`
-- Clipboard (macOS): `pbcopy` OR Clipboard (Linux): `xclip`/`xsel`
-- Text-to-Speech (macOS): `say` OR TTS (Linux): `espeak`/`festival`
+**For team members - complete setup in 2 minutes:**
+```bash
+git clone <repo-url> ~/.claude
+cd ~/.claude
+./install-all-tools
+```
 
-> **Note**: This workspace is **not designed for Windows compatibility**. All paths and scripts assume Unix conventions (`$HOME`, `/tmp/`, etc.)
+## Documentation
 
-## System Architecture
+- **[Team Setup Guide](TEAM_SETUP.md)** - Complete installation and usage guide
+- **[Architecture Overview](ARCHITECTURE.md)** - System architecture and design principles
+- **[Seamless Sync Setup](seamless-sync-setup.md)** - Advanced sync configuration
+- **[Claude Code Sync Strategy](claude-code-sync-strategy.md)** - Synchronization strategies
+- **[Bidirectional Sync Demo](bidirectional-sync-demo.md)** - Sync demonstration
+- **[GPU Cloud Setup](gpu-cloud-setup.md)** - GPU workstation configuration
+- **[Official Files Reference](CLAUDE_CODE_OFFICIAL_FILES.md)** - Claude Code file specifications
 
-| Component | Purpose | Key Files |
-|-----------|---------|-----------|
-| **[APCF System](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation)** | Audit-proof commit formatting for SR&ED evidence | `CLAUDE.md` |
-| **[CNS (Conversation Notification System)](../automation/cns/)** | Audio notification system (clipboard disabled) | `automation/cns/conversation_handler.sh`, `automation/cns/config/` |
-| **[Command Hub](../commands/)** | Slash command system for workflow automation | `commands/` directory |
-| **[Automation System](../automation/)** | Event-driven automation and CNS integration | `automation/cns/`, `automation/logs/` |
-| **[Development Tools](../tools/)** | Standalone utilities and development aids | `tools/gfm-link-checker/` |
-| **[System Architecture](ARCHITECTURE.md)** | Detailed system design and integration architecture | `docs/ARCHITECTURE.md` |
-| **[System Runtime](../system/)** | Session management and todo tracking | `system/sessions/`, `system/todos/`, `system/ide/`, `system/statsig/` |
-| **[Development Context](../settings.json)** | Core configuration and system preferences | `settings.json` |
-| **[Agent Configurations](../agents/)** | Custom agent definitions and behaviors | `agents/` directory |
-| **[Tmux Integration](../tmux/)** | Simple session management with smart naming | `tmux/` directory |
-| **[Historical Data](../history/)** | Archived sessions and development history | `history/` directory |
-| **[Shell Snapshots](../shell-snapshots/)** | Terminal session state captures | `shell-snapshots/` directory |
+## Tools & Components
 
-## Core Configuration Files
+### SAGE Development Suite
+- **Location**: `tools/sage-aliases/`
+- **Documentation**: [SAGE Tools Documentation](../tools/sage-aliases/docs/README.md)
+- **Commands**: `sage-dev`, `sage-sync`, `sage-status`, `gpu-ws`
 
-- **`settings.json`**: Main Claude Code configuration with model settings and hook definitions
-- **`CLAUDE.md`**: User memory system with APCF methodology and workflow preferences  
-- **`.gitignore`**: Version control exclusions for temporary and system files
-- **`CLAUDE_CODE_OFFICIAL_FILES.md`**: Safety documentation for critical system files
+### Documentation & Quality Tools
+- **GFM Link Checker**: `tools/gfm-link-checker/`
+- **Documentation**: [GFM Checker Documentation](../tools/gfm-link-checker/docs/README.md)
+- **Command**: `gfm-check`
 
-⚠️ **Claude Code Official Files (DO NOT MOVE):**
-- `CLAUDE.md` - User memory file
-- `settings.json` - Configuration
-- `system/` directory - Session and runtime data
+### System & Productivity Tools
+- **CNS Notification System**: `automation/cns/`
+- **Documentation**: [CNS Documentation](../automation/cns/README.md)
+- **Command**: `cns-notify`
 
-⚠️ **Integration Files (Modify with caution):**
-- `automation/cns/` directory - CNS hook system integration
+- **Tmux Session Management**: `tmux/`
+- **Documentation**: [Tmux Tools Documentation](../tmux/docs/README.md)
+- **Commands**: `tmux-session`, `tmux-list`, `tmux-kill`
 
-## Audio & Clipboard Integration
+### Command Extensions
+- **Location**: `commands/`
+- **Documentation**: [Command Extensions Documentation](command-extensions.md)
 
-The CNS (Conversation Notification System) provides:
-- **Clipboard Tracking**: Automatic copying of conversation exchanges (USER: + CLAUDE: format)
-- **Cross-Platform Audio**: Configurable volume notification with platform detection (`afplay`/`paplay`/`aplay`)
-- **Cross-Platform Clipboard**: Platform detection for clipboard operations (`pbcopy`/`xclip`/`xsel`)
-- **Cross-Platform TTS**: Folder name text-to-speech with platform alternatives (`say`/`espeak`/`festival`)
-- **Command Detection**: Smart handling of hash (`#`) and slash (`/`) commands for clipboard optimization
-- **Debug Logging**: Comprehensive operation tracking at `/tmp/claude_cns_debug.log`
-- **Volume Control**: JSON-configurable notification volume (0.0-1.0 range)
+### Agent Configurations
+- **Location**: `agents/`
+- **Documentation**: [Agent Configurations Documentation](../agents/docs/)
 
-## Usage
+## Architecture
 
-This configuration enables:
-1. **APCF Workflow**: Type "APCF" to generate audit-proof commit messages with SR&ED evidence
-2. **Cross-Platform Portability**: Supports both macOS and Linux with automatic platform detection
-3. **Clipboard Tracking**: Automatic conversation capture for easy sharing and reference
-4. **Configurable Audio**: Volume-controlled notification system with platform-specific audio players
-5. **Slash Commands**: Custom workflow automation through `/command` syntax including `/apcf`
-6. **Memory Persistence**: Cross-session project context and preference retention
-7. **Development Integration**: Seamless workflow with git, debugging, and productivity tools
-8. **Organizational Repository**: Hosted at https://github.com/Eon-Labs/claude-config
+This workspace follows hybrid architecture principles:
+- **Source files**: Organized in structured directories
+- **Executables**: Globally accessible via `~/.local/bin/`
+- **Documentation**: Centralized in `docs/` directories
+- **Universal access**: All tools work from any directory after installation
 
-For detailed APCF usage and commit formatting guidelines, see the [APCF section in CLAUDE.md](../CLAUDE.md#apcf-audit-proof-commit-format-for-sred-evidence-generation).
+## Support
+
+- **Installation Issues**: Re-run `./install-all-tools` for diagnostics
+- **Tool Usage**: See individual tool documentation linked above
+- **Team Setup**: Follow the [Team Setup Guide](TEAM_SETUP.md)
