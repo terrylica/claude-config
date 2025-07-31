@@ -34,7 +34,7 @@ type(scope): description
 - Hypothesis: [Auto-derived from commit intent + proposed technical approach + risk factors] 
 - Investigation: [Auto-derived from workspace analysis + systematic methodology + failures/iterations]
 - Result: [Auto-derived from changes + technical advancement + specific measurements]
-- Authenticity: [Developer notes + work timestamps + debugging context for CRA contemporaneous compliance]
+- Authenticity: [Real-time technical discoveries + debugging breakthrough moments + tool-specific implementation challenges + personal developer insights demonstrating contemporaneous hands-on technical work]
 
 The follow footer section display the lines of libraries involved seperated by commas and spaces. The lines are shown only if the pertaining libraries are involved:
 
