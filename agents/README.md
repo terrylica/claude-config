@@ -1,31 +1,17 @@
-# Agents Directory
+# Claude Code Agent Configurations
 
-**Purpose**: Custom agent configurations and specialized sub-agents for Claude Code
+Specialized agent configurations for various development tasks.
 
-## Available Agents
+## Documentation
 
-### [Research Scout](./research-scout.md) (`research-scout`)
-Explores research directions from seed keywords. Use when you need systematic exploration of topics.
+All agent documentation is located in the [docs/](docs/) directory:
 
-### [Compliance Auditor](./compliance-auditor.md) (`compliance-auditor`)
-Specialized agent for compliance auditing and regulatory analysis.
-
-### [SR&ED Evidence Extractor](./sred-evidence-extractor.md) (`sred-evidence-extractor`)
-Extracts and documents Scientific Research and Experimental Development evidence from codebases.
-
-### [Simple Helper](./simple-helper.md) (`simple-helper`)
-Basic utility agent for straightforward tasks and assistance.
-
-### [Test Agent](./test-agent.md) (`test-agent`)
-Development and testing agent for experimental workflows.
+- **[Simple Helper](docs/simple-helper.md)** - Basic utility agent
+- **[Research Scout](docs/research-scout.md)** - Research and exploration agent
+- **[Test Agent](docs/test-agent.md)** - Development and testing agent
+- **[Compliance Auditor](docs/compliance-auditor.md)** - SR&ED compliance review
+- **[SR&ED Evidence Extractor](docs/sred-evidence-extractor.md)** - Tax credit evidence extraction
 
 ## Usage
-Use agents with the Task tool:
-```
-Task(description="Research task", prompt="Your request", subagent_type="research-scout")
-```
 
-## Claude Code Official Status
-❌ **USER DIRECTORY** - Safe to customize and modify
-
-This directory contains user-defined agents and is not part of Claude Code's core functionality.
+These agents are configured for use with Claude Code's Task tool. See individual documentation files for specific capabilities and usage patterns.
