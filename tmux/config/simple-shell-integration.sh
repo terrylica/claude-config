@@ -6,24 +6,18 @@
 # Note: Load guard removed to ensure aliases are always available
 
 
-# Configuration
-export CLAUDE_TMUX_DIR="$HOME/.claude/tmux"
+# Hybrid Architecture: Tools now globally available via ~/.local/bin
+# Note: All tmux-* commands are now globally accessible without aliases
 
-# Core tmux session management aliases
-alias tmux-session="$CLAUDE_TMUX_DIR/bin/tmux-session"
-alias tmux-list="$CLAUDE_TMUX_DIR/bin/tmux-list"
-alias tmux-kill="$CLAUDE_TMUX_DIR/bin/tmux-kill"
-alias setup-simple-tmux="$CLAUDE_TMUX_DIR/bin/setup-simple-tmux"
-
-# Convenient shortcuts
-alias ts="$CLAUDE_TMUX_DIR/bin/tmux-session"    # Quick session creation/attach
-alias tl="$CLAUDE_TMUX_DIR/bin/tmux-list"       # List sessions
-alias tk="$CLAUDE_TMUX_DIR/bin/tmux-kill"       # Kill session
+# Convenient shortcuts (pointing to global commands)
+alias ts="tmux-session"    # Quick session creation/attach
+alias tl="tmux-list"       # List sessions
+alias tk="tmux-kill"       # Kill session
 
 # Note: Session persistence is automatic - no manual commands needed
 
 # Quick session operations for current directory
-alias tmux-here="$CLAUDE_TMUX_DIR/bin/tmux-session"    # Create/attach session using folder name
+alias tmux-here="tmux-session"    # Create/attach session using folder name
 
 
 # Help function

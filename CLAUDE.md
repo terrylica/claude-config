@@ -22,38 +22,54 @@
 - **Include**: Environment preferences, tool choices, file locations
 - **Exclude**: Implementation details, parameters, version numbers, limitations, processing flows
 
-### Technical Requirements
-- **Portability**: All workspace documentation MUST use Unix conventions (`$HOME`, `$USER`) instead of explicit paths for cross-user compatibility
-- **Universal Tooling Access**: All workspace tools accessible via standardized `$HOME/.claude/` paths with minimal PATH configuration for seamless cross-workspace usage
-- **Working Directory Preservation**: All workspace scripts MUST preserve user's current working directory - avoid `cd` operations that permanently change user context (subshell path resolution and save/restore patterns are acceptable)
-- **Platform Assumption**: Documentation assumes Unix-like systems; Windows compatibility is explicitly not supported
+## System Architecture & Environment
 
-## Tool Usage Preferences
-- **Remote Viewing**: Prefer `curl` over fetch
-- **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
-- **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
-- **Workspace Tools**: Use direct `$HOME/.claude/` paths for zero-impact cross-user accessibility
-- **Script Execution**: Use `uv run --directory` and universal path construction instead of `cd` operations to preserve working directory
+### Platform & Path Conventions
+- **Target Platform**: Unix-like systems (macOS, Linux) - **Not designed for Windows compatibility**
+- **Path Standards**: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux)
+- **Workspace Location**: `$HOME/.claude/` (follows dotfile convention)
+- **Shell Environment**: POSIX-compliant shells (zsh, bash)
+- **Portability**: All documentation MUST use Unix conventions (`$HOME`, `$USER`) for cross-user compatibility
 
-## System Architecture and Assumptions
+### Universal Tool Access & Working Directory Preservation
+- **Hybrid Architecture Strategy**: `$HOME/.local/bin/` for executables, `$HOME/.claude/tools/` for supporting files/configs
+- **PATH Configuration**: Shell configuration includes ONLY `$HOME/.local/bin` in PATH (industry standard)
+- **Clean Separation**: Executables globally accessible, source code and configs organized in .claude structure
+- **Cross-Platform Consistency**: Same tool access pattern on macOS and Linux environments
+- **Absolute Path Resolution**: Scripts use absolute paths to find supporting files in .claude structure
+- **Architecture Pattern**: Tools use `uv run --directory` for self-contained environments while preserving working directory context
+- **Working Directory Principle**: All workspace scripts MUST preserve user's current working directory - avoid `cd` operations that permanently change user context (subshell path resolution and save/restore patterns are acceptable)
 
-**Target Platform**: Unix-like systems (macOS, Linux) - **Not designed for Windows compatibility**
-
-**Standard Unix Conventions**:
-- User home directory: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux)
-- Workspace location: `$HOME/.claude/` (follows dotfile convention)
-- Shell environment: POSIX-compliant shells (zsh, bash)
-
-**Current User Context**: 
+### Current User Context
 - Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
 - Advocate for SOTA tooling in Claude Code Max environment
-- The full system path to user directory: `$HOME` (resolves to `/Users/$USER` on macOS, `/home/$USER` on Linux) 
 
-## Universal Tool Access Configuration
+## Development Environment & Tools
 
-**PATH Strategy**: Shell configuration includes `$HOME/.claude/*/bin` directories for cross-workspace tool access without script duplication or workspace-specific installations
+### Primary Toolchain
+- **Python Management**: `uv` for all Python operations (`uv run`, `uv add`) - **Avoid**: pip, conda, pipenv
+- **Python Version**: 3.10+, type checking disabled (development environment)
+- **Libraries**: Prefer `httpx` over `requests`, `platformdirs` for cache directories
+- **Remote Access**: Prefer `curl` over fetch
+- **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
+- **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
 
-**Architecture Pattern**: Tools use `uv run --directory` for self-contained environments while preserving working directory context, enabling execution from any location regardless of local Python environment state
+### Git Repository Detection
+- `uv run python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
+
+## Documentation Standards
+
+### Claude Code Markdown Restrictions & README Policies
+- **Global `~/.claude/`**: Markdown files allowed (configuration template)
+- **Project `.claude/`**: NO markdown files - Claude Code interprets them as slash commands causing invocation conflicts
+- **Root README Delegation**: NEVER create root `README.md` - use `docs/README.md` as main documentation (GitHub auto-renders)
+- **Related Docs**: Use alternative naming (OVERVIEW.md, INDEX.md, GUIDE.md) for non-global `.claude/` directory documentation
+
+### Link Validation Standards
+- **Pre-edit Verification**: Verify all directory links have README.md or point to existing files
+- **GitHub Behavior**: Directory links without README.md show empty pages/404 on GitHub
+- **Validation Scope**: Check directory references, file paths, anchor links, relative paths
+- **Security Audit**: Validate shell commands, file paths, user input handling in documentation examples
 
 ## DSQ: Direction Steering Questions
 
@@ -63,38 +79,6 @@
 
 - **Usage**: Request "APCF" or "apcf" to trigger automated SR&ED-compliant commit message generation.
 - **Full Documentation**: See `/apcf` command for complete specifications, templates, and usage guidelines.
-
-## 🧠 Workspace
-
-### DRA: Documentation & README Audit
-
-- **Claude Code Markdown Restrictions**: 
-  - **Global `~/.claude/`**: Markdown files allowed (configuration template)
-  - **Project `.claude/`**: NO markdown files - Claude Code interprets them as slash commands causing invocation conflicts
-- **Root README Delegation**: NEVER create root `README.md` - use `docs/README.md` as main documentation (GitHub auto-renders)
-- **Python Commands**: Always use `uv` prefix (e.g., `uv run`, `uv add`) - never assume pip/python
-- **Link Validation**: Before editing README.md files, verify all directory links have README.md or point to existing files
-- **GitHub Behavior**: Directory links without README.md show empty pages/404 on GitHub
-- **Broken Link Types**: Check directory references, file paths, anchor links, relative paths
-- **Security Audit**: Validate shell commands, file paths, user input handling in documentation examples
-- **Root README Policy**: Delegate all content to `docs/README.md` - root level should not exist
-- **Related Docs**: Use alternative naming (OVERVIEW.md, INDEX.md, GUIDE.md) for non-global `.claude/` directory documentation
-
-## Development Environment Preferences
-
-- `uv run python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
-
-### Python Package Management
-- **Primary Tool**: `uv` for all Python operations
-- **Commands**: Use `uv run` for operations
-- **Tools**: uv, ruff (other tools available via uv install)  
-- **Python**: 3.10+, type checking disabled (development environment)  
-- **Avoid**: pip, conda, pipenv
-
-### Python Library Preference
-
-- Prefer `httpx` over `requests` 
-- Uses `platformdirs` for platform-appropriate cache directories (not workspace dirs)
 
 ## Claude Code User Custom Extensions
 
@@ -106,7 +90,7 @@
 - **Main Script**: `.claude/automation/cns/conversation_handler.sh` (206 lines, audio processing)
 - **Entry Point**: `.claude/automation/cns/cns_hook_entry.sh` (hook system integration)
 - **Notification Hook**: `.claude/automation/cns/cns_notification_hook.sh` (audio notification with configurable volume + folder name announcement)
-- **Manual Utility**: `.claude/bin/cns-notify` (manual notification testing)
+- **Manual Utility**: `cns-notify` (available globally via ~/.local/bin)
 - **Debug Logs**: `/tmp/claude_cns_debug.log` (structured logging)
 
 #### CRITICAL PRINCIPLE: Asynchronous Hook Architecture
@@ -122,7 +106,7 @@
 **Purpose**: Link integrity validation for local workspaces with GitHub-specific behavior
 
 #### Universal Access
-- **Usage**: `$HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]`
+- **Usage**: `gfm-check [options]` (available globally via ~/.local/bin)
 - **Zero Configuration**: Works from any workspace without system modifications
 
 #### Core Files

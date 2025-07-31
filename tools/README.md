@@ -10,8 +10,9 @@
 
 - `sage-aliases/` - SAGE development productivity tool
   - Comprehensive alias system for dual-environment development
-  - Universal access commands: `gpu`, `sage-dev`, `sage-status`
+  - Universal access commands: `gpu-ws`, `sage-dev`, `sage-status`, `sage-sync`
   - GPU workstation integration and infrastructure monitoring
+  - Advanced sync tool with error handling and comprehensive debugging
 
 ## Features
 - Standalone utility tools

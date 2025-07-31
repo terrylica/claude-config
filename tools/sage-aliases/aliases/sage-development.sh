@@ -3,44 +3,29 @@
 # Part of SAGE Aliases Tool - /Users/terryli/.claude/tools/sage-aliases/
 
 # =============================================================================
-# SAGE SESSION SAFETY
+# CLAUDE SESSION SYNC (Simple Git-Based)
 # =============================================================================
 
-# Safe session startup with corruption prevention
-function sage-safe-start() {
-    # Check for active sessions on other machines
-    if test -f ~/.claude/.session-owner; then
-        echo "⚠️  Session active on: $(cat ~/.claude/.session-owner)"
-        return 1
-    fi
-    
-    # Check for sync conflicts
-    if ls ~/.claude/projects/*.sync-conflict* 2>/dev/null; then
-        echo "🚨 Resolve sync conflicts first: ls ~/.claude/projects/*.sync-conflict*"
-        return 1
-    fi
-    
-    # Validate session file integrity
-    if ! find ~/.claude/projects -name "*.jsonl" -exec jq empty {} \; 2>/dev/null; then
-        echo "🚨 Corrupted session file detected - check ~/.claude/projects/"
-        return 1
-    fi
-    
-    # Create session lock
-    echo "$(hostname)-$(date)" > ~/.claude/.session-owner
-    trap 'rm -f ~/.claude/.session-owner' EXIT
-    echo "✅ Session safety checks passed"
+# Simple Claude session backup/restore
+function claude-session-backup() {
+    cd ~/.claude && git add projects/ && git commit -m "session backup: $(hostname) $(date '+%H:%M')" && git push
+    echo "✅ Claude sessions backed up"
+}
+
+function claude-session-restore() {
+    cd ~/.claude && git pull
+    echo "✅ Claude sessions restored"
 }
 
 # =============================================================================
 # SAGE MODEL ALIASES
 # =============================================================================
 
-# Individual model development (with session safety)
-alias alphaforge-dev='sage-safe-start && cd ~/eon/nt/repos/alphaforge && echo "📊 AlphaForge Development" && claude'
-alias catch22-dev='sage-safe-start && cd ~/eon/nt && echo "🎣 catch22 Features Development" && python3 -c "import pycatch22; print(f\"catch22 version: {pycatch22.__version__}\")" && claude'
-alias tsfresh-dev='sage-safe-start && cd ~/eon/nt && echo "🔍 tsfresh Features Development" && python3 -c "import tsfresh; print(f\"tsfresh version: {tsfresh.__version__}\")" && claude'
-alias tirex-gpu='ssh zerotier-remote -t "sage-safe-start && cd ~/eon/nt && echo \"🦕 TiRex GPU Development\" && export PATH=~/.npm-global/bin:\$PATH && python3 -c \"import torch; print(f\\\"CUDA: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \\\"None\\\"}\\\")\" && claude"'
+# Individual model development (simplified)
+alias alphaforge-dev='cd ~/eon/nt/repos/alphaforge && claude'
+alias catch22-dev='cd ~/eon/nt && claude'  
+alias tsfresh-dev='cd ~/eon/nt && claude'
+alias tirex-gpu='ssh zerotier-remote -t "cd ~/eon/nt && claude"'
 
 # =============================================================================
 # SAGE ENSEMBLE DEVELOPMENT

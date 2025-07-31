@@ -1,37 +1,38 @@
 # Universal GFM Link Checker Access
 
-## Zero-Impact Global Usage
+## Global Command Access
 
-Since every user has the standardized `$HOME/.claude/` directory structure, the GFM link checker is universally accessible without any system modifications.
+The GFM link checker is installed to `~/.local/bin` for universal, robust access across all shells and environments.
 
 ## Usage from Any Workspace
 
-Use the standard path from any directory:
+Use the global command from any directory:
 
 ```bash
 # Check current directory
-$HOME/.claude/tools/gfm-link-checker/bin/gfm-check
+gfm-check
 
 # Check specific directory  
-$HOME/.claude/tools/gfm-link-checker/bin/gfm-check /path/to/other/workspace
+gfm-check /path/to/other/workspace
 
 # Check with options
-$HOME/.claude/tools/gfm-link-checker/bin/gfm-check --no-completeness --verbose
+gfm-check --no-completeness --verbose
 ```
 
 ## Benefits
 
-- **Zero Configuration**: Works immediately on any system with `$HOME/.claude/` structure
-- **Universal**: Same command works for all users across all computers
-- **No Impact**: Requires no shell profile modifications or system changes
-- **Portable**: Part of the Claude Code global configuration template
+- **Industry Standard**: Uses standard `~/.local/bin` location
+- **Universal Access**: Works in any shell (bash, zsh, fish)
+- **Script-Ready**: Works in automation, cron jobs, SSH sessions
+- **No Sudo Required**: User-owned installation
+- **Cross-Platform**: Same pattern on macOS and Linux
 
 ## Verification
 
 Test from any directory:
 ```bash
 cd /tmp
-$HOME/.claude/tools/gfm-link-checker/bin/gfm-check --help
+gfm-check --help
 ```
 
 The tool preserves your current working directory and can validate any workspace.

@@ -153,7 +153,7 @@ The CNS notification volume can be adjusted independently of system volume:
 - `0.5` = Half volume (50%)
 - `1.0` = Full volume (original loudness)
 
-**Testing**: Use `$HOME/.claude/bin/cns-notify` to test audio playback (note: manual test does not include volume control)
+**Testing**: Use `cns-notify` to test audio playback (note: manual test does not include volume control)
 
 **Important**: This only affects CNS notification audio. System volume and other applications remain unchanged.
 

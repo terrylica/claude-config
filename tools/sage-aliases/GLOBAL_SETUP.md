@@ -2,7 +2,7 @@
 
 **Tool**: SAGE development aliases and productivity commands  
 **Location**: `/Users/terryli/.claude/tools/sage-aliases/`  
-**Access**: Universal commands via `$HOME/.claude/*/bin` pattern
+**Access**: Global commands via `~/.local/bin` (industry standard)
 
 ## Installation Status
 
@@ -13,23 +13,27 @@
 
 ## Universal Access Commands
 
-### Available Immediately (via PATH)
+### Available Globally (via ~/.local/bin)
 ```bash
-gpu              # GPU workstation connection and management
+gpu-ws           # GPU workstation connection and management
 sage-dev         # SAGE development environment launcher
 sage-status      # Infrastructure health monitoring
+sage-sync        # Comprehensive sync tool for dual environments
 ```
 
 ### Command Examples
 ```bash
 # Test GPU workstation connectivity
-gpu check
+gpu-ws
 
 # Start SAGE ensemble development
 sage-dev ensemble
 
 # Check complete infrastructure health
 sage-status
+
+# Sync sessions and workspace
+sage-sync --sync-sessions
 ```
 
 ## Shell Integration Options
@@ -51,10 +55,11 @@ source ~/.claude/tools/sage-aliases/aliases/sage-development.sh
 ## Architecture Benefits
 
 ### Universal Access Pattern
-- **Cross-workspace**: Commands work from any workspace
-- **PATH Integration**: Follows `$HOME/.claude/*/bin` convention
-- **Working Directory Preservation**: Commands preserve current location
-- **Zero Configuration**: No shell modification required
+- **Industry Standard**: Uses `~/.local/bin` location (same as pipx, uv, etc.)
+- **Cross-Platform**: Same pattern on macOS and Linux environments
+- **Shell Agnostic**: Works in bash, zsh, fish, and any POSIX shell
+- **Automation Ready**: Works in scripts, cron jobs, SSH sessions
+- **No Sudo Required**: User-owned installation and updates
 
 ### Organized Structure
 - **Modular Design**: Separate concerns (GPU, SAGE, sync, network)
@@ -100,9 +105,14 @@ sage-dev status
 ## Troubleshooting
 
 ### If Commands Not Found
-Check PATH includes `$HOME/.claude/*/bin`:
+Check PATH includes `~/.local/bin`:
 ```bash
-echo $PATH | grep ".claude"
+echo $PATH | grep ".local/bin"
+```
+
+If not found, add to your shell config:
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
 
 ### If Aliases Not Working

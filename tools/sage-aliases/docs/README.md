@@ -4,25 +4,22 @@
 
 ## Universal Access Commands
 
-The tool provides universal access via `$HOME/.claude/*/bin` pattern:
+The tool provides global access via `~/.local/bin` (industry standard):
 
 ### Core Commands
 ```bash
-gpu              # GPU workstation connection and management
+gpu-ws           # GPU workstation connection and management
 sage-dev         # SAGE development environment launcher  
 sage-status      # Infrastructure health monitoring
+sage-sync        # Comprehensive sync tool for dual environments
 ```
 
 ## Command Reference
 
-### GPU Workstation (`gpu`)
+### GPU Workstation (`gpu-ws`)
 ```bash
-gpu              # SSH to GPU workstation
-gpu status       # GPU hardware status
-gpu check        # Connectivity test
-gpu claude       # Start Claude Code on GPU
-gpu sage         # SAGE development with GPU monitoring
-gpu dev          # Complete development startup
+gpu-ws           # SSH to GPU workstation
+gpu-ws --help    # Show all available options
 ```
 
 ### SAGE Development (`sage-dev`)
@@ -56,7 +53,7 @@ sage-status models # SAGE models availability
 
 The tool follows the standard `/Users/terryli/.claude/tools/` pattern:
 
-1. **Automatic PATH**: Commands available via `$HOME/.claude/*/bin` pattern
+1. **Global Access**: Commands available via `~/.local/bin` (industry standard)
 2. **Shell Integration**: Source alias files as needed
 3. **Universal Access**: Work from any directory
 
@@ -122,7 +119,7 @@ sage-status gpu
 
 ### Shell Configuration
 The tool integrates with shell configuration via:
-- Universal PATH pattern: `$HOME/.claude/*/bin`
+- Industry standard: `~/.local/bin` location
 - Selective alias sourcing as needed
 - Working directory preservation
 
