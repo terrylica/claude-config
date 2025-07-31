@@ -1,0 +1,114 @@
+#!/bin/bash
+# SAGE Development Launcher - Universal Access Command
+# Part of SAGE Aliases Tool - /Users/terryli/.claude/tools/sage-aliases/
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOL_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Source SAGE development aliases to get access to functions
+source "$TOOL_DIR/aliases/sage-development.sh"
+
+# If no arguments, show help
+if [ $# -eq 0 ]; then
+    echo "SAGE Development Environment Launcher
+
+Usage: sage-dev [environment]
+
+Environments:
+  docs         Documentation and planning (macOS)
+  tirex        TiRex GPU inference (GPU workstation)
+  ensemble     Full SAGE integration (GPU workstation)
+  local        Local CPU development (macOS)
+  status       Show all models status
+  diag         Environment diagnostics
+
+Examples:
+  sage-dev docs       # Start documentation session on macOS
+  sage-dev tirex      # Start TiRex development on GPU workstation
+  sage-dev ensemble   # Start full SAGE ensemble development
+  sage-dev status     # Check all SAGE models availability
+  
+Auto-selects optimal environment based on task requirements."
+    exit 0
+fi
+
+# Handle specific environments
+case "$1" in
+    "docs"|"documentation"|"planning"|"research")
+        echo "📚 Using macOS for documentation work"
+        cd ~/eon/nt/docs && exec claude
+        ;;
+    "tirex"|"gpu"|"inference"|"training")
+        echo "🎮 Using GPU workstation for compute-intensive work"
+        exec ssh zerotier-remote -t "cd ~/eon/nt && export PATH=~/.npm-global/bin:\$PATH && claude"
+        ;;
+    "ensemble"|"sage"|"integration"|"all")
+        echo "🧠 Using GPU workstation for full SAGE integration"
+        exec ssh zerotier-remote -t "
+cd ~/eon/nt
+echo \"🧠 SAGE Ensemble Development Session\"
+export PATH=~/.npm-global/bin:\$PATH
+echo \"=== Model Availability Check ===\"
+echo \"✅ AlphaForge: \$(ls repos/alphaforge/ | head -3)\"
+python3 -c \"import pycatch22; print(\\\"✅ catch22: Available\\\")\" 2>/dev/null || echo \"❌ catch22: Not available\"
+python3 -c \"import tsfresh; print(\\\"✅ tsfresh: Available\\\")\" 2>/dev/null || echo \"❌ tsfresh: Not available\"
+python3 -c \"import torch; print(f\\\"✅ TiRex GPU: {torch.cuda.is_available()}\\\")\" 2>/dev/null || echo \"❌ TiRex: PyTorch not available\"
+echo \"=== Starting SAGE Development ===\"
+claude
+"
+        ;;
+    "local"|"cpu"|"testing")
+        echo "🍎 Using macOS for local development"
+        cd ~/eon/nt && exec claude
+        ;;
+    "status")
+        echo "📊 SAGE Models Status:"
+        echo ""
+        echo "✅ AlphaForge: $(ls ~/eon/nt/repos/alphaforge/ > /dev/null 2>&1 && echo "Available" || echo "Missing")"
+        echo "✅ NautilusTrader: $(ls ~/eon/nt/repos/nautilus_trader/ > /dev/null 2>&1 && echo "Available" || echo "Missing")"  
+        echo "✅ DSM: $(ls ~/eon/nt/repos/data-source-manager/ > /dev/null 2>&1 && echo "Available" || echo "Missing")"
+        echo "✅ FinPlot: $(ls ~/eon/nt/repos/finplot/ > /dev/null 2>&1 && echo "Available" || echo "Missing")"
+        echo "✅ catch22: $(cd ~/eon/nt && uv run python -c "import pycatch22; print('Available')" 2>/dev/null || echo "Not installed")"
+        echo "✅ tsfresh: $(cd ~/eon/nt && uv run python -c "import tsfresh; print('Available')" 2>/dev/null || echo "Not installed")"
+        echo "✅ TiRex GPU: $(ssh zerotier-remote "cd ~/eon/nt && source .venv/bin/activate && python3 -c \"import torch; print('Available' if torch.cuda.is_available() else 'CUDA not available')\"" 2>/dev/null || echo "Remote check failed")"
+        ;;
+    "diag"|"diagnostics")
+        echo "🔍 SAGE Environment Diagnostics"
+        echo ""
+        echo "Local macOS:"
+        python3 -c "import pycatch22, tsfresh; print(f\"catch22: {pycatch22.__version__}, tsfresh: {tsfresh.__version__}\")" 2>/dev/null || echo "Python packages not available locally"
+        echo ""
+        echo "Remote GPU:"
+        ssh zerotier-remote "python3 -c \"import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')\"" 2>/dev/null || echo "Remote Python environment check failed"
+        echo ""
+        echo "Repositories:"
+        ls -la ~/eon/nt/repos/ | grep -E "(alphaforge|nautilus|data-source|finplot)"
+        ;;
+    "help"|"-h"|"--help")
+        echo "SAGE Development Environment Launcher
+
+Usage: sage-dev [environment]
+
+Environments:
+  docs         Documentation and planning (macOS)
+  tirex        TiRex GPU inference (GPU workstation)  
+  ensemble     Full SAGE integration (GPU workstation)
+  local        Local CPU development (macOS)
+  status       Show all models status
+  diag         Environment diagnostics
+
+The launcher automatically selects the optimal environment:
+- Documentation work → macOS (fast local access)
+- GPU models (TiRex) → GPU workstation (direct hardware access)
+- Full SAGE ensemble → GPU workstation (all models available)
+- CPU models only → Either environment
+
+Part of SAGE Aliases Tool - ~/.claude/tools/sage-aliases/"
+        ;;
+    *)
+        echo "Unknown environment: $1"
+        echo "Use 'sage-dev help' for available environments"
+        exit 1
+        ;;
+esac

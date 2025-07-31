@@ -8,6 +8,11 @@
   - UV project with comprehensive validation
   - Command-line interface for local workspaces
 
+- `sage-aliases/` - SAGE development productivity tool
+  - Comprehensive alias system for dual-environment development
+  - Universal access commands: `gpu`, `sage-dev`, `sage-status`
+  - GPU workstation integration and infrastructure monitoring
+
 ## Features
 - Standalone utility tools
 - Development aids and helpers
