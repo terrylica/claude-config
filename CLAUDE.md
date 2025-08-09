@@ -75,6 +75,30 @@
 
 - **Clear Discrepancies**: Ask user key direction steering questions (DSQ) to ensure plan stays focused and consolidated toward user's preferred path.
 
+## MHR: Module Housekeep Refactoring 
+
+### Comprehensive Audit & Alignment
+- Conduct systematic analysis of the designated workspace or module folder path for inconsistencies, outdated terminology requiring correction, legacy files requiring archival, redundancies requiring consolidation or DRY principles application, and corresponding local bin wrapper(s) requiring alignment.
+- Add defensive docstrings in code to document hard-learned truths and prevent regression to proven unsound practices.
+
+### Strategic Modularization & Tracking
+- Modularize the largest scripting file using minimum viable effort with maximum impact to reduce file size and improve maintainability.
+- Commit a pre-flight modularization snapshot and record its commit hash ID in the modularized files for future reference and rollback capability.
+
+#### Import Stability Guardrails (During Modularization)
+- Prefer absolute imports at package boundaries; use explicit relative imports within the same package (PEP 328).
+- Keep top-level modules side-effect free; defer I/O, configuration, and heavy initialization to functions or guarded entry points.
+- Define and preserve a stable public API via `__init__.py` re-exports and `__all__`; reshuffle internals without changing external import paths.
+- Provide temporary compatibility shims (re-exports + `DeprecationWarning`) for moved symbols; schedule removal after a deprecation window.
+- Prevent circular imports with layered dependencies; use postponed annotations and `TYPE_CHECKING` for type-only imports.
+- Use the `src/` layout; run tests against the installed package and compile modules during CI.
+- Avoid shadowing stdlib names; use namespace packages (PEP 420) only when necessary.
+- Optionally use module `__getattr__`/`__dir__` (PEP 562) for lazy subpackages and transitional import aliases.
+
+### Documentation Synchronization
+- Update all relevant documentation to reflect structural changes, new module boundaries, and updated usage patterns.
+
+
 ## APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
 - **Usage**: Request "APCF" or "apcf" to trigger automated SR&ED-compliant commit message generation.
