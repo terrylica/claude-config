@@ -16,4 +16,3 @@ Transform seed keywords into research direction options.
 - Summary of keyword landscape
 - Research direction options
 - Recommendations and next steps
-EOF < /dev/null

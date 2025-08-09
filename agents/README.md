@@ -16,11 +16,11 @@ Extracts and documents Scientific Research and Experimental Development evidence
 ### [Simple Helper](./simple-helper.md) (`simple-helper`)
 Basic utility agent for straightforward tasks and assistance.
 
-### [Test Agent](./test-agent.md) (`test-agent`)
-Development and testing agent for experimental workflows.
-
 ### [Python Import Validator](./python-import-validator.md) (`python-import-validator`)
 Comprehensive Python import health validation using multi-tool static analysis approach.
+
+### [Workspace Sync](./workspace-sync.md) (`workspace-sync`)
+Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations and cross-environment development workflows.
 
 ## Usage
 Use agents with the Task tool:

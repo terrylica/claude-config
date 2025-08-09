@@ -8,14 +8,15 @@
 
 ### Analysis Steps
 1. **Third-party protection check** - Identify and protect third-party submodules from accidental commits
-2. **Staged files** (`git diff --cached --name-status`) - ready to commit
-3. **Modified files** (`git diff --name-status`) - unstaged changes  
-4. **Untracked files** (`git status --porcelain`) - new files
-5. **Recent commits** (`git log --oneline -5`) - understand commit patterns
-6. Auto-derive SR&ED evidence from complete change analysis
-7. Generate logical commit grouping and sequencing strategy
-8. Execute commits in sequence with user approval (using safe commit process)
-9. Verify clean working tree completion
+2. **Gitignore conflict detection** - Detect and auto-resolve tracked files matching .gitignore patterns
+3. **Staged files** (`git diff --cached --name-status`) - ready to commit
+4. **Modified files** (`git diff --name-status`) - unstaged changes  
+5. **Untracked files** (`git status --porcelain`) - new files
+6. **Recent commits** (`git log --oneline -5`) - understand commit patterns
+7. Auto-derive SR&ED evidence from complete change analysis
+8. Generate logical commit grouping and sequencing strategy
+9. Execute commits in sequence with user approval (using safe commit process)
+10. Verify clean working tree completion
 
 ### Timestamp Requirement
 First get the current 'America/Vancouver' time using:
@@ -124,8 +125,47 @@ Here in this line, the last line in the commit message, we display the result of
 - **File deletion metrics** (e.g., "−2,977 deletions") demonstrate systematic simplification research
 - **User approval workflow** ensures commit strategy alignment before execution
 
+### Gitignore Conflict Detection & Resolution
+
+**Purpose**: Automatically detect and resolve tracked files that should be ignored per .gitignore rules
+
+#### Detection Process
+```bash
+# Identify tracked files matching .gitignore patterns
+git ls-files -i --exclude-standard -c
+```
+
+#### Auto-Resolution Workflow
+When conflicts are detected:
+1. **Display conflicted files**: Show which tracked files match .gitignore
+2. **Auto-untrack files**: Use `git rm --cached` to untrack while preserving local files
+3. **Dedicated commit**: Create separate commit for gitignore hygiene
+4. **Continue APCF**: Proceed with normal workflow after resolution
+
+#### Implementation Commands
+```bash
+# Detection
+git ls-files -i --exclude-standard -c
+
+# Resolution (when conflicts found)
+git ls-files -i --exclude-standard -c | xargs -r git rm --cached
+
+# Verification
+git status --porcelain | grep -v "^??" | wc -l  # Should be 0 for clean state
+```
+
+#### Commit Message Pattern
+```
+chore(gitignore): resolve tracking conflicts with ignore patterns
+
+- Knowledge Gap: Repository hygiene maintenance with .gitignore precedence rules
+- Investigation: Detected N tracked files matching .gitignore patterns via `git ls-files -i --exclude-standard`
+- Result: Untracked conflicted files while preserving local copies for continued development
+```
+
 ### Common Issues & Solutions
 - **Git command errors**: Use `git diff --cached --name-status` not `git status --cached`
 - **Commit message formatting**: Use HEREDOC with proper quoting for multi-line messages
 - **File staging logic**: Group related functionality, respect dependencies
 - **Clean verification**: Always check `git status` after completion
+- **IDE change indicators**: Gitignore conflicts resolved to prevent persistent change notifications
