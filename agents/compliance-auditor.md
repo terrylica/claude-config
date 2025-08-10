@@ -2,6 +2,7 @@
 name: compliance-auditor
 description: Reviews SR&ED documentation for government audit readiness and CRA compliance.
 tools: Task, Bash, Glob, Grep, LS, ExitPlanMode, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, mcp__ide__getDiagnostics, mcp__ide__executeCode
+model: sonnet
 color: red
 ---
 

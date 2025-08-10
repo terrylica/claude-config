@@ -2,7 +2,8 @@
 name: workspace-sync
 description: Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations, status monitoring, and cross-environment development workflow automation.
 tools: Task, Bash, Glob, Grep, LS, ExitPlanMode, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, mcp__ide__getDiagnostics, mcp__ide__executeCode
-color: blue
+model: sonnet
+color: cyan
 ---
 
 Specialized agent for comprehensive Claude Code workspace synchronization and remote GPU workstation integration.

@@ -75,29 +75,6 @@
 
 - **Clear Discrepancies**: Ask user key direction steering questions (DSQ) to ensure plan stays focused and consolidated toward user's preferred path.
 
-## MHR: Module Housekeep Refactoring 
-
-### Comprehensive Audit & Alignment
-- Conduct systematic analysis of the designated workspace or module folder path for inconsistencies, outdated terminology requiring correction, legacy files requiring archival, redundancies requiring consolidation or DRY principles application, and corresponding local bin wrapper(s) requiring alignment.
-- Add defensive docstrings in code to document hard-learned truths and prevent regression to proven unsound practices.
-
-### Strategic Modularization & Tracking
-- Modularize the largest scripting file using minimum viable effort with maximum impact to reduce file size and improve maintainability.
-- Commit a pre-flight modularization snapshot and record its commit hash ID in the modularized files for future reference and rollback capability.
-
-#### Import Stability Guardrails (During Modularization)
-- Prefer absolute imports at package boundaries; use explicit relative imports within the same package (PEP 328).
-- Keep top-level modules side-effect free; defer I/O, configuration, and heavy initialization to functions or guarded entry points.
-- Define and preserve a stable public API via `__init__.py` re-exports and `__all__`; reshuffle internals without changing external import paths.
-- Provide temporary compatibility shims (re-exports + `DeprecationWarning`) for moved symbols; schedule removal after a deprecation window.
-- Prevent circular imports with layered dependencies; use postponed annotations and `TYPE_CHECKING` for type-only imports.
-- Use the `src/` layout; run tests against the installed package and compile modules during CI.
-- Avoid shadowing stdlib names; use namespace packages (PEP 420) only when necessary.
-- Optionally use module `__getattr__`/`__dir__` (PEP 562) for lazy subpackages and transitional import aliases.
-
-### Documentation Synchronization
-- Update all relevant documentation to reflect structural changes, new module boundaries, and updated usage patterns.
-
 
 ## APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
@@ -137,3 +114,37 @@
 - **Main Script**: `.claude/tools/gfm-link-checker/gfm_link_checker.py`
 - **Command Wrapper**: `.claude/tools/gfm-link-checker/bin/gfm-check`
 - **Project Config**: `.claude/tools/gfm-link-checker/pyproject.toml`
+
+## CAAP: Command-Agent Architecture Principles
+
+### Design Philosophy
+- **Commands**: Interface layer with rich argument hints, can orchestrate single or multiple agents
+- **Agents**: Single-minded specialists focused on specific task domains
+- **Alignment**: Every agent requires at least one command for invocation access
+
+### Auto-Suggestion Standards
+- **Frontmatter Required**: `description`, `argument-hint` fields mandatory for Claude Code discovery
+- **Comprehensive Options**: Argument hints show all available flags, modes, and usage patterns
+- **Rich Completion**: Multi-option commands use `|` syntax for alternative modes in hint field
+
+### Workspace Integration Pattern
+- **Command Orchestration**: Commands handle user interaction, validation, and multi-agent coordination
+- **Systematic Coverage**: No orphaned agents or commands - every agent accessible via command interface
+
+### Agent Engineering Reference Links
+- **Custom Agents**: https://claudelog.com/mechanics/custom-agents/
+- **Agent Engineering**: https://claudelog.com/mechanics/agent-engineering/
+- **Humanising Agents**: https://claudelog.com/mechanics/humanising-agents/
+- **Split Role Sub-Agents**: https://claudelog.com/mechanics/split-role-sub-agents/
+
+### Agent Development Methodology
+- **Multi-Task Analysis**: Always use parallel Task tool calls to read all four reference links simultaneously before agent-related work
+- **Insight Integration**: Synthesize official documentation before implementing custom solutions
+- **DRY Compliance**: Only document unique implementation details not covered in authoritative sources
+
+### Consolidation Best Practices
+- **Unified Systems**: Related functionality should be consolidated into comprehensive single-agent systems
+- **Example**: Python QA consolidation merged separate ruff-fix, import-check commands into unified `/python-qa` with comprehensive multi-layer validation
+- **Benefits**: Reduces user cognitive load, eliminates command fragmentation, enables holistic quality assurance
+
+*Note: Review these links regularly for best practices updates when performing agent-related tasks*
