@@ -29,10 +29,10 @@ echo "Test from macOS $(date)" > ~/eon/nt/sync-test-mac.txt &&
 echo "⏱️  Waiting 12 seconds for sync..." &&
 sleep 12 &&
 echo "Remote content:" &&
-ssh zerotier-remote "cat ~/eon/nt/sync-test-mac.txt 2>/dev/null || echo \"Sync failed - file not found\""'
+ssh tca "cat ~/eon/nt/sync-test-mac.txt 2>/dev/null || echo \"Sync failed - file not found\""'
 
 alias sync-test-reverse='echo "🔄 Testing reverse sync..." &&
-ssh zerotier-remote "echo \"Test from GPU $(date)\" > ~/eon/nt/sync-test-gpu.txt" &&
+ssh tca "echo \"Test from GPU $(date)\" > ~/eon/nt/sync-test-gpu.txt" &&
 echo "⏱️  Waiting 12 seconds for sync..." &&
 sleep 12 &&
 echo "Local content:" &&
@@ -45,7 +45,7 @@ alias sync-verify='echo "🔍 Comprehensive sync verification:
 ls -la ~/eon/nt/ | head -5 &&
 echo "
 === Remote Files ===" &&
-ssh zerotier-remote "ls -la ~/eon/nt/" | head -5 &&
+ssh tca "ls -la ~/eon/nt/" | head -5 &&
 echo "
 === Sync Status ===" &&
 sync-health &&
@@ -69,7 +69,7 @@ alias sync-health-full='echo "🏥 Comprehensive Sync Health Check
 
 === Service Status ===
 Local: $(brew services list | grep syncthing | awk "{print \$2}")  
-Remote: $(ssh zerotier-remote "pgrep syncthing > /dev/null && echo \"Running\" || echo \"Stopped\"")
+Remote: $(ssh tca "pgrep syncthing > /dev/null && echo \"Running\" || echo \"Stopped\"")
 
 === Sync Status ===
 Folder State: $(sync-health)

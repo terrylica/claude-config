@@ -25,14 +25,14 @@ function claude-session-restore() {
 alias alphaforge-dev='cd ~/eon/nt/repos/alphaforge && claude'
 alias catch22-dev='cd ~/eon/nt && claude'  
 alias tsfresh-dev='cd ~/eon/nt && claude'
-alias tirex-gpu='ssh zerotier-remote -t "cd ~/eon/nt && claude"'
+alias tirex-gpu='ssh tca -t "cd ~/eon/nt && claude"'
 
 # =============================================================================
 # SAGE ENSEMBLE DEVELOPMENT
 # =============================================================================
 
 # Complete SAGE framework
-alias sage-ensemble='ssh zerotier-remote -t "
+alias sage-ensemble='ssh tca -t "
 cd ~/eon/nt
 echo \"🧠 SAGE Ensemble Development Session\"
 export PATH=~/.npm-global/bin:\$PATH
@@ -46,7 +46,7 @@ claude
 "'
 
 # SAGE validation workflow
-alias sage-validate='ssh zerotier-remote -t "
+alias sage-validate='ssh tca -t "
 cd ~/eon/nt
 echo \"🔬 SAGE Model Validation Workflow\"  
 export PATH=~/.npm-global/bin:\$PATH
@@ -72,7 +72,7 @@ function sage_development() {
             ;;
         "tirex"|"gpu"|"inference"|"training")
             echo "🎮 Using GPU workstation for compute-intensive work"
-            ssh zerotier-remote -t "cd ~/eon/nt && export PATH=~/.npm-global/bin:\$PATH && claude"
+            ssh tca -t "cd ~/eon/nt && export PATH=~/.npm-global/bin:\$PATH && claude"
             ;;
         "ensemble"|"sage"|"integration"|"all")
             echo "🧠 Using GPU workstation for full SAGE integration"
@@ -111,7 +111,7 @@ function models-status() {
     echo "✅ FinPlot: $(ls ~/eon/nt/repos/finplot/ > /dev/null 2>&1 && echo "Available" || echo "Missing")"
     echo "✅ catch22: $(python3 -c "import pycatch22; print('Available')" 2>/dev/null || echo "Not installed")"
     echo "✅ tsfresh: $(python3 -c "import tsfresh; print('Available')" 2>/dev/null || echo "Not installed")"
-    echo "✅ TiRex GPU: $(ssh zerotier-remote "python3 -c \"import torch; print('Available' if torch.cuda.is_available() else 'CUDA not available')\"" 2>/dev/null || echo "Remote check failed")"
+    echo "✅ TiRex GPU: $(ssh tca "python3 -c \"import torch; print('Available' if torch.cuda.is_available() else 'CUDA not available')\"" 2>/dev/null || echo "Remote check failed")"
 }
 
 # SAGE environment diagnostics
@@ -122,7 +122,7 @@ function sage-diag() {
     python3 -c "import pycatch22, tsfresh; print(f\"catch22: {pycatch22.__version__}, tsfresh: {tsfresh.__version__}\")" 2>/dev/null || echo "Python packages not available locally"
     echo ""
     echo "Remote GPU:"
-    ssh zerotier-remote "python3 -c \"import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')\"" 2>/dev/null || echo "Remote Python environment check failed"
+    ssh tca "python3 -c \"import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')\"" 2>/dev/null || echo "Remote Python environment check failed"
     echo ""
     echo "Repositories:"
     ls -la ~/eon/nt/repos/ | grep -E "(alphaforge|nautilus|data-source|finplot)"

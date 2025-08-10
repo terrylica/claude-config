@@ -1,6 +1,17 @@
+---
+description: "Generate audit-proof commit messages for SR&ED compliance"
+argument-hint: "[scope] [--extract-evidence] [--compliance-check] [--full-workflow]"
+allowed-tools: Task, Bash, Glob, Grep, Read, Write, TodoWrite
+---
+
 # APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
-**Usage**: When you request "APCF" or "apcf", I will analyze ALL changes and create audit-proof commit messages.
+**Usage Options**:
+- `/apcf` - Full APCF workflow with SR&ED evidence extraction and compliance validation
+- `/apcf [scope]` - Target specific files or directories for commit analysis
+- `/apcf --extract-evidence` - Use SR&ED evidence extractor for commit analysis
+- `/apcf --compliance-check` - Run compliance audit on proposed commit messages
+- `/apcf --full-workflow` - Complete SR&ED workflow with evidence extraction and compliance validation
 
 ## Command Process
 
@@ -9,13 +20,19 @@
 ### Analysis Steps
 1. **Third-party protection check** - Identify and protect third-party submodules from accidental commits
 2. **Gitignore conflict detection** - Detect and auto-resolve tracked files matching .gitignore patterns
-3. **Staged files** (`git diff --cached --name-status`) - ready to commit
-4. **Modified files** (`git diff --name-status`) - unstaged changes  
-5. **Untracked files** (`git status --porcelain`) - new files
-6. **Recent commits** (`git log --oneline -5`) - understand commit patterns
-7. Auto-derive SR&ED evidence from complete change analysis
-8. Generate logical commit grouping and sequencing strategy
-9. Execute commits in sequence with user approval (using safe commit process)
+3. **Change analysis** - Comprehensive git status, staged, modified, and untracked file assessment
+4. **SR&ED evidence extraction** - Deploy `sred-evidence-extractor` agent for commit analysis and evidence generation
+5. **Commit strategy planning** - Generate logical commit grouping and sequencing strategy
+6. **Compliance validation** - Deploy `compliance-auditor` agent for audit-ready message validation
+7. **Execution coordination** - Execute commits in sequence with user approval and safety verification
+
+### Agent Integration Workflow
+
+**Multi-Agent Orchestration**:
+- **Primary**: APCF orchestrates the complete SR&ED compliance workflow
+- **Evidence Extraction**: `sred-evidence-extractor` analyzes git commits and code changes for Canadian tax credit compliance
+- **Compliance Review**: `compliance-auditor` ensures government audit readiness and CRA compliance
+- **Coordinated Output**: Unified commit message generation with full evidence chain and compliance validation
 10. Verify clean working tree completion
 
 ### Timestamp Requirement

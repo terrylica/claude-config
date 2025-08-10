@@ -35,10 +35,10 @@ alias zt-performance='echo "📊 ZeroTier Performance Analysis:" && zt-direct &&
 
 # Basic connectivity tests
 alias net-check='ping -c 3 172.25.253.142 && echo "✅ GPU workstation reachable"'
-alias net-speed='time ssh zerotier-remote "echo \"Speed test\"" && echo "SSH response time measured above"'
+alias net-speed='time ssh tca "echo \"Speed test\"" && echo "SSH response time measured above"'
 
 # Service connectivity
-alias ssh-test='ssh -o ConnectTimeout=5 zerotier-remote "echo \"SSH connectivity confirmed\""'
+alias ssh-test='ssh -o ConnectTimeout=5 tca "echo \"SSH connectivity confirmed\""'
 alias http-test='curl -s --connect-timeout 5 http://172.25.253.142:8384 > /dev/null && echo "✅ Syncthing web interface reachable" || echo "❌ Syncthing not accessible"'
 
 # =============================================================================
@@ -58,7 +58,7 @@ $(zt-direct)
 $(ping -c 1 172.25.253.142 > /dev/null 2>&1 && echo "✅ Basic connectivity OK" || echo "❌ Connectivity failed")
 
 === SSH Access ===
-$(ssh -o ConnectTimeout=5 zerotier-remote "echo SSH OK" 2>/dev/null || echo "❌ SSH failed")
+$(ssh -o ConnectTimeout=5 tca "echo SSH OK" 2>/dev/null || echo "❌ SSH failed")
 
 === Performance ===
 $(zt-latency 2>/dev/null || echo "Latency test failed")

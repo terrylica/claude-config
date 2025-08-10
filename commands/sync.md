@@ -70,7 +70,7 @@ echo "🔧 Options: $dry_run_flag $verbose_flag $force_flag"
 echo "📡 Target: GPU Workstation (tca)"
 echo ""
 
-echo "🤖 AGENT_DEPLOYMENT: Using Task tool with 'general-purpose' agent for comprehensive sync management."
+echo "🤖 AGENT_DEPLOYMENT: Using Task tool with 'workspace-sync' agent for comprehensive sync management."
 echo ""
 echo "🎯 SYNC_OBJECTIVES:"
 echo "1. Environment Validation & Connectivity Check"
