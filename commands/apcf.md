@@ -1,6 +1,6 @@
 ---
-description: "Generate audit-proof commit messages for SR&ED compliance"
-argument-hint: "[scope] [--extract-evidence] [--compliance-check] [--full-workflow]"
+description: "Generate audit-proof commit messages for SR&ED compliance with automatic git hygiene"
+argument-hint: "[scope] [--extract-evidence] [--compliance-check] [--full-workflow] [--clean-untracked] [--update-gitignore]"
 allowed-tools: Task, Bash, Glob, Grep, Read, Write, TodoWrite
 ---
 
@@ -12,6 +12,8 @@ allowed-tools: Task, Bash, Glob, Grep, Read, Write, TodoWrite
 - `/apcf --extract-evidence` - Use SR&ED evidence extractor for commit analysis
 - `/apcf --compliance-check` - Run compliance audit on proposed commit messages
 - `/apcf --full-workflow` - Complete SR&ED workflow with evidence extraction and compliance validation
+- `/apcf --clean-untracked` - Automatic git hygiene: analyze untracked files and recommend .gitignore updates
+- `/apcf --update-gitignore` - Update .gitignore based on untracked file analysis and commit the changes
 
 ## Command Process
 
@@ -20,11 +22,12 @@ allowed-tools: Task, Bash, Glob, Grep, Read, Write, TodoWrite
 ### Analysis Steps
 1. **Third-party protection check** - Identify and protect third-party submodules from accidental commits
 2. **Gitignore conflict detection** - Detect and auto-resolve tracked files matching .gitignore patterns
-3. **Change analysis** - Comprehensive git status, staged, modified, and untracked file assessment
-4. **SR&ED evidence extraction** - Deploy `sred-evidence-extractor` agent for commit analysis and evidence generation
-5. **Commit strategy planning** - Generate logical commit grouping and sequencing strategy
-6. **Compliance validation** - Deploy `compliance-auditor` agent for audit-ready message validation
-7. **Execution coordination** - Execute commits in sequence with user approval and safety verification
+3. **Git hygiene assessment** - Analyze untracked files and apply "track or ignore" principle
+4. **Change analysis** - Comprehensive git status, staged, modified, and untracked file assessment
+5. **SR&ED evidence extraction** - Deploy `sred-evidence-extractor` agent for commit analysis and evidence generation
+6. **Commit strategy planning** - Generate logical commit grouping and sequencing strategy
+7. **Compliance validation** - Deploy `compliance-auditor` agent for audit-ready message validation
+8. **Execution coordination** - Execute commits in sequence with user approval and safety verification
 
 ### Agent Integration Workflow
 
@@ -180,9 +183,53 @@ chore(gitignore): resolve tracking conflicts with ignore patterns
 - Result: Untracked conflicted files while preserving local copies for continued development
 ```
 
+## Git Hygiene Management (Option 2 Principle)
+
+### **Track or Ignore Rule**
+**Core Principle**: Every file must be either tracked OR ignored - never left in untracked limbo
+
+#### Automatic Untracked File Analysis
+```bash
+# Identify untracked files causing VS Code clutter
+git status --porcelain | grep "^??"
+```
+
+#### Decision Matrix for Untracked Files
+1. **Development Artifacts** → Add to .gitignore
+   - `archive/`, `backups/`, `test-workspace/`, `*.tmp`, `*.log`
+   - Temporary files, local testing, personal notes
+
+2. **Project Documentation** → Consider committing  
+   - `docs/*.md`, `README.md`, architecture documents
+   - Knowledge that benefits the team/future development
+
+3. **Configuration Examples** → Commit as templates
+   - `config.example.json`, `settings.template.yaml`
+   - Remove sensitive data, keep structure
+
+#### Auto-Update .gitignore Process
+```bash
+# Common development artifact patterns to ignore
+echo "archive/" >> .gitignore
+echo "backups/" >> .gitignore  
+echo "test-workspace/" >> .gitignore
+echo "*.tmp" >> .gitignore
+echo ".DS_Store" >> .gitignore
+```
+
+#### Commit Pattern for Gitignore Updates
+```
+chore(gitignore): implement "track or ignore" hygiene principle
+
+- Knowledge Gap: Untracked files creating VS Code visual clutter and git workflow uncertainty
+- Investigation: Applied systematic analysis of N untracked files using track/ignore decision matrix
+- Result: Clean git status with proper file categorization and improved developer experience
+```
+
 ### Common Issues & Solutions
 - **Git command errors**: Use `git diff --cached --name-status` not `git status --cached`
 - **Commit message formatting**: Use HEREDOC with proper quoting for multi-line messages
 - **File staging logic**: Group related functionality, respect dependencies
 - **Clean verification**: Always check `git status` after completion
 - **IDE change indicators**: Gitignore conflicts resolved to prevent persistent change notifications
+- **Untracked file limbo**: Apply "track or ignore" principle immediately to maintain clean workspace
