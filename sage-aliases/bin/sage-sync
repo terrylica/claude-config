@@ -6,18 +6,53 @@
 set -euo pipefail  # Exit on any error, undefined vars, pipe failures
 
 # =============================================================================
-# CONFIGURATION & GLOBALS  
+# CONFIGURATION & GLOBALS - BIDIRECTIONAL SYSTEM DETECTION
 # =============================================================================
 
 SCRIPT_NAME="sage-sync"
-VERSION="2.0.0-modular"
-REMOTE_HOST="tca"
-LOCAL_WORKSPACE="$HOME/eon/nt"
-REMOTE_WORKSPACE="~/eon/nt"
+VERSION="2.1.0-bidirectional"
+
+# Dynamic system detection for true bidirectional sync
+CURRENT_USER="$(whoami)"
+CURRENT_HOST="$(hostname)"
+
+# Detect local system type and configure remote target
+if [[ "$CURRENT_USER" == "tca" && "$CURRENT_HOST" == "el02" ]]; then
+    # Running on Linux GPU workstation
+    SYSTEM_TYPE="linux"
+    LOCAL_USER="tca"
+    LOCAL_HOST="el02"
+    REMOTE_HOST="zerotier-remote"  # SSH config alias for macOS
+    REMOTE_USER="terryli"
+    REMOTE_HOST_REAL="Terrys-MacBook-Pro"
+elif [[ "$CURRENT_USER" == "terryli" && "$CURRENT_HOST" =~ Mac ]]; then
+    # Running on macOS development machine
+    SYSTEM_TYPE="macos"
+    LOCAL_USER="terryli"
+    LOCAL_HOST="$CURRENT_HOST"
+    REMOTE_HOST="tca"  # SSH config alias for Linux
+    REMOTE_USER="tca"
+    REMOTE_HOST_REAL="el02"
+else
+    echo "❌ ERROR: Unknown system configuration"
+    echo "   Current user: $CURRENT_USER"
+    echo "   Current host: $CURRENT_HOST"
+    echo "   Supported configurations:"
+    echo "   - Linux: tca@el02 ↔ terryli@macOS"
+    echo "   - macOS: terryli@macOS ↔ tca@el02"
+    exit 1
+fi
+
+# Focus: Claude session synchronization only (workspace uses Git)
 CLAUDE_DIR="$HOME/.claude"
 REMOTE_CLAUDE_DIR="~/.claude"
-CLAUDE_SESSIONS_DIR="$HOME/.claude/system/sessions"
-REMOTE_SESSIONS_DIR="~/.claude/system/sessions"
+CLAUDE_SESSIONS_DIR="$HOME/.claude/projects"
+REMOTE_SESSIONS_DIR="~/.claude/projects"
+
+# Workspace directories (for legacy compatibility)
+LOCAL_WORKSPACE="$HOME/.claude"
+REMOTE_WORKSPACE="~/.claude"
+
 LOG_FILE="/tmp/sage-sync-$(date +%Y%m%d-%H%M%S).log"
 
 # Colors for output
@@ -28,16 +63,13 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Flags
+# Flags - Simplified for session-only sync
 DRY_RUN=false
 VERBOSE=false
 FORCE=false
-PUSH_WORKSPACE=false
-PULL_WORKSPACE=false
 SYNC_SESSIONS=false
 MIGRATE_SESSIONS=false
 CHECK_STATUS=false
-SYNC_ALL=false
 
 # =============================================================================
 # MODULAR IMPORTS - Defensive Truth: Source libraries with absolute paths
@@ -113,44 +145,44 @@ trap cleanup EXIT
 
 show_help() {
     cat << EOF
-$SCRIPT_NAME v$VERSION - SAGE Comprehensive Sync Tool (Modular Architecture)
+$SCRIPT_NAME v$VERSION - Claude Session Sync Tool (Bidirectional)
+
+🎯 PURPOSE: Synchronize Claude Code sessions across macOS ↔ Linux systems
+📁 SCOPE: Claude sessions only (use Git for workspace sync)
 
 USAGE:
     $SCRIPT_NAME [OPTIONS] [ACTIONS]
 
 ACTIONS:
-    --push-workspace     Push local workspace to remote
-    --pull-workspace     Pull remote workspace to local
-    --sync-sessions      Universal cross-platform session sync with canonical format
-    --migrate-sessions   Migrate platform-specific sessions to canonical format
+    --sync-sessions      Sync Claude sessions using official ~/.claude/projects/ format
+    --migrate-sessions   Migrate sessions from legacy format to official standard  
     --status             Check SAGE models status
-    --all               Execute all sync operations
 
 OPTIONS:
     --dry-run           Show what would be done without executing
     --verbose           Enable verbose debug output
     --force             Force operations (skip some confirmations)
     --help              Show this help message
+    --version           Show version and system configuration
 
 EXAMPLES:
-    $SCRIPT_NAME --status --verbose
+    $SCRIPT_NAME --sync-sessions --verbose
     $SCRIPT_NAME --migrate-sessions --dry-run
-    $SCRIPT_NAME --push-workspace --sync-sessions
-    $SCRIPT_NAME --all --dry-run
-    $SCRIPT_NAME --pull-workspace --force
+    $SCRIPT_NAME --status
+    $SCRIPT_NAME --sync-sessions --force
+
+RECOMMENDED WORKFLOW:
+    1. 📁 Workspace sync: Use Git (git pull/push)
+    2. 🗂️ Session sync:   Use sage-sync --sync-sessions
+    3. ✅ Status check:   Use sage-sync --status
+
+BIDIRECTIONAL SUPPORT:
+    • Linux (tca@el02) ↔ macOS (terryli@macOS)
+    • Auto-detects local system and configures remote target
+    • Uses SSH config aliases for seamless connectivity
 
 LOG FILES:
-    Debug logs are saved to /tmp/sage-sync-YYYYMMDD-HHMMSS.log
-
-WORKFLOW:
-    Before switching to remote:
-        $SCRIPT_NAME --push-workspace --sync-sessions
-    
-    Before switching to local:
-        $SCRIPT_NAME --pull-workspace
-    
-    Status check:
-        $SCRIPT_NAME --status --verbose
+    Debug logs saved to /tmp/sage-sync-YYYYMMDD-HHMMSS.log
 
 EOF
 }
@@ -178,14 +210,6 @@ parse_arguments() {
                 log "INFO" "Force mode enabled"
                 shift
                 ;;
-            --push-workspace)
-                PUSH_WORKSPACE=true
-                shift
-                ;;
-            --pull-workspace)
-                PULL_WORKSPACE=true
-                shift
-                ;;
             --sync-sessions)
                 SYNC_SESSIONS=true
                 shift
@@ -198,16 +222,15 @@ parse_arguments() {
                 CHECK_STATUS=true
                 shift
                 ;;
-            --all)
-                SYNC_ALL=true
-                PUSH_WORKSPACE=true
-                PULL_WORKSPACE=false  # Don't pull by default in --all
-                SYNC_SESSIONS=true
-                CHECK_STATUS=true
-                shift
-                ;;
             --help|-h)
                 show_help
+                exit 0
+                ;;
+            --version|-v)
+                echo "$SCRIPT_NAME v$VERSION - Claude Session Sync Tool (Bidirectional)"
+                echo "Local System: $LOCAL_USER@$LOCAL_HOST ($SYSTEM_TYPE)"
+                echo "Remote Target: $REMOTE_USER@$REMOTE_HOST_REAL"
+                echo "Scope: Claude sessions only (use Git for workspace)"
                 exit 0
                 ;;
             *)
@@ -219,14 +242,29 @@ parse_arguments() {
     done
 }
 
+# =============================================================================
+# SYSTEM INFO DISPLAY
+# =============================================================================
+
+show_system_info() {
+    echo -e "${CYAN}🖥️  System Configuration:${NC}"
+    echo -e "   ${GREEN}Local System:${NC}  $LOCAL_USER@$LOCAL_HOST ($SYSTEM_TYPE)"
+    echo -e "   ${YELLOW}Remote System:${NC} $REMOTE_USER@$REMOTE_HOST_REAL"
+    echo -e "   ${BLUE}SSH Target:${NC}    $REMOTE_HOST"
+    echo
+}
+
 main() {
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║                 SAGE Comprehensive Sync Tool                ║${NC}"
-    echo -e "${BLUE}║                        Version $VERSION                        ║${NC}"
+    echo -e "${BLUE}║                     Version $VERSION (Bidirectional)                     ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo
     
-    log "INFO" "Starting $SCRIPT_NAME v$VERSION"
+    show_system_info
+    
+    log "INFO" "Starting $SCRIPT_NAME v$VERSION on $SYSTEM_TYPE system"
+    log "INFO" "Local: $LOCAL_USER@$LOCAL_HOST → Remote: $REMOTE_USER@$REMOTE_HOST_REAL"
     log "INFO" "Log file: $LOG_FILE"
     log "INFO" "PID: $$"
     
@@ -241,40 +279,28 @@ main() {
         actions_executed=true
     fi
     
-    if [[ $PUSH_WORKSPACE == true ]]; then
-        push_workspace || exit 1
-        actions_executed=true
-    fi
-    
-    if [[ $PULL_WORKSPACE == true ]]; then
-        if [[ $FORCE == false ]] && [[ $actions_executed == true ]]; then
-            log "WARNING" "Pull workspace after other operations may overwrite changes"
-            read -p "Continue? (y/N): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                log "INFO" "Pull workspace skipped by user"
-            else
-                pull_workspace || exit 1
-            fi
-        else
-            pull_workspace || exit 1
-        fi
-        actions_executed=true
-    fi
+    # Workspace sync removed - use Git instead
     
     if [[ $MIGRATE_SESSIONS == true ]]; then
-        section "Canonical Session Migration"
-        log "INFO" "Migrating platform-specific sessions to canonical format"
+        section "Session Migration to Official Format"
+        log "INFO" "Migrating sessions from custom format to official ~/.claude/projects/"
+        log "INFO" "Using session recovery script for safe migration"
         if [[ $DRY_RUN == true ]]; then
-            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "true" || exit 1
+            log "INFO" "DRY RUN: Would run $HOME/.claude/tools/session-recovery.sh"
         else
-            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "false" || exit 1
+            if [[ -x "$HOME/.claude/tools/session-recovery.sh" ]]; then
+                "$HOME/.claude/tools/session-recovery.sh" || exit 1
+            else
+                log "ERROR" "Session recovery script not found or not executable"
+                log "INFO" "Expected: $HOME/.claude/tools/session-recovery.sh"
+                exit 1
+            fi
         fi
         actions_executed=true
     fi
     
     if [[ $SYNC_SESSIONS == true ]]; then
-        sync_canonical_claude_sessions || exit 1
+        sync_claude_sessions || exit 1
         actions_executed=true
     fi
     
