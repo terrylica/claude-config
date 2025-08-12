@@ -13,13 +13,18 @@ cd ~/.claude
 
 ## Documentation
 
-- **[Team Setup Guide](TEAM_SETUP.md)** - Complete installation and usage guide
-- **[Architecture Overview](ARCHITECTURE.md)** - System architecture and design principles
-- **[Seamless Sync Setup](seamless-sync-setup.md)** - Advanced sync configuration
-- **[Claude Code Sync Strategy](claude-code-sync-strategy.md)** - Synchronization strategies
-- **[Bidirectional Sync Demo](bidirectional-sync-demo.md)** - Sync demonstration
-- **[GPU Cloud Setup](gpu-cloud-setup.md)** - GPU workstation configuration
-- **[Official Files Reference](CLAUDE_CODE_OFFICIAL_FILES.md)** - Claude Code file specifications
+- Standards
+  - [Claude Session Storage: Verified Standard](standards/CLAUDE_SESSION_STORAGE_STANDARD.md)
+  - [Official Files Reference](CLAUDE_CODE_OFFICIAL_FILES.md)
+- Architecture
+  - [Architecture Overview](architecture/ARCHITECTURE.md)
+- Setup
+  - [Team Setup Guide](setup/TEAM_SETUP.md)
+  - [GPU Cloud Setup](setup/gpu-cloud-setup.md)
+- Sync
+  - [Seamless Sync Setup](sync/seamless-sync-setup.md)
+  - [Claude Code Sync Strategy](sync/claude-code-sync-strategy.md)
+  - [Bidirectional Sync Demo](sync/bidirectional-sync-demo.md)
 
 ## Tools & Components
 
