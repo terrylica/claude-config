@@ -23,6 +23,12 @@ allowed-tools: Bash, Task
 - `/gfm-check -v` - Verbose output showing skipped directories
 - `/gfm-check -ii -v` - Include ignored directories with verbose output
 
+**Claude Code Agent Validation:**
+- Automatically validates `.claude/agents/` directory compliance
+- Checks required frontmatter fields (especially `name:` field)
+- Detects non-agent files in agents directory
+- Validates agent directory purity (no subdirectories, only `.md` files)
+
 **Direct Usage (from any workspace):**
 ```
 $HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]

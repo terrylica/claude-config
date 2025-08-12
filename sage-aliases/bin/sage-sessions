@@ -1,0 +1,191 @@
+#!/bin/bash
+# SAGE Universal Session Lookup and Management
+# Part of SAGE Canonical Session Architecture for Cross-Platform Compatibility
+
+# Source canonical session functions
+source "$HOME/.claude/sage-aliases/lib/sage-canonical-sessions.sh"
+
+# Configuration
+CLAUDE_SESSIONS_DIR="${CLAUDE_SESSIONS_DIR:-$HOME/.claude/system/sessions}"
+
+# Utility functions
+show_help() {
+    cat << 'EOF'
+SAGE Universal Session Lookup & Management
+
+Usage: sage-sessions [COMMAND] [OPTIONS]
+
+COMMANDS:
+  list                     List all canonical sessions with workspace mappings
+  find [workspace]         Find canonical session for current or specified workspace  
+  current                  Show canonical session for current working directory
+  migrate                  Migrate platform-specific sessions to canonical format
+  migrate-dry-run         Preview what migration would do without changes
+  validate                Validate canonical session directory structure
+  cleanup                 Clean up empty session directories and legacy backups
+
+EXAMPLES:
+  sage-sessions list                          # Show all available canonical sessions
+  sage-sessions current                       # Find session for current directory
+  sage-sessions find ~/eon/nt               # Find session for specific workspace
+  sage-sessions migrate-dry-run              # Preview migration changes
+  sage-sessions migrate                       # Perform actual migration
+
+CANONICAL SESSION FORMAT:
+  Platform-specific session directories like:
+    -Users-terryli-eon-nt/     (macOS)
+    -home-tca-eon-nt/          (Ubuntu)
+  
+  Are unified into canonical format:
+    ~eon-nt/                   (Universal)
+
+This enables seamless session resumption across any platform with the same 
+relative workspace structure.
+EOF
+}
+
+# Main command processing
+main() {
+    local command="${1:-list}"
+    
+    case "$command" in
+        "list")
+            echo "📋 Available Canonical Sessions:"
+            echo "================================="
+            list_canonical_sessions "$CLAUDE_SESSIONS_DIR"
+            ;;
+        
+        "find")
+            local workspace="${2:-$PWD}"
+            echo "🔍 Finding canonical session for workspace: $workspace"
+            echo "=================================================="
+            
+            local canonical_session=$(workspace_to_canonical_session "$workspace")
+            if [[ $? -eq 0 ]]; then
+                echo "✅ Canonical session: $canonical_session"
+                
+                local canonical_dir="$CLAUDE_SESSIONS_DIR/$canonical_session"
+                if [[ -d "$canonical_dir" ]]; then
+                    local session_count=$(find "$canonical_dir" -name "*.jsonl" -type f | wc -l)
+                    echo "📁 Session directory: $canonical_dir"
+                    echo "📊 Available sessions: $session_count"
+                    
+                    if [[ $session_count -gt 0 ]]; then
+                        echo ""
+                        echo "💡 To resume a session in this workspace:"
+                        echo "   cd $workspace"
+                        echo "   claude -r"
+                    fi
+                else
+                    echo "❌ No sessions found for this workspace"
+                    echo "💡 Start a new session with: cd $workspace && claude"
+                fi
+            else
+                echo "❌ Could not determine canonical session for workspace"
+            fi
+            ;;
+        
+        "current")
+            echo "🔍 Current Workspace Session Lookup"
+            echo "==================================="
+            echo "📁 Current directory: $PWD"
+            
+            local canonical_session=$(workspace_to_canonical_session "$PWD")
+            if [[ $? -eq 0 ]]; then
+                echo "✅ Canonical session: $canonical_session"
+                
+                local canonical_dir="$CLAUDE_SESSIONS_DIR/$canonical_session"
+                if [[ -d "$canonical_dir" ]]; then
+                    local session_count=$(find "$canonical_dir" -name "*.jsonl" -type f | wc -l)
+                    echo "📁 Session directory: $canonical_dir"
+                    echo "📊 Available sessions: $session_count"
+                    
+                    if [[ $session_count -gt 0 ]]; then
+                        echo ""
+                        echo "💡 Resume sessions with: claude -r"
+                        echo "📝 Recent sessions:"
+                        
+                        # Show 5 most recent sessions
+                        find "$canonical_dir" -name "*.jsonl" -type f -exec stat -f "%m %N" {} \; 2>/dev/null | \
+                        sort -nr | head -5 | while read -r timestamp file; do
+                            local uuid=$(basename "$file" .jsonl)
+                            local date_str=$(date -r "$timestamp" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "Unknown")
+                            echo "   • $uuid ($date_str)"
+                        done
+                    fi
+                else
+                    echo "❌ No sessions found for current workspace"
+                    echo "💡 Start a new session with: claude"
+                fi
+            else
+                echo "❌ Could not determine canonical session for current workspace"
+            fi
+            ;;
+        
+        "migrate")
+            echo "🔄 Migrating Platform-Specific Sessions to Canonical Format"
+            echo "=========================================================="
+            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "false"
+            ;;
+        
+        "migrate-dry-run")
+            echo "🔍 Migration Preview (Dry Run)"
+            echo "=============================="
+            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "true"
+            ;;
+        
+        "validate")
+            echo "🔍 Validating Canonical Session Structure"
+            echo "========================================"
+            validate_canonical_sessions "$CLAUDE_SESSIONS_DIR"
+            ;;
+        
+        "cleanup")
+            echo "🧹 Cleaning Up Session Directories"
+            echo "=================================="
+            
+            # Remove empty session directories
+            local empty_dirs=$(find "$CLAUDE_SESSIONS_DIR" -type d -empty 2>/dev/null)
+            if [[ -n "$empty_dirs" ]]; then
+                echo "Removing empty directories:"
+                echo "$empty_dirs" | while read -r dir; do
+                    echo "  Removing: $dir"
+                    rmdir "$dir" 2>/dev/null || true
+                done
+            else
+                echo "No empty directories found"
+            fi
+            
+            # Show legacy backup status
+            local legacy_dir="$CLAUDE_SESSIONS_DIR/legacy"
+            if [[ -d "$legacy_dir" ]]; then
+                local backup_size=$(du -sh "$legacy_dir" 2>/dev/null | cut -f1)
+                local backup_dirs=$(find "$legacy_dir" -type d -name "-*" | wc -l)
+                echo ""
+                echo "📦 Legacy backup information:"
+                echo "   Directory: $legacy_dir"
+                echo "   Size: $backup_size"
+                echo "   Backed up session directories: $backup_dirs"
+                echo ""
+                echo "💡 Legacy backups can be safely removed after verifying canonical migration"
+                echo "   To remove: rm -rf $legacy_dir"
+            fi
+            ;;
+        
+        "help"|"-h"|"--help")
+            show_help
+            ;;
+        
+        *)
+            echo "❌ Unknown command: $command"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Execute main function if script is run directly
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]]; then
+    main "$@"
+fi

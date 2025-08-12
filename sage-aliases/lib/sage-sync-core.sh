@@ -3,6 +3,9 @@
 # Rollback Reference: c80d866 (pre-MHR modularization snapshot)
 # Part of SAGE Sync Infrastructure - Bulletproof Session Preservation
 
+# Import canonical session management functions
+source "$HOME/.claude/sage-aliases/lib/sage-canonical-sessions.sh"
+
 # Defensive Truth: Always validate environment before destructive operations
 # This prevents silent failures that could lead to data loss or sync corruption
 validate_environment() {
@@ -92,8 +95,115 @@ validate_environment() {
     return 0
 }
 
+# Universal Cross-Platform Session Sync with Canonical Format
+# Migrates platform-specific sessions to canonical format for cross-platform compatibility
+sync_canonical_claude_sessions() {
+    section "Universal Cross-Platform Claude Session Sync"
+    
+    # Check if Claude sessions directory exists
+    if [[ ! -d "$CLAUDE_SESSIONS_DIR" ]]; then
+        log "WARNING" "No Claude sessions directory found at $CLAUDE_SESSIONS_DIR"
+        log "INFO" "Creating empty sessions directory"
+        if [[ $DRY_RUN == false ]]; then
+            mkdir -p "$CLAUDE_SESSIONS_DIR" || {
+                log "ERROR" "Failed to create Claude sessions directory"
+                return 1
+            }
+        fi
+    fi
+    
+    # Step 1: Migrate local sessions to canonical format
+    log "INFO" "Step 1: Migrating local sessions to canonical format"
+    if [[ $DRY_RUN == true ]]; then
+        log "INFO" "DRY RUN: Would migrate local sessions to canonical format"
+        migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "true"
+    else
+        # Check if canonical migration is needed
+        local needs_migration=false
+        local platform_specific_dirs=$(find "$CLAUDE_SESSIONS_DIR" -maxdepth 1 -type d -name "-*-*-*" 2>/dev/null | wc -l)
+        local canonical_dirs=$(find "$CLAUDE_SESSIONS_DIR" -maxdepth 1 -type d -name "~*" 2>/dev/null | wc -l)
+        
+        if [[ $platform_specific_dirs -gt 0 && $canonical_dirs -eq 0 ]]; then
+            log "INFO" "Found $platform_specific_dirs platform-specific session directories, migrating to canonical format"
+            needs_migration=true
+        elif [[ $platform_specific_dirs -gt 0 && $canonical_dirs -gt 0 ]]; then
+            log "INFO" "Mixed session format detected, consolidating to canonical format"
+            needs_migration=true
+        else
+            log "INFO" "Sessions already in canonical format ($canonical_dirs canonical directories)"
+        fi
+        
+        if [[ $needs_migration == true ]]; then
+            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "false"
+            log "SUCCESS" "Local session migration to canonical format completed"
+        fi
+    fi
+    
+    # Step 2: Count canonical sessions for sync validation
+    local local_canonical_sessions=$(find "$CLAUDE_SESSIONS_DIR/~"* -name "*.jsonl" 2>/dev/null | wc -l || echo "0")
+    local local_canonical_dirs=$(find "$CLAUDE_SESSIONS_DIR" -maxdepth 1 -type d -name "~*" 2>/dev/null | wc -l || echo "0")
+    local local_size=$(du -sk "$CLAUDE_SESSIONS_DIR/" 2>/dev/null | cut -f1 || echo "0")
+    
+    log "INFO" "Local canonical sessions: $local_canonical_dirs directories, $local_canonical_sessions session files, ${local_size}KB"
+    
+    if [[ $DRY_RUN == true ]]; then
+        log "INFO" "DRY RUN: Would sync canonical sessions to remote"
+        log "INFO" "DRY RUN: Rsync would sync ~/canonical directories and exclude legacy platform-specific directories"
+        return 0
+    fi
+    
+    # Step 3: Sync canonical directories to remote
+    progress "Syncing canonical Claude sessions to remote..."
+    
+    # Sync only canonical directories (starting with ~) to ensure cross-platform compatibility
+    local rsync_cmd="rsync -avz --update --stats --human-readable"
+    
+    # Include canonical directories and standard session files
+    rsync_cmd="$rsync_cmd --include='~*/' --include='~*/**' --include='*.json' --include='*.jsonl' --include='projects/' --exclude='legacy/' --exclude='-*'"
+    
+    if [[ $VERBOSE == true ]]; then
+        rsync_cmd="$rsync_cmd --progress"
+    fi
+    
+    log "DEBUG" "Executing canonical sync: $rsync_cmd \"$CLAUDE_SESSIONS_DIR/\" \"$REMOTE_HOST:$REMOTE_SESSIONS_DIR/\""
+    
+    if $rsync_cmd "$CLAUDE_SESSIONS_DIR/" "$REMOTE_HOST:$REMOTE_SESSIONS_DIR/" 2>&1 | tee -a "$LOG_FILE"; then
+        # Step 4: Post-sync validation
+        local remote_canonical_sessions=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR/~* -name '*.jsonl' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+        local remote_canonical_dirs=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR -maxdepth 1 -type d -name '~*' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+        local remote_size=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "du -sk $REMOTE_SESSIONS_DIR/ | cut -f1" 2>/dev/null || echo "0")
+        
+        log "INFO" "Remote canonical sessions after sync: $remote_canonical_dirs directories, $remote_canonical_sessions session files, ${remote_size}KB"
+        
+        # Success criteria: At least the canonical directories synced properly
+        if [[ $remote_canonical_dirs -gt 0 && $local_canonical_dirs -eq $remote_canonical_dirs ]]; then
+            log "SUCCESS" "Canonical Claude sessions sync completed successfully"
+            log "INFO" "Cross-platform session compatibility established"
+            log "INFO" "Sessions can now be resumed on any platform with matching workspace structure"
+        else
+            log "WARNING" "Canonical directory count mismatch: local=$local_canonical_dirs, remote=$remote_canonical_dirs"
+            log "INFO" "This may indicate sync issues or partial transfer"
+        fi
+        
+        # Additional validation: Check specific cross-platform sessions
+        log "INFO" "Validating cross-platform session availability..."
+        local cross_platform_sessions=("~eon-nt" "~scripts" "~-claude")
+        for canonical_session in "${cross_platform_sessions[@]}"; do
+            if ssh -o ConnectTimeout=10 "$REMOTE_HOST" "test -d $REMOTE_SESSIONS_DIR/$canonical_session" 2>/dev/null; then
+                local session_count=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR/$canonical_session -name '*.jsonl' | wc -l" 2>/dev/null || echo "0")
+                log "SUCCESS" "Cross-platform session $canonical_session: Available ($session_count sessions)"
+            fi
+        done
+        
+    else
+        log "ERROR" "Canonical Claude sessions sync failed"
+        return 1
+    fi
+}
+
 # Defensive Truth: Session sync with path corruption protection is essential
 # Claude Code creates mangled session directory names that break remote environments
+# DEPRECATED: Use sync_canonical_claude_sessions() for cross-platform compatibility
 sync_claude_sessions() {
     section "Syncing Claude Sessions"
     

@@ -35,6 +35,7 @@ FORCE=false
 PUSH_WORKSPACE=false
 PULL_WORKSPACE=false
 SYNC_SESSIONS=false
+MIGRATE_SESSIONS=false
 CHECK_STATUS=false
 SYNC_ALL=false
 
@@ -101,7 +102,7 @@ trap cleanup EXIT
 
 # Functions are now loaded from modular libraries:
 # - validate_environment() from sage-sync-core.sh
-# - sync_claude_sessions() from sage-sync-core.sh  
+# - sync_canonical_claude_sessions() from sage-sync-core.sh  
 # - check_sage_status() from sage-sync-core.sh
 # - push_workspace() from sage-sync-workspace.sh
 # - pull_workspace() from sage-sync-workspace.sh
@@ -120,7 +121,8 @@ USAGE:
 ACTIONS:
     --push-workspace     Push local workspace to remote
     --pull-workspace     Pull remote workspace to local
-    --sync-sessions      Sync Claude sessions to remote via rsync
+    --sync-sessions      Universal cross-platform session sync with canonical format
+    --migrate-sessions   Migrate platform-specific sessions to canonical format
     --status             Check SAGE models status
     --all               Execute all sync operations
 
@@ -132,6 +134,7 @@ OPTIONS:
 
 EXAMPLES:
     $SCRIPT_NAME --status --verbose
+    $SCRIPT_NAME --migrate-sessions --dry-run
     $SCRIPT_NAME --push-workspace --sync-sessions
     $SCRIPT_NAME --all --dry-run
     $SCRIPT_NAME --pull-workspace --force
@@ -185,6 +188,10 @@ parse_arguments() {
                 ;;
             --sync-sessions)
                 SYNC_SESSIONS=true
+                shift
+                ;;
+            --migrate-sessions)
+                MIGRATE_SESSIONS=true
                 shift
                 ;;
             --status)
@@ -255,8 +262,19 @@ main() {
         actions_executed=true
     fi
     
+    if [[ $MIGRATE_SESSIONS == true ]]; then
+        section "Canonical Session Migration"
+        log "INFO" "Migrating platform-specific sessions to canonical format"
+        if [[ $DRY_RUN == true ]]; then
+            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "true" || exit 1
+        else
+            migrate_to_canonical_sessions "$CLAUDE_SESSIONS_DIR" "false" || exit 1
+        fi
+        actions_executed=true
+    fi
+    
     if [[ $SYNC_SESSIONS == true ]]; then
-        sync_claude_sessions || exit 1
+        sync_canonical_claude_sessions || exit 1
         actions_executed=true
     fi
     

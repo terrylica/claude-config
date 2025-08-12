@@ -1,4 +1,5 @@
 ---
+name: apcf-agent
 description: "SR&ED-compliant commit message generator with automatic git hygiene and audit-proof formatting"
 tools: Bash, Glob, Grep, Read, Write, TodoWrite, Task
 ---
