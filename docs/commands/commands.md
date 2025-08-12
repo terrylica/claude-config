@@ -4,11 +4,11 @@ Custom slash commands and extensions for Claude Code.
 
 ## Available Commands
 
-- **[/apcf](apcf.md)** - SR&ED audit-proof commit formatting
-- **[/ruff-fix](ruff-fix.md)** - Python code formatting and linting  
-- **[/test-reload](test-reload.md)** - Testing and reload utilities
-- **[/command-check](command-check.md)** - Command validation suite
-- **[/gfm-check](gfm-check.md)** - GitHub Flavored Markdown link checking
+- **[/apcf](../../commands/apcf.md)** - SR&ED audit-proof commit formatting
+- **[/sync](../../commands/sync.md)** - Workspace and session synchronization
+- **[/command-check](../../commands/command-check.md)** - Command validation suite
+- **[/gfm-check](../../commands/gfm-check.md)** - GitHub Flavored Markdown link checking
+- **[/python-qa](../../commands/python-qa.md)** - Python code quality analysis
 
 ## Usage
 
@@ -16,4 +16,4 @@ These commands are available as slash commands within Claude Code sessions. Type
 
 ## Additional Documentation
 
-Extended documentation is available in the [docs/](docs/) directory.
+Extended documentation is available in the [docs/](../) directory.

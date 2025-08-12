@@ -4,28 +4,28 @@
 
 ## Available Agents
 
-### [Research Scout](../agents/research-scout.md) (`research-scout`)
+### [Research Scout](../../agents/research-scout.md) (`research-scout`)
 Explores research directions from seed keywords. Use when you need systematic exploration of topics.
 
-### [Compliance Auditor](../agents/compliance-auditor.md) (`compliance-auditor`)
+### [Compliance Auditor](../../agents/compliance-auditor.md) (`compliance-auditor`)
 Specialized agent for compliance auditing and regulatory analysis.
 
-### [SR&ED Evidence Extractor](../agents/sred-evidence-extractor.md) (`sred-evidence-extractor`)
+### [SR&ED Evidence Extractor](../../agents/sred-evidence-extractor.md) (`sred-evidence-extractor`)
 Extracts and documents Scientific Research and Experimental Development evidence from codebases.
 
-### [Simple Helper](../agents/simple-helper.md) (`simple-helper`)
+### [Simple Helper](../../agents/simple-helper.md) (`simple-helper`)
 Basic utility agent for straightforward tasks and assistance.
 
-### [APCF Agent](../agents/apcf-agent.md) (`apcf-agent`)
+### [APCF Agent](../../agents/apcf-agent.md) (`apcf-agent`)
 SR&ED-compliant commit message generator with automatic git hygiene and audit-proof formatting.
 
-### [Python QA](../agents/python-qa.md) (`python-qa`)
+### [Python QA](../../agents/python-qa.md) (`python-qa`)
 Comprehensive Python import health validation using multi-tool static analysis approach.
 
-### [MHR Refactor](../agents/mhr-refactor.md) (`mhr-refactor`)
+### [MHR Refactor](../../agents/mhr-refactor.md) (`mhr-refactor`)
 Specialized refactoring agent for complex code transformations.
 
-### [Workspace Sync](../agents/workspace-sync.md) (`workspace-sync`)
+### [Workspace Sync](../../agents/workspace-sync.md) (`workspace-sync`)
 Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations and cross-environment development workflows.
 
 ## Usage

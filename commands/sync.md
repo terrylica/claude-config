@@ -1,32 +1,57 @@
 ---
-description: Universal cross-platform Claude Code workspace synchronization with canonical session architecture - seamless development across macOS and Ubuntu environments
-argument-hint: "[--status|--sync-sessions|--push-workspace|--pull-workspace|--all] [--dry-run] [--verbose] [--force] [--migrate-sessions]"
+description: Claude Code session synchronization using verified ~/.claude/projects/ standard - automatic bidirectional sync across macOS and Linux environments
+argument-hint: "[--status|--sync-sessions|--migrate-sessions] [--dry-run] [--verbose] [--force]"
 allowed-tools: Task, Bash, Read
 ---
 
-# Universal Cross-Platform Workspace Sync: $ARGUMENTS
+# Claude Session Sync: $ARGUMENTS
 
-**Revolutionary Claude Code workspace and session synchronization with canonical session architecture**
-**Enables seamless session resumption across macOS ↔ Ubuntu environments**
+**🎯 PURPOSE: Claude Code session synchronization using Docker-verified official standard**
+**🔄 SCOPE: Sessions only - use Git for workspace synchronization**
+**🖥️ AUTOMATIC BIDIRECTIONAL: Auto-detects macOS ↔ Linux and syncs both directions in one command**
 
-**Flags:**
+## Recommended Workflow
+
+### 1. 📁 Workspace Sync (Use Git)
+```bash
+# Push changes to remote repository
+git add . && git commit -m "Work in progress" && git push
+
+# Pull latest changes on other system
+git pull
+```
+
+### 2. 🗂️ Session Sync (Use sage-sync)
+```bash
+# Automatically sync Claude sessions in both directions (local → remote, remote → local)
+/sync --sync-sessions --verbose
+```
+
+### 3. ✅ Status Check
+```bash
+# Verify sync infrastructure health
+/sync --status
+```
+
+## Available Actions
+
+- `--sync-sessions` - Automatically sync Claude sessions bidirectionally using official ~/.claude/projects/ format
+- `--migrate-sessions` - Migrate sessions from legacy format to official standard
 - `--status` - Check sync infrastructure health and model availability
-- `--sync-sessions` - Universal cross-platform session sync with canonical format
-- `--migrate-sessions` - Migrate platform-specific sessions to canonical format
-- `--push-workspace` - Push local workspace to remote
-- `--pull-workspace` - Pull remote workspace to local
-- `--all` - Execute comprehensive sync (push workspace + canonical sessions + status)
-- `--dry-run` - Preview changes without executing
-- `--verbose` - Detailed output and diagnostics
-- `--force` - Skip confirmations and force operations
 
-**Examples:**
-- `/sync --status --verbose` - Comprehensive health check with canonical session validation
-- `/sync --sync-sessions` - Universal cross-platform session sync with automatic migration
-- `/sync --migrate-sessions --dry-run` - Preview canonical session migration without changes
-- `/sync --all --dry-run` - Preview complete cross-platform sync operation
-- `/sync --push-workspace --sync-sessions` - Full development environment sync
-- `/sync --force --sync-sessions` - Force canonical session sync (resolves path conflicts)
+## Options
+
+- `--dry-run` - Preview changes without executing
+- `--verbose` - Detailed output and diagnostics  
+- `--force` - Skip confirmations and force operations
+- `--version` - Show version and system configuration
+
+## Examples
+
+- `/sync --sync-sessions --verbose` - Bidirectionally sync sessions with detailed logging
+- `/sync --migrate-sessions --dry-run` - Preview legacy session migration
+- `/sync --status` - Check system health and connectivity
+- `/sync --version` - Show bidirectional configuration
 
 ```bash
 # Parse arguments
@@ -83,11 +108,12 @@ echo "   • ZeroTier network status and fallback routing"
 echo "   • Local and remote workspace integrity verification"
 echo "   • Cross-platform path compatibility assessment"
 echo ""
-echo "2. Canonical Session Architecture Execution"
+echo "2. Automatic Bidirectional Session Sync Execution"
 echo "   • Execute: $sync_command"
-echo "   • Universal cross-platform session synchronization"
-echo "   • Automatic migration of platform-specific sessions to canonical format"
-echo "   • Intelligent session deduplication with UUID-based merging"
+echo "   • Step 1: Push local sessions to remote (local → remote)"
+echo "   • Step 2: Pull remote sessions to local (remote → local)"
+echo "   • Cross-platform session synchronization using ~/.claude/projects/"
+echo "   • Docker-verified official Claude Code format with --update safety"
 echo ""
 echo "3. SAGE Models & Infrastructure Status"
 echo "   • Local/remote model availability (alphaforge, nautilus_trader, etc.)"
@@ -95,31 +121,31 @@ echo "   • Python package consistency (pycatch22, tsfresh)"
 echo "   • TiRex GPU availability and CUDA status"
 echo "   • Cross-platform development environment verification"
 echo ""
-echo "4. Revolutionary Claude Sessions Management"
-echo "   • Universal canonical session format (~eon-nt, ~scripts, ~-claude)"
-echo "   • Cross-platform session consolidation (macOS + Ubuntu → Universal)"
-echo "   • Seamless session resumption across any platform"
-echo "   • Workspace-relative path mapping for true portability"
+echo "4. Official Claude Sessions Management"
+echo "   • Official ~/.claude/projects/ format (Docker-verified)"
+echo "   • Cross-platform session sync (macOS ↔ Ubuntu)"
+echo "   • Seamless session resumption using native Claude behavior"
+echo "   • Path-encoded directory names for workspace identification"
 echo ""
-echo "5. Universal Cross-Platform Validation & Recommendations"
-echo "   • Canonical session format verification and integrity checks"
+echo "5. Cross-Platform Validation & Recommendations"
+echo "   • Official session format verification and integrity checks"
 echo "   • Cross-platform session availability validation"
-echo "   • Universal workspace compatibility assessment"
-echo "   • Performance metrics for canonical session architecture"
+echo "   • Native Claude Code compatibility assessment"
+echo "   • Performance metrics for official session architecture"
 echo ""
-echo "💡 REVOLUTIONARY WORKFLOW INTEGRATION:"
-echo "   • Initial setup: /sync --migrate-sessions (convert existing sessions)"
+echo "💡 OFFICIAL WORKFLOW INTEGRATION:"
+echo "   • Initial setup: /sync --migrate-sessions (convert to official format)"
 echo "   • Before switching to GPU: /sync --push-workspace --sync-sessions"
 echo "   • Before switching to local: /sync --pull-workspace --sync-sessions"
 echo "   • Regular cross-platform sync: /sync --all --verbose"
 echo "   • Emergency session recovery: /sync --sync-sessions --force"
 echo "   • Session migration preview: /sync --migrate-sessions --dry-run"
 echo ""
-echo "🚀 CANONICAL SESSION BENEFITS:"
-echo "   • Resume any session from any platform (macOS ↔ Ubuntu)"
-echo "   • Universal workspace compatibility (~eon-nt works everywhere)"
-echo "   • Automatic platform-specific session consolidation"
-echo "   • Zero manual path translation or configuration required"
+echo "🚀 OFFICIAL SESSION BENEFITS:"
+echo "   • Resume sessions from any platform (macOS ↔ Ubuntu)"
+echo "   • Native Claude Code compatibility (Docker-verified)"
+echo "   • Simple path-encoded directory structure"
+echo "   • No custom transformations or complexity required"
 echo ""
 
 # Success indicator for automation
