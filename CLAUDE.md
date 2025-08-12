@@ -71,10 +71,22 @@
 - **Validation Scope**: Check directory references, file paths, anchor links, relative paths
 - **Security Audit**: Validate shell commands, file paths, user input handling in documentation examples
 
+## Native Pattern Conformity
+
+### Pattern Adherence Requirements
+- **User Global Patterns** (`~/.claude/CLAUDE.md`): Language evolution, Unix conventions, tool preferences, documentation standards
+- **Project Patterns** (`CLAUDE.md`): PPO, FPPA, NTPA, CFUP, APCF, AFPOE compliance
+- **Cross-Pattern Validation**: Ensure harmony between user global and project requirements
+- **Systematic Validation**: Apply audit methodology to verify pattern conformity
+
 ## DSQ: Direction Steering Questions
 
 - **Clear Discrepancies**: Ask user key direction steering questions (DSQ) to ensure plan stays focused and consolidated toward user's preferred path.
 
+## Success Gates & Success Sluices Terminology
+
+- **Success Gates**: Major implementation milestones that must be validated before proceeding
+- **Success Sluices**: Granular validation checkpoints between Success Gates that must be cleared before advancing
 
 ## APCF: Audit-Proof Commit Format for SR&ED Evidence Generation
 
@@ -114,37 +126,3 @@
 - **Main Script**: `.claude/tools/gfm-link-checker/gfm_link_checker.py`
 - **Command Wrapper**: `.claude/tools/gfm-link-checker/bin/gfm-check`
 - **Project Config**: `.claude/tools/gfm-link-checker/pyproject.toml`
-
-## CAAP: Command-Agent Architecture Principles
-
-### Design Philosophy
-- **Commands**: Interface layer with rich argument hints, can orchestrate single or multiple agents
-- **Agents**: Single-minded specialists focused on specific task domains
-- **Alignment**: Every agent requires at least one command for invocation access
-
-### Auto-Suggestion Standards
-- **Frontmatter Required**: `description`, `argument-hint` fields mandatory for Claude Code discovery
-- **Comprehensive Options**: Argument hints show all available flags, modes, and usage patterns
-- **Rich Completion**: Multi-option commands use `|` syntax for alternative modes in hint field
-
-### Workspace Integration Pattern
-- **Command Orchestration**: Commands handle user interaction, validation, and multi-agent coordination
-- **Systematic Coverage**: No orphaned agents or commands - every agent accessible via command interface
-
-### Agent Engineering Reference Links
-- **Custom Agents**: https://claudelog.com/mechanics/custom-agents/
-- **Agent Engineering**: https://claudelog.com/mechanics/agent-engineering/
-- **Humanising Agents**: https://claudelog.com/mechanics/humanising-agents/
-- **Split Role Sub-Agents**: https://claudelog.com/mechanics/split-role-sub-agents/
-
-### Agent Development Methodology
-- **Multi-Task Analysis**: Always use parallel Task tool calls to read all four reference links simultaneously before agent-related work
-- **Insight Integration**: Synthesize official documentation before implementing custom solutions
-- **DRY Compliance**: Only document unique implementation details not covered in authoritative sources
-
-### Consolidation Best Practices
-- **Unified Systems**: Related functionality should be consolidated into comprehensive single-agent systems
-- **Example**: Python QA consolidation merged separate ruff-fix, import-check commands into unified `/python-qa` with comprehensive multi-layer validation
-- **Benefits**: Reduces user cognitive load, eliminates command fragmentation, enables holistic quality assurance
-
-*Note: Review these links regularly for best practices updates when performing agent-related tasks*
