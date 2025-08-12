@@ -38,7 +38,8 @@ tl                    # or: tmux-list
 tk auth               # or: tmux-kill auth
 
 # Detach from session (keeps it running)
-Ctrl+b, then d
+td                    # Smart detach command (recommended)
+# OR: Ctrl+b, then d  # Traditional keyboard shortcut
 ```
 
 ## 🧠 Smart Naming
@@ -59,11 +60,13 @@ The session manager automatically creates intelligent session names:
 - `tmux-session [name]` - Create/attach session (uses folder name if no name provided)
 - `tmux-list` - List all sessions with status
 - `tmux-kill <name>` - Kill specific session
+- `tmux-detach [name]` - Smart detach from current or specified session
 
 ### Quick Aliases
 - `ts [name]` - Short for `tmux-session`
 - `tl` - Short for `tmux-list`
 - `tk <name>` - Short for `tmux-kill`
+- `td [name]` - Short for `tmux-detach`
 - `tmux-here` - Same as `ts` (create/attach using folder name)
 
 ### Help
@@ -77,7 +80,7 @@ cd ~/my-awesome-project
 ts                           # Creates 'my-awesome-project' session
 
 # In the tmux session - work normally
-# Press Ctrl+b then d to detach (session keeps running)
+# Use 'td' to detach (session keeps running) - much easier than Ctrl+b d!
 
 # Later, return to work
 cd ~/my-awesome-project  
@@ -156,7 +159,7 @@ The scripts are simple bash files - feel free to modify them:
 ## ⚡ Session Management
 
 ### Detaching vs Exiting
-- **Detach** (`Ctrl+b, d`): Session keeps running in background
+- **Detach** (`td` or `Ctrl+b, d`): Session keeps running in background
 - **Exit** (`exit` or `Ctrl+d`): Terminates session completely
 
 ### Session Lifecycle

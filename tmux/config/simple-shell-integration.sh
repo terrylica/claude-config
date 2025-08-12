@@ -13,6 +13,7 @@
 alias ts="tmux-session"    # Quick session creation/attach
 alias tl="tmux-list"       # List sessions
 alias tk="tmux-kill"       # Kill session
+alias td="tmux-detach"     # Smart detach from session
 
 # Note: Session persistence is automatic - no manual commands needed
 
@@ -29,12 +30,14 @@ tmux-help() {
     echo "  tmux-session [name]     Create/attach session (uses folder name if no name)"
     echo "  tmux-list              List all sessions with status"
     echo "  tmux-kill <name>       Kill specific session"
+    echo "  tmux-detach [name]     Smart detach from current or specified session"
     echo ""
     echo ""
     echo "Quick Aliases:"
     echo "  ts [name]              Short for tmux-session"
     echo "  tl                     Short for tmux-list"
     echo "  tk <name>              Short for tmux-kill"
+    echo "  td [name]              Short for tmux-detach"
     echo "  tmux-here              Same as ts (create/attach using folder name)"
     echo ""
     echo "Smart Naming Examples:"

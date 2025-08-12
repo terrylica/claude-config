@@ -1,0 +1,169 @@
+#!/bin/bash
+# Simple tmux session detach utility
+# Usage: tmux-detach [options] [session-name]
+#
+# Features:
+# - Smart detach from current session if inside tmux
+# - Detach specific session by name
+# - Supports all tmux detach-session flags
+# - Clean, transparent, debuggable
+
+set -euo pipefail
+
+# Colors for output
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Check if we're currently inside a tmux session
+is_inside_tmux() {
+    [[ -n "${TMUX:-}" ]]
+}
+
+# Get current tmux session name
+get_current_session() {
+    if is_inside_tmux; then
+        tmux display-message -p '#S'
+    else
+        echo ""
+    fi
+}
+
+# Show help
+show_help() {
+    echo "Simple tmux session detach utility"
+    echo ""
+    echo "Usage:"
+    echo "  tmux-detach                    # Smart detach from current session"
+    echo "  tmux-detach mysession          # Detach specific session by name"
+    echo "  tmux-detach -v                 # Verbose mode"
+    echo "  tmux-detach -a                 # Detach all clients (tmux flag)"
+    echo "  tmux-detach -P                 # Don't print messages (tmux flag)"
+    echo ""
+    echo "Smart behavior:"
+    echo "  • Inside tmux: detaches current session"
+    echo "  • Outside tmux: requires session name"
+    echo "  • Supports all tmux detach-session flags"
+    echo ""
+    echo "Examples:"
+    echo "  td                             # Quick detach (alias)"
+    echo "  td -v                          # Verbose detach"
+    echo "  td mysession                   # Detach specific session"
+    echo "  td -a                          # Detach all clients"
+    echo ""
+    echo "Tmux detach-client flags:"
+    echo "  -a            Detach all clients attached to the session"
+    echo "  -P            Don't print messages"
+    echo "  -s target     Specify target session"
+    echo ""
+    exit 0
+}
+
+# Main function
+main() {
+    local verbose=false
+    local session_name=""
+    local tmux_flags=()
+    local explicit_session=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                ;;
+            -v|--verbose)
+                verbose=true
+                shift
+                ;;
+            -a|-P)
+                # Pass through tmux flags
+                tmux_flags+=("$1")
+                shift
+                ;;
+            -s)
+                # Handle -s flag with target session
+                tmux_flags+=("$1")
+                if [[ $# -gt 1 ]]; then
+                    tmux_flags+=("$2")
+                    explicit_session=true
+                    shift 2
+                else
+                    echo -e "${RED}❌ -s flag requires a session name${NC}"
+                    exit 1
+                fi
+                ;;
+            -*)
+                echo -e "${RED}❌ Unknown flag: $1${NC}"
+                echo "Use -h for help"
+                exit 1
+                ;;
+            *)
+                if [[ -z "$session_name" ]]; then
+                    session_name="$1"
+                    explicit_session=true
+                else
+                    echo -e "${RED}❌ Too many arguments${NC}"
+                    echo "Use -h for help"
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    # Show info if verbose
+    if [[ "$verbose" == true ]]; then
+        echo -e "${BLUE}🎯 tmux Detach Utility${NC}"
+        if is_inside_tmux; then
+            echo "📍 Currently inside tmux session: $(get_current_session)"
+        else
+            echo "📍 Not currently in a tmux session"
+        fi
+        echo ""
+    fi
+    
+    # Smart session detection
+    if [[ "$explicit_session" == false ]]; then
+        if is_inside_tmux; then
+            current_session=$(get_current_session)
+            [[ "$verbose" == true ]] && echo -e "${GREEN}🔍 Auto-detected current session: $current_session${NC}"
+            tmux_flags+=(-s "$current_session")
+        else
+            echo -e "${RED}❌ Not inside a tmux session and no session specified${NC}"
+            echo ""
+            echo "Available sessions:"
+            "$HOME/.claude/tmux/bin/tmux-list"
+            echo ""
+            echo "Usage: tmux-detach <session-name>"
+            exit 1
+        fi
+    elif [[ -n "$session_name" ]]; then
+        # Verify the specified session exists
+        if ! tmux list-sessions 2>/dev/null | grep -q "^${session_name}:"; then
+            echo -e "${RED}❌ Session not found: $session_name${NC}"
+            echo ""
+            echo "Available sessions:"
+            "$HOME/.claude/tmux/bin/tmux-list"
+            exit 1
+        fi
+        tmux_flags+=(-s "$session_name")
+        [[ "$verbose" == true ]] && echo -e "${GREEN}🎯 Targeting session: $session_name${NC}"
+    fi
+    
+    # Execute detach command
+    if [[ "$verbose" == true ]]; then
+        echo -e "${YELLOW}🚀 Executing: tmux detach-client ${tmux_flags[*]}${NC}"
+    fi
+    
+    tmux detach-client "${tmux_flags[@]}"
+    
+    if [[ "$verbose" == true ]]; then
+        echo -e "${GREEN}✅ Successfully detached${NC}"
+    fi
+}
+
+# Run main function
+main "$@"
