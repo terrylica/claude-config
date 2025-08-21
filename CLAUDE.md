@@ -44,6 +44,22 @@
 - Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
 - Advocate for SOTA tooling in Claude Code Max environment
 
+## FDAP: Fail-Fast Data Authenticity Precept
+
+**CORE MOTTO**: *"Real Data Only, Fail-Fast Always, Debug Everything"*
+
+### Absolute Prohibitions
+- **NO Fail-Safes**: Never implement failover, failsafe, or fallback mechanisms for data or model operations
+- **NO Synthetic Data**: Absolutely prohibited - no fake data, mock data, or synthetic data even for testing
+- **NO Graceful Degradation**: Systems must fail immediately with rich debug context, never continue with corrupted state
+- **NO Silent Failures**: Every anomaly, inconsistency, or boundary violation must raise explicit exceptions
+
+### Universal Principles
+- **Real Data Imperative**: Always seek authentic, production-quality data sources - never settle for substitutes
+- **Immediate Failure**: Fail-fast with comprehensive exception context for rapid root cause identification
+- **Authenticity Verification**: Validate data authenticity and integrity at every processing boundary
+- **Exception-Driven Design**: Use structured exceptions with rich context for maximum debugging information
+
 ## Development Environment & Tools
 
 ### Primary Toolchain
