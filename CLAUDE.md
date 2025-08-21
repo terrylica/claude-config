@@ -37,7 +37,7 @@
 - **Clean Separation**: Executables globally accessible, source code and configs organized in .claude structure
 - **Cross-Platform Consistency**: Same tool access pattern on macOS and Linux environments
 - **Absolute Path Resolution**: Scripts use absolute paths to find supporting files in .claude structure
-- **Architecture Pattern**: Tools use `uv run --directory` for self-contained environments while preserving working directory context
+- **Architecture Pattern**: Tools use `uv run --active python --directory` for self-contained environments while preserving working directory context
 - **Working Directory Principle**: All workspace scripts MUST preserve user's current working directory - avoid `cd` operations that permanently change user context (subshell path resolution and save/restore patterns are acceptable)
 
 ### Current User Context
@@ -47,7 +47,7 @@
 ## Development Environment & Tools
 
 ### Primary Toolchain
-- **Python Management**: `uv` for all Python operations (`uv run`, `uv add`) - **Avoid**: pip, conda, pipenv
+- **Python Management**: `uv` for all Python operations (`uv run --active python`, `uv add`) - **Avoid**: pip, conda, pipenv
 - **Python Version**: 3.10+, type checking disabled (development environment)
 - **Libraries**: Prefer `httpx` over `requests`, `platformdirs` for cache directories
 - **Remote Access**: Prefer `curl` over fetch
@@ -55,7 +55,7 @@
 - **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
 
 ### Git Repository Detection
-- `uv run python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
+- `uv run --active python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
 
 ## Documentation Standards
 
@@ -126,3 +126,20 @@
 - **Main Script**: `.claude/tools/gfm-link-checker/gfm_link_checker.py`
 - **Command Wrapper**: `.claude/tools/gfm-link-checker/bin/gfm-check`
 - **Project Config**: `.claude/tools/gfm-link-checker/pyproject.toml`
+
+## EPMS: Editable Package Management System
+
+### Core Principle
+**Universal Workspace Integration**: All packages (repos/, experiments/, tools/) are uv workspace members enabling seamless cross-package imports without sys.path manipulation.
+
+### Architecture Benefits
+- **Zero sys.path Hacks**: Clean Python imports across all workspace components
+- **Live Development**: Changes in any package instantly available to all dependents
+- **Dependency Transparency**: All package relationships explicit in pyproject.toml files
+- **Universal Tool Access**: Scripts work from any directory without path discovery logic
+
+### Integration Patterns
+- **Third-Party Repos**: `repos/` packages (tirex, data-source-manager, finplot, nautilus_trader)
+- **Internal Experiments**: `experiments/` packages (tirex-context-stability, research projects)
+- **Development Tools**: `.claude/tools/` packages with global CLI access via ~/.local/bin
+- **Test Environments**: Isolated package testing with full workspace dependency access
