@@ -37,41 +37,46 @@
 - **Clean Separation**: Executables globally accessible, source code and configs organized in .claude structure
 - **Cross-Platform Consistency**: Same tool access pattern on macOS and Linux environments
 - **Absolute Path Resolution**: Scripts use absolute paths to find supporting files in .claude structure
-- **Architecture Pattern**: Tools use `uv run --active python --directory` for self-contained environments while preserving working directory context
+- **Architecture Pattern**: Tools use `uv run --active python -m --directory` for self-contained environments while preserving working directory context
 - **Working Directory Principle**: All workspace scripts MUST preserve user's current working directory - avoid `cd` operations that permanently change user context (subshell path resolution and save/restore patterns are acceptable)
 
 ### Current User Context
 - Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
 - Advocate for SOTA tooling in Claude Code Max environment
 
-## FDAP: Fail-Fast Data Authenticity Precept
+## Defensive Programming Standards
 
-**CORE MOTTO**: *"Real Data Only, Fail-Fast Always, Debug Everything"*
-
-### Absolute Prohibitions
-- **NO Fail-Safes**: Never implement failover, failsafe, or fallback mechanisms for data or model operations
-- **NO Synthetic Data**: Absolutely prohibited - no fake data, mock data, or synthetic data even for testing
-- **NO Graceful Degradation**: Systems must fail immediately with rich debug context, never continue with corrupted state
-- **NO Silent Failures**: Every anomaly, inconsistency, or boundary violation must raise explicit exceptions
-
-### Universal Principles
-- **Real Data Imperative**: Always seek authentic, production-quality data sources - never settle for substitutes
-- **Immediate Failure**: Fail-fast with comprehensive exception context for rapid root cause identification
+### Data Authenticity Requirements
+- **Real Data Only**: Never use fake data, mock data, synthetic data, or placeholder data even for testing
+- **Production Quality Sources**: Always seek authentic, production-quality data sources
+- **Data Integrity**: Validate all inputs at system boundaries with explicit type checking
 - **Authenticity Verification**: Validate data authenticity and integrity at every processing boundary
-- **Exception-Driven Design**: Use structured exceptions with rich context for maximum debugging information
+
+### Input Validation Requirements  
+- **Boundary Conditions**: Check for null, empty, and edge case values before processing
+- **Format Validation**: Ensure data conforms to expected formats before consumption
+- **Range Validation**: Verify numeric values fall within acceptable bounds
+
+### Exception-Only Failure Principles
+- **No Fallover Mechanisms**: Never implement failover, failsafe, or fallback mechanisms for data or model operations
+- **Immediate Exception**: Systems must fail immediately with rich debug context, never continue with corrupted state
+- **No Silent Failures**: Every anomaly, inconsistency, or boundary violation must raise explicit exceptions
+- **Explicit Exceptions**: Raise structured exceptions with rich context for debugging
+- **Early Detection**: Identify problems as close to source as possible
 
 ## Development Environment & Tools
 
 ### Primary Toolchain
-- **Python Management**: `uv` for all Python operations (`uv run --active python`, `uv add`) - **Avoid**: pip, conda, pipenv
-- **Python Version**: 3.10+, type checking disabled (development environment)
+- **Python Management**: `uv` for all Python operations (`uv run --active python -m`, `uv add`) - **Avoid**: pip, conda, pipenv
+- **Module-Only Execution**: Mandatory `-m` flag with on-demand compatibility resolution and consolidation over proliferation
+- **Python Version**: 3.12+, type checking disabled (development environment)
 - **Libraries**: Prefer `httpx` over `requests`, `platformdirs` for cache directories
 - **Remote Access**: Prefer `curl` over fetch
 - **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
 - **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
 
 ### Git Repository Detection
-- `uv run --active python -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
+- `uv run --active python -m pathlib -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
 
 ## Documentation Standards
 
@@ -91,7 +96,7 @@
 
 ### Pattern Adherence Requirements
 - **User Global Patterns** (`~/.claude/CLAUDE.md`): Language evolution, Unix conventions, tool preferences, documentation standards
-- **Project Patterns** (`CLAUDE.md`): PPO, FPPA, NTPA, CFUP, APCF, AFPOE compliance
+- **Project Patterns** (`CLAUDE.md`): PPO, COE, FPPA, NTPA, APCF compliance
 - **Cross-Pattern Validation**: Ensure harmony between user global and project requirements
 - **Systematic Validation**: Apply audit methodology to verify pattern conformity
 
