@@ -1,5 +1,5 @@
 ---
-name: python-qa
+name: python-qa-agent
 description: "Comprehensive Python quality assurance specialist. Multi-layer validation combining ruff auto-fixing, import health analysis, circular dependency detection, and architectural validation."
 tools: Bash, Glob, Grep, Read, Write, mcp__ide__getDiagnostics, mcp__ide__executeCode
 model: sonnet
@@ -29,7 +29,7 @@ Execute this comprehensive 6-layer validation pipeline:
 - **Coverage**: Import cycle analysis with dependency graph generation
 
 ### 4. Module Compilation Validation
-- **Command**: `uv run python -m compileall -q [target]`
+- **Command**: `uv run --active python -m compileall -q [target]`
 - **Purpose**: Syntax validation and module loading sanity check
 
 ### 5. Policy Rule Enforcement
@@ -38,7 +38,7 @@ Execute this comprehensive 6-layer validation pipeline:
 - **Command**: `uvx semgrep --config semgrep.yml`
 
 ### 6. Integration Smoke Test
-- **Command**: `uv run python -c "import [package]; print('✅ Import validation passed')"`
+- **Command**: `uv run --active python -c "import [package]; print('✅ Import validation passed')"`
 - **Purpose**: Final runtime validation of import health
 
 ## Configuration Management

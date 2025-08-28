@@ -18,4 +18,3 @@ Canadian SR&ED compliance specialist for government audit readiness.
 - Proper SR&ED terminology and criteria usage
 - Evidence chain integrity for government review
 - Focus on scientific/technological advancement and uncertainty
-EOF < /dev/null
