@@ -22,8 +22,8 @@ SR&ED-compliant commit message generator with automatic git hygiene and audit-pr
 ### [Python QA](../../agents/python-qa.md) (`python-qa`)
 Comprehensive Python import health validation using multi-tool static analysis approach.
 
-### [MHR Refactor](../../agents/mhr-refactor.md) (`mhr-refactor`)
-Specialized refactoring agent for complex code transformations.
+### [Workspace Refactor](../../agents/workspace-refactor.md) (`workspace-refactor`)
+Comprehensive workspace refactoring and technical debt reduction specialist. Systematically refactors workspaces by eliminating inconsistencies, cleaning up legacy files, and strategically modularizing code with rollback safety.
 
 ### [Workspace Sync](../../agents/workspace-sync.md) (`workspace-sync`)
 Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations and cross-environment development workflows.
