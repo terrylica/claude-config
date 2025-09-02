@@ -9,19 +9,26 @@ CNS_CONFIG_FILE="$CONFIG_DIR/cns_config.json"
 
 echo "$(date): CNS clipboard hook triggered" >> /tmp/claude_cns_debug.log
 
-# Load configuration
-clipboard_enabled="1"  # default enabled
-if [[ -f "$CNS_CONFIG_FILE" ]]; then
-    clipboard_enabled=$(jq -r '.command_detection.clipboard_enabled // true' "$CNS_CONFIG_FILE" 2>/dev/null)
-    if [[ "$clipboard_enabled" == "false" ]]; then
-        clipboard_enabled="0"
-    else
-        clipboard_enabled="1"
-    fi
-    echo "$(date): Clipboard enabled from config: $clipboard_enabled" >> /tmp/claude_cns_debug.log
-else
-    echo "$(date): Config file not found, using default clipboard enabled" >> /tmp/claude_cns_debug.log
+# Load configuration - fail immediately if config file missing or invalid
+if [[ ! -f "$CNS_CONFIG_FILE" ]]; then
+    echo "$(date): ERROR: CNS config file not found: $CNS_CONFIG_FILE" >> /tmp/claude_cns_debug.log
+    echo "ERROR: CNS config file not found: $CNS_CONFIG_FILE" >&2
+    exit 1
 fi
+
+clipboard_enabled=$(jq -r '.command_detection.clipboard_enabled // true' "$CNS_CONFIG_FILE")
+if [[ $? -ne 0 ]]; then
+    echo "$(date): ERROR: Failed to parse CNS config file: $CNS_CONFIG_FILE" >> /tmp/claude_cns_debug.log
+    echo "ERROR: Failed to parse CNS config file: $CNS_CONFIG_FILE" >&2
+    exit 2
+fi
+
+if [[ "$clipboard_enabled" == "false" ]]; then
+    clipboard_enabled="0"
+else
+    clipboard_enabled="1"
+fi
+echo "$(date): Clipboard enabled from config: $clipboard_enabled" >> /tmp/claude_cns_debug.log
 
 # Read input from Claude Code hook
 input_data=$(cat)
@@ -89,7 +96,12 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
     
     while [[ $attempt -lt $max_attempts ]]; do
         # Get recent lines to find the latest response
-        last_lines=$(tail -50 "$transcript_path" 2>/dev/null)
+        last_lines=$(tail -50 "$transcript_path")
+        if [[ $? -ne 0 ]]; then
+            echo "$(date): ERROR: Failed to read transcript file: $transcript_path" >> /tmp/claude_cns_debug.log
+            echo "ERROR: Failed to read transcript file: $transcript_path" >&2
+            exit 3
+        fi
         
         # Look for assistant response with our session ID
         temp_response=$(echo "$last_lines" | tail -r | while read -r line; do
@@ -165,30 +177,38 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
             local combined_content
             combined_content=$(printf "USER: %s\n\nCLAUDE: %s" "$user_prompt" "$last_response")
             
-            # Platform-specific clipboard copy
+            # Determine required clipboard tool and fail immediately if not available
             if command -v pbcopy >/dev/null 2>&1; then
-                # macOS
-                if printf "%s" "$combined_content" | pbcopy 2>/dev/null; then
-                    echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
-                else
-                    echo "$(date): Failed to copy combined content to clipboard (pbcopy)" >> /tmp/claude_cns_debug.log
+                # macOS - pbcopy is required
+                printf "%s" "$combined_content" | pbcopy
+                if [[ $? -ne 0 ]]; then
+                    echo "$(date): ERROR: Failed to copy to clipboard using pbcopy" >> /tmp/claude_cns_debug.log
+                    echo "ERROR: Failed to copy to clipboard using pbcopy" >&2
+                    exit 4
                 fi
+                echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
             elif command -v xclip >/dev/null 2>&1; then
-                # Linux with xclip
-                if printf "%s" "$combined_content" | xclip -selection clipboard 2>/dev/null; then
-                    echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
-                else
-                    echo "$(date): Failed to copy combined content to clipboard (xclip)" >> /tmp/claude_cns_debug.log
+                # Linux with xclip - xclip is required
+                printf "%s" "$combined_content" | xclip -selection clipboard
+                if [[ $? -ne 0 ]]; then
+                    echo "$(date): ERROR: Failed to copy to clipboard using xclip" >> /tmp/claude_cns_debug.log
+                    echo "ERROR: Failed to copy to clipboard using xclip" >&2
+                    exit 4
                 fi
+                echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
             elif command -v xsel >/dev/null 2>&1; then
-                # Linux with xsel
-                if printf "%s" "$combined_content" | xsel --clipboard --input 2>/dev/null; then
-                    echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
-                else
-                    echo "$(date): Failed to copy combined content to clipboard (xsel)" >> /tmp/claude_cns_debug.log
+                # Linux with xsel - xsel is required
+                printf "%s" "$combined_content" | xsel --clipboard --input
+                if [[ $? -ne 0 ]]; then
+                    echo "$(date): ERROR: Failed to copy to clipboard using xsel" >> /tmp/claude_cns_debug.log
+                    echo "ERROR: Failed to copy to clipboard using xsel" >&2
+                    exit 4
                 fi
+                echo "$(date): Combined content copied to clipboard: User(${#user_prompt}) + Claude(${#last_response}) chars" >> /tmp/claude_cns_debug.log
             else
-                echo "$(date): No supported clipboard tool found (pbcopy/xclip/xsel)" >> /tmp/claude_cns_debug.log
+                echo "$(date): ERROR: No supported clipboard tool found (pbcopy/xclip/xsel required)" >> /tmp/claude_cns_debug.log
+                echo "ERROR: No supported clipboard tool found (pbcopy/xclip/xsel required)" >&2
+                exit 5
             fi
         else
             echo "$(date): Clipboard copying disabled (config: $clipboard_enabled, env: ${CLAUDE_CNS_CLIPBOARD:-unset})" >> /tmp/claude_cns_debug.log

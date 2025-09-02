@@ -53,8 +53,16 @@ create_local_backup() {
     # Copy sessions with verification
     if [[ -d "$SESSIONS_DIR" ]]; then
         cp -r "$SESSIONS_DIR" "$backup_dir/"
-        local_session_count=$(find "$SESSIONS_DIR" -name "*.json" 2>/dev/null | wc -l)
-        backup_session_count=$(find "$backup_dir/sessions" -name "*.json" 2>/dev/null | wc -l)
+        local_session_count=$(find "$SESSIONS_DIR" -name "*.json" | wc -l)
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to count session files in source directory: $SESSIONS_DIR" >&2
+            return 1
+        fi
+        backup_session_count=$(find "$backup_dir/sessions" -name "*.json" | wc -l)
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to count session files in backup directory: $backup_dir/sessions" >&2
+            return 1
+        fi
         
         if [[ "$local_session_count" -eq "$backup_session_count" ]]; then
             log_success "Local backup verified: $local_session_count sessions" >&2
@@ -79,24 +87,32 @@ create_remote_backup() {
     
     log_info "Creating remote emergency backup..." >&2
     
-    # Create remote backup directory and copy sessions
-    if ssh "$REMOTE_HOST" "mkdir -p ~/.claude/backups/emergency && [[ -d ~/.claude/system/sessions ]] && cp -r ~/.claude/system/sessions ~/.claude/backups/emergency/remote_$timestamp" 2>/dev/null; then
-        # Verify remote backup
-        remote_session_count=$(ssh "$REMOTE_HOST" "find ~/.claude/system/sessions -name '*.json' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-        backup_session_count=$(ssh "$REMOTE_HOST" "find ~/.claude/backups/emergency/remote_$timestamp/sessions -name '*.json' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-        
-        if [[ "$remote_session_count" -eq "$backup_session_count" ]]; then
-            log_success "Remote backup verified: $remote_session_count sessions" >&2
-            echo "$remote_backup_dir"
-            return 0
-        else
-            log_error "Remote backup verification failed: $remote_session_count vs $backup_session_count" >&2
-            return 1
-        fi
-    else
-        log_warning "Remote sessions directory not found or backup failed" >&2
+    # Create remote backup directory and copy sessions - fail immediately on any error
+    if ! ssh "$REMOTE_HOST" "mkdir -p ~/.claude/backups/emergency && [[ -d ~/.claude/system/sessions ]] && cp -r ~/.claude/system/sessions ~/.claude/backups/emergency/remote_$timestamp"; then
+        log_error "Failed to create remote backup via SSH" >&2
+        return 1
+    fi
+    
+    # Verify remote backup - fail immediately on any count error
+    remote_session_count=$(ssh "$REMOTE_HOST" "find ~/.claude/system/sessions -name '*.json' | wc -l")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to count remote session files" >&2
+        return 1
+    fi
+    
+    backup_session_count=$(ssh "$REMOTE_HOST" "find ~/.claude/backups/emergency/remote_$timestamp/sessions -name '*.json' | wc -l")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to count remote backup files" >&2
+        return 1
+    fi
+    
+    if [[ "$remote_session_count" -eq "$backup_session_count" ]]; then
+        log_success "Remote backup verified: $remote_session_count sessions" >&2
         echo "$remote_backup_dir"
         return 0
+    else
+        log_error "Remote backup verification failed: $remote_session_count vs $backup_session_count" >&2
+        return 1
     fi
 }
 
@@ -111,7 +127,7 @@ test_backup_integrity() {
     if [[ -d "$local_backup" ]]; then
         local_test_files=$(find "$local_backup" -name "*.json" | head -3)
         for file in $local_test_files; do
-            if ! jq empty "$file" >/dev/null 2>&1; then
+            if ! jq empty "$file" >/dev/null; then
                 log_error "Local backup integrity test failed: $file"
                 return 1
             fi
@@ -146,13 +162,31 @@ generate_backup_manifest() {
     local remote_backup="$3"
     local manifest_file="$BACKUP_BASE_DIR/emergency/manifest_$timestamp.json"
     
-    # Count sessions
-    local_count=$(find "$local_backup" -name "*.json" 2>/dev/null | wc -l)
-    remote_count=$(ssh "$REMOTE_HOST" "find $remote_backup -name '*.json' 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    # Count sessions - fail immediately on any error
+    local_count=$(find "$local_backup" -name "*.json" | wc -l)
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to count local backup sessions for manifest" >&2
+        return 1
+    fi
     
-    # Calculate sizes
-    local_size=$(du -sh "$local_backup" 2>/dev/null | cut -f1 || echo "unknown")
-    remote_size=$(ssh "$REMOTE_HOST" "du -sh $remote_backup 2>/dev/null | cut -f1" 2>/dev/null || echo "unknown")
+    remote_count=$(ssh "$REMOTE_HOST" "find $remote_backup -name '*.json' | wc -l")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to count remote backup sessions for manifest" >&2
+        return 1
+    fi
+    
+    # Calculate sizes - fail immediately on any error
+    local_size=$(du -sh "$local_backup" | cut -f1)
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to calculate local backup size for manifest" >&2
+        return 1
+    fi
+    
+    remote_size=$(ssh "$REMOTE_HOST" "du -sh $remote_backup | cut -f1")
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to calculate remote backup size for manifest" >&2
+        return 1
+    fi
     
     # Create manifest
     cat > "$manifest_file" << EOF

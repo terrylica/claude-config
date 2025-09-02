@@ -34,7 +34,7 @@ validate_environment() {
     # Check required commands
     local required_commands=("rsync" "ssh")
     for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
+        if ! command -v "$cmd" > /dev/null; then
             log "ERROR" "Required command not found: $cmd"
             ((errors++))
         else
@@ -43,7 +43,7 @@ validate_environment() {
     done
     
     # Check git availability for workspace backup (optional)
-    if command -v "git" &> /dev/null; then
+    if command -v "git" > /dev/null; then
         log "DEBUG" "Command available: git (for workspace backup)"
     else
         log "DEBUG" "Git not available (workspace backup disabled)"
@@ -52,7 +52,7 @@ validate_environment() {
     # Test SSH connection
     log "DEBUG" "REMOTE_HOST variable is: $REMOTE_HOST"
     progress "Testing SSH connection to $REMOTE_HOST..."
-    if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no "$REMOTE_HOST" "echo 'SSH connection successful'" &>/dev/null; then
+    if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no "$REMOTE_HOST" "echo 'SSH connection successful'" > /dev/null; then
         log "SUCCESS" "SSH connection to $REMOTE_HOST successful"
     else
         log "ERROR" "SSH connection to $REMOTE_HOST failed"
@@ -73,9 +73,19 @@ validate_environment() {
         fi
     fi
     
-    # Check disk space
+    # Check disk space - both local and remote are required
     local local_space=$(df "$HOME" | awk 'NR==2 {print $4}')
-    local remote_space=$(ssh "$REMOTE_HOST" "df ~ | awk 'NR==2 {print \$4}'" 2>/dev/null || echo "0")
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to check local disk space"
+        ((errors++))
+    fi
+    
+    local remote_space=$(ssh "$REMOTE_HOST" "df ~ | awk 'NR==2 {print \$4}'")
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to check remote disk space"
+        ((errors++))
+        remote_space="0"  # Set to 0 to trigger low space warning below
+    fi
     
     log "INFO" "Local disk space available: ${local_space}KB"
     log "INFO" "Remote disk space available: ${remote_space}KB"
@@ -115,10 +125,24 @@ sync_claude_sessions() {
         fi
     fi
     
-    # Pre-sync session counts
-    local local_sessions=$(find "$CLAUDE_SESSIONS_DIR" -name "*.jsonl" -type f 2>/dev/null | wc -l || echo "0")
-    local local_dirs=$(find "$CLAUDE_SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l || echo "0")
-    local local_size=$(du -sk "$CLAUDE_SESSIONS_DIR/" 2>/dev/null | cut -f1 || echo "0")
+    # Pre-sync session counts - fail immediately if count operations fail
+    local local_sessions=$(find "$CLAUDE_SESSIONS_DIR" -name "*.jsonl" -type f | wc -l)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to count local session files"
+        return 1
+    fi
+    
+    local local_dirs=$(find "$CLAUDE_SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to count local session directories"
+        return 1
+    fi
+    
+    local local_size=$(du -sk "$CLAUDE_SESSIONS_DIR/" | cut -f1)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to calculate local sessions directory size"
+        return 1
+    fi
     
     log "INFO" "Local sessions (before sync): $local_dirs directories, $local_sessions session files, ${local_size}KB"
     
@@ -158,14 +182,42 @@ sync_claude_sessions() {
         return 1
     fi
     
-    # Post-sync validation and statistics
-    local final_local_sessions=$(find "$CLAUDE_SESSIONS_DIR" -name "*.jsonl" -type f 2>/dev/null | wc -l || echo "0")
-    local final_local_dirs=$(find "$CLAUDE_SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l || echo "0")
-    local final_local_size=$(du -sk "$CLAUDE_SESSIONS_DIR/" 2>/dev/null | cut -f1 || echo "0")
+    # Post-sync validation and statistics - fail immediately if validation fails
+    local final_local_sessions=$(find "$CLAUDE_SESSIONS_DIR" -name "*.jsonl" -type f | wc -l)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to count final local session files"
+        return 1
+    fi
     
-    local remote_sessions=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR -name '*.jsonl' -type f 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-    local remote_dirs=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l" 2>/dev/null || echo "0")
-    local remote_size=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "du -sk $REMOTE_SESSIONS_DIR/ | cut -f1" 2>/dev/null || echo "0")
+    local final_local_dirs=$(find "$CLAUDE_SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to count final local session directories"
+        return 1
+    fi
+    
+    local final_local_size=$(du -sk "$CLAUDE_SESSIONS_DIR/" | cut -f1)
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to calculate final local sessions size"
+        return 1
+    fi
+    
+    local remote_sessions=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR -name '*.jsonl' -type f | wc -l")
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to count remote session files"
+        return 1
+    fi
+    
+    local remote_dirs=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "find $REMOTE_SESSIONS_DIR -mindepth 1 -maxdepth 1 -type d | wc -l")
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to count remote session directories"
+        return 1
+    fi
+    
+    local remote_size=$(ssh -o ConnectTimeout=10 "$REMOTE_HOST" "du -sk $REMOTE_SESSIONS_DIR/ | cut -f1")
+    if [[ $? -ne 0 ]]; then
+        log "ERROR" "Failed to calculate remote sessions size"
+        return 1
+    fi
     
     log "INFO" "Final local sessions: $final_local_dirs directories, $final_local_sessions session files, ${final_local_size}KB"
     log "INFO" "Final remote sessions: $remote_dirs directories, $remote_sessions session files, ${remote_size}KB"
@@ -200,7 +252,7 @@ check_sage_status() {
     # Python packages
     cd "$LOCAL_WORKSPACE"
     for pkg in "pycatch22" "tsfresh"; do
-        if uv run python -c "import $pkg; print('$pkg available')" &>/dev/null; then
+        if uv run python -c "import $pkg; print('$pkg available')" > /dev/null; then
             log "SUCCESS" "Local $pkg: Available"
         else
             log "WARNING" "Local $pkg: Not installed"
@@ -220,7 +272,7 @@ check_sage_status() {
         done
         
         # Remote Python packages
-        if ssh "$REMOTE_HOST" "cd $REMOTE_WORKSPACE && source .venv/bin/activate && python3 -c 'import torch; print(f\"PyTorch CUDA: {torch.cuda.is_available()}\")'" &>/dev/null; then
+        if ssh "$REMOTE_HOST" "cd $REMOTE_WORKSPACE && source .venv/bin/activate && python3 -c 'import torch; print(f\"PyTorch CUDA: {torch.cuda.is_available()}\")'" > /dev/null; then
             log "SUCCESS" "Remote TiRex GPU: Available"
         else
             log "WARNING" "Remote TiRex GPU: Not available"

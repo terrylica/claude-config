@@ -191,17 +191,17 @@ execute_with_error_handling() {
     local output
     local exit_code
     
-    if command -v timeout >/dev/null 2>&1; then
-        output=$(timeout "$timeout_seconds" bash -c "$command" 2>&1)
-        exit_code=$?
-        
-        if [[ $exit_code -eq 124 ]]; then
-            handle_timeout_error "$operation_name" "$timeout_seconds"
-            return "$ERR_TIMEOUT"
-        fi
-    else
-        output=$(bash -c "$command" 2>&1)
-        exit_code=$?
+    # Timeout command is required - fail immediately if not available
+    if ! command -v timeout >/dev/null 2>&1; then
+        handle_error "$ERR_EXTERNAL_COMMAND" "timeout command is required but not available on this system" true
+    fi
+    
+    output=$(timeout "$timeout_seconds" bash -c "$command" 2>&1)
+    exit_code=$?
+    
+    if [[ $exit_code -eq 124 ]]; then
+        handle_timeout_error "$operation_name" "$timeout_seconds"
+        return "$ERR_TIMEOUT"
     fi
     
     if [[ $exit_code -ne 0 ]]; then
@@ -220,10 +220,13 @@ cleanup_on_error() {
     
     log_info "CLEANUP" "Performing error cleanup (error code: $error_code)"
     
-    # Remove temporary files
-    local temp_prefix=$(get_config_value "paths.temp_prefix" "/tmp/claude_speech_" 2>/dev/null)
+    # Remove temporary files - fail immediately if config cannot be read or cleanup fails
+    local temp_prefix=$(get_config_value "paths.temp_prefix" "/tmp/claude_speech_")
     if [[ -n "$temp_prefix" ]]; then
-        find /tmp -name "${temp_prefix##*/}*" -type f -mmin -60 -delete 2>/dev/null || true
+        find /tmp -name "${temp_prefix##*/}*" -type f -mmin -60 -delete
+        if [[ $? -ne 0 ]]; then
+            handle_error "$ERR_GENERAL" "Failed to cleanup temporary files with prefix: $temp_prefix"
+        fi
     fi
     
     # Kill any background processes if needed

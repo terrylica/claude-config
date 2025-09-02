@@ -41,11 +41,15 @@ get_config_value() {
     local config_file="${3:-$CNS_CONFIG_FILE}"
     
     if [[ ! -f "$config_file" ]]; then
-        echo "$default_value"
-        return 1
+        echo "ERROR: Configuration file not found: $config_file" >&2
+        exit 2
     fi
     
-    local value=$(jq -r ".$key_path // \"$default_value\"" "$config_file" 2>/dev/null)
+    local value=$(jq -r ".$key_path // \"$default_value\"" "$config_file")
+    if [[ $? -ne 0 ]]; then
+        echo "ERROR: Failed to parse configuration file: $config_file" >&2
+        exit 3
+    fi
     echo "$value"
 }
 

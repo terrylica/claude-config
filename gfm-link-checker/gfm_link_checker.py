@@ -19,11 +19,10 @@ import pathspec
 
 try:
     import httpx
-    HAS_HTTPX = True
 except ImportError:
-    HAS_HTTPX = False
-    print("⚠️  Warning: 'httpx' module not available. External link checking disabled.")
-    print("   Install with: uv add httpx")
+    print("ERROR: 'httpx' module is required for link checking functionality")
+    print("Install with: uv add httpx")
+    sys.exit(1)
 
 
 @dataclass
@@ -85,7 +84,7 @@ class GFMLinkChecker:
             'tools',         # Tool directories (only README.md allowed)
         }
         
-    def _find_git_root(self) -> Optional[Path]:
+    def _find_git_root(self) -> Path:
         """Find the root of the git repository."""
         try:
             result = subprocess.run(
@@ -96,8 +95,10 @@ class GFMLinkChecker:
                 check=True
             )
             return Path(result.stdout.strip())
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return None
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Git repository required but git command failed: {e}")
+        except FileNotFoundError:
+            raise RuntimeError("Git repository required but git command not found")
     
     def _should_ignore_directory(self, dir_path: Path) -> bool:
         """Check if a directory should be ignored for documentation organization checks."""
@@ -136,7 +137,7 @@ class GFMLinkChecker:
         
         # Find and load .gitignore files walking up from workspace to git root
         search_paths = [self.workspace_path]
-        if self.git_root and self.git_root != self.workspace_path:
+        if self.git_root != self.workspace_path:
             # Add all parent directories up to git root
             current = self.workspace_path
             while current != self.git_root and current.parent != current:
@@ -158,7 +159,7 @@ class GFMLinkChecker:
                         ]
                         patterns.extend(gitignore_patterns)
                 except Exception as e:
-                    print(f"⚠️  Warning: Could not read {gitignore_path}: {e}")
+                    raise RuntimeError(f"Failed to read required gitignore file {gitignore_path}: {e}")
         
         return pathspec.PathSpec.from_lines('gitwildmatch', patterns)
     
@@ -186,16 +187,15 @@ class GFMLinkChecker:
                 return True, "broken symlink"
         
         # Check .gitmodules for submodule paths
-        if self.git_root:
-            gitmodules_path = self.git_root / '.gitmodules'
-            if gitmodules_path.exists():
-                try:
-                    rel_path = dir_path.relative_to(self.git_root)
-                    gitmodules_content = gitmodules_path.read_text(encoding='utf-8')
-                    if f'path = {rel_path}' in gitmodules_content:
-                        return True, "git submodule"
-                except (ValueError, OSError):
-                    pass
+        gitmodules_path = self.git_root / '.gitmodules'
+        if gitmodules_path.exists():
+            try:
+                rel_path = dir_path.relative_to(self.git_root)
+                gitmodules_content = gitmodules_path.read_text(encoding='utf-8')
+                if f'path = {rel_path}' in gitmodules_content:
+                    return True, "git submodule"
+            except (ValueError, OSError):
+                pass
         
         # Check gitignore patterns
         if self._is_ignored(dir_path):
@@ -205,8 +205,8 @@ class GFMLinkChecker:
     
     def _is_ignored(self, file_path: Path) -> bool:
         """Check if a file path should be ignored based on gitignore patterns."""
-        # Convert to relative path from git root (or workspace if no git root)
-        base_path = self.git_root if self.git_root else self.workspace_path
+        # Convert to relative path from git root
+        base_path = self.git_root
         try:
             rel_path = file_path.relative_to(base_path)
             # pathspec expects forward slashes
@@ -227,13 +227,9 @@ class GFMLinkChecker:
                 # Check if we can read the directory
                 entries = list(current_path.iterdir())
             except PermissionError as e:
-                if self.verbose:
-                    print(f"⚠️  Permission denied: {current_path} - {e}")
-                return
+                raise PermissionError(f"Permission denied accessing directory {current_path}: {e}")
             except OSError as e:
-                if self.verbose:
-                    print(f"⚠️  Cannot read directory: {current_path} - {e}")
-                return
+                raise OSError(f"Cannot read directory {current_path}: {e}")
             
             for entry in entries:
                 if entry.is_file():
@@ -300,9 +296,8 @@ class GFMLinkChecker:
             walk_tokens(doc)
             
         except Exception as e:
-            # If mistletoe fails, log error and return empty list
-            print(f"Error: Failed to parse {file_path}: {e}")
-            return []
+            # If mistletoe fails, raise exception immediately
+            raise RuntimeError(f"Failed to parse markdown file {file_path}: {e}")
         
         return links
     
@@ -338,10 +333,7 @@ class GFMLinkChecker:
         # Resolve relative path
         if file_part.startswith('/'):
             # Absolute path from git root
-            if self.git_root:
-                target_path = self.git_root / file_part.lstrip('/')
-            else:
-                target_path = Path(file_part)
+            target_path = self.git_root / file_part.lstrip('/')
         else:
             # Relative path from source file
             target_path = (source_file.parent / file_part).resolve()
@@ -431,13 +423,6 @@ class GFMLinkChecker:
     
     def validate_external_link(self, link: str, source_file: Path, line_number: int) -> LinkValidationResult:
         """Validate external HTTP/HTTPS link."""
-        if not HAS_HTTPX:
-            return LinkValidationResult(
-                link=link, source_file=str(source_file), line_number=line_number,
-                is_valid=True, error_type='', error_message='External check skipped (httpx not available)',
-                link_type='external'
-            )
-            
         try:
             # Use httpx with timeout and proper headers
             headers = {
@@ -766,10 +751,7 @@ class GFMLinkChecker:
                     
                     # Resolve the target directory
                     if file_part.startswith('/'):
-                        if self.git_root:
-                            target_dir = self.git_root / file_part.lstrip('/')
-                        else:
-                            target_dir = Path(file_part)
+                        target_dir = self.git_root / file_part.lstrip('/')
                     else:
                         target_dir = (source_path.parent / file_part).resolve()
                     
