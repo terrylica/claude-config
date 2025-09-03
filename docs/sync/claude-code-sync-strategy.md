@@ -9,7 +9,7 @@ This document outlines the optimal synchronization strategy between macOS Claude
 ### Local Environment (macOS)
 - **Location**: `/Users/terryli/eon/nt/`
 - **Repository**: `https://github.com/Eon-Labs/nt.git`
-- **Branch**: `master`
+- **Branch**: `main`
 - **Claude Code**: Full access to local development environment
 - **Limitations**: No GPU for TiRex model inference
 
@@ -60,7 +60,7 @@ Local macOS (Development & Planning)     Remote GPU (Model Inference & Validatio
 - AlphaForge integration (CPU compatible)
 - catch22 + tsfresh feature extraction
 - Code development and testing
-- Git commits to `master` branch
+- Git commits to `main` branch
 
 **Remote Validation (GPU Workstation)**:
 - TiRex model inference and validation
@@ -75,12 +75,12 @@ Local macOS (Development & Planning)     Remote GPU (Model Inference & Validatio
 ```bash
 # 1. Local: Push changes to GitHub
 git add . && git commit -m "Local development updates"
-git push origin master
+git push origin main
 
 # 2. Remote: Pull updates and run GPU validation
 gpu
-cd ~/eon/nt && git pull origin master
-cd ~/eon/nt-gpu && git merge master
+cd ~/eon/nt && git pull origin main
+cd ~/eon/nt-gpu && git merge main
 # Run TiRex validation...
 git add . && git commit -m "GPU validation results"
 git push origin gpu-validation

@@ -13,13 +13,10 @@ Specialized agent for compliance auditing and regulatory analysis.
 ### [SR&ED Evidence Extractor](../../agents/sred-evidence-extractor.md) (`sred-evidence-extractor`)
 Extracts and documents Scientific Research and Experimental Development evidence from codebases.
 
-### [Simple Helper](../../agents/simple-helper.md) (`simple-helper`)
-Basic utility agent for straightforward tasks and assistance.
-
 ### [APCF Agent](../../agents/apcf-agent.md) (`apcf-agent`)
 SR&ED-compliant commit message generator with automatic git hygiene and audit-proof formatting.
 
-### [Python QA](../../agents/python-qa.md) (`python-qa`)
+### [Python QA Agent](../../agents/python-qa-agent.md) (`python-qa-agent`)
 Comprehensive Python import health validation using multi-tool static analysis approach.
 
 ### [Workspace Refactor](../../agents/workspace-refactor.md) (`workspace-refactor`)
@@ -27,6 +24,18 @@ Comprehensive workspace refactoring and technical debt reduction specialist. Sys
 
 ### [Workspace Sync](../../agents/workspace-sync.md) (`workspace-sync`)
 Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations and cross-environment development workflows.
+
+### [File Structure Organizer](../../agents/file-structure-organizer.md) (`file-structure-organizer`)
+Determines optimal file and directory placement within project structure for new scripts, configuration files, and documentation.
+
+### [Config Conformer](../../agents/config-conformer.md) (`config-conformer`)
+Identifies and fixes hardcoded values that bypass established configuration patterns. Detects magic numbers, hardcoded paths, and constants that should be externalized.
+
+### [Milestone Commit Logger](../../agents/milestone-commit-logger.md) (`milestone-commit-logger`)
+Creates git commits with AI/LLM-readable milestone logs that capture commit IDs as version freeze points and document hard-learned lessons.
+
+### [Fallback Removal Validator](../../agents/fallback-removal-validator.md) (`fallback-removal-validator`)
+Systematically removes fallback, failover, and failsafe mechanisms from scripts and validates changes don't introduce regressions.
 
 ## Usage
 Use agents with the Task tool:
