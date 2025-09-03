@@ -1,0 +1,104 @@
+#!/bin/bash
+# tmux Update Utility for Latest Version Installation
+# Handles installation from source for latest tmux versions
+
+set -euo pipefail
+
+# Colors
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+LATEST_VERSION="3.5a"
+BUILD_DIR="/tmp/tmux-build-$$"
+
+echo -e "${BLUE}🚀 tmux Update Utility${NC}"
+echo "========================"
+echo ""
+
+# Check current version
+if command -v tmux &> /dev/null; then
+    CURRENT_VERSION=$(tmux -V | cut -d' ' -f2)
+    echo -e "${GREEN}Current version: ${CURRENT_VERSION}${NC}"
+else
+    echo -e "${YELLOW}tmux not found - will install fresh${NC}"
+    CURRENT_VERSION="none"
+fi
+
+# Get latest version from GitHub
+echo -e "${BLUE}Checking latest version...${NC}"
+LATEST_AVAILABLE=$(curl -s https://api.github.com/repos/tmux/tmux/releases/latest | grep -o '"tag_name": "[^"]*' | cut -d'"' -f4)
+echo -e "${GREEN}Latest available: ${LATEST_AVAILABLE}${NC}"
+
+if [[ "$CURRENT_VERSION" == "$LATEST_AVAILABLE" ]]; then
+    echo -e "${GREEN}✅ tmux is already up to date${NC}"
+    exit 0
+fi
+
+echo ""
+echo -e "${YELLOW}📦 Updating tmux: ${CURRENT_VERSION} → ${LATEST_AVAILABLE}${NC}"
+echo ""
+
+# Install dependencies
+echo -e "${BLUE}Installing build dependencies...${NC}"
+if ! command -v make &> /dev/null; then
+    echo -e "${RED}❌ Build tools not available. Please run:${NC}"
+    echo "  sudo apt update && sudo apt install -y build-essential libevent-dev libncurses-dev bison pkg-config"
+    exit 1
+fi
+
+# Create build directory
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+# Download and extract
+echo -e "${BLUE}Downloading tmux ${LATEST_AVAILABLE}...${NC}"
+curl -L "https://github.com/tmux/tmux/releases/download/${LATEST_AVAILABLE}/tmux-${LATEST_AVAILABLE}.tar.gz" -o "tmux-${LATEST_AVAILABLE}.tar.gz"
+
+echo -e "${BLUE}Extracting...${NC}"
+tar -xzf "tmux-${LATEST_AVAILABLE}.tar.gz"
+cd "tmux-${LATEST_AVAILABLE}"
+
+# Configure, compile, and install
+echo -e "${BLUE}Configuring build...${NC}"
+./configure --prefix=/usr/local
+
+echo -e "${BLUE}Compiling...${NC}"
+make
+
+echo -e "${BLUE}Installing...${NC}"
+if command -v sudo &> /dev/null; then
+    sudo make install
+else
+    echo -e "${RED}❌ sudo required for installation${NC}"
+    exit 1
+fi
+
+# Cleanup
+cd /
+rm -rf "$BUILD_DIR"
+
+# Verify installation
+if command -v tmux &> /dev/null; then
+    NEW_VERSION=$(tmux -V | cut -d' ' -f2)
+    echo ""
+    echo -e "${GREEN}🎉 tmux updated successfully!${NC}"
+    echo -e "${GREEN}New version: ${NEW_VERSION}${NC}"
+    
+    # Update tmux server if running
+    if tmux has-session 2>/dev/null; then
+        echo -e "${YELLOW}Note: Restart tmux sessions to use the new version${NC}"
+    fi
+else
+    echo -e "${RED}❌ Installation failed${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${BLUE}📖 Tmux management commands available:${NC}"
+echo "  tmux-session - Create/attach sessions"
+echo "  tmux-list    - List sessions"
+echo "  tmux-kill    - Kill sessions"
+echo "  tmux-detach  - Smart detach"
