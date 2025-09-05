@@ -44,6 +44,29 @@
 - Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
 - Advocate for SOTA tooling in Claude Code Max environment
 
+### Additional AI Research Resources
+
+#### GPT-5 Thinking Model Integration
+- **Availability**: Cheap and almost unlimited usage for extensive research
+- **Usage Philosophy**: Don't hesitate to invoke GPT-5 thinking model at any point when in doubt
+
+#### Research Prompt Generation Guidelines
+**When to Use**: Configuration errors, API compatibility issues, parameter optimization, implementation uncertainty
+**How to Structure Research Prompts**:
+- **Context Section**: Current technical environment, library versions, specific error messages, data constraints
+- **Problem Definition**: Exact challenges faced, failed approaches, specific blockers
+- **Research Objectives**: Numbered list of specific questions needing systematic investigation  
+- **Technical Environment**: Hardware specs, software versions, data characteristics
+- **Research Methodology**: Request systematic literature review, documentation analysis, community examples
+- **Deliverable Format**: Working code examples, parameter recommendations, troubleshooting guides
+- **Success Criteria**: Measurable outcomes that eliminate trial-and-error approaches
+
+#### Quality Standards
+- Always verify GPT-5 research with real data and sufficient data length before claiming completion
+- Use extensive context in research prompts to get targeted, actionable solutions
+- Request specific implementation examples rather than theoretical explanations
+- Focus on systematic investigation over quick fixes
+
 ## Defensive Programming Standards
 
 ### Data Authenticity Requirements
@@ -164,3 +187,20 @@
 - **Internal Experiments**: `experiments/` packages (tirex-context-stability, research projects)
 - **Development Tools**: `.claude/tools/` packages with global CLI access via ~/.local/bin
 - **Test Environments**: Isolated package testing with full workspace dependency access
+
+### Secure Sudo Helper
+**Purpose**: Automated privilege escalation with security controls for system diagnostics
+
+#### Universal Access
+- **Usage**: `sudo-helper <command>` (available globally via ~/.local/bin)
+- **Security**: Whitelist-based command filtering with audit logging
+
+#### Core Files
+- **Main Script**: `$HOME/.local/bin/sudo-helper` (whitelisted command execution)
+- **Audit Log**: `$HOME/.sudo-helper.log` (complete usage tracking)
+
+#### Security Features
+- **Command Whitelist**: Only pre-approved diagnostic commands execute automatically
+- **Audit Trail**: All usage logged with timestamps for security review
+- **Graceful Fallback**: Non-whitelisted commands require manual sudo authentication
+- **No Persistent Access**: Works within standard sudo timeout windows only
