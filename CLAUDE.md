@@ -69,11 +69,27 @@
 
 ## Defensive Programming Standards
 
-### Data Authenticity Requirements
-- **Real Data Only**: Never use fake data, mock data, synthetic data, or placeholder data even for testing
-- **Production Quality Sources**: Always seek authentic, production-quality data sources
+### Data Authenticity Requirements - CCXT MANDATE
+- **CCXT USDⓈ-M Perpetuals ONLY**: Use CCXT direct Binance API connectivity as the exclusive authentic data source for all financial data collection
+- **USDⓈ-M Perpetuals ONLY**: `'defaultType': 'future'` (USDⓈ-Margined Perpetuals), BTC/USDT:USDT perpetual - NEVER spot or other derivatives
+- **Performance Validated**: 35x more data than constraints (26,280 vs 744 bars), perfect backtesting.py compatibility
+- **Zero Synthetic Data Tolerance**: Never use fake, mock, synthetic, or placeholder financial data in ANY scenario
+- **Production Quality Sources**: All data must originate from direct Binance USDⓈ-M Perpetuals API sources
 - **Data Integrity**: Validate all inputs at system boundaries with explicit type checking
-- **Authenticity Verification**: Validate data authenticity and integrity at every processing boundary
+
+### CCXT USDⓈ-M Perpetuals Integration Standards
+- **Mandatory Library**: `import ccxt`
+- **Installation Command**: `uv add ccxt`
+- **Standard Configuration**: 
+  ```python
+  exchange = ccxt.binance({
+      'options': {'defaultType': 'future'}  # USDⓈ-M Perpetuals ONLY
+  })
+  # Collect authentic USDⓈ-M Perpetuals data: 26,280 bars vs 744 constraint
+  ohlcv = exchange.fetch_ohlcv('BTC/USDT:USDT', '1h', since, 1000)
+  ```
+- **Perfect OHLCV Format**: Direct backtesting.py compatibility with authentic USDⓈ-M perpetual pricing
+- **Authenticity Verification**: Real USDT settlement matching backtesting environment
 
 ### Input Validation Requirements  
 - **Boundary Conditions**: Check for null, empty, and edge case values before processing
@@ -87,10 +103,154 @@
 - **Explicit Exceptions**: Raise structured exceptions with rich context for debugging
 - **Early Detection**: Identify problems as close to source as possible
 
+## Quantitative Development Standards
+
+### backtesting.py Strategy Architecture - EXCLUSIVE FRAMEWORK
+**MANDATE**: backtesting.py ONLY for all quantitative backtesting
+
+#### **Separated LONG/SHORT Strategy Pattern**
+- **Implementation**: Separate Strategy classes, never unified LONG/SHORT
+- **Pattern**:
+  ```python
+  class LongOnlyStrategy(Strategy):  # Pure LONG momentum
+  class ShortOnlyStrategy(Strategy): # Pure SHORT momentum  
+  class PortfolioManager:            # Combines results manually
+  ```
+- **Source**: Empirically derived (Dec 2024) - unified approaches failed execution despite generating signals
+
+### backtesting.py Universal Configuration Standards
+
+#### **Canonical Configuration Template**
+```python
+# Universal backtesting.py configuration for crypto assets
+bt = Backtest(
+    data,                    # OHLCV DataFrame from CCXT USDⓈ-M Perpetuals API  
+    StrategyClass,          # Strategy class (not instance)
+    cash=10_000_000,        # Universal cash - works for any crypto asset
+    commission=0.0008,      # Realistic USDⓈ-M perpetuals rate (8bp)
+    exclusive_orders=True,  # Clean position management
+    trade_on_close=False    # Prevent look-ahead bias
+)
+```
+
+#### **Parameter Documentation (Official backtesting.py Sources)**
+
+**`data` (Required)**:
+- **Official**: "A pandas DataFrame with columns Open, High, Low, Close, and optionally Volume"
+- **Standard**: OHLCV from CCXT USDⓈ-M Perpetuals API with authentic pricing and datetime index
+
+**`strategy` (Required)**:
+- **Official**: "A Strategy subclass (not an instance) defining trading logic"
+- **Critical**: Pass the **class itself**, never `StrategyClass()` instance
+
+**`cash` (Optional, Default: $10,000)**:
+- **Official**: "Initial cash to start the backtest, defaulting to $10,000"
+- **Empirical**: `10_000_000` ($10M) validated for ALL crypto assets (BTCUSDT ~$111K, ETHUSDT ~$4.3K)
+
+**`commission` (Optional, Default: 0.0)**:
+- **Official**: "Trading commission rate" supporting float, tuple, or callable formats
+- **Standard**: `0.0008` = 8bp (realistic Binance USDⓈ-M perpetuals rate)
+
+**`exclusive_orders` (Optional, Default: False)**:
+- **Official**: "If True, each new order automatically closes the previous trade/position"
+- **Standard**: `True` - prevents position stacking, complements separated LONG/SHORT
+
+**`trade_on_close` (Optional, Default: False)**:
+- **Official**: "If True, market orders filled at current bar's closing price instead of next bar's open"
+- **Standard**: `False` - orders execute at **next bar's open** (prevents look-ahead bias)
+
+#### **Order Execution Timing**
+**Sequence** (with `trade_on_close=False`):
+1. `next()` called at bar N → 2. Order placed at bar N → 3. Executes at bar N+1 open
+
+#### **Cash Requirements Matrix**
+
+| **Asset** | **Price** | **Min Cash (30%)** | **$10M Status** |
+|---|---|---|---|
+| BTCUSDT | ~$111K | $740K | ✅ 13x margin |
+| ETHUSDT | ~$4.3K | $29K | ✅ 348x margin |
+| Altcoins | $0.50-$1K | $10-$7K | ✅ 1000x+ margin |
+
+#### **Mandatory Standards**
+- **Cash**: `10_000_000` 
+- **Commission**: `0.0008`
+- **Exclusive Orders**: `True`
+- **Trade on Close**: `False`
+- **Data Source**: CCXT USDⓈ-M Perpetuals API with direct Binance connectivity ONLY
+- **Strategy Pattern**: Separated LONG/SHORT classes
+- **Benchmark Comparison**: Required for all strategies (see Benchmark Standards below)
+
+### Benchmark Comparison Standards - EMPIRICALLY VALIDATED
+
+**UNIVERSAL REQUIREMENT**: ALL quantitative strategies MUST include benchmark comparison for accurate performance assessment
+
+#### **Canonical Benchmark Implementation**
+```python
+# Buy-and-Hold Benchmark for LONG strategies
+class BuyAndHoldBenchmark(Strategy):
+    def init(self): pass
+    def next(self):
+        if not self.position: self.buy()
+
+# Short-and-Hold Benchmark for SHORT strategies  
+class ShortAndHoldBenchmark(Strategy):
+    def init(self): pass
+    def next(self):
+        if not self.position: self.sell()
+```
+
+#### **Direction-Specific Benchmark Selection**
+- **LONG Strategies**: MUST compare against `BuyAndHoldBenchmark`
+- **SHORT Strategies**: MUST compare against `ShortAndHoldBenchmark`  
+- **NEUTRAL Strategies**: Default to `BuyAndHoldBenchmark`
+
+#### **Benchmark Configuration Standards**
+```python
+# LONG strategy benchmark
+benchmark_bt = Backtest(data, BuyAndHoldBenchmark, cash=10_000_000, commission=0.0008)
+
+# SHORT strategy benchmark  
+benchmark_bt = Backtest(data, ShortAndHoldBenchmark, cash=10_000_000, 
+                       commission=0.0008, margin=0.5)
+```
+
+#### **Performance Metrics (Mandatory)**
+- **Alpha**: `strategy_return - benchmark_return` (primary metric)
+- **Excess Sharpe**: `strategy_sharpe - benchmark_sharpe`
+- **Information Ratio**: `mean(excess_returns) / std(excess_returns)`
+- **Tracking Error**: `std(excess_returns) * sqrt(252)` (annualized)
+- **Risk Improvement**: `benchmark_max_dd - strategy_max_dd`
+
+#### **Integration Pattern**
+```python
+from benchmarks.benchmark_comparison_framework import BenchmarkComparisonFramework
+
+# Initialize framework
+framework = BenchmarkComparisonFramework(cash=10_000_000, commission=0.0008)
+
+# Run strategy with automatic benchmark comparison
+comparison_results = framework.run_benchmark_comparison(data, StrategyClass)
+
+# Access results
+alpha = comparison_results['metrics']['alpha']
+excess_sharpe = comparison_results['metrics']['excess_sharpe']
+benchmark_used = comparison_results['benchmark_class']
+
+print(f"Alpha: {alpha:+.2f}%")
+print(f"Benchmark: {benchmark_used}")
+```
+
+#### **Validation Requirements**
+- **Performance Assessment**: Strategy MUST generate alpha > 0% for production use
+- **Risk Analysis**: Strategy MUST show risk improvement vs benchmark
+- **Statistical Significance**: Information Ratio > 1.0 indicates meaningful outperformance
+- **Trade Validation**: Strategy MUST execute trades (benchmark comparison fails with 0 trades)
+
 ## Development Environment & Tools
 
 ### Primary Toolchain
 - **Python Management**: `uv` for all Python operations (`uv run --active python -m`, `uv add`) - **Avoid**: pip, conda, pipenv
+- **Backtesting Framework**: backtesting.py EXCLUSIVELY - **Prohibited**: bt, vectorbt, btester, backtrader, zipline, pyfolio, quantlib, NautilusTrader, any alternative backtesting frameworks
 - **Module-Only Execution**: Mandatory `-m` flag with on-demand compatibility resolution and consolidation over proliferation
 - **Python Version**: 3.12+, type checking disabled (development environment)
 - **Libraries**: Prefer `httpx` over `requests`, `platformdirs` for cache directories
