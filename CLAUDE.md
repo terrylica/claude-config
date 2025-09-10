@@ -251,6 +251,7 @@ print(f"Benchmark: {benchmark_used}")
 ### Primary Toolchain
 - **Python Management**: `uv` for all Python operations (`uv run --active python -m`, `uv add`) - **Avoid**: pip, conda, pipenv
 - **Backtesting Framework**: backtesting.py EXCLUSIVELY - **Prohibited**: bt, vectorbt, btester, backtrader, zipline, pyfolio, quantlib, NautilusTrader, any alternative backtesting frameworks
+- **Python-Rust Integration**: `maturin develop --release --uv` for building PyO3 extensions with consistent uv package management
 - **Module-Only Execution**: Mandatory `-m` flag with on-demand compatibility resolution and consolidation over proliferation
 - **Python Version**: 3.12+, type checking disabled (development environment)
 - **Libraries**: Prefer `httpx` over `requests`, `platformdirs` for cache directories
