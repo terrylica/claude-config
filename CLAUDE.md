@@ -79,6 +79,78 @@
 - **Explicit Exceptions**: Raise structured exceptions with rich context for debugging
 - **Early Detection**: Identify problems as close to source as possible
 
+### Temporal Integrity Mandate - ZERO TOLERANCE
+**ABSOLUTE RULE**: Never fit() on future data in financial backtesting
+
+#### **Critical Violations (Auto-Reject)**
+```python
+# ❌ FORBIDDEN: Global scaling uses tomorrow's statistics today
+scaler.fit_transform(entire_dataset)  # Knows future means/stds
+cross_val_score(model, scaled_data, target, cv=TimeSeriesSplit())
+
+# ❌ FORBIDDEN: Target leakage
+features['next_return'] = returns.shift(-1)  # Uses future returns
+
+# ❌ FORBIDDEN: Future parameter optimization  
+best_params = grid_search_on_full_period()  # Optimizes on test outcomes
+```
+
+#### **Correct Implementation**
+```python
+# ✅ MANDATORY: Per-fold scaling via Pipeline
+pipeline = Pipeline([('scaler', StandardScaler()), ('model', Model())])
+cross_val_score(pipeline, raw_features, target, cv=TimeSeriesSplit(5))
+
+# ✅ MANDATORY: Per-window WFA scaling
+for window in wfa_windows:
+    train_scaler = StandardScaler().fit(train_data[window])  # Only historical
+    test_scaled = train_scaler.transform(test_data[window])  # Apply historical stats
+```
+
+#### **Enforcement**
+- **Exception-Only**: Any `.fit()` on future data → immediate system failure
+- **Code Audit**: Search all `.fit_transform()` calls for temporal violations  
+- **Validation**: Every ML pipeline must demonstrate temporal integrity compliance
+
+### Auditing Temporal Violations (ATV) Framework
+**PURPOSE**: Systematic detection of temporal violations in OHLCV + technical indicators + cross-validation backtesting systems
+
+#### **ATV Pipeline Audit (13 Violations)**
+**DATA COLLECTION PHASE**:
+- Data leakage (future data contaminating historical)
+- Frequency mismatch violations (mixed timeframes)
+
+**FEATURE ENGINEERING PHASE**:
+- Look-ahead bias (features using future data)
+- Scaling violations (using future statistics) 
+- Feature engineering violations (TA indicators with future data)
+- Target generation violations (incorrect temporal relationships)
+- Index alignment violations (timestamp mismatches)
+
+**MODEL TRAINING PHASE**:
+- Memory/state violations (model state bleeding between windows)
+- Sampling/selection violations (cherry-picking periods)
+
+**EVALUATION PHASE**:
+- Temporal misalignment (wrong chronological order)
+- Time-based splitting errors (improper train/test boundaries)
+- Cross-validation temporal violations (CV fold contamination)
+- Benchmark/comparison violations (benchmark using future data)
+
+#### **ATV Audit Checklist**
+```python
+# ✅ Quick ATV audit commands:
+# 1. grep -n "shift(-" *.py  # Check for look-ahead bias
+# 2. grep -n "fit_transform.*entire" *.py  # Check scaling violations  
+# 3. grep -n "for.*model.*fit" *.py  # Check memory/state violations
+# 4. grep -n "TimeSeriesSplit\|cross_val" *.py  # Check CV implementation
+```
+
+#### **ATV Success Criteria**
+- **All 13 violations clean** → Temporal integrity confirmed
+- **Any violation found** → Fix before proceeding
+- **Regular ATV audits** → Maintain temporal integrity over time
+
 ## Quantitative Development Standards
 
 ### backtesting.py Strategy Architecture - EXCLUSIVE FRAMEWORK
