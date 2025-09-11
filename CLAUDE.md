@@ -290,6 +290,7 @@ print(f"Benchmark: {benchmark_used}")
 
 ### Primary Toolchain
 - **Python Management**: `uv` for all Python operations (`uv run --active python -m`, `uv add`) - **Avoid**: pip, conda, pipenv
+- **Rust Development**: `cargo` with ARM64-native compilation, cross-platform targets ready
 - **Backtesting Framework**: backtesting.py EXCLUSIVELY - **Prohibited**: bt, vectorbt, btester, backtrader, zipline, pyfolio, quantlib, NautilusTrader, any alternative backtesting frameworks
 - **Python-Rust Integration**: `maturin develop --release --uv` for building PyO3 extensions with consistent uv package management
 - **Module-Only Execution**: Mandatory `-m` flag with on-demand compatibility resolution and consolidation over proliferation
@@ -298,6 +299,15 @@ print(f"Benchmark: {benchmark_used}")
 - **Remote Access**: Prefer `curl` over fetch
 - **File Operations**: Prefer `Read`, `LS`, `Glob`, `Grep` over MCP filesystem tools (broader access)
 - **Code Analysis**: `Semgrep`, `ast-grep`, `ShellCheck`
+
+### Rust Environment Configuration (Cross-Platform)
+- **Shell Integration**: Standard `.zshrc` configuration with Rust-first PATH precedence (`$HOME/.cargo/bin` before language-specific paths)
+- **Performance Optimization**: Native compilation with target-specific flags (ARM64 macOS, x86_64 Linux)
+- **Cross-Platform Targets**: Pre-configured for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`
+- **Parallel Builds**: Auto-detects CPU cores (`sysctl -n hw.ncpu` macOS, `nproc` Linux)
+- **Environment Harmony**: Rust and Python toolchains coexist without PATH conflicts
+- **Essential Tools**: Use `cargo nextest run` (enhanced testing), `cargo deny check` (comprehensive validation)
+- **Utility Functions**: `rust-python-project()` (hybrid project creation), `fresh-build()` (clean rebuild)
 
 ### Git Repository Detection
 - `uv run --active python -m pathlib -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
