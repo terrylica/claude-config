@@ -94,6 +94,9 @@ class CNSNotificationHandler(BaseHTTPRequestHandler):
         
         self._send_macos_notification(title, message)
         
+        # CRITICAL: Trigger local CNS audio system (toy-story + TTS)
+        self._trigger_cns_audio_system(title, message, data)
+        
         # Handle clipboard if requested
         if data.get('clipboard_enabled', False):
             clipboard_content = data.get('content', {}).get('claude_response', '')
@@ -104,6 +107,16 @@ class CNSNotificationHandler(BaseHTTPRequestHandler):
         """Process plain text notification."""
         logger.info(f"Received text notification: {text}")
         self._send_macos_notification("CNS Remote Alert", text)
+        
+        # Try to parse JSON from text to get environment data
+        try:
+            import json
+            data = json.loads(text)
+        except:
+            data = {}
+        
+        # CRITICAL: Trigger local CNS audio system (toy-story + TTS)
+        self._trigger_cns_audio_system("CNS Remote Alert", text, data)
     
     def _send_macos_notification(self, title, message):
         """Send notification to macOS notification center."""
@@ -168,6 +181,50 @@ class CNSNotificationHandler(BaseHTTPRequestHandler):
             return True
         except subprocess.CalledProcessError:
             return False
+    
+    def _trigger_cns_audio_system(self, title, message, data=None):
+        """Trigger local CNS audio system (toy-story + TTS)."""
+        try:
+            import json
+            import os
+            
+            # Read volume from CNS config
+            config_path = os.path.expanduser("~/.claude/automation/cns/config/cns_config.json")
+            volume = 0.3  # default
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    volume = config.get('audio', {}).get('notification_volume', 0.3)
+            except:
+                pass
+            
+            # Play toy-story notification FIRST (wait for completion)
+            audio_file = os.path.expanduser("~/.claude/media/toy-story-notification.mp3")
+            if os.path.exists(audio_file):
+                subprocess.run([
+                    'afplay', audio_file, '--volume', str(volume)
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+                logger.info(f"Played CNS audio notification at volume {volume}")
+            
+            # THEN TTS announcement (after toy-story finishes) 
+            tts_text = "dot claude"  # default fallback
+            if data and isinstance(data, dict):
+                # Extract Linux directory from environment data
+                linux_cwd = data.get('environment', {}).get('cwd', '')
+                if linux_cwd:
+                    # Get just the directory name (e.g., "tmp" from "/tmp")
+                    dir_name = os.path.basename(linux_cwd.rstrip('/'))
+                    if dir_name:
+                        tts_text = dir_name
+                        logger.info(f"Using Linux directory '{dir_name}' for TTS")
+            
+            subprocess.Popen([
+                'say', tts_text
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info(f"Triggered CNS TTS announcement: '{tts_text}'")
+            
+        except Exception as e:
+            logger.error(f"Error triggering CNS audio system: {e}")
     
     def log_message(self, format, *args):
         """Override to use our logger instead of stderr."""
@@ -246,8 +303,9 @@ if __name__ == '__main__':
         logger.error("This script is designed for macOS. Current system not supported.")
         sys.exit(1)
     
-    # Ensure tools are available
-    if not install_macos_tools():
-        sys.exit(1)
+    # Check tools availability but proceed anyway (we have fallbacks)
+    tools_available = install_macos_tools()
+    if not tools_available:
+        logger.warning("Some notification tools missing, but proceeding with available fallbacks")
     
     start_hub_server()

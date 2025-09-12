@@ -1,16 +1,17 @@
 #!/bin/bash
 # CNS notification hook - plays audio and speaks folder name
-{
+# Run audio in current session, then background the rest
+(
     # Read volume setting from config (default 0.3 if not found)
     CNS_CONFIG="$HOME/.claude/automation/cns/config/cns_config.json"
     VOLUME=$(jq -r '.audio.notification_volume // 0.3' "$CNS_CONFIG" 2>/dev/null || echo "0.3")
     
-    # Play notification at configured volume (platform-aware)
+    # Play notification at configured volume (platform-aware with user session access)
     AUDIO_FILE="$HOME/.claude/media/toy-story-notification.mp3"
     if [[ -f "$AUDIO_FILE" ]]; then
         if command -v afplay >/dev/null 2>&1; then
-            # macOS
-            afplay "$AUDIO_FILE" --volume "$VOLUME" > /dev/null 2>&1
+            # macOS - Play audio FIRST, wait for completion before voice announcement
+            afplay "$AUDIO_FILE" --volume "$VOLUME" &>/dev/null
         elif command -v paplay >/dev/null 2>&1; then
             # Linux with PulseAudio
             paplay "$AUDIO_FILE" > /dev/null 2>&1
@@ -46,11 +47,11 @@
         fi
     fi
     
-    # Platform-specific text-to-speech
+    # Platform-specific text-to-speech with user session access
     if [[ -n "$announce_text" ]]; then
         if command -v say >/dev/null 2>&1; then
-            # macOS
-            say "$announce_text" > /dev/null 2>&1
+            # macOS - Voice announcement AFTER jingle completes
+            say "$announce_text" &>/dev/null
         elif command -v espeak >/dev/null 2>&1; then
             # Linux with espeak
             espeak "$announce_text" > /dev/null 2>&1
@@ -59,5 +60,5 @@
             echo "$announce_text" | festival --tts > /dev/null 2>&1
         fi
     fi
-} &
-# Exit immediately, don't wait for sound to finish
+) &
+# Exit immediately after spawning audio process

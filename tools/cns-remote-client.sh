@@ -43,7 +43,7 @@ send_via_tunnel() {
     local message="$1"
     local json_payload="$2"
     
-    if command -v nc >/dev/null 2>&1; then
+    if command -v nc-disabled >/dev/null 2>&1; then
         # Use netcat for fast transmission
         echo "$json_payload" | nc -w "$TIMEOUT" "$SSH_TUNNEL_HOST" "$SSH_TUNNEL_PORT" 2>/dev/null
         return $?
@@ -53,7 +53,7 @@ send_via_tunnel() {
              -X POST \
              -H "Content-Type: application/json" \
              -d "$json_payload" \
-             "http://$SSH_TUNNEL_HOST:$SSH_TUNNEL_PORT/notify" >/dev/null 2>&1
+             "http://$SSH_TUNNEL_HOST:$SSH_TUNNEL_PORT/" >/dev/null 2>&1
         return $?
     else
         # No tools available
