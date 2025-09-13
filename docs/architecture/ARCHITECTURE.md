@@ -9,8 +9,8 @@ This document describes the refactored architecture of the Claude Code workspace
 ~/.claude/
 ├── settings.json              # [FIXED] Main Claude Code configuration
 ├── CLAUDE.md                  # [FIXED] User memory & APCF methodology
-├── agents/                    # [FIXED] Sub-agent configurations
-├── commands/                  # [FIXED] Slash commands (/ruff-fix, /apcf, /gfm-check)
+├── agents/                    # [FIXED] Agent configurations
+├── commands/                  # [FIXED] Slash commands (/python-qa, /apcf, /gfm-check)
 ├── bin/                       # [NEW] Utility scripts
 │   └── cns-notify             # Manual CNS notification trigger
 ├── automation/                # [NEW] Automation subsystem  
@@ -48,7 +48,7 @@ This document describes the refactored architecture of the Claude Code workspace
 **Files**: 
 - `settings.json`: Hook configurations, model settings
 - `CLAUDE.md`: User memory, APCF methodology
-- `agents/`: Sub-agent definitions
+- `agents/`: Agent definitions
 - `commands/`: Slash command definitions
 
 **Constraints**: Cannot be moved or renamed per Claude Code documentation
@@ -239,8 +239,8 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 - **Research Documentation**: Structured in `docs/`
 
 ### Development Tools
-- **Slash Commands**: `/ruff-fix`, `/apcf`, `/gfm-check` for workflow automation
-- **Sub-agents**: Specialized agents for compliance, testing, research
+- **Slash Commands**: `/python-qa`, `/apcf`, `/gfm-check` for workflow automation
+- **Agents**: Specialized agents for compliance, testing, research
 - **Hook Automation**: Async logging and session management (no delays)
 - **Manual Utilities**: `bin/cns-notify` for independent testing
 - **Link Validation**: `tools/gfm-link-checker/` for documentation integrity
@@ -271,6 +271,6 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ---
 
-**Last Updated**: July 29, 2025  
+**Last Updated**: September 12, 2025  
 **Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete  
-**Compatible with**: Claude Code official constraints as of July 2025
+**Compatible with**: Claude Code official constraints as of September 2025

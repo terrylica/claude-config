@@ -1,5 +1,5 @@
 #!/bin/bash
-# Enhanced CNS hook - supports both local and remote SSH environments
+# CNS hook - supports both local and remote SSH environments
 # Maintains fire-and-forget async pattern for <10ms execution
 
 # Capture input immediately
@@ -24,6 +24,19 @@ has_remote_client() {
         # Extract user prompt and Claude response for remote client
         user_prompt=$(echo "$input_data" | jq -r '.user_prompt // empty' 2>/dev/null || echo "")
         claude_response=$(echo "$input_data" | jq -r '.claude_response // empty' 2>/dev/null || echo "$input_data")
+        
+        # If both are empty, create directory context message matching local behavior
+        if [[ -z "$user_prompt" && -z "$claude_response" ]]; then
+            working_dir=$(pwd 2>/dev/null || echo "unknown")
+            working_dir_name=$(basename "$working_dir" 2>/dev/null || echo "directory")
+            
+            # Format directory name for proper TTS pronunciation (match local behavior)
+            if [[ "$working_dir_name" == .* ]]; then
+                claude_response="dot ${working_dir_name:1}"
+            else
+                claude_response="$working_dir_name"
+            fi
+        fi
         
         # Send to remote client with hook integration
         "$HOME/.claude/tools/cns-remote-client.sh" --hook "$user_prompt" "$claude_response"

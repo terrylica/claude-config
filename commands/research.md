@@ -1,5 +1,5 @@
 ---
-description: "Advanced multi-perspective research with parallel keyword processing and batch analysis capabilities"
+description: "Multi-perspective research with parallel keyword processing and batch analysis capabilities"
 argument-hint: "[keywords] [--parallel] [--depth=N] [--mode=deep-dive|comparative] [--format=json|markdown] [--save] [--interactive]"
 allowed-tools: Task, WebSearch, WebFetch, Read, Write, TodoWrite
 ---
@@ -7,7 +7,7 @@ allowed-tools: Task, WebSearch, WebFetch, Read, Write, TodoWrite
 # Research: Systematic Direction Exploration
 
 **Usage Options**:
-- `/research [keywords]` - Standard sequential keyword exploration with comprehensive analysis
+- `/research [keywords]` - Standard sequential keyword exploration with analysis
 - `/research [keywords] --parallel` - Simultaneous multi-keyword processing with cross-domain synthesis
 - `/research [keywords] --depth=N` - Control exploration depth (1-5, default: 2)  
 - `/research [keywords] --mode=deep-dive` - Intensive single-domain exploration with multi-perspective analysis

@@ -44,7 +44,7 @@ td                    # Smart detach command (recommended)
 
 ## 🧠 Smart Naming
 
-The session manager automatically creates intelligent session names:
+The session manager automatically creates session names:
 
 | Directory | Session Name | Reason |
 |-----------|--------------|--------|

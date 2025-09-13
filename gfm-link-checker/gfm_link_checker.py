@@ -637,7 +637,7 @@ class GFMLinkChecker:
             results.append(LinkValidationResult(
                 link='', source_file=str(root_readme), line_number=0,
                 is_valid=False, error_type='root_readme_delegation',
-                error_message='Root README.md should be moved to docs/README.md for better organization',
+                error_message='Root README.md should be moved to docs/README.md for proper organization',
                 link_type='claude_restriction'
             ))
         

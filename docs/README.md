@@ -1,6 +1,6 @@
 # Claude Code Global Configuration Template
 
-This repository serves as a comprehensive template for Claude Code workspace configuration, providing standardized tools, automation, and team setup procedures.
+This repository serves as a template for Claude Code workspace configuration, providing standardized tools, automation, and team setup procedures.
 
 ## 🚀 Quick Navigation
 
@@ -31,19 +31,19 @@ Essential standards and official documentation for Claude Code compliance:
 
 ### 🏗️ Architecture
 System design and architectural documentation:
-- [Architecture Overview](architecture/ARCHITECTURE.md) - Complete system architecture and design principles
+- [Architecture Overview](architecture/ARCHITECTURE.md) - System architecture and design principles
 
 ### ⚙️ Setup & Configuration  
 Installation and configuration guides:
-- [Team Setup Guide](setup/TEAM_SETUP.md) - Complete installation and usage guide
+- [Team Setup Guide](setup/TEAM_SETUP.md) - Installation and usage guide
 - [GPU Cloud Setup](setup/gpu-cloud-setup.md) - GPU workstation configuration
 
 ### 🔄 Synchronization
 Cross-platform sync strategies and workflows:
-- [Seamless Sync Setup](sync/seamless-sync-setup.md) - Advanced sync configuration
+- [Seamless Sync Setup](sync/seamless-sync-setup.md) - Sync configuration
 - [Claude Code Sync Strategy](sync/claude-code-sync-strategy.md) - Synchronization strategies  
 - [Bidirectional Sync Demo](sync/bidirectional-sync-demo.md) - Sync demonstration
-- [Sync Redesign Master Plan](sync/SYNC_REDESIGN_MASTER_PLAN.md) - Comprehensive sync architecture
+- [Sync Redesign Master Plan](sync/SYNC_REDESIGN_MASTER_PLAN.md) - Sync architecture
 
 ### 🤖 Agents & Commands
 AI agents and slash command documentation:

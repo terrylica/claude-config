@@ -34,7 +34,7 @@ For each commit, auto-derive:
 - **Hypothesis**: From technical approach + risk factors
 - **Investigation**: From systematic methodology + failures/iterations
 - **Result**: From changes + technical advancement + measurements
-- **Authenticity**: Real-time discoveries + debugging breakthroughs + tool challenges
+- **Authenticity**: Real-time discoveries + debugging insights + tool challenges
 
 ### 4. Commit Message Generation
 Use this template for each commit:

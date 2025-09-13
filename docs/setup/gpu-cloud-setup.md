@@ -1,4 +1,4 @@
-# GPU-as-a-Service: Simplest Solutions for macOS + Remote RTX 4090
+# GPU-as-a-Service: Solutions for macOS + Remote RTX 4090
 
 ## Solution 1: SSH + Jupyter Tunneling (RECOMMENDED)
 
@@ -35,7 +35,7 @@ ssh -L 8888:localhost:8888 zerotier-remote -N &
 
 ### Advantages
 ✅ **Keep Claude Code on macOS** - Full local development experience  
-✅ **Zero complex setup** - Just SSH tunneling  
+✅ **Minimal setup** - Just SSH tunneling  
 ✅ **Real-time GPU access** - Run cells with RTX 4090 power  
 ✅ **Visual interface** - Jupyter notebooks for experimentation  
 ✅ **File sync** - Easy copy/paste between local and remote  
@@ -143,7 +143,7 @@ open http://localhost:8888
 ### Jupyter Tunneling
 - **Latency**: ~10-20ms for notebook interactions
 - **Throughput**: Full GPU bandwidth for computations
-- **Use case**: Perfect for TiRex inference, model training
+- **Use case**: Suitable for TiRex inference, model training
 - **Data transfer**: Only results transferred, not full datasets
 
 ### Bandwidth Usage

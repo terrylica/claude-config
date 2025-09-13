@@ -1,6 +1,6 @@
 # Agents Directory
 
-**Purpose**: Custom agent configurations and specialized sub-agents for Claude Code
+**Purpose**: Custom agent configurations and specialized agents for Claude Code
 
 ## Available Agents
 
@@ -17,10 +17,10 @@ Extracts and documents Scientific Research and Experimental Development evidence
 SR&ED-compliant commit message generator with automatic git hygiene and audit-proof formatting.
 
 ### [Python QA Agent](../../agents/python-qa-agent.md) (`python-qa-agent`)
-Comprehensive Python import health validation using multi-tool static analysis approach.
+Python import health validation using multi-tool static analysis approach.
 
 ### [Workspace Refactor](../../agents/workspace-refactor.md) (`workspace-refactor`)
-Comprehensive workspace refactoring and technical debt reduction specialist. Systematically refactors workspaces by eliminating inconsistencies, cleaning up legacy files, and strategically modularizing code with rollback safety.
+Workspace refactoring and technical debt reduction specialist. Systematically refactors workspaces by eliminating inconsistencies, cleaning up legacy files, and strategically modularizing code with rollback safety.
 
 ### [Workspace Sync](../../agents/workspace-sync.md) (`workspace-sync`)
 Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations and cross-environment development workflows.

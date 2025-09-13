@@ -1,7 +1,7 @@
 # SAGE Sync Infrastructure Redesign - Master Plan
 
 ## 🎯 **Mission Statement**
-Transform SAGE sync from a dangerous file-copying utility into an intelligent conversation preservation system with bulletproof data protection and enterprise-grade disaster recovery.
+Transform SAGE sync from a dangerous file-copying utility into a conversation preservation system with data protection and disaster recovery.
 
 ## 📊 **Problem Analysis - Data Loss Incident 2025-08-09**
 
@@ -23,14 +23,14 @@ Transform SAGE sync from a dangerous file-copying utility into an intelligent co
 
 ### Core Principles
 1. **Data Preservation First**: Never lose conversation history
-2. **Intelligent Merging**: Smart bidirectional sync with conflict resolution
-3. **Bulletproof Safety**: Multiple backup layers with verified rollback
+2. **Merging**: Smart bidirectional sync with conflict resolution
+3. **Safety**: Multiple backup layers with verified rollback
 4. **User Control**: Clear warnings and confirmation for destructive operations
 5. **Session Awareness**: Understand conversation content and context
 
 ### Technical Foundation
 ```
-Enhanced Storage Structure:
+Storage Structure:
 ~/.claude/system/
 ├── sessions/
 │   ├── active/              # Current conversations
@@ -99,8 +99,8 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
 .claude/lib/smart-merge.sh              # NEW - Merge intelligence
 ```
 
-### ⚡ **PHASE 3: Advanced Features (Weeks 4-5) - MEDIUM**
-**Objective**: Enhanced user experience and control
+### ⚡ **PHASE 3: Additional Features (Weeks 4-5) - MEDIUM**
+**Objective**: User experience and control
 
 #### Components
 1. **Interactive Conflict Resolution**
@@ -113,7 +113,7 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
    - Branch-based resolution (keep both variants)
    - Version rollback for individual sessions
 
-3. **Enhanced Sync Operations**
+3. **Extended Sync Operations**
    - Selective sync (choose specific sessions)
    - Incremental sync (only changed content)
    - Batch conflict resolution

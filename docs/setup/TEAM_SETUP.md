@@ -13,7 +13,7 @@ cd ~/.claude
 ./install-all-tools
 ```
 
-**The enhanced installer will:**
+**The installer will:**
 - ✅ Install SAGE development tools (sage-dev, sage-sync, sage-status, gpu-ws)
 - ✅ Install GFM link checker (gfm-check)
 - ✅ Install CNS notification system (cns-notify)
@@ -45,7 +45,7 @@ tmux-session --help
 
 #### SAGE Development Suite:
 - **`sage-dev`** - SAGE development environment launcher
-- **`sage-sync`** - Comprehensive workspace/session sync tool  
+- **`sage-sync`** - Workspace/session sync tool  
 - **`sage-status`** - Infrastructure health monitoring
 - **`gpu-ws`** - GPU workstation connection and management
 
@@ -103,7 +103,7 @@ gpu-ws                                         # Connect to GPU workstation
 The installer handles most issues automatically, but if you encounter problems:
 
 ### Commands Not Found After Installation?
-**First, try re-running the installer** - it includes comprehensive diagnostics and safety features:
+**First, try re-running the installer** - it includes diagnostics and safety features:
 ```bash
 ~/.claude/install-all-tools
 ```

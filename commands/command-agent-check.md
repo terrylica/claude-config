@@ -20,7 +20,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, Write, Edit, LS
 **Alignment Checks**:
 1. **Frontmatter Completeness**
    - `description` field presence and clarity
-   - `argument-hint` field with comprehensive option coverage
+   - `argument-hint` field with option coverage
    - `allowed-tools` alignment with agent capabilities
    - Optional fields (`model`, `temperature`) consistency
 

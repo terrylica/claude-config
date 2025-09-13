@@ -1,10 +1,10 @@
-# Seamless Background Workspace Synchronization
+# Background Workspace Synchronization
 
-## Current Status: ✅ OPTIMAL SETUP DETECTED
+## Current Status: ✅ SETUP DETECTED
 
 ### ZeroTier Performance Analysis
 - **Connection Type**: DIRECT (peer-to-peer, not relayed)
-- **Latency**: 7ms (excellent for same LAN)
+- **Latency**: 7ms (suitable for same LAN)
 - **Local Network Detection**: ✅ Working (192.168.0.111)
 - **Overhead**: Minimal - ZeroTier using local network directly
 
@@ -40,7 +40,7 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 - **macOS**: http://localhost:8384
 - **Remote**: http://172.25.253.142:8384 (via ZeroTier)
 
-## Setup Phase 2: Configure Seamless Sync
+## Setup Phase 2: Configure Sync
 
 ### 1. Add Remote Device
 1. Open http://localhost:8384 on your Mac
@@ -54,7 +54,7 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 2. **Folder Path**: `/Users/terryli/eon/nt/`
 3. **Folder ID**: `nt-workspace`
 4. **Share with**: Select "GPU Workstation"
-5. Advanced Settings:
+5. Additional Settings:
    - **Ignore Patterns**: Add these lines:
      ```
      .git/objects/**
@@ -156,7 +156,7 @@ Add to ignore patterns:
 **/.git/objects/**
 ```
 
-## Advanced: Selective Sync
+## Selective Sync
 
 ### For Different Work Patterns:
 - **Code Only**: Sync just `/src/` and `/docs/`

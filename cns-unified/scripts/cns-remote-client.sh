@@ -152,16 +152,7 @@ cns_hook_entry() {
     if [[ -z "$message" && -n "$user_prompt" ]]; then
         message="$user_prompt"
     elif [[ -z "$message" ]]; then
-        # Generate consistent folder announcement matching local macOS behavior
-        local working_dir=$(pwd 2>/dev/null || echo "unknown")
-        local folder_name=$(basename "$working_dir" 2>/dev/null || echo "directory")
-        
-        # Format directory name for proper TTS pronunciation (match local behavior)
-        if [[ "$folder_name" == .* ]]; then
-            message="dot ${folder_name:1}"
-        else
-            message="$folder_name"
-        fi
+        message="Claude Code session activity"
     fi
     
     # Fire-and-forget execution in background to maintain <10ms hook time

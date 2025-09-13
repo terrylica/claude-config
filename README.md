@@ -5,14 +5,14 @@
 ## Contents
 - `gfm-link-checker/` - GitHub Flavored Markdown link validation tool
   - Python-based link integrity checker
-  - UV project with comprehensive validation
+  - UV project with validation
   - Command-line interface for local workspaces
 
 - `sage-aliases/` - SAGE development productivity tool
-  - Comprehensive alias system for dual-environment development
+  - Alias system for dual-environment development
   - Universal access commands: `gpu-ws`, `sage-dev`, `sage-status`, `sage-sync`
   - GPU workstation integration and infrastructure monitoring
-  - Advanced sync tool with error handling and comprehensive debugging
+  - Sync tool with error handling and debugging
 
 ## Features
 - Standalone utility tools

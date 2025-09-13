@@ -109,7 +109,7 @@ cat ~/eon/nt/sync-test-gpu.txt
 
 ## 🎯 SAGE Development Workflow
 
-### Enhanced Phase 0 Execution (GPU Workstation):
+### Phase 0 Execution (GPU Workstation):
 ```bash
 ssh zerotier-remote
 cd ~/eon/nt/
