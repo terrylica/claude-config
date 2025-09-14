@@ -1,0 +1,43 @@
+#!/bin/bash
+# Pushover Notification Sender
+# Usage: pushover-notify <title> <message> [device] [sound]
+
+if [[ $# -lt 2 ]]; then
+    echo "Usage: pushover-notify <title> <message> [device] [sound]"
+    echo "Example: pushover-notify 'Build Complete' 'System ready'"
+    echo "Example: pushover-notify 'Task Done' 'Ready!' 'iphone_13_mini' 'toy_story'"
+    exit 1
+fi
+
+TITLE="$1"
+MESSAGE="$2"
+DEVICE="${3:-iphone_13_mini}"
+SOUND="${4:-toy_story}"
+
+# Retrieve credentials from keychain
+USER_KEY=$(security find-generic-password -s "pushover-user-key" -a "terryli" -w 2>/dev/null)
+APP_TOKEN=$(security find-generic-password -s "pushover-app-token" -a "terryli" -w 2>/dev/null)
+
+if [[ -z "$USER_KEY" ]]; then
+    echo "❌ User key not found in keychain"
+    exit 1
+fi
+
+if [[ -z "$APP_TOKEN" ]]; then
+    echo "❌ Application token not found in keychain"
+    echo "Run: pushover-setup <your-app-token>"
+    echo "Get token from: https://pushover.net/apps/build"
+    exit 1
+fi
+
+# Send notification
+curl -s \
+  --form-string "token=$APP_TOKEN" \
+  --form-string "user=$USER_KEY" \
+  --form-string "device=$DEVICE" \
+  --form-string "title=$TITLE" \
+  --form-string "message=$MESSAGE" \
+  --form-string "sound=$SOUND" \
+  https://api.pushover.net/1/messages.json
+
+echo # Add newline after curl response

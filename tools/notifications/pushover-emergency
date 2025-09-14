@@ -1,0 +1,64 @@
+#!/bin/bash
+# Pushover Emergency Notification (with retry until acknowledged)
+# Usage: pushover-emergency <title> <message> [retry_seconds] [expire_minutes] [sound]
+
+if [[ $# -lt 2 ]]; then
+    echo "Usage: pushover-emergency <title> <message> [retry_seconds] [expire_minutes] [sound]"
+    echo "Example: pushover-emergency 'URGENT' 'System failure requires attention!'"
+    echo "Example: pushover-emergency 'ALERT' 'Action needed' 30 60 'siren'"
+    echo "Defaults: retry=30s, expire=60min, sound=toy_story"
+    exit 1
+fi
+
+TITLE="$1"
+MESSAGE="$2"
+RETRY="${3:-30}"        # Default: retry every 30 seconds
+EXPIRE_MIN="${4:-60}"   # Default: expire after 60 minutes  
+SOUND="${5:-toy_story}"
+
+# Convert minutes to seconds for API
+EXPIRE=$((EXPIRE_MIN * 60))
+
+# Validate retry minimum (HARD API LIMIT: >= 30 seconds - confirmed via API testing)
+if [[ $RETRY -lt 30 ]]; then
+    echo "❌ HARD API LIMIT: Retry must be at least 30 seconds"
+    echo "   Pushover API error: 'retry is too small, must be at least 30 seconds'"
+    exit 1
+fi
+
+# Validate expire maximum (API requirement: <= 10800 seconds = 3 hours)
+if [[ $EXPIRE -gt 10800 ]]; then
+    echo "❌ Expire must be at most 180 minutes (API requirement)"
+    exit 1
+fi
+
+# Retrieve credentials from keychain
+USER_KEY=$(security find-generic-password -s "pushover-user-key" -a "terryli" -w 2>/dev/null)
+APP_TOKEN=$(security find-generic-password -s "pushover-app-token" -a "terryli" -w 2>/dev/null)
+
+if [[ -z "$USER_KEY" ]]; then
+    echo "❌ User key not found in keychain"
+    exit 1
+fi
+
+if [[ -z "$APP_TOKEN" ]]; then
+    echo "❌ Application token not found in keychain"
+    exit 1
+fi
+
+echo "🚨 Sending emergency notification (retry every ${RETRY}s for ${EXPIRE_MIN}min)..."
+
+# Send emergency notification
+curl -s \
+  --form-string "token=$APP_TOKEN" \
+  --form-string "user=$USER_KEY" \
+  --form-string "device=iphone_13_mini" \
+  --form-string "title=$TITLE" \
+  --form-string "message=$MESSAGE" \
+  --form-string "sound=$SOUND" \
+  --form-string "priority=2" \
+  --form-string "retry=$RETRY" \
+  --form-string "expire=$EXPIRE" \
+  https://api.pushover.net/1/messages.json
+
+echo # Add newline after curl response

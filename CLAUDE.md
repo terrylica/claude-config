@@ -353,3 +353,8 @@ print(f"Benchmark: {benchmark_used}")
 ### GitHub Flavored Markdown Link Checker
 **Specification**: [`.claude/specifications/gfm-link-checker.yaml`](.claude/specifications/gfm-link-checker.yaml)
 
+### Pushover Integration
+**API**: https://pushover.net/api  
+**Keychain**: `pushover-user-key`, `pushover-app-token`, `pushover-email` (account: `terryli`)  
+**Sounds**: `toy_story`, `dune`, `bike`, `siren`, `cosmic`, `alien`, `vibrate`, `none`
+
