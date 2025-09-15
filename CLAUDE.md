@@ -315,6 +315,23 @@ print(f"Benchmark: {benchmark_used}")
 - **Essential Tools**: Use `cargo nextest run` (enhanced testing), `cargo deny check` (comprehensive validation)
 - **Utility Functions**: `rust-python-project()` (hybrid project creation), `fresh-build()` (clean rebuild)
 
+### Mandatory Rust Code Quality Enforcement (2025 Best Practices)
+- **Pre-commit Hook**: MANDATORY `.git/hooks/pre-commit` script blocks unformatted code, clippy warnings, failing tests
+- **Formatting**: `cargo fmt --check` required before every commit (auto-enforced)
+- **Linting**: `cargo clippy --all-targets --all-features -- -D warnings` blocks commits with warnings
+- **Testing**: `cargo test` must pass before commit acceptance
+- **VS Code Integration**: Auto-format on save/type/paste with rust-analyzer (`editor.formatOnSave: true`)
+- **CI/CD Enforcement**: GitHub Actions validates formatting, clippy, tests on every push/PR
+- **Setup Commands**:
+  ```bash
+  # Create mandatory pre-commit hook
+  chmod +x .git/hooks/pre-commit
+  # Configure VS Code rust-analyzer formatting
+  # Enable pre-commit framework: pip install pre-commit && pre-commit install
+  ```
+- **Zero Tolerance**: No commits allowed with unformatted code, clippy warnings, or failing tests
+- **New Project Requirement**: Set up mandatory enforcement for every new Rust project immediately
+
 ### Git Repository Detection
 - `uv run --active python -m pathlib -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
 
@@ -358,10 +375,20 @@ print(f"Benchmark: {benchmark_used}")
 **Keychain**: `pushover-user-key`, `pushover-app-token`, `pushover-email` (account: `terryli`)
 **Sounds**: `toy_story`, `dune`, `bike`, `siren`, `cosmic`, `alien`, `vibrate`, `none`
 
-### PyPI Publishing Credentials
+### PyPI Publishing Methods
+
+#### Legacy Token-Based (Backup Only)
 **Location**: `$HOME/.pypirc` (terryli's macOS MacBook only - not stored elsewhere)
 **Authentication**: Token-based authentication (`username = __token__`)
-**Publication Command**: `uv publish --token "pypi-[TOKEN]"`
+**Manual Command**: `uv publish --token "pypi-[TOKEN]"`
 **Token Format**: `pypi-AgEI...` (scoped to specific package publishing permissions)
 **Unique Identifier**: `cc934ce2-87dc-4995-812b-1149d7e977cf` (publishing token ID)
+
+#### Trusted Publishing (Primary Method - 2025 Best Practice)
+**Security**: OIDC-based authentication (no stored tokens)
+**Automation**: GitHub Actions with `.github/workflows/publish.yml`
+**Environments**: `pypi` (production) and `testpypi` (testing)
+**Approval**: Manual approval required for production releases
+**Features**: Digital attestations, Sigstore signatures, zero-credential workflow
+**Documentation**: `docs/PUBLISHING.md` for complete setup guide
 
