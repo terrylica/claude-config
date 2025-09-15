@@ -354,7 +354,14 @@ print(f"Benchmark: {benchmark_used}")
 **Specification**: [`.claude/specifications/gfm-link-checker.yaml`](.claude/specifications/gfm-link-checker.yaml)
 
 ### Pushover Integration
-**API**: https://pushover.net/api  
-**Keychain**: `pushover-user-key`, `pushover-app-token`, `pushover-email` (account: `terryli`)  
+**API**: https://pushover.net/api
+**Keychain**: `pushover-user-key`, `pushover-app-token`, `pushover-email` (account: `terryli`)
 **Sounds**: `toy_story`, `dune`, `bike`, `siren`, `cosmic`, `alien`, `vibrate`, `none`
+
+### PyPI Publishing Credentials
+**Location**: `$HOME/.pypirc` (terryli's macOS MacBook only - not stored elsewhere)
+**Authentication**: Token-based authentication (`username = __token__`)
+**Publication Command**: `uv publish --token "pypi-[TOKEN]"`
+**Token Format**: `pypi-AgEI...` (scoped to specific package publishing permissions)
+**Unique Identifier**: `cc934ce2-87dc-4995-812b-1149d7e977cf` (publishing token ID)
 
