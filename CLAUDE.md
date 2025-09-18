@@ -45,27 +45,10 @@
 
 ## Defensive Programming Standards
 
-### Data Authenticity Requirements - CCXT MANDATE
-- **CCXT USDⓈ-M Perpetuals ONLY**: Use CCXT direct Binance API connectivity as the exclusive authentic data source for all financial data collection
-- **USDⓈ-M Perpetuals ONLY**: `'defaultType': 'future'` (USDⓈ-Margined Perpetuals), BTC/USDT:USDT perpetual - NEVER spot or other derivatives
-- **Performance Validated**: 35x more data than constraints (26,280 vs 744 bars), perfect backtesting.py compatibility
+### Data Authenticity Requirements
 - **Zero Synthetic Data Tolerance**: Never use fake, mock, synthetic, or placeholder financial data in ANY scenario
-- **Production Quality Sources**: All data must originate from direct Binance USDⓈ-M Perpetuals API sources
+- **Production Quality Sources**: All data must originate from authentic, verified financial data sources
 - **Data Integrity**: Validate all inputs at system boundaries with explicit type checking
-
-### CCXT USDⓈ-M Perpetuals Integration Standards
-- **Mandatory Library**: `import ccxt`
-- **Installation Command**: `uv add ccxt`
-- **Standard Configuration**: 
-  ```python
-  exchange = ccxt.binance({
-      'options': {'defaultType': 'future'}  # USDⓈ-M Perpetuals ONLY
-  })
-  # Collect authentic USDⓈ-M Perpetuals data: 26,280 bars vs 744 constraint
-  ohlcv = exchange.fetch_ohlcv('BTC/USDT:USDT', '1h', since, 1000)
-  ```
-- **Perfect OHLCV Format**: Direct backtesting.py compatibility with authentic USDⓈ-M perpetual pricing
-- **Authenticity Verification**: Real USDT settlement matching backtesting environment
 
 ### Input Validation Requirements  
 - **Boundary Conditions**: Check for null, empty, and edge case values before processing
@@ -151,6 +134,69 @@ for window in wfa_windows:
 - **Any violation found** → Fix before proceeding
 - **Regular ATV audits** → Maintain temporal integrity over time
 
+### Foolproof Validation System Architecture (V8 Pattern)
+**PURPOSE**: Prevent users from accidentally using insufficient data through automatic validation with rich guidance
+
+#### **Universal Validation Constants**
+```python
+MIN_WARMUP_PERIODS = 50      # Maximum warmup across all features
+MIN_PRODUCTION_DATA = 170    # Absolute minimum (warmup + 120 effective periods)
+MIN_RECOMMENDED_DATA = 420   # Recommended minimum (warmup + 370 effective periods)
+```
+
+#### **Validation Decorator Pattern**
+```python
+@validate_v8_input_data(['feature_list'], validation_level='strict')
+def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
+    # Validation occurs automatically before function execution
+    # Users cannot accidentally use insufficient data
+    return enhanced_df
+```
+
+#### **Three-Level Validation System**
+- **Strict**: Production-grade validation, fails fast with clear errors and guidance
+- **Moderate**: Development validation, issues warnings but allows execution with guidance
+- **Permissive**: Research validation, minimal checks with logging
+
+#### **One-Line Validation Patterns**
+```python
+# Quick sufficiency check with automatic guidance printing
+if not quick_v8_check(df, "model training"):
+    return  # Don't proceed - guidance automatically shown
+
+# Enforce minimums - guarantee sufficiency or fail fast
+df = enforce_v8_minimums(df, "production model training")
+# If this executes, data is guaranteed sufficient
+
+# Walk-forward validation setup verification
+wf_result = validate_walk_forward_setup(df, train_window, test_window, step_size)
+```
+
+#### **Rich Error Guidance Pattern**
+```python
+# Validation failures include actionable guidance:
+"""
+🚨 V8 FEATURE CALCULATION BLOCKED
+Function: calculate_features
+Issue: Insufficient data (120 periods, need 420)
+
+IMMEDIATE ACTIONS:
+1. Collect 300 more data periods
+2. Or use validation_level='moderate' for development
+3. Or reduce feature set to lower-requirement features
+
+Example: df = calculate_features(df, validation_level='moderate')
+"""
+```
+
+#### **CLI Validation Tool Pattern**
+```bash
+# Instant data assessment without coding
+python -m v8_microstructure.validation.cli_validator data.csv
+python -m v8_microstructure.validation.cli_validator data.csv --walk-forward
+python -m v8_microstructure.validation.cli_validator --requirements
+```
+
 ## Quantitative Development Standards
 
 ### backtesting.py Strategy Architecture - EXCLUSIVE FRAMEWORK
@@ -185,7 +231,7 @@ bt = Backtest(
 
 **`data` (Required)**:
 - **Official**: "A pandas DataFrame with columns Open, High, Low, Close, and optionally Volume"
-- **Standard**: OHLCV from CCXT USDⓈ-M Perpetuals API with authentic pricing and datetime index
+- **Standard**: OHLCV from authentic financial data sources with verified pricing and datetime index
 
 **`strategy` (Required)**:
 - **Official**: "A Strategy subclass (not an instance) defining trading logic"
@@ -216,7 +262,7 @@ bt = Backtest(
 - **Commission**: `0.0008`
 - **Exclusive Orders**: `True`
 - **Trade on Close**: `False`
-- **Data Source**: CCXT USDⓈ-M Perpetuals API with direct Binance connectivity ONLY
+- **Data Source**: Authentic financial data sources with verified connectivity
 - **Strategy Pattern**: Separated LONG/SHORT classes
 - **Benchmark Comparison**: Required for all strategies (see Benchmark Standards below)
 
@@ -292,7 +338,8 @@ print(f"Benchmark: {benchmark_used}")
 - **Python Management**: `uv` for all Python operations (`uv run --active python -m`, `uv add`) - **Avoid**: pip, conda, pipenv
 - **Rust Development**: `cargo` with ARM64-native compilation, cross-platform targets ready
 - **GPU-Accelerated Computing**: `uv add cupy` - GPU-accelerated NumPy replacement for CUDA/ROCm acceleration across all numerical computing
-- **Backtesting Framework**: backtesting.py EXCLUSIVELY - **Prohibited**: bt, vectorbt, btester, backtrader, zipline, pyfolio, quantlib, NautilusTrader, any alternative backtesting frameworks
+- **Backtesting Framework**: backtesting.py EXCLUSIVELY - **Prohibited**: bt, vectorbt, btester, backtrader, zipline, pyfolio, quantlib, NautilusTrader, mlfinlab, any alternative backtesting frameworks
+- **Commercial Library Restrictions**: **Prohibited**: mlfinlab, VectorBT (commercial licensing conflicts) - use open-source alternatives: sklearn, scipy, statsmodels, pandas
 - **Python-Rust Integration**: `maturin develop --release --uv` for building PyO3 extensions with consistent uv package management
 - **Information Theory & Pattern Analysis**: 
   - **Primary**: `uv add infomeasure jax jaxlib` - SOTA 2024-2025 entropy stack
@@ -336,6 +383,16 @@ print(f"Benchmark: {benchmark_used}")
 - `uv run --active python -m pathlib -c "import pathlib;g=next((x for x in [pathlib.Path.cwd()]+list(pathlib.Path.cwd().parents) if (x/'.git').exists()),pathlib.Path.cwd());print(g)"`
 
 ## Documentation Standards
+
+### LLM-Optimized Documentation Architecture (2025 Pattern)
+- **Machine-Readable Priority**: OpenAPI 3.1.0 specs, JSON Schema definitions, YAML specifications take precedence over human documentation
+- **LLM Integration Targets**: Cursor IDE, Claude Code CLI, and AI coding assistants as primary documentation consumers
+- **Tri-Format Standard**:
+  - **OpenAPI YAML**: Complete API reference with endpoints, schemas, examples
+  - **JSON Schema**: Type definitions with constraints, validation rules, autocompletion support
+  - **YAML Specifications**: Comprehensive rule documentation with usage patterns and code examples
+- **Human Documentation**: Provides context and examples, points to machine-readable sources
+- **Cross-Reference Integrity**: All documentation cross-references validated, no orphaned links
 
 ### Claude Code Markdown Restrictions & README Policies
 - **Global `~/.claude/`**: Markdown files allowed (configuration template)
