@@ -1,0 +1,1293 @@
+# Dukascopy Data Source Integration Plan for rangebar
+## Project: ~/eon/rangebar
+## Date: 2025-09-30
+## Platform: macOS (Apple Silicon)
+
+---
+
+## Executive Summary
+
+**Objective**: Integrate Dukascopy historical tick data as a new data source into the rangebar project, enabling Forex/multi-asset range bar construction alongside existing Binance crypto data.
+
+**Approach**: Direct Rust implementation of Dukascopy protocol (HTTP + LZMA + binary parsing) with conversion to rangebar's `AggTrade` format.
+
+**Estimated Timeline**: 3-5 days for core implementation, 2-3 days for testing/validation
+
+---
+
+## 1. Current Architecture Analysis
+
+### 1.1 Existing Data Pipeline
+
+```
+┌─────────────────┐
+│ Data Source     │ → Binance (Spot, UM Futures, CM Futures)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Loader          │ → HistoricalDataLoader (src/data/historical.rs)
+└────────┬────────┘
+         │ HTTP + ZIP + CSV parsing
+         ▼
+┌─────────────────┐
+│ AggTrade        │ → Universal format (src/core/types.rs)
+│ (struct)        │   - agg_trade_id
+│                 │   - price (FixedPoint)
+│                 │   - volume (FixedPoint)
+│                 │   - first_trade_id / last_trade_id
+│                 │   - timestamp (i64 microseconds)
+│                 │   - is_buyer_maker (bool)
+│                 │   - is_best_match (Option<bool>)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Processor       │ → RangeBarProcessor (src/core/processor.rs)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ RangeBar        │ → Output format
+│ (struct)        │   - OHLCV data
+│                 │   - Market microstructure metrics
+│                 │   - Temporal integrity
+└─────────────────┘
+```
+
+### 1.2 Key Integration Points
+
+1. **DataSource Enum** (`src/core/types.rs:7-17`)
+   - Already designed for multi-exchange support
+   - Currently has BinanceSpot, BinanceFuturesUM, BinanceFuturesCM
+   - **Action**: Add Dukascopy variants
+
+2. **AggTrade Struct** (`src/core/types.rs:19-67`)
+   - Universal input format for all data sources
+   - Fixed-point precision for financial calculations
+   - **Action**: Map Dukascopy ticks → AggTrade
+
+3. **Data Module** (`src/data/`)
+   - HistoricalDataLoader pattern
+   - Async HTTP fetching with reqwest
+   - **Action**: Create DukascopyDataLoader
+
+---
+
+## 2. Dukascopy Data Characteristics
+
+### 2.1 Tick Data Format
+
+**Binary Structure (.bi5 files)**:
+```
+LZMA Compressed Binary File
+└── Tick Records (20 bytes each)
+    ├── Timestamp Offset: 4 bytes (uint32, big-endian) [ms from hour start]
+    ├── Ask Price: 4 bytes (uint32, big-endian) [scaled integer]
+    ├── Bid Price: 4 bytes (uint32, big-endian) [scaled integer]
+    ├── Ask Volume: 4 bytes (float32, big-endian)
+    └── Bid Volume: 4 bytes (float32, big-endian)
+```
+
+**HTTP Endpoint**:
+```
+https://www.dukascopy.com/datafeed/{INSTRUMENT}/{YYYY}/{MM}/{DD}/{HH}h_ticks.bi5
+```
+
+### 2.2 Data Coverage
+
+- **Instruments**: 1000+ (Forex, Crypto, Commodities, Stocks, ETFs)
+- **Temporal Range**: 2003-2025 (varies by instrument)
+- **Granularity**: Tick-level (every price change)
+- **Update Frequency**: Hourly files, updated continuously
+
+### 2.3 Key Differences vs. Binance AggTrades
+
+| Feature | Binance AggTrades | Dukascopy Ticks |
+|---------|-------------------|-----------------|
+| **Aggregation** | Pre-aggregated ~100ms | Individual ticks |
+| **Side Info** | `is_buyer_maker` flag | Bid/Ask spread |
+| **Trade IDs** | first_trade_id, last_trade_id | No trade IDs |
+| **Price Type** | Single execution price | Bid + Ask quotes |
+| **Volume** | Single volume | Bid volume + Ask volume |
+| **Timestamp** | Microsecond precision | Millisecond precision |
+
+---
+
+## 3. Architecture Design
+
+### 3.1 Module Structure
+
+```
+src/data/
+├── mod.rs                    # Re-exports
+├── historical.rs             # Existing Binance loader
+└── dukascopy.rs             # NEW: Dukascopy loader
+    ├── DukascopyTick        # Raw tick struct
+    ├── DukascopyDataLoader  # Async loader
+    ├── DukascopyConfig      # Configuration
+    └── tick_to_aggtrade()   # Conversion logic
+```
+
+### 3.2 Data Flow
+
+```rust
+// 1. Fetch & Decompress
+DukascopyDataLoader::fetch_hour()
+    ↓ HTTP GET (reqwest)
+    ↓ LZMA Decompress (xz2 crate)
+    ↓ Binary Parse (byteorder crate)
+    ↓
+Vec<DukascopyTick>
+
+// 2. Convert to AggTrade
+DukascopyTick::to_agg_trade(conversion_strategy)
+    ↓ Map bid/ask to execution price
+    ↓ Synthesize trade IDs
+    ↓ Set is_buyer_maker heuristic
+    ↓
+AggTrade
+
+// 3. Process into RangeBars
+RangeBarProcessor::process_agg_trade_records()
+    ↓ [Existing pipeline]
+    ↓
+Vec<RangeBar>
+```
+
+### 3.3 Core Rust Implementation
+
+#### 3.3.1 Cargo.toml Dependencies
+
+```toml
+[dependencies]
+# Existing dependencies...
+
+# Dukascopy-specific (add these)
+xz2 = "0.1"              # LZMA decompression
+byteorder = "1.5"        # Big-endian binary parsing
+
+# Already present:
+# reqwest = { version = "^0.12", features = ["stream"] }
+# tokio = { version = "^1.0", features = ["full"] }
+# chrono = { version = "^0.4", features = ["serde"] }
+```
+
+#### 3.3.2 DukascopyTick Struct
+
+```rust
+// src/data/dukascopy.rs
+
+use byteorder::{BigEndian, ReadBytesExt};
+use chrono::{NaiveDate, NaiveDateTime};
+use std::io::Cursor;
+use xz2::read::XzDecoder;
+use crate::{AggTrade, FixedPoint};
+
+/// Raw tick from Dukascopy binary format
+#[derive(Debug, Clone)]
+pub struct DukascopyTick {
+    /// Absolute timestamp in milliseconds (epoch)
+    pub timestamp: i64,
+
+    /// Ask price (scaled integer from binary)
+    pub ask: u32,
+
+    /// Bid price (scaled integer from binary)
+    pub bid: u32,
+
+    /// Ask volume (liquidity available)
+    pub ask_volume: f32,
+
+    /// Bid volume (liquidity available)
+    pub bid_volume: f32,
+}
+
+impl DukascopyTick {
+    /// Parse from 20-byte binary chunk
+    pub fn from_bytes(
+        chunk: &[u8],
+        base_timestamp: i64,
+        point_value: f64,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut cursor = Cursor::new(chunk);
+
+        let timestamp_offset = cursor.read_u32::<BigEndian>()? as i64;
+        let ask_raw = cursor.read_u32::<BigEndian>()?;
+        let bid_raw = cursor.read_u32::<BigEndian>()?;
+        let ask_volume = cursor.read_f32::<BigEndian>()?;
+        let bid_volume = cursor.read_f32::<BigEndian>()?;
+
+        Ok(Self {
+            timestamp: base_timestamp + timestamp_offset,
+            ask: ask_raw,
+            bid: bid_raw,
+            ask_volume,
+            bid_volume,
+        })
+    }
+
+    /// Convert to AggTrade using mid-price strategy
+    pub fn to_agg_trade_mid(&self, point_value: f64, tick_id: i64) -> AggTrade {
+        // Use mid price as execution price
+        let mid_price = (self.ask as f64 + self.bid as f64) / 2.0 / point_value;
+        let total_volume = self.ask_volume + self.bid_volume;
+
+        // Heuristic: if ask_volume > bid_volume, likely sell pressure (is_buyer_maker = true)
+        let is_buyer_maker = self.ask_volume > self.bid_volume;
+
+        AggTrade {
+            agg_trade_id: tick_id,
+            price: FixedPoint::from_str(&mid_price.to_string()).unwrap(),
+            volume: FixedPoint::from_str(&total_volume.to_string()).unwrap(),
+            first_trade_id: tick_id,
+            last_trade_id: tick_id,
+            timestamp: self.timestamp * 1000, // Convert ms to µs
+            is_buyer_maker,
+            is_best_match: None, // Not applicable for quotes
+        }
+    }
+
+    /// Convert to AggTrade using bid-ask separation (generates 2 AggTrades)
+    pub fn to_agg_trades_split(&self, point_value: f64, tick_id: i64) -> Vec<AggTrade> {
+        let bid_price = self.bid as f64 / point_value;
+        let ask_price = self.ask as f64 / point_value;
+
+        vec![
+            // Bid side (buy pressure)
+            AggTrade {
+                agg_trade_id: tick_id * 2,
+                price: FixedPoint::from_str(&bid_price.to_string()).unwrap(),
+                volume: FixedPoint::from_str(&self.bid_volume.to_string()).unwrap(),
+                first_trade_id: tick_id * 2,
+                last_trade_id: tick_id * 2,
+                timestamp: self.timestamp * 1000,
+                is_buyer_maker: false, // Bid = buy side
+                is_best_match: None,
+            },
+            // Ask side (sell pressure)
+            AggTrade {
+                agg_trade_id: tick_id * 2 + 1,
+                price: FixedPoint::from_str(&ask_price.to_string()).unwrap(),
+                volume: FixedPoint::from_str(&self.ask_volume.to_string()).unwrap(),
+                first_trade_id: tick_id * 2 + 1,
+                last_trade_id: tick_id * 2 + 1,
+                timestamp: self.timestamp * 1000,
+                is_buyer_maker: true, // Ask = sell side
+                is_best_match: None,
+            },
+        ]
+    }
+}
+```
+
+#### 3.3.3 DukascopyDataLoader
+
+```rust
+/// Configuration for Dukascopy data source
+#[derive(Debug, Clone)]
+pub struct DukascopyConfig {
+    /// Instrument symbol (e.g., "EURUSD", "BTCUSD")
+    pub instrument: String,
+
+    /// Point value for price scaling (100 or 100000 typically)
+    pub point_value: f64,
+
+    /// Conversion strategy (Mid price or Bid/Ask split)
+    pub conversion_strategy: ConversionStrategy,
+
+    /// Rate limiting: requests per batch
+    pub batch_size: usize,
+
+    /// Rate limiting: pause between batches (ms)
+    pub batch_pause_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConversionStrategy {
+    /// Use mid-price (ask+bid)/2, total volume, volume-based is_buyer_maker
+    MidPrice,
+
+    /// Generate separate AggTrades for bid and ask sides
+    BidAskSplit,
+}
+
+impl Default for DukascopyConfig {
+    fn default() -> Self {
+        Self {
+            instrument: String::new(),
+            point_value: 100000.0, // Standard for Forex
+            conversion_strategy: ConversionStrategy::MidPrice,
+            batch_size: 10,
+            batch_pause_ms: 1000,
+        }
+    }
+}
+
+/// Async loader for Dukascopy historical tick data
+pub struct DukascopyDataLoader {
+    client: reqwest::Client,
+    config: DukascopyConfig,
+}
+
+impl DukascopyDataLoader {
+    pub fn new(config: DukascopyConfig) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            config,
+        }
+    }
+
+    /// Fetch ticks for a single hour
+    pub async fn fetch_hour(
+        &self,
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+    ) -> Result<Vec<DukascopyTick>, Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://www.dukascopy.com/datafeed/{}/{:04}/{:02}/{:02}/{:02}h_ticks.bi5",
+            self.config.instrument.to_uppercase(),
+            year,
+            month,
+            day,
+            hour
+        );
+
+        // HTTP GET with timeout
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.client.get(&url).send()
+        ).await??;
+
+        if !response.status().is_success() {
+            return Err(format!("HTTP {} for {}-{:02}-{:02} {:02}:00",
+                response.status(), year, month, day, hour).into());
+        }
+
+        let compressed = response.bytes().await?;
+
+        // LZMA decompression
+        let mut decoder = XzDecoder::new(&compressed[..]);
+        let mut decompressed = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decompressed)?;
+
+        // Parse binary ticks
+        let base_timestamp = NaiveDate::from_ymd_opt(year, month, day)
+            .ok_or("Invalid date")?
+            .and_hms_opt(hour, 0, 0)
+            .ok_or("Invalid time")?
+            .timestamp_millis();
+
+        let chunk_size = 20;
+        let mut ticks = Vec::with_capacity(decompressed.len() / chunk_size);
+
+        for chunk in decompressed.chunks_exact(chunk_size) {
+            let tick = DukascopyTick::from_bytes(
+                chunk,
+                base_timestamp,
+                self.config.point_value,
+            )?;
+            ticks.push(tick);
+        }
+
+        Ok(ticks)
+    }
+
+    /// Fetch date range with rate limiting
+    pub async fn fetch_date_range(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<AggTrade>, Box<dyn std::error::Error>> {
+        use futures::stream::{self, StreamExt};
+
+        // Generate all hour tasks
+        let mut hours = Vec::new();
+        let mut current = start_date;
+
+        while current <= end_date {
+            for hour in 0..24 {
+                hours.push((current.year(), current.month(), current.day(), hour));
+            }
+            current = current.succ_opt().ok_or("Date overflow")?;
+        }
+
+        // Batch processing with rate limiting
+        let all_ticks: Vec<DukascopyTick> = stream::iter(hours.chunks(self.config.batch_size))
+            .then(|batch| async move {
+                let futures: Vec<_> = batch
+                    .iter()
+                    .map(|(y, m, d, h)| self.fetch_hour(*y, *m, *d, *h))
+                    .collect();
+
+                let results = futures::future::join_all(futures).await;
+
+                // Pause between batches
+                tokio::time::sleep(
+                    std::time::Duration::from_millis(self.config.batch_pause_ms)
+                ).await;
+
+                results
+            })
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .flatten()
+            .collect();
+
+        // Convert to AggTrades
+        let agg_trades = match self.config.conversion_strategy {
+            ConversionStrategy::MidPrice => {
+                all_ticks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, tick)| tick.to_agg_trade_mid(self.config.point_value, i as i64))
+                    .collect()
+            }
+            ConversionStrategy::BidAskSplit => {
+                all_ticks
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, tick)| tick.to_agg_trades_split(self.config.point_value, i as i64))
+                    .collect()
+            }
+        };
+
+        Ok(agg_trades)
+    }
+}
+```
+
+### 3.4 DataSource Enum Extension
+
+```rust
+// src/core/types.rs
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+pub enum DataSource {
+    /// Binance Spot Market
+    BinanceSpot,
+
+    /// Binance USD-Margined Futures
+    #[default]
+    BinanceFuturesUM,
+
+    /// Binance Coin-Margined Futures
+    BinanceFuturesCM,
+
+    /// Dukascopy Forex (spot market)
+    DukascopyForex,
+
+    /// Dukascopy Crypto (e.g., BTCUSD)
+    DukascopyC crypto,
+
+    /// Dukascopy Commodities
+    DukascopyCommodities,
+
+    /// Dukascopy Stocks/ETFs
+    DukascopyEquities,
+}
+```
+
+---
+
+## 4. Implementation Roadmap
+
+### Phase 1: Core Infrastructure (Day 1-2)
+
+#### 4.1 Dependency Setup
+```bash
+cd ~/eon/rangebar
+
+# Add dependencies to Cargo.toml
+# xz2 = "0.1"
+# byteorder = "1.5"
+
+cargo build --release
+cargo test
+```
+
+#### 4.2 Create Dukascopy Module
+```bash
+touch src/data/dukascopy.rs
+```
+
+**Implementation checklist**:
+- [ ] DukascopyTick struct with from_bytes()
+- [ ] DukascopyConfig struct
+- [ ] ConversionStrategy enum
+- [ ] to_agg_trade_mid() method
+- [ ] to_agg_trades_split() method
+- [ ] Unit tests for binary parsing
+
+#### 4.3 Update Module Exports
+```rust
+// src/data/mod.rs
+pub mod historical;
+pub mod dukascopy;
+
+pub use historical::{CsvAggTrade, HistoricalDataLoader, detect_csv_headers, python_bool};
+pub use dukascopy::{
+    DukascopyTick, DukascopyDataLoader, DukascopyConfig, ConversionStrategy
+};
+```
+
+### Phase 2: Data Loader (Day 2-3)
+
+#### 4.4 Implement DukascopyDataLoader
+**Implementation checklist**:
+- [ ] HTTP fetching with reqwest
+- [ ] LZMA decompression with xz2
+- [ ] Binary parsing with byteorder
+- [ ] Batch processing with rate limiting
+- [ ] Error handling for HTTP 503 (rate limits)
+- [ ] Unit tests with mocked HTTP responses
+
+#### 4.5 Conversion Logic
+**Implementation checklist**:
+- [ ] Mid-price conversion (single AggTrade per tick)
+- [ ] Bid/Ask split conversion (two AggTrades per tick)
+- [ ] Timestamp normalization (ms → µs)
+- [ ] Price scaling validation
+- [ ] Volume aggregation tests
+
+### Phase 3: Integration (Day 3-4)
+
+#### 4.6 Create Binary Tool
+```bash
+touch src/bin/dukascopy_processor.rs
+```
+
+```rust
+// src/bin/dukascopy_processor.rs
+use rangebar::{
+    DukascopyDataLoader, DukascopyConfig, ConversionStrategy,
+    RangeBarProcessor, ParquetExporter,
+};
+use chrono::NaiveDate;
+use clap::Parser;
+
+#[derive(Parser)]
+struct Args {
+    /// Instrument (e.g., EURUSD, BTCUSD)
+    #[arg(short, long)]
+    instrument: String,
+
+    /// Start date (YYYY-MM-DD)
+    #[arg(long)]
+    from: String,
+
+    /// End date (YYYY-MM-DD)
+    #[arg(long)]
+    to: String,
+
+    /// Threshold in basis points
+    #[arg(short, long, default_value = "25")]
+    threshold: u16,
+
+    /// Point value for price scaling
+    #[arg(long, default_value = "100000")]
+    point_value: f64,
+
+    /// Output path
+    #[arg(short, long)]
+    output: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    // Parse dates
+    let start_date = NaiveDate::parse_from_str(&args.from, "%Y-%m-%d")?;
+    let end_date = NaiveDate::parse_from_str(&args.to, "%Y-%m-%d")?;
+
+    // Configure Dukascopy loader
+    let config = DukascopyConfig {
+        instrument: args.instrument.clone(),
+        point_value: args.point_value,
+        conversion_strategy: ConversionStrategy::MidPrice,
+        batch_size: 10,
+        batch_pause_ms: 1000,
+    };
+
+    // Fetch data
+    println!("📥 Fetching {} data from {} to {}",
+        args.instrument, args.from, args.to);
+
+    let loader = DukascopyDataLoader::new(config);
+    let agg_trades = loader.fetch_date_range(start_date, end_date).await?;
+
+    println!("✅ Fetched {} ticks", agg_trades.len());
+
+    // Process into range bars
+    println!("🔄 Processing range bars ({}bps threshold)", args.threshold);
+
+    let mut processor = RangeBarProcessor::new(args.threshold);
+    let range_bars = processor.process_agg_trade_records(&agg_trades)?;
+
+    println!("✅ Generated {} range bars", range_bars.len());
+
+    // Export
+    #[cfg(feature = "polars-io")]
+    {
+        let exporter = ParquetExporter::new();
+        exporter.export(&range_bars, &args.output)?;
+        println!("💾 Exported to {}", args.output);
+    }
+
+    Ok(())
+}
+```
+
+#### 4.7 Update Cargo.toml
+```toml
+[[bin]]
+name = "dukascopy-processor"
+path = "src/bin/dukascopy_processor.rs"
+```
+
+### Phase 4: Testing & Validation (Day 4-5)
+
+#### 4.8 Unit Tests
+```rust
+// src/data/dukascopy.rs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tick_parsing() {
+        // Create 20-byte test data
+        let mut data = vec![0u8; 20];
+        // timestamp_offset = 1000ms
+        data[0..4].copy_from_slice(&1000u32.to_be_bytes());
+        // ask = 150000 (1.50000 with point_value=100000)
+        data[4..8].copy_from_slice(&150000u32.to_be_bytes());
+        // bid = 149990 (1.49990)
+        data[8..12].copy_from_slice(&149990u32.to_be_bytes());
+        // ask_volume = 1.5
+        data[12..16].copy_from_slice(&1.5f32.to_be_bytes());
+        // bid_volume = 2.5
+        data[16..20].copy_from_slice(&2.5f32.to_be_bytes());
+
+        let base_ts = 1640995200000; // 2022-01-01 00:00:00
+        let tick = DukascopyTick::from_bytes(&data, base_ts, 100000.0).unwrap();
+
+        assert_eq!(tick.timestamp, 1640995201000);
+        assert_eq!(tick.ask, 150000);
+        assert_eq!(tick.bid, 149990);
+        assert_eq!(tick.ask_volume, 1.5);
+        assert_eq!(tick.bid_volume, 2.5);
+    }
+
+    #[test]
+    fn test_mid_price_conversion() {
+        let tick = DukascopyTick {
+            timestamp: 1640995201000,
+            ask: 150000,
+            bid: 149990,
+            ask_volume: 1.5,
+            bid_volume: 2.5,
+        };
+
+        let agg_trade = tick.to_agg_trade_mid(100000.0, 12345);
+
+        // Mid price = (1.50000 + 1.49990) / 2 = 1.49995
+        assert_eq!(agg_trade.price.to_string(), "1.49995000");
+
+        // Total volume = 1.5 + 2.5 = 4.0
+        assert_eq!(agg_trade.volume.to_string(), "4.00000000");
+
+        // is_buyer_maker should be false (bid_volume > ask_volume)
+        assert_eq!(agg_trade.is_buyer_maker, false);
+    }
+
+    #[tokio::test]
+    async fn test_http_fetch() {
+        // Integration test (requires internet)
+        let config = DukascopyConfig {
+            instrument: "EURUSD".to_string(),
+            point_value: 100000.0,
+            ..Default::default()
+        };
+
+        let loader = DukascopyDataLoader::new(config);
+
+        // Fetch recent data
+        let result = loader.fetch_hour(2025, 1, 15, 10).await;
+
+        match result {
+            Ok(ticks) => {
+                assert!(!ticks.is_empty());
+                println!("✅ Fetched {} ticks", ticks.len());
+            }
+            Err(e) => {
+                println!("⚠️  Fetch failed (expected if data unavailable): {}", e);
+            }
+        }
+    }
+}
+```
+
+#### 4.9 Integration Test
+```rust
+// tests/dukascopy_integration.rs
+use rangebar::{
+    DukascopyDataLoader, DukascopyConfig, ConversionStrategy,
+    RangeBarProcessor,
+};
+use chrono::NaiveDate;
+
+#[tokio::test]
+#[ignore] // Only run with --ignored flag (requires internet)
+async fn test_eurusd_range_bars() {
+    let config = DukascopyConfig {
+        instrument: "EURUSD".to_string(),
+        point_value: 100000.0,
+        conversion_strategy: ConversionStrategy::MidPrice,
+        batch_size: 5,
+        batch_pause_ms: 2000,
+    };
+
+    let loader = DukascopyDataLoader::new(config);
+
+    // Fetch 1 day of data
+    let start = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+    let end = start;
+
+    let agg_trades = loader.fetch_date_range(start, end).await.unwrap();
+    assert!(!agg_trades.is_empty());
+
+    println!("✅ Fetched {} AggTrades", agg_trades.len());
+
+    // Process into range bars
+    let mut processor = RangeBarProcessor::new(25); // 25bps = 0.25%
+    let range_bars = processor.process_agg_trade_records(&agg_trades).unwrap();
+
+    assert!(!range_bars.is_empty());
+    println!("✅ Generated {} range bars", range_bars.len());
+
+    // Validate first bar
+    let first_bar = &range_bars[0];
+    assert!(first_bar.open.0 > 0);
+    assert!(first_bar.high >= first_bar.open);
+    assert!(first_bar.low <= first_bar.open);
+    assert!(first_bar.volume.0 > 0);
+}
+```
+
+#### 4.10 End-to-End Test
+```bash
+# Test full pipeline
+cargo run --bin dukascopy-processor --release -- \
+    --instrument EURUSD \
+    --from 2025-01-15 \
+    --to 2025-01-15 \
+    --threshold 25 \
+    --output ~/eon/rangebar/output/eurusd_test.parquet
+
+# Verify output
+ls -lh ~/eon/rangebar/output/eurusd_test.parquet
+```
+
+### Phase 5: Documentation & Polish (Day 5)
+
+#### 4.11 Update CLAUDE.md
+```markdown
+## Data Sources
+
+### Supported Data Sources
+1. **Binance Markets**
+   - Spot: Pre-aggregated trades (~100ms windows)
+   - USD-M Futures: USDT/USDC perpetuals
+   - Coin-M Futures: Coin-margined contracts
+
+2. **Dukascopy Markets** (NEW)
+   - Forex: 293+ currency pairs (tick-level)
+   - Crypto: BTC, ETH, etc. (tick-level)
+   - Commodities: Metals, energy, agricultural
+   - Equities: 62+ stocks and ETFs
+
+### Usage
+
+**Binance** (existing):
+```bash
+spot-tier1-processor --symbol BTCUSDT --from 2025-01-01 --to 2025-01-31
+```
+
+**Dukascopy** (new):
+```bash
+dukascopy-processor --instrument EURUSD --from 2025-01-15 --to 2025-01-15 \
+    --threshold 25 --point-value 100000 --output output/eurusd.parquet
+```
+```
+
+#### 4.12 Add README Section
+```markdown
+## Multi-Source Data Support
+
+rangebar now supports multiple market data sources:
+
+- **Binance**: Crypto aggregate trades (Spot, UM/CM Futures)
+- **Dukascopy**: Forex/multi-asset tick data (1000+ instruments)
+
+All data sources convert to the universal `AggTrade` format before processing, ensuring consistent range bar construction regardless of source.
+```
+
+---
+
+## 5. macOS-Specific Considerations
+
+### 5.1 Dependencies
+
+**LZMA (xz2 crate)**:
+- macOS ships with `liblzma` (part of XZ Utils)
+- Homebrew package: `xz`
+- Verification:
+  ```bash
+  # Check if liblzma is available
+  pkg-config --cflags --libs liblzma
+
+  # If not found, install:
+  brew install xz
+  ```
+
+**OpenSSL (reqwest TLS)**:
+- Already handled by existing `reqwest` dependency
+- macOS uses native-tls by default
+
+### 5.2 Build Configuration
+
+```toml
+# .cargo/config.toml (if needed)
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+```
+
+### 5.3 Testing on Apple Silicon
+
+```bash
+# Verify native compilation
+cargo build --release --bin dukascopy-processor
+file target/release/dukascopy-processor
+# Should show: Mach-O 64-bit executable arm64
+
+# Run tests
+cargo test --release -- --test-threads=1
+
+# Run integration tests
+cargo test --release --ignored -- --test-threads=1
+```
+
+---
+
+## 6. Performance Optimization
+
+### 6.1 Memory Management
+
+**Streaming vs. Buffering**:
+```rust
+// Option 1: Buffer entire dataset (current approach)
+let agg_trades = loader.fetch_date_range(start, end).await?;
+let range_bars = processor.process_agg_trade_records(&agg_trades)?;
+
+// Option 2: Streaming (future optimization)
+let mut processor = StreamingProcessor::new(threshold);
+loader.stream_date_range(start, end, |agg_trade| {
+    processor.process_trade(agg_trade);
+}).await?;
+```
+
+### 6.2 Parallel Processing
+
+```rust
+// Use rayon for parallel date processing
+use rayon::prelude::*;
+
+let dates: Vec<NaiveDate> = (0..30)
+    .map(|i| start_date + chrono::Duration::days(i))
+    .collect();
+
+let all_bars: Vec<RangeBar> = dates
+    .par_iter()
+    .map(|date| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let trades = loader.fetch_hour(...).await.unwrap();
+            let mut proc = RangeBarProcessor::new(threshold);
+            proc.process_agg_trade_records(&trades).unwrap()
+        })
+    })
+    .flatten()
+    .collect();
+```
+
+### 6.3 Caching Strategy
+
+```rust
+// Add optional local caching for downloaded .bi5 files
+use std::path::PathBuf;
+use sha2::{Sha256, Digest};
+
+impl DukascopyDataLoader {
+    pub async fn fetch_hour_cached(
+        &self,
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        cache_dir: Option<PathBuf>,
+    ) -> Result<Vec<DukascopyTick>, Box<dyn std::error::Error>> {
+        if let Some(cache_dir) = cache_dir {
+            let cache_key = format!("{}_{:04}{:02}{:02}{:02}",
+                self.config.instrument, year, month, day, hour);
+            let cache_path = cache_dir.join(format!("{}.bin", cache_key));
+
+            // Try cache first
+            if cache_path.exists() {
+                return self.load_from_cache(&cache_path);
+            }
+
+            // Fetch and cache
+            let ticks = self.fetch_hour(year, month, day, hour).await?;
+            self.save_to_cache(&ticks, &cache_path)?;
+            Ok(ticks)
+        } else {
+            self.fetch_hour(year, month, day, hour).await
+        }
+    }
+}
+```
+
+---
+
+## 7. Testing & Validation Strategy
+
+### 7.1 Unit Test Coverage
+
+- [ ] Binary parsing (20-byte chunks)
+- [ ] LZMA decompression
+- [ ] Price scaling (point value conversion)
+- [ ] Mid-price calculation
+- [ ] Bid/Ask split logic
+- [ ] Timestamp conversion (ms → µs)
+- [ ] Volume aggregation
+
+### 7.2 Integration Test Coverage
+
+- [ ] HTTP fetching (single hour)
+- [ ] Date range fetching (multiple days)
+- [ ] Rate limiting compliance
+- [ ] Error handling (404, 503)
+- [ ] Conversion to AggTrade
+- [ ] Range bar construction
+- [ ] Parquet export
+
+### 7.3 Validation Criteria
+
+**Data Quality**:
+```rust
+#[test]
+fn validate_dukascopy_conversion() {
+    // 1. No negative prices
+    for bar in &range_bars {
+        assert!(bar.open.0 > 0);
+        assert!(bar.high.0 >= bar.low.0);
+    }
+
+    // 2. Monotonic timestamps
+    for i in 1..range_bars.len() {
+        assert!(range_bars[i].open_time >= range_bars[i-1].close_time);
+    }
+
+    // 3. Volume conservation
+    let total_agg_volume: i64 = agg_trades.iter()
+        .map(|t| t.volume.0)
+        .sum();
+    let total_bar_volume: i64 = range_bars.iter()
+        .map(|b| b.volume.0)
+        .sum();
+    assert_eq!(total_agg_volume, total_bar_volume);
+
+    // 4. Threshold compliance
+    for bar in &range_bars {
+        let range_pct = ((bar.high.0 - bar.open.0) as f64 / bar.open.0 as f64) * 10000.0;
+        assert!(range_pct >= threshold as f64 * 0.95); // Allow 5% tolerance
+    }
+}
+```
+
+### 7.4 Performance Benchmarks
+
+```rust
+// benches/dukascopy_bench.rs
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn bench_tick_parsing(c: &mut Criterion) {
+    let data = create_test_data(10000); // 10k ticks
+
+    c.bench_function("parse_10k_ticks", |b| {
+        b.iter(|| {
+            for chunk in data.chunks_exact(20) {
+                DukascopyTick::from_bytes(black_box(chunk), 0, 100000.0).unwrap();
+            }
+        });
+    });
+}
+
+fn bench_conversion(c: &mut Criterion) {
+    let ticks = create_test_ticks(10000);
+
+    c.bench_function("convert_10k_ticks", |b| {
+        b.iter(|| {
+            for (i, tick) in ticks.iter().enumerate() {
+                tick.to_agg_trade_mid(black_box(100000.0), i as i64);
+            }
+        });
+    });
+}
+
+criterion_group!(benches, bench_tick_parsing, bench_conversion);
+criterion_main!(benches);
+```
+
+**Target Performance**:
+- Parse 1M ticks: <500ms
+- Convert to AggTrade: <200ms
+- Process to range bars: <1s (existing performance)
+- Total pipeline (1 day EURUSD): <10s
+
+---
+
+## 8. Risk Assessment & Mitigation
+
+### 8.1 Technical Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| **Rate Limiting (HTTP 503)** | High | Medium | Implement exponential backoff, conservative batch sizes |
+| **Data Quality (spikes, gaps)** | Medium | High | Validation pipeline, outlier detection, gap handling |
+| **Point Value Errors** | Low | High | Per-instrument configuration, validation against known values |
+| **Memory Overflow** | Low | Medium | Streaming processing, chunked fetching |
+| **LZMA Compatibility** | Low | Low | Use stable xz2 crate, test on macOS |
+
+### 8.2 Data Quality Risks
+
+**Spike Detection**:
+```rust
+fn detect_price_spikes(ticks: &[DukascopyTick]) -> Vec<usize> {
+    let mid_prices: Vec<f64> = ticks.iter()
+        .map(|t| (t.ask as f64 + t.bid as f64) / 2.0)
+        .collect();
+
+    let mean = mid_prices.iter().sum::<f64>() / mid_prices.len() as f64;
+    let std_dev = (mid_prices.iter()
+        .map(|p| (p - mean).powi(2))
+        .sum::<f64>() / mid_prices.len() as f64).sqrt();
+
+    let threshold = 10.0 * std_dev;
+
+    mid_prices.iter()
+        .enumerate()
+        .filter(|(_, &price)| (price - mean).abs() > threshold)
+        .map(|(i, _)| i)
+        .collect()
+}
+```
+
+**Gap Handling**:
+```rust
+fn detect_timestamp_gaps(ticks: &[DukascopyTick], max_gap_ms: i64) -> Vec<(usize, i64)> {
+    ticks.windows(2)
+        .enumerate()
+        .filter_map(|(i, window)| {
+            let gap = window[1].timestamp - window[0].timestamp;
+            if gap > max_gap_ms {
+                Some((i, gap))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+```
+
+### 8.3 Operational Risks
+
+**Monitoring**:
+```rust
+struct DukascopyMetrics {
+    total_fetches: usize,
+    successful_fetches: usize,
+    failed_fetches: usize,
+    rate_limit_hits: usize,
+    total_ticks: usize,
+    total_duration: Duration,
+}
+
+impl DukascopyDataLoader {
+    pub fn get_metrics(&self) -> &DukascopyMetrics {
+        &self.metrics
+    }
+}
+```
+
+---
+
+## 9. Success Criteria
+
+### 9.1 Functional Requirements
+
+- [ ] Successfully fetch Dukascopy tick data via HTTP
+- [ ] Decompress LZMA .bi5 files
+- [ ] Parse 20-byte binary tick records
+- [ ] Convert to AggTrade format with accurate prices
+- [ ] Generate range bars with existing algorithm
+- [ ] Export to Parquet/CSV/JSON
+- [ ] Handle rate limiting gracefully
+- [ ] Support multiple instruments (Forex, Crypto, etc.)
+
+### 9.2 Performance Requirements
+
+- [ ] Process 1M ticks in <2 seconds
+- [ ] Fetch 1 day of EURUSD data in <60 seconds
+- [ ] Memory usage <1GB for 1 day of tick data
+- [ ] Support parallel date processing
+
+### 9.3 Quality Requirements
+
+- [ ] 100% unit test coverage for core functions
+- [ ] Integration tests pass for 3+ instruments
+- [ ] No data loss (volume conservation)
+- [ ] Monotonic timestamp ordering
+- [ ] Threshold compliance (95%+ accuracy)
+
+### 9.4 Documentation Requirements
+
+- [ ] API documentation (rustdoc)
+- [ ] Usage examples in README
+- [ ] CLAUDE.md updated
+- [ ] Binary tool help text
+- [ ] Configuration guide
+
+---
+
+## 10. Next Steps
+
+### Immediate Actions (Week 1)
+
+1. **Day 1**: Add dependencies, create dukascopy.rs, implement DukascopyTick
+2. **Day 2**: Implement DukascopyDataLoader, HTTP fetching, LZMA decompression
+3. **Day 3**: Conversion logic, integration with RangeBarProcessor
+4. **Day 4**: Binary tool, end-to-end testing
+5. **Day 5**: Documentation, polish, final validation
+
+### Future Enhancements (Post-MVP)
+
+1. **Streaming Architecture**: Process ticks incrementally without buffering
+2. **Caching Layer**: Local disk cache for .bi5 files
+3. **Multi-instrument Batch**: Process multiple instruments in parallel
+4. **Advanced Conversion Strategies**:
+   - VWAP-weighted mid-price
+   - Trade direction inference from spread dynamics
+5. **Data Quality Dashboard**: Visualize gaps, spikes, completeness
+6. **WebSocket Integration**: Live Dukascopy data streaming
+
+### Long-term Vision
+
+- **Universal Data Adapter**: Support 10+ data sources (Interactive Brokers, Yahoo Finance, etc.)
+- **Data Marketplace Integration**: Vendor-neutral range bar construction
+- **Cross-Source Validation**: Compare range bars across multiple data providers
+
+---
+
+## 11. Appendices
+
+### A. Instrument Configuration Reference
+
+```rust
+// Pre-configured instruments
+const FOREX_INSTRUMENTS: &[(&str, f64)] = &[
+    ("EURUSD", 100000.0),
+    ("GBPUSD", 100000.0),
+    ("USDJPY", 100.0), // Different point value!
+    ("AUDUSD", 100000.0),
+];
+
+const CRYPTO_INSTRUMENTS: &[(&str, f64)] = &[
+    ("BTCUSD", 100.0),
+    ("ETHUSD", 100.0),
+];
+```
+
+### B. Binary Format Reference
+
+```
+Offset | Size | Type    | Field             | Notes
+-------|------|---------|-------------------|------------------
+0      | 4    | uint32  | Timestamp Offset  | Milliseconds from hour start
+4      | 4    | uint32  | Ask Price         | Scaled by point value
+8      | 4    | uint32  | Bid Price         | Scaled by point value
+12     | 4    | float32 | Ask Volume        | IEEE 754
+16     | 4    | float32 | Bid Volume        | IEEE 754
+
+Total: 20 bytes per tick
+Byte order: Big-endian (network order)
+Compression: LZMA (XZ format)
+```
+
+### C. Rate Limiting Best Practices
+
+```rust
+// Conservative settings (recommended for production)
+const RATE_LIMIT_CONFIG: RateLimitConfig = RateLimitConfig {
+    batch_size: 10,
+    batch_pause_ms: 2000, // 2 seconds between batches
+    retry_attempts: 3,
+    retry_backoff_ms: 5000, // 5 seconds initial backoff
+    max_backoff_ms: 60000, // 1 minute max backoff
+};
+
+// Aggressive settings (use with caution)
+const FAST_CONFIG: RateLimitConfig = RateLimitConfig {
+    batch_size: 20,
+    batch_pause_ms: 1000,
+    retry_attempts: 5,
+    retry_backoff_ms: 2000,
+    max_backoff_ms: 30000,
+};
+```
+
+---
+
+## Conclusion
+
+This integration plan provides a comprehensive roadmap for adding Dukascopy as a data source to the rangebar project. The architecture leverages existing patterns (HistoricalDataLoader, AggTrade conversion) while accommodating the unique characteristics of Dukascopy tick data (binary format, LZMA compression, bid/ask quotes).
+
+**Key Success Factors**:
+1. **Modular Design**: Dukascopy module is self-contained, doesn't disrupt existing Binance functionality
+2. **Universal Format**: All data sources convert to AggTrade, ensuring consistent range bar construction
+3. **macOS Compatibility**: Native dependency support, tested on Apple Silicon
+4. **Performance**: Rust async/await, parallel processing, efficient binary parsing
+5. **Extensibility**: Easy to add more data sources in the future
+
+**Timeline**: 5 days for MVP, 2-3 days for polish and optimization
+
+**Risk Level**: Low (well-understood problem, proven architecture, incremental changes)
+
+---
+
+**Document Version**: 1.0
+**Last Updated**: 2025-09-30
+**Author**: Claude Code
+**Status**: Ready for Implementation

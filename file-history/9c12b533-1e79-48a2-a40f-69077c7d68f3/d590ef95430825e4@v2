@@ -1,0 +1,583 @@
+"""
+MQL5 Article Extractor with retry logic and quality validation.
+
+Enhanced version of simple_mql5_extractor.py with:
+- Exponential backoff retry logic
+- Quality validation (word count, code blocks, login popup detection)
+- Structured logging instead of print statements
+- Better error handling and context
+"""
+
+import asyncio
+import json
+import re
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+import httpx
+
+from playwright.async_api import async_playwright, Page
+from bs4 import BeautifulSoup
+
+from .logger import get_logger
+from .config_manager import Config
+
+logger = get_logger(__name__)
+
+
+class ExtractionError(Exception):
+    """Base exception for extraction errors."""
+    pass
+
+
+class ValidationError(Exception):
+    """Exception for validation failures."""
+    pass
+
+
+class MQL5Extractor:
+    """
+    Production-grade MQL5 article extractor with retry logic.
+
+    Features:
+    - Exponential backoff retry on failures
+    - Quality validation before saving
+    - Hierarchical user_id/article_id folder structure
+    - Comprehensive error reporting
+    """
+
+    def __init__(self, config: Config):
+        """
+        Initialize extractor with configuration.
+
+        Args:
+            config: Configuration object
+        """
+        self.config = config
+        self.results_dir = Path(config.extraction.output_dir)
+        self.results_dir.mkdir(exist_ok=True)
+
+        logger.info(f"Initialized MQL5Extractor", extra={
+            "output_dir": str(self.results_dir),
+            "headless": config.extraction.headless
+        })
+
+    async def extract_article(self, url: str) -> Dict[str, Any]:
+        """
+        Extract article with retry logic.
+
+        Args:
+            url: Article URL
+
+        Returns:
+            Extraction result dictionary
+
+        Raises:
+            ExtractionError: If extraction fails after all retries
+        """
+        article_id = self._extract_id_from_url(url)
+
+        for attempt in range(1, self.config.retry.max_attempts + 1):
+            try:
+                logger.info(f"Extraction attempt {attempt}/{self.config.retry.max_attempts}",
+                           extra={"article_id": article_id, "url": url})
+
+                result = await self._extract_with_playwright(url, article_id)
+
+                # Validate quality
+                self._validate_extraction(result)
+
+                logger.info("Extraction successful", extra={"article_id": article_id})
+                return result
+
+            except ValidationError as e:
+                logger.error(f"Validation failed: {e}", extra={"article_id": article_id})
+                raise  # Don't retry validation failures
+
+            except Exception as e:
+                logger.warning(f"Extraction attempt {attempt} failed: {e}",
+                              extra={"article_id": article_id})
+
+                if attempt < self.config.retry.max_attempts:
+                    backoff = min(
+                        self.config.retry.initial_backoff_seconds * (
+                            self.config.retry.exponential_base ** (attempt - 1)
+                        ),
+                        self.config.retry.max_backoff_seconds
+                    )
+                    logger.info(f"Retrying in {backoff:.1f}s...", extra={"article_id": article_id})
+                    await asyncio.sleep(backoff)
+                else:
+                    logger.error(f"Extraction failed after {attempt} attempts",
+                                extra={"article_id": article_id})
+                    raise ExtractionError(f"Failed to extract article {article_id}: {e}")
+
+    async def _extract_with_playwright(self, url: str, article_id: str) -> Dict[str, Any]:
+        """Execute extraction using Playwright browser automation."""
+        result = {
+            "url": url,
+            "article_id": article_id,
+            "timestamp": datetime.now().isoformat(),
+            "success": False,
+            "content": {
+                "title": None,
+                "author": None,
+                "user_id": None,
+                "word_count": 0,
+                "main_content": None,
+                "code_blocks": [],
+                "images": []
+            }
+        }
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=self.config.extraction.headless)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            try:
+                # Navigate with timeout
+                logger.debug(f"Navigating to {url}", extra={"article_id": article_id})
+                await page.goto(url, timeout=self.config.extraction.timeout_ms)
+                await page.wait_for_load_state('networkidle')
+
+                # Take screenshot for debugging
+                screenshot_path = self.results_dir / f"screenshot_{article_id}.png"
+                await page.screenshot(path=str(screenshot_path))
+                logger.debug(f"Screenshot saved", extra={"article_id": article_id, "path": str(screenshot_path)})
+
+                # Get page HTML and parse
+                html = await page.content()
+                soup = BeautifulSoup(html, 'html.parser')
+
+                # Extract all content
+                await self._extract_title(soup, result)
+                await self._extract_author(soup, result)
+                await self._extract_user_id(soup, result)
+                await self._extract_images(soup, result)
+                await self._extract_code_blocks(soup, result)
+                await self._extract_content(soup, result)
+
+                # Create folder and download images
+                article_folder = self._create_article_folder(
+                    article_id,
+                    result["content"]["title"],
+                    result["content"]["user_id"]
+                )
+
+                if result["content"]["images"]:
+                    result["content"]["images"] = await self._download_images(result, article_folder)
+
+                result["success"] = True
+                result["article_folder"] = str(article_folder)
+
+            except Exception as e:
+                logger.error(f"Extraction error: {e}", extra={"article_id": article_id}, exc_info=True)
+                result["error"] = str(e)
+                raise
+
+            finally:
+                await browser.close()
+
+        # Save results
+        await self._save_results(result)
+        return result
+
+    def _validate_extraction(self, result: Dict[str, Any]):
+        """
+        Validate extraction quality.
+
+        Raises:
+            ValidationError: If validation fails
+        """
+        content = result["content"]
+        article_id = result["article_id"]
+
+        # Check success flag
+        if not result.get("success"):
+            raise ValidationError(f"Extraction marked as unsuccessful")
+
+        # Check word count
+        word_count = content.get("word_count", 0)
+        if word_count < self.config.validation.min_word_count:
+            raise ValidationError(
+                f"Word count {word_count} below minimum {self.config.validation.min_word_count}"
+            )
+
+        # Check code blocks
+        code_blocks = len(content.get("code_blocks", []))
+        if code_blocks < self.config.validation.min_code_blocks:
+            raise ValidationError(
+                f"Code blocks {code_blocks} below minimum {self.config.validation.min_code_blocks}"
+            )
+
+        # Check for login popup content
+        if self.config.validation.reject_login_popup:
+            main_content = content.get("main_content", "").lower()
+            if "login" in main_content and "password" in main_content and word_count < 200:
+                raise ValidationError("Content appears to be login popup")
+
+        logger.debug("Validation passed", extra={
+            "article_id": article_id,
+            "word_count": word_count,
+            "code_blocks": code_blocks
+        })
+
+    # ===== Content Extraction Methods (from simple_mql5_extractor.py) =====
+
+    async def _extract_title(self, soup: BeautifulSoup, result: Dict):
+        """Extract title using verified selector."""
+        title_element = soup.select_one('title')
+        if title_element:
+            title = title_element.get_text().strip()
+            title = re.sub(r' - MQL5 Articles?$', '', title)
+            result["content"]["title"] = title
+            logger.debug(f"Title: {title}", extra={"article_id": result["article_id"]})
+
+    async def _extract_author(self, soup: BeautifulSoup, result: Dict):
+        """Extract author using verified selectors."""
+        author_selectors = ['.author', 'a[href*="/users/"]']
+
+        for selector in author_selectors:
+            author_element = soup.select_one(selector)
+            if author_element:
+                author = author_element.get_text().strip()
+                if author and len(author) > 0:
+                    result["content"]["author"] = author
+                    logger.debug(f"Author: {author}", extra={"article_id": result["article_id"]})
+                    return
+
+        result["content"]["author"] = "Unknown Author"
+        logger.warning("Author not found", extra={"article_id": result["article_id"]})
+
+    async def _extract_user_id(self, soup: BeautifulSoup, result: Dict):
+        """Extract user ID from meta tag."""
+        meta_author = soup.select_one('meta[property="article:author"]')
+        if meta_author:
+            author_url = meta_author.get('content', '')
+            match = re.search(r'/users/([^/?]+)', author_url)
+            if match:
+                user_id = match.group(1)
+                result["content"]["user_id"] = user_id
+                logger.debug(f"User ID: {user_id}", extra={"article_id": result["article_id"]})
+                return
+
+        result["content"]["user_id"] = "unknown"
+        logger.warning("User ID not found", extra={"article_id": result["article_id"]})
+
+    async def _extract_content(self, soup: BeautifulSoup, result: Dict):
+        """Extract main content with proper formatting."""
+        content_element = soup.select_one('.content')
+        if content_element:
+            # Replace images with placeholders
+            img_elements = content_element.find_all('img')
+            for i, img_elem in enumerate(img_elements):
+                img_elem.replace_with(f"\n\n[IMAGE_{i}]\n\n")
+
+            # Replace code blocks with placeholders
+            code_elements = content_element.find_all('pre', class_='code')
+            for i, code_elem in enumerate(code_elements):
+                code_elem.replace_with(f"\n\n[CODE_BLOCK_{i}]\n\n")
+
+            # Convert HTML to markdown-like format
+            formatted_content = self._html_to_markdown(content_element)
+
+            # Clean up whitespace
+            formatted_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', formatted_content)
+            formatted_content = re.sub(r'[ \t]+', ' ', formatted_content)
+            formatted_content = formatted_content.strip()
+
+            result["content"]["main_content"] = formatted_content
+            result["content"]["word_count"] = len(formatted_content.split())
+            logger.debug(f"Content: {result['content']['word_count']} words",
+                        extra={"article_id": result["article_id"]})
+        else:
+            logger.error("No content found", extra={"article_id": result["article_id"]})
+
+    def _html_to_markdown(self, element):
+        """Convert HTML structure to markdown format."""
+        # Handle headers
+        for tag in element.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+            level = int(tag.name[1])
+            header_text = tag.get_text().strip()
+            tag.replace_with(f"\n\n{'#' * level} {header_text}\n\n")
+
+        # Handle paragraphs
+        for p in element.find_all('p'):
+            p_text = p.get_text().strip()
+            if p_text:
+                p.replace_with(f"\n\n{p_text}\n\n")
+
+        # Handle unordered lists
+        for ul in element.find_all('ul'):
+            list_items = []
+            for li in ul.find_all('li'):
+                li_text = li.get_text().strip()
+                if li_text:
+                    list_items.append(f"- {li_text}")
+            if list_items:
+                ul.replace_with(f"\n\n" + "\n".join(list_items) + "\n\n")
+
+        # Handle ordered lists
+        for ol in element.find_all('ol'):
+            list_items = []
+            for i, li in enumerate(ol.find_all('li'), 1):
+                li_text = li.get_text().strip()
+                if li_text:
+                    list_items.append(f"{i}. {li_text}")
+            if list_items:
+                ol.replace_with(f"\n\n" + "\n".join(list_items) + "\n\n")
+
+        # Handle line breaks
+        for br in element.find_all('br'):
+            br.replace_with('\n')
+
+        return element.get_text()
+
+    async def _extract_code_blocks(self, soup: BeautifulSoup, result: Dict):
+        """Extract code blocks using verified selector."""
+        code_elements = soup.select('pre.code')
+
+        for i, code_element in enumerate(code_elements):
+            code_text = code_element.get_text().strip()
+            if len(code_text) > 10:
+                language = self._detect_language(code_text)
+                code_block = {
+                    'content': code_text,
+                    'language': language,
+                    'line_count': len(code_text.split('\n'))
+                }
+                result["content"]["code_blocks"].append(code_block)
+
+        logger.debug(f"Code blocks: {len(result['content']['code_blocks'])}",
+                    extra={"article_id": result["article_id"]})
+
+    async def _extract_images(self, soup: BeautifulSoup, result: Dict):
+        """Extract images information."""
+        img_elements = soup.select('.content img')
+
+        for img in img_elements:
+            img_src = img.get('src')
+            if img_src:
+                # Make absolute URL
+                if img_src.startswith('//'):
+                    img_src = 'https:' + img_src
+                elif img_src.startswith('/'):
+                    img_src = 'https://www.mql5.com' + img_src
+
+                image_info = {
+                    'url': img_src,
+                    'alt': img.get('alt', ''),
+                    'title': img.get('title', ''),
+                    'local_path': None,
+                    'filename': None,
+                    'size_bytes': 0
+                }
+                result["content"]["images"].append(image_info)
+
+        logger.debug(f"Images: {len(result['content']['images'])}",
+                    extra={"article_id": result["article_id"]})
+
+    async def _download_images(self, result: Dict, article_folder: Path) -> List[Dict]:
+        """Download all images locally."""
+        article_id = result["article_id"]
+        images_folder = article_folder / "images"
+        downloaded_images = []
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for i, image_info in enumerate(result["content"]["images"], 1):
+                try:
+                    logger.debug(f"Downloading image {i}/{len(result['content']['images'])}",
+                                extra={"article_id": article_id, "url": image_info['url']})
+
+                    response = await client.get(image_info['url'])
+                    response.raise_for_status()
+
+                    # Determine extension
+                    content_type = response.headers.get('content-type', '')
+                    ext = self._get_image_extension(content_type, image_info['url'])
+
+                    # Create filename
+                    description = self._create_image_description(image_info['alt'], image_info['title'])
+                    filename = f"image_{i:03d}_{description}.{ext}"
+
+                    # Save image
+                    image_path = images_folder / filename
+                    with open(image_path, 'wb') as f:
+                        f.write(response.content)
+
+                    # Update image info
+                    image_info['local_path'] = f"images/{filename}"
+                    image_info['filename'] = filename
+                    image_info['size_bytes'] = len(response.content)
+                    downloaded_images.append(image_info)
+
+                    logger.debug(f"Saved: {filename} ({len(response.content):,} bytes)",
+                                extra={"article_id": article_id})
+
+                except Exception as e:
+                    logger.warning(f"Failed to download image {i}: {e}",
+                                  extra={"article_id": article_id})
+                    image_info['download_error'] = str(e)
+                    downloaded_images.append(image_info)
+
+        successful = len([img for img in downloaded_images if img.get('local_path')])
+        logger.info(f"Downloaded {successful}/{len(result['content']['images'])} images",
+                   extra={"article_id": article_id})
+        return downloaded_images
+
+    def _get_image_extension(self, content_type: str, url: str) -> str:
+        """Determine image file extension."""
+        if 'png' in content_type:
+            return 'png'
+        elif 'jpeg' in content_type or 'jpg' in content_type:
+            return 'jpg'
+        elif 'gif' in content_type:
+            return 'gif'
+        elif 'webp' in content_type:
+            return 'webp'
+        else:
+            # Try from URL
+            url_ext = url.split('.')[-1].lower()
+            if url_ext in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
+                return 'jpg' if url_ext == 'jpeg' else url_ext
+            return 'png'  # Default
+
+    def _create_image_description(self, alt_text: str, title_text: str) -> str:
+        """Create descriptive filename part from alt or title."""
+        description = alt_text or title_text or "image"
+        description = re.sub(r'[^\w\s-]', '', description.lower())
+        description = re.sub(r'[-\s]+', '_', description)
+        return description[:30].strip('_') or "image"
+
+    def _detect_language(self, code_text: str) -> str:
+        """Detect programming language of code block."""
+        mql5_indicators = [
+            r'\b(OnTick|OnInit|OnStart|OnCalculate|OnDeinit)\b',
+            r'\b(input\s+|extern\s+)',
+            r'\b(CArrayObj|CTrade|CPositionInfo|CSymbolInfo)\b',
+            r'\b(OrderSend|OrderSelect|PositionSelect)\b',
+            r'\b(PERIOD_|SYMBOL_|ORDER_|DEAL_|POSITION_)',
+            r'\b(Ask|Bid|Point|Digits)\b',
+            r'#property\s+',
+            r'//\+------------------------------------------------------------------+',
+        ]
+
+        for pattern in mql5_indicators:
+            if re.search(pattern, code_text, re.IGNORECASE):
+                return 'mql5'
+
+        if re.search(r'\b(void|int|double|string)\s+\w+\s*\(', code_text):
+            return 'cpp'
+        elif re.search(r'\bdef\s+\w+\s*\(', code_text):
+            return 'python'
+        elif re.search(r'\bfunction\s+\w+\s*\(', code_text):
+            return 'javascript'
+
+        return 'unknown'
+
+    def _extract_id_from_url(self, url: str) -> str:
+        """Extract article ID from URL."""
+        match = re.search(r'/articles/(\d+)', url)
+        return match.group(1) if match else "unknown"
+
+    def _create_slug(self, title: str) -> str:
+        """Create URL-friendly slug from title."""
+        if not title:
+            return "untitled"
+
+        title = re.sub(r' - MQL5 Articles?$', '', title)
+        slug = re.sub(r'[^\w\s-]', '', title.lower())
+        slug = re.sub(r'[-\s]+', '_', slug)
+        slug = slug[:50].strip('_')
+
+        return slug or "untitled"
+
+    def _create_article_folder(self, article_id: str, title: str, user_id: str = None) -> Path:
+        """Create hierarchical folder structure: user_id/article_id/files."""
+        user_folder_name = user_id or "unknown"
+        user_folder = self.results_dir / user_folder_name
+        user_folder.mkdir(exist_ok=True)
+
+        article_folder_name = f"article_{article_id}"
+        article_folder = user_folder / article_folder_name
+        article_folder.mkdir(exist_ok=True)
+
+        images_folder = article_folder / "images"
+        images_folder.mkdir(exist_ok=True)
+
+        return article_folder
+
+    async def _save_results(self, result: Dict):
+        """Save extraction results."""
+        article_id = result["article_id"]
+        title = result["content"].get("title", "Untitled")
+
+        # Get article folder
+        if result.get("article_folder"):
+            article_folder = Path(result["article_folder"])
+        else:
+            user_id = result["content"].get("user_id")
+            article_folder = self._create_article_folder(article_id, title, user_id)
+
+        # Save metadata JSON
+        metadata_file = article_folder / "metadata.json"
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        logger.debug(f"Metadata saved", extra={"article_id": article_id, "path": str(metadata_file)})
+
+        # Save images manifest
+        if result["content"].get("images"):
+            manifest_file = article_folder / "images_manifest.json"
+            images_manifest = {
+                "article_id": article_id,
+                "total_images": len(result["content"]["images"]),
+                "images": result["content"]["images"]
+            }
+            with open(manifest_file, 'w', encoding='utf-8') as f:
+                json.dump(images_manifest, f, indent=2, ensure_ascii=False)
+            logger.debug(f"Images manifest saved", extra={"article_id": article_id})
+
+        # Create markdown
+        if result.get("success") and result["content"].get("main_content"):
+            md_file = article_folder / "article.md"
+            with open(md_file, 'w', encoding='utf-8') as f:
+                f.write(f"# {title}\n\n")
+                f.write(f"**Author:** {result['content'].get('author', 'Unknown')}\n")
+                f.write(f"**User ID:** {result['content'].get('user_id', 'Unknown')}\n")
+                f.write(f"**Article ID:** {article_id}\n")
+                f.write(f"**Source:** {result.get('url', '')}\n")
+                f.write(f"**Word Count:** {result['content'].get('word_count', 0)}\n")
+                f.write(f"**Code Blocks:** {len(result['content'].get('code_blocks', []))}\n")
+                f.write(f"**Images:** {len([img for img in result['content'].get('images', []) if img.get('local_path')])}\n\n")
+                f.write("---\n\n")
+
+                # Write main content with integrated code and images
+                main_content = result["content"]["main_content"]
+
+                # Replace code block placeholders
+                for i, code_block in enumerate(result["content"].get("code_blocks", [])):
+                    code_placeholder = f"[CODE_BLOCK_{i}]"
+                    code_formatted = f"```{code_block['language']}\n{code_block['content']}\n```"
+                    main_content = main_content.replace(code_placeholder, code_formatted)
+
+                # Replace image placeholders
+                for i, image in enumerate(result["content"].get("images", [])):
+                    image_placeholder = f"[IMAGE_{i}]"
+                    if image.get("local_path"):
+                        alt_text = image.get("alt", "MQL5 Trading Strategy Diagram")
+                        if not alt_text or alt_text.strip() == "":
+                            alt_text = f"Trading Strategy Diagram {i+1}"
+                        image_markdown = f"![{alt_text}]({image['local_path']})"
+                        main_content = main_content.replace(image_placeholder, image_markdown)
+                    else:
+                        main_content = main_content.replace(image_placeholder, "")
+
+                f.write(main_content)
+
+            logger.info(f"Article saved", extra={
+                "article_id": article_id,
+                "path": str(md_file),
+                "folder": str(article_folder)
+            })

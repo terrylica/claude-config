@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""Auto-injected calendar effects with dependency resolution
+
+Replaces manual parameter passing with automatic dependency injection
+for calendar-conditional effects following exception-only policy.
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, Optional
+from .adaptive_scaling import AdaptiveCalendarScaler
+
+
+class AutoInjectedCalendarEffects:
+    """Calendar effects processor with automatic parameter injection
+
+    Eliminates manual parameter passing by automatically extracting
+    calendar features from input data and applying appropriate effects.
+    """
+
+    def __init__(self, estimation_window: int = 120):
+        """Initialize with automatic parameter resolution
+
+        Args:
+            estimation_window: Rolling window for effect estimation
+
+        Raises:
+            RuntimeError: If initialization fails
+        """
+        self.estimation_window = estimation_window
+        self.min_observations = 50
+        self.adaptive_scaler = AdaptiveCalendarScaler()
+
+        # Required calendar feature mappings (auto-detected)
+        self.calendar_mappings = {
+            'holiday': ['is_us_holiday', 'is_holiday'],
+            'weekend': ['is_weekend'],
+            'session': ['is_asia_session', 'is_europe_session', 'is_us_session']
+        }
+
+    def _auto_detect_calendar_features(self, data: pd.DataFrame) -> Dict[str, Optional[str]]:
+        """Automatically detect calendar feature columns
+
+        Args:
+            data: Input DataFrame with potential calendar features
+
+        Returns:
+            Dictionary mapping effect types to actual column names (None if not found)
+        """
+        detected = {}
+
+        for effect_type, possible_columns in self.calendar_mappings.items():
+            found_column = None
+            for col in possible_columns:
+                if col in data.columns:
+                    found_column = col
+                    break
+
+            detected[effect_type] = found_column
+
+            if found_column is None:
+                raise RuntimeError(f"Required calendar feature for {effect_type} not found. Looked for: {possible_columns}")
+
+        return detected
+
+    def _extract_returns_series(self, data: pd.DataFrame) -> pd.Series:
+        """Extract returns series from price data
+
+        Args:
+            data: DataFrame with price columns
+
+        Returns:
+            Returns series
+
+        Raises:
+            RuntimeError: If price data unavailable or invalid
+        """
+        price_columns = ['close', 'price', 'Close', 'Price']
+        price_column = None
+
+        for col in price_columns:
+            if col in data.columns:
+                price_column = col
+                break
+
+        if price_column is None:
+            raise RuntimeError(f"No price column found. Available: {list(data.columns)}")
+
+        returns = data[price_column].pct_change().dropna()
+
+        if len(returns) < self.min_observations:
+            raise RuntimeError(f"Insufficient returns data: {len(returns)} < {self.min_observations}")
+
+        return returns
+
+    def compute_all_effects(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Compute all calendar effects with automatic parameter injection
+
+        Args:
+            data: DataFrame with price and calendar features
+
+        Returns:
+            DataFrame with all calendar effect features
+
+        Raises:
+            RuntimeError: If computation fails or data insufficient
+        """
+        # Auto-detect calendar features (eliminates manual parameter passing)
+        calendar_features = self._auto_detect_calendar_features(data)
+
+        # Auto-extract returns (eliminates manual parameter passing)
+        returns = self._extract_returns_series(data)
+
+        # Initialize results DataFrame
+        effects_df = pd.DataFrame(index=data.index)
+
+        # Compute weekend effects (if available)
+        if calendar_features['weekend'] is not None:
+            weekend_effects = self._compute_weekend_effect(
+                returns, data[calendar_features['weekend']]
+            )
+            effects_df = pd.concat([effects_df, weekend_effects], axis=1)
+
+        # Compute holiday effects (if available)
+        if calendar_features['holiday'] is not None:
+            holiday_effects = self._compute_holiday_effect(
+                returns, data[calendar_features['holiday']]
+            )
+            effects_df = pd.concat([effects_df, holiday_effects], axis=1)
+
+        # Compute session effects (if any session features available)
+        session_available = any(col in data.columns for col in self.calendar_mappings['session'])
+        if session_available:
+            session_effects = self._compute_session_effects(data, calendar_features)
+            effects_df = pd.concat([effects_df, session_effects], axis=1)
+
+        # Check if any effects were computed - exception-only failure
+        if effects_df.empty or len(effects_df.columns) == 0:
+            raise RuntimeError("No calendar effects computed - all required calendar features missing")
+
+        # Apply adaptive scaling - exception-only failure (no fallbacks)
+        scaled_effects, metrics = self.adaptive_scaler.fit_transform_stream(effects_df)
+        return scaled_effects
+
+    def _compute_weekend_effect(self, returns: pd.Series, is_weekend: pd.Series) -> pd.DataFrame:
+        """Compute weekend volatility effects
+
+        Args:
+            returns: Price returns series
+            is_weekend: Weekend indicator
+
+        Returns:
+            DataFrame with weekend effect features
+        """
+        # Align series properly
+        is_weekend_aligned = is_weekend.reindex(returns.index, fill_value=False).astype(bool)
+
+        # Separate weekend and weekday returns
+        weekend_returns = returns[is_weekend_aligned]
+        weekday_returns = returns[~is_weekend_aligned]
+
+        if len(weekend_returns) < 10:  # Minimum weekend observations
+            result = pd.DataFrame(index=returns.index)
+            result['weekend_vol_effect'] = 1.0
+            result['weekend_return_effect'] = 0.0
+            return result
+
+        # Rolling weekend volatility effect
+        weekend_vol = weekend_returns.ewm(span=self.estimation_window//4).std()
+        weekday_vol = weekday_returns.ewm(span=self.estimation_window).std()
+
+        # Calculate effect ratios
+        vol_effect = pd.Series(1.0, index=returns.index)
+        return_effect = pd.Series(0.0, index=returns.index)
+
+        # Weekend volatility multiplier
+        if len(weekend_vol.dropna()) > 0 and len(weekday_vol.dropna()) > 0:
+            weekend_vol_mean = weekend_vol.iloc[-20:].mean() if len(weekend_vol) >= 20 else weekend_vol.mean()
+            weekday_vol_mean = weekday_vol.iloc[-50:].mean() if len(weekday_vol) >= 50 else weekday_vol.mean()
+
+            if weekday_vol_mean > 0:
+                vol_ratio = weekend_vol_mean / weekday_vol_mean
+                vol_effect.loc[is_weekend_aligned] = np.clip(vol_ratio, 0.5, 3.0)
+
+        # Weekend return bias
+        if len(weekend_returns) >= 10:
+            weekend_mean_return = weekend_returns.iloc[-30:].mean() if len(weekend_returns) >= 30 else weekend_returns.mean()
+            return_effect.loc[is_weekend_aligned] = np.clip(weekend_mean_return, -0.05, 0.05)
+
+        result = pd.DataFrame(index=returns.index)
+
+        # Check for null values after forward fill - exception-only failure
+        vol_filled = vol_effect.ffill()
+        return_filled = return_effect.ffill()
+
+        if vol_filled.isnull().any():
+            null_count = vol_filled.isnull().sum()
+            raise RuntimeError(f"Weekend volatility effect calculation produced {null_count} null values")
+
+        if return_filled.isnull().any():
+            null_count = return_filled.isnull().sum()
+            raise RuntimeError(f"Weekend return effect calculation produced {null_count} null values")
+
+        result['weekend_vol_effect'] = vol_filled
+        result['weekend_return_effect'] = return_filled
+
+        return result
+
+    def _compute_holiday_effect(self, returns: pd.Series, is_holiday: pd.Series) -> pd.DataFrame:
+        """Compute holiday market effects
+
+        Args:
+            returns: Price returns series
+            is_holiday: Holiday indicator
+
+        Returns:
+            DataFrame with holiday effect features
+        """
+        is_holiday_aligned = is_holiday.reindex(returns.index, fill_value=False).astype(bool)
+
+        # Pre-holiday and post-holiday effects (1 day window)
+        pre_holiday = is_holiday_aligned.shift(-1, fill_value=False)  # Day before holiday (tomorrow is holiday)
+        post_holiday = is_holiday_aligned.shift(1, fill_value=False)  # Day after holiday (yesterday was holiday)
+
+        result = pd.DataFrame(index=returns.index)
+        result['pre_holiday_effect'] = 0.0
+        result['post_holiday_effect'] = 0.0
+        result['holiday_vol_effect'] = 1.0
+
+        # Calculate pre-holiday effect (day before holiday)
+        if pre_holiday.any():
+            pre_holiday_returns = returns[pre_holiday]
+            if len(pre_holiday_returns) >= 5:
+                pre_effect = pre_holiday_returns.iloc[-20:].mean() if len(pre_holiday_returns) >= 20 else pre_holiday_returns.mean()
+                result.loc[pre_holiday, 'pre_holiday_effect'] = np.clip(pre_effect, -0.03, 0.03)
+
+        # Calculate post-holiday effect (day after holiday)
+        if post_holiday.any():
+            post_holiday_returns = returns[post_holiday]
+            if len(post_holiday_returns) >= 5:
+                post_effect = post_holiday_returns.iloc[-20:].mean() if len(post_holiday_returns) >= 20 else post_holiday_returns.mean()
+                result.loc[post_holiday, 'post_holiday_effect'] = np.clip(post_effect, -0.03, 0.03)
+
+        # Holiday volatility effect (reduced trading)
+        if is_holiday_aligned.any():
+            holiday_returns = returns[is_holiday_aligned]
+            normal_returns = returns[~is_holiday_aligned]
+
+            if len(holiday_returns) >= 3 and len(normal_returns) >= 20:
+                holiday_vol = holiday_returns.std()
+                normal_vol = normal_returns.iloc[-100:].std() if len(normal_returns) >= 100 else normal_returns.std()
+
+                if normal_vol > 0:
+                    vol_ratio = holiday_vol / normal_vol
+                    result.loc[is_holiday_aligned, 'holiday_vol_effect'] = np.clip(vol_ratio, 0.3, 2.0)
+
+        # Check for null values after forward fill - exception-only failure
+        for col in result.columns:
+            filled_col = result[col].ffill()
+            if filled_col.isnull().any():
+                null_count = filled_col.isnull().sum()
+                raise RuntimeError(f"Holiday effect calculation produced {null_count} null values in column {col}")
+            result[col] = filled_col
+
+        return result
+
+    def _compute_session_effects(self, data: pd.DataFrame, calendar_features: Dict[str, str]) -> pd.DataFrame:
+        """Compute trading session effects
+
+        Args:
+            data: Full dataset with session indicators
+            calendar_features: Detected calendar feature mappings
+
+        Returns:
+            DataFrame with session effect features
+        """
+        returns = self._extract_returns_series(data)
+
+        result = pd.DataFrame(index=data.index)
+
+        # Session activity effects
+        session_types = ['asia', 'europe', 'us']
+        for session in session_types:
+            session_col = f'is_{session}_session'
+
+            if session_col in data.columns:
+                is_session = data[session_col].reindex(returns.index, fill_value=False).astype(bool)
+
+                session_returns = returns[is_session]
+                other_returns = returns[~is_session]
+
+                vol_effect = 1.0
+                return_bias = 0.0
+
+                if len(session_returns) >= 10 and len(other_returns) >= 10:
+                    # Session volatility effect
+                    session_vol = session_returns.std()
+                    other_vol = other_returns.std()
+
+                    if other_vol > 0:
+                        vol_effect = np.clip(session_vol / other_vol, 0.5, 2.5)
+
+                    # Session return bias
+                    session_mean = session_returns.mean()
+                    return_bias = np.clip(session_mean, -0.02, 0.02)
+
+                result[f'{session}_session_vol_effect'] = vol_effect
+                result[f'{session}_session_return_bias'] = return_bias
+            else:
+                # Default neutral effects if session not detected
+                result[f'{session}_session_vol_effect'] = 1.0
+                result[f'{session}_session_return_bias'] = 0.0
+
+        return result
+
+
+# Factory function for easy integration
+def create_auto_injected_effects_processor(estimation_window: int = 120) -> AutoInjectedCalendarEffects:
+    """Create auto-injected calendar effects processor
+
+    Args:
+        estimation_window: Rolling estimation window
+
+    Returns:
+        Configured processor with dependency injection
+
+    Raises:
+        RuntimeError: If creation fails
+    """
+    try:
+        return AutoInjectedCalendarEffects(estimation_window=estimation_window)
+    except Exception as e:
+        raise RuntimeError(f"Failed to create auto-injected effects processor: {e}") from e
