@@ -26,8 +26,10 @@
 ### Primary Toolchain
 - **Python Stack**: `uv` (management), `uv run --active python -m` (execution), `maturin` (Rust integration), 3.12+ - **Avoid**: pip, conda, standalone execution
 - **Rust Stack**: `cargo`, cross-platform compilation, `cargo nextest run`, `cargo deny check`, coexists with Python
-- **Libraries**: Prefer `httpx`, `platformdirs`, `curl` over `requests`, `fetch` - **Tools**: `Read`, `LS`, `Glob`, `Grep` over MCP
+- **Python Packages**: Prefer `httpx`, `platformdirs`, `orjson`, `ciso8601` over `requests`, `json`, `dateutil`, `arrow`, `maya`
+- **Claude Code Tools**: `Read`, `LS`, `Glob`, `Grep` over MCP
 - **Analysis**: `Semgrep`, `ast-grep`, `ShellCheck` - **GPU**: `tensorflow-metal`, `jax`, `torch`, `cupy`
+- **PDF Processing**: `mupdf-tools` (`mutool draw -F html`) for born-digital PDFs with clean HTML/block grouping; Poppler `pdftohtml -xml` for exact coordinates or complex column layouts
 - **Finance**: `backtesting.py` ONLY, `rangebar` crate - **Prohibited**: bt, vectorbt, mlfinlab, commercial libs
 - **Documentation**: ALL examples must use `uv run --active python -m` format, never standalone execution
 
