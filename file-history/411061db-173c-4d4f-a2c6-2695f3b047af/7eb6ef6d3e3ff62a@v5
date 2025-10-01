@@ -1,0 +1,580 @@
+# V2 Strategy Specification — Upgrade Plan
+
+**Date:** September 30, 2025
+**Status:** 🎯 **COMPREHENSIVE UPGRADE NEEDED**
+
+---
+
+## 🎯 Executive Summary
+
+The v2 spec represents a **major upgrade** from our current backtester. It shifts from:
+
+- ❌ **Momentum strategy** (use T-1 rate, hope it persists to T)
+- ✅ **Predictive strategy** (estimate T rate using premium/index formula)
+
+**Key insight:** Our current strategy failed because funding rates have **zero persistence** (correlation = 0.056). The v2 spec solves this by **predicting** rates instead of **extrapolating** them.
+
+---
+
+## 📊 What We Currently Have vs Need
+
+| Component | Current Backtester | V2 Spec | Gap |
+|-----------|-------------------|---------|-----|
+| **Signal** | Use T-1 rate as proxy for T | Predict T rate from premium/index | 🔴 **MAJOR** |
+| **Universe** | Top-5 by \|rate\| (no filters) | Liquidity + OI + borrow + tier gates | 🟡 **MEDIUM** |
+| **Weights** | Min 5%, max 50%, sum 100% | Same + liquidity caps | 🟢 **MINOR** |
+| **Rebalance** | Fixed 8h cadence | Dynamic (1/2/4/8h per symbol) | 🟡 **MEDIUM** |
+| **Hurdle** | 3 bps advantage | 3 bps net after all costs | 🟡 **MEDIUM** |
+| **Costs** | Trading fees only | Fees + borrow + slippage + error buffer | 🔴 **MAJOR** |
+| **Execution** | Instant fill at midpoint | Maker-first, taker near settlement | 🟡 **MEDIUM** |
+| **Data** | Historical funding rates only | Premium, index, mark, borrow, L2, OI | 🔴 **MAJOR** |
+
+**Summary:** We have a **bias-free framework** but missing **predictive signal** and **comprehensive costs**.
+
+---
+
+## 🔍 Key Learnings from Our Audit
+
+### 1. **Momentum Strategy Doesn't Work** ❌
+
+**What we tested:**
+- Use T-1 funding rate to select portfolio
+- Apply T funding rate as actual return
+- Assumption: Rates persist (T ≈ T-1)
+
+**Results:**
+- Funding rate persistence: **0.056** (essentially zero)
+- APY: **57.33%** (still positive but not exceptional)
+- Strategy works despite low persistence because we capture **realized spreads**, not predictions
+
+**Why it works at all:**
+- Even with random selection, absolute funding arbitrage captures actual realized rates
+- We're not betting on direction, just magnitude
+- Low persistence means we can't optimize selection well
+
+### 2. **Predictive Strategy Should Work Better** ✅
+
+**V2 approach:**
+- Predict next funding rate using OKX's premium/index formula
+- Select based on **estimated** T rate (not historical T-1)
+- Apply **actual** T rate as return
+- Track **prediction error** and buffer for it
+
+**Why this is better:**
+- Premium/index data is **forward-looking** (what market expects)
+- OKX uses this to calculate next rate (we replicate their formula)
+- Prediction error is measurable and can be buffered
+- This is what Victor's `next_funding_rate.py` was doing!
+
+### 3. **Temporal Correctness is Non-Negotiable** 🔒
+
+**What we learned:**
+- fundingTime = settlement timestamp (end of period)
+- fundingRate = rate for period that just ended
+- Cannot trade on settled rates (period is over)
+- Must predict NEXT rate, not use CURRENT rate
+
+**V2 spec gets this right:**
+- Signal uses **predicted** next rate (forward-looking)
+- Costs account for **estimated** next period
+- Execution happens **before** settlement (to capture predicted rate)
+
+---
+
+## 🔧 Required Upgrades to Our Backtester
+
+### Priority 1: **Predictive Signal** 🔴
+
+**Current approach:**
+```python
+# At time T, select using T-1 rate
+rates_prev = snap[snap["funding_time"] == t_prev]["fundingRate"]
+target = select_top5(rates_prev)
+```
+
+**V2 approach:**
+```python
+# At time T, predict T+1 rate using premium/index
+premium_history = get_premium_history(inst_id, elapsed_minutes)
+predicted_rate = estimate_next_funding(premium_history, interest_rate)
+signal = predicted_rate - borrow_apr - fees - slippage - error_buffer
+target = select_top5_by_signal(signal)
+```
+
+**Implementation steps:**
+1. Download premium/index historical data from OKX
+2. Implement OKX's funding rate formula (changes over time!)
+3. Build prediction model using minute-level premium data
+4. Calculate historical prediction errors
+5. Add error quantile buffer (e.g., 80th percentile)
+
+**Data needed:**
+- `GET /api/v5/market/index-candles` (historical)
+- `GET /api/v5/market/mark-price-candles` (historical)
+- OKX formula change dates (regime table)
+
+### Priority 2: **Comprehensive Cost Model** 🔴
+
+**Current approach:**
+```python
+# Only trading fees
+fee_factor = 1.0 - (maker_fee + taker_fee) * turnover
+net_return = gross_return * fee_factor
+```
+
+**V2 approach:**
+```python
+# All costs per symbol
+borrow_cost = borrow_apr[symbol] * hours_in_period / 8760
+slippage_cost = estimate_slippage(symbol, turnover, orderbook)
+prediction_error_buffer = quantile(abs(predicted - actual), 0.80)
+
+net_signal = predicted_rate - borrow_cost - trading_fees - slippage_cost - prediction_error_buffer
+```
+
+**Implementation steps:**
+1. Download borrow rate history from OKX
+2. Build slippage model from historical trades/L2 data
+3. Track prediction errors to calculate quantile buffer
+4. Apply all costs in signal calculation
+
+**Data needed:**
+- OKX public borrow/loan endpoints (hourly polling)
+- Historical trades + L2 orderbook depth
+- Prediction error tracking database
+
+### Priority 3: **Dynamic Settlement Intervals** 🟡
+
+**Current approach:**
+```python
+# Fixed 8-hour resampling
+snap = df.resample("8H").last()
+```
+
+**V2 approach:**
+```python
+# Per-symbol variable intervals (1/2/4/8h)
+settlement_interval = get_settlement_interval(inst_id, timestamp)
+snap = df.groupby("symbol").apply(lambda g: resample_dynamic(g, intervals))
+```
+
+**Implementation steps:**
+1. Query `/api/v5/public/funding-rate` for current interval
+2. Track interval changes over time (regime table)
+3. Resample each symbol according to its interval
+4. Align trading window to settlement times (T-10 to T-3 minutes)
+
+**Data needed:**
+- Settlement interval history (from announcements + API polling)
+- Regime change table with effective dates
+
+### Priority 4: **Liquidity & Feasibility Filters** 🟡
+
+**Current approach:**
+```python
+# No filters - select from all symbols with data
+rates = all_symbols_with_rates
+target = select_top5(rates)
+```
+
+**V2 approach:**
+```python
+# Multi-gate universe filter
+eligible = []
+for symbol in universe:
+    if (open_interest[symbol] < MIN_OI or
+        l2_depth[symbol] < MIN_DEPTH or
+        borrow_available[symbol] == False or
+        borrow_apr[symbol] > MAX_BORROW_APR or
+        position_tier_supports_notional[symbol] == False):
+        continue
+    eligible.append(symbol)
+
+target = select_top5(eligible)
+```
+
+**Implementation steps:**
+1. Download OI history (public data or vendor)
+2. Track L2 depth from orderbook snapshots
+3. Monitor borrow availability/caps
+4. Check position tier limits for target notional
+
+**Data needed:**
+- Open interest (OKX public data or Tardis)
+- L2 orderbook (historical market data hub)
+- Borrow availability flags
+- Position tiers (`GET /api/v5/public/position-tiers`)
+
+### Priority 5: **Realistic Execution Model** 🟡
+
+**Current approach:**
+```python
+# Instant fill at midpoint
+turnover = calculate_turnover(target, current)
+equity *= gross_return * fee_factor
+```
+
+**V2 approach:**
+```python
+# Time-aware execution with slippage
+if time_to_settlement > MAKER_WINDOW:
+    fills = execute_maker_orders(target_delta)
+    slippage = 0  # Assume maker fills at favorable prices
+else:
+    fills = execute_taker_sweep(target_delta)
+    slippage = calculate_market_impact(target_delta, orderbook)
+
+# Hedge after actual fills (no naked exposure)
+hedge_delta = fills - target
+execute_hedge(hedge_delta)
+
+equity *= gross_return * fee_factor - slippage
+```
+
+**Implementation steps:**
+1. Add execution timing logic (maker window vs taker urgency)
+2. Model slippage from historical L2 data
+3. Track actual fill ratios (maker vs taker split)
+4. Ensure hedge sizing matches realized fills
+
+**Data needed:**
+- L2 orderbook for impact modeling
+- Historical fill ratios by timing window
+
+---
+
+## 📋 Checklist for V2 Implementation
+
+### Phase 1: Data Infrastructure (2-3 weeks)
+
+**Backfill historical data:**
+- [ ] Download funding rate CSVs (2021-present) from OKX
+- [ ] Backfill index candles (`/api/v5/market/index-candles`)
+- [ ] Backfill mark price candles (`/api/v5/market/mark-price-candles`)
+- [ ] Download historical trades for top symbols
+- [ ] Download L2 orderbook snapshots
+- [ ] Document funding formula changes (regime table)
+- [ ] Pull position tier snapshots with effective dates
+- [ ] Grab fee schedules with date ranges
+
+**Set up ongoing polling:**
+- [ ] Hourly: funding rate + interval for all symbols
+- [ ] Hourly: borrow APR + availability
+- [ ] Minutely: index/mark candles for nowcasting
+- [ ] Daily: announcements feed for regime changes
+
+### Phase 2: Prediction Model (1-2 weeks)
+
+**Build OKX funding rate predictor:**
+- [ ] Implement premium calculation (mark - index)
+- [ ] Build weighted moving average (per OKX formula)
+- [ ] Add interest rate component
+- [ ] Apply clamp (±0.05% or per-symbol caps)
+- [ ] Handle formula regime changes
+- [ ] Validate against actual settled rates
+
+**Track prediction accuracy:**
+- [ ] Store predicted vs actual for each settlement
+- [ ] Calculate error distribution (MAE, quantiles)
+- [ ] Compute error buffer (e.g., 80th percentile)
+- [ ] Monitor directional accuracy
+
+### Phase 3: Cost Modeling (1 week)
+
+**Add comprehensive costs:**
+- [ ] Borrow APR tracking (per symbol, per hour)
+- [ ] Slippage model (from L2 depth + historical impact)
+- [ ] Trading fees (maker/taker blend by timing)
+- [ ] Error buffer (from prediction tracking)
+
+**Build signal calculator:**
+- [ ] Signal = predicted_rate - all_costs
+- [ ] Rank symbols by net signal
+- [ ] Apply liquidity gates before selection
+
+### Phase 4: Enhanced Backtester (2 weeks)
+
+**Upgrade selection logic:**
+- [ ] Replace T-1 rates with predicted T+1 rates
+- [ ] Apply liquidity + OI + borrow filters
+- [ ] Use net signal (after all costs) for ranking
+
+**Add dynamic intervals:**
+- [ ] Per-symbol settlement interval tracking
+- [ ] Dynamic resampling by symbol
+- [ ] Align execution windows to settlement times
+
+**Realistic execution:**
+- [ ] Maker-first execution model (T-10 to T-3 min)
+- [ ] Taker-complete for urgency (T-3 to T-1 min)
+- [ ] Slippage based on orderbook depth
+- [ ] Hedge sizing to actual fills
+
+### Phase 5: Validation & Comparison (1 week)
+
+**Run comparative backtests:**
+- [ ] V1 (momentum): Use T-1 rates
+- [ ] V2 (predictive): Use predicted T+1 rates
+- [ ] Compare APY, Sharpe, win rate, prediction accuracy
+
+**Metrics to track:**
+- [ ] Prediction correlation (predicted vs actual)
+- [ ] Mean absolute error (bps)
+- [ ] Directional accuracy (% correct sign)
+- [ ] Net APY after all costs
+- [ ] Cost breakdown (borrow vs fees vs slippage)
+
+---
+
+## 🎯 Expected Performance Improvements
+
+### Current Backtester (V1 - Momentum)
+
+**Results on recent data:**
+- APY: **57.33%**
+- Sharpe: **17.49**
+- Selection method: Use T-1 rate (persistence assumption)
+- Persistence measured: **0.056** (essentially zero)
+
+**Why it works despite zero persistence:**
+- Still captures absolute funding spreads
+- Market-neutral, so benefits from volatility
+- Conservative rebalancing reduces turnover drag
+
+### V2 Backtester (Predictive) — Expected
+
+**Improvements:**
+- Better selection using predicted rates (forward-looking vs backward)
+- Lower prediction error than persistence assumption
+- More comprehensive cost model (realistic expectations)
+- Liquidity filters prevent capacity issues
+
+**Expected results:**
+- APY: **65-80%** (if predictions have edge)
+- Sharpe: **15-20** (may be lower due to more aggressive trading)
+- Prediction accuracy: **correlation > 0.3** (better than random)
+- MAE: **< 10 bps** (better than current ~15-20 bps spread)
+
+**Key dependencies:**
+- Premium/index prediction quality
+- Borrow cost stability
+- Execution slippage control
+- Error buffer calibration
+
+---
+
+## 💡 Strategic Insights
+
+### 1. **Why Victor Had Two Strategies**
+
+**Strategy #1 (funding_arb_strat_1.py):**
+- Simple momentum approach
+- Use historical rates as proxy
+- Fast to implement
+- Had look-ahead bias (acknowledged by Victor)
+
+**Strategy #2 (next_funding_rate.py):**
+- Predictive approach using premium/index
+- More sophisticated
+- Requires more data infrastructure
+- Missing backtest (we never found it)
+
+**V2 spec IS Strategy #2's backtest!**
+
+### 2. **Why Our V1 Worked Despite Low Persistence**
+
+**Key insight:** We're not betting on persistence, we're capturing **realized absolute spreads**.
+
+Even with random selection:
+- If avg funding = 10 bps per 8h
+- With 5 symbols, avg capture = 10 bps
+- Annualized: 10 bps × 3 periods/day × 365 = 109.5% gross
+- After fees/costs: ~50-60% net APY
+
+**Selection optimization adds ~5-15 pp** if you can predict winners.
+
+### 3. **The Real Edge: Prediction Accuracy**
+
+**Current V1 edge:**
+- Selection: Use T-1 rate (correlation 0.056 with T rate)
+- Essentially random selection
+- Still profitable due to absolute spreads
+
+**V2 potential edge:**
+- Selection: Use predicted T+1 rate (correlation ??? with T+1 rate)
+- If correlation > 0.3, meaningful edge
+- Could add 10-25 pp to APY
+
+**Critical question:** What's the correlation between premium-based predictions and actual settled rates?
+
+---
+
+## 📊 Data Requirements — Checklist
+
+### User Input Needed
+
+**1. Symbol universe:**
+```
+Target symbols (e.g., 50-69 most liquid USDT perps):
+- BTC-USDT-SWAP
+- ETH-USDT-SWAP
+- SOL-USDT-SWAP
+- ... (complete list)
+```
+
+**2. Fee tier:**
+```
+VIP tier: VIP-7
+Region: Non-EEA
+Maker: -0.005%
+Taker: +0.020%
+Expected blend: 60% maker / 40% taker
+```
+
+**3. Backtest period:**
+```
+Start: 2023-01-01
+End: 2025-09-30
+Reason: Full regime coverage (pre/post formula changes)
+```
+
+**4. Data vendors:**
+```
+Primary: OKX (free historical + API)
+Optional: Tardis.dev for tick L2 (paid, ~$500/mo for 50 symbols)
+Optional: CoinGlass for context flags (free tier)
+Decision: Start with OKX only, add Tardis if slippage model needs refinement
+```
+
+**5. Borrow rate archival:**
+```
+Self-archive: YES
+Method: Hourly poll of /api/v5/public/borrow-info
+Storage: PostgreSQL timeseries table
+Retention: Full history (< 1GB for 50 symbols over 3 years)
+```
+
+### Data Endpoints (OKX API)
+
+**Historical (one-time backfill):**
+- Funding rates: https://www.okx.com/historical-data (CSV download)
+- Index candles: `GET /api/v5/market/history-index-candles`
+- Mark candles: `GET /api/v5/market/history-mark-price-candles`
+- Trades: Historical market data hub (bulk download)
+- L2 orderbook: Historical market data hub (bulk download)
+
+**Live (ongoing polling):**
+- Current funding: `GET /api/v5/public/funding-rate`
+- Index/mark (1m bars): `GET /api/v5/market/index-candles`, `/mark-price-candles`
+- Borrow info: `GET /api/v5/public/borrow-info` (or finance endpoints)
+- Position tiers: `GET /api/v5/public/position-tiers`
+
+**Meta:**
+- API docs: https://www.okx.com/docs-v5/en/
+- Changelog: https://www.okx.com/docs-v5/log_en/
+- Fee schedule: https://www.okx.com/fees
+
+---
+
+## 🚀 Implementation Roadmap
+
+### Week 1-2: Data Infrastructure
+- Set up PostgreSQL timeseries database
+- Backfill historical funding rates (2021-2025)
+- Backfill index/mark candles (1-min bars)
+- Download top-50 symbols trades + L2 snapshots
+- Build regime table (funding formula changes)
+
+### Week 3-4: Prediction Model
+- Implement OKX funding rate formula
+- Build premium calculation (mark - index)
+- Add weighted moving average (time-aware)
+- Handle regime switches (formula changes)
+- Validate against actual settled rates
+- Track prediction errors
+
+### Week 5: Cost Modeling
+- Implement borrow APR tracking
+- Build slippage model from L2 data
+- Calculate error buffer (quantile-based)
+- Combine into net signal calculator
+
+### Week 6-7: Enhanced Backtester
+- Replace T-1 selection with predicted T+1
+- Add liquidity/OI/borrow filters
+- Implement dynamic settlement intervals
+- Build realistic execution model
+
+### Week 8: Validation
+- Run V1 vs V2 comparison
+- Measure prediction accuracy
+- Analyze cost breakdown
+- Generate performance reports
+
+**Total timeline: ~8 weeks** for full v2 implementation.
+
+---
+
+## 🎯 Decision Points
+
+### Should We Build V2?
+
+**Arguments FOR:**
+- V2 uses forward-looking predictions (better than backward T-1)
+- Addresses low persistence issue (0.056 correlation)
+- More realistic cost modeling
+- This is what Victor intended with Strategy #2
+- Potential for 10-25 pp APY improvement
+
+**Arguments AGAINST:**
+- V1 already works (57% APY is good!)
+- Significant development time (~8 weeks)
+- Requires ongoing data infrastructure
+- Prediction edge is unproven (need to validate first)
+
+### Recommended Approach: **Phased**
+
+**Phase 1 (2 weeks):** Build prediction model + validate
+- Backfill premium/index data
+- Implement OKX formula
+- Measure prediction accuracy on historical data
+- **Decision gate:** If correlation > 0.3, proceed. If < 0.2, stick with V1.
+
+**Phase 2 (4 weeks):** Full V2 backtester
+- Only if Phase 1 shows promise
+- Build comprehensive cost model
+- Implement enhanced backtester
+- Compare V1 vs V2 performance
+
+**Phase 3 (2 weeks):** Production deployment
+- Paper trading validation
+- Live monitoring setup
+- Gradual capital allocation
+
+---
+
+## 📋 Immediate Next Steps
+
+1. **Decide on V2 pursuit:**
+   - Do we want to invest 8 weeks in V2 development?
+   - Or deploy V1 now and iterate later?
+
+2. **If V2 yes, start with prediction validation:**
+   - Backfill 6 months of premium/index data
+   - Build prediction model
+   - Measure correlation with actual rates
+   - If good (> 0.3), proceed. If bad (< 0.2), reconsider.
+
+3. **If V2 no, deploy V1 with enhancements:**
+   - Add borrow cost tracking (easy)
+   - Add basic slippage buffer (conservative estimate)
+   - Start paper trading to validate
+   - Collect live data for future V2
+
+**Recommendation:** Start with prediction validation (2 weeks) to determine if V2 is worth full investment.
+
+---
+
+**Status:** 🎯 Ready to scope Phase 1 (prediction model validation)
+
+**Next:** Provide symbol list + decide on V2 pursuit timeline

@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""
+Download OKX Funding Rate Historical Data from CDN
+
+Discovery: OKX has a CDN endpoint with daily funding rate data going back to 2021!
+URL Format: https://www.okx.com/cdn/okex/traderecords/swaprate/daily/{YYYYMMDD}/{SYMBOL}-swaprate-{YYYY-MM-DD}.zip
+
+Each ZIP contains a CSV with 3 funding settlements per day (8-hour intervals).
+
+CSV Format (with Chinese headers):
+- contract_type/合约类型: SWAP
+- funding_rate/预计下一期资费: Next predicted rate
+- real_funding_rate/本期本币实际费率: ACTUAL SETTLED RATE (what we want!)
+- funding_time/下一期结算时间: Settlement timestamp (ms)
+
+This script downloads 2 years of data for all symbols and creates a clean dataset.
+"""
+
+import requests
+import pandas as pd
+import zipfile
+import io
+from datetime import datetime, timedelta
+from pathlib import Path
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import chardet
+
+# Configuration
+BASE_URL = "https://www.okx.com/cdn/okex/traderecords/swaprate/daily"
+START_DATE = "2023-10-01"  # 2 years back from now
+END_DATE = "2025-10-01"
+
+# Top liquid perpetuals (same as our test symbols)
+SYMBOLS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT", "MATIC", "LTC",
+    "AVAX", "SHIB", "LINK", "UNI", "ATOM", "ETC", "FIL", "AAVE", "ALGO", "NEAR",
+    "APE", "SNX", "SAND", "MANA", "GALA", "AXS", "THETA", "EGLD", "XTZ", "FTM",
+    "RUNE", "1INCH", "ENJ", "BAT", "ZRX", "COMP", "MKR", "SUSHI", "CRV", "YFI",
+    "STX", "INJ", "AR", "FLOW", "ICP", "EOS", "XLM", "VET", "TRX",
+    "LDO", "ARB", "OP", "PEPE", "WLD", "SUI", "SEI", "TON", "BONK", "ORDI",
+]
+
+# Parallel downloads
+MAX_WORKERS = 10
+RETRY_ATTEMPTS = 3
+SLEEP_BETWEEN_BATCHES = 1.0
+
+
+def generate_date_range(start: str, end: str):
+    """Generate all dates in range."""
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+
+    current = start_dt
+    while current <= end_dt:
+        yield current
+        current += timedelta(days=1)
+
+
+def build_url(symbol: str, date: datetime) -> tuple[str, str, str]:
+    """
+    Build CDN URL for a symbol and date.
+
+    Returns:
+        (url, symbol, date_str)
+    """
+    date_str = date.strftime("%Y-%m-%d")
+    date_folder = date.strftime("%Y%m%d")
+    inst_id = f"{symbol}-USDT-SWAP"
+
+    url = f"{BASE_URL}/{date_folder}/{inst_id}-swaprate-{date_str}.zip"
+    return url, symbol, date_str
+
+
+def download_and_parse(url: str, symbol: str, date_str: str) -> list:
+    """
+    Download ZIP, extract CSV, parse funding rates.
+
+    Returns:
+        List of records: [{symbol, ts, funding_time, fundingRate}, ...]
+    """
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            # Download ZIP
+            response = requests.get(url, timeout=30)
+            if response.status_code == 404:
+                # Symbol didn't exist on this date
+                return []
+            response.raise_for_status()
+
+            # Extract CSV from ZIP
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+                csv_filename = zf.namelist()[0]
+                csv_data = zf.read(csv_filename)
+
+            # Detect encoding (CSV has Chinese headers)
+            encoding_result = chardet.detect(csv_data)
+            encoding = encoding_result['encoding'] or 'utf-8'
+
+            # Parse CSV
+            df = pd.read_csv(
+                io.BytesIO(csv_data),
+                encoding=encoding,
+                on_bad_lines='skip'
+            )
+
+            # Extract columns (handles Chinese headers)
+            records = []
+            for _, row in df.iterrows():
+                try:
+                    # Get real_funding_rate (actual settled rate)
+                    # Column name contains Chinese characters
+                    rate_col = [c for c in df.columns if 'real' in c.lower() or '实际' in c][0]
+                    time_col = [c for c in df.columns if 'time' in c.lower() or '时间' in c][0]
+
+                    ts = int(row[time_col])
+                    rate = float(row[rate_col])
+
+                    records.append({
+                        'symbol': symbol,
+                        'ts': ts,
+                        'funding_time': datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S"),
+                        'fundingRate': rate,
+                    })
+                except (ValueError, KeyError, IndexError):
+                    continue
+
+            return records
+
+        except Exception as e:
+            if attempt == RETRY_ATTEMPTS - 1:
+                print(f"  ✗ {symbol} {date_str}: {str(e)[:50]}")
+                return []
+            time.sleep(0.5)
+
+    return []
+
+
+def download_historical_data(start_date: str, end_date: str, symbols: list) -> pd.DataFrame:
+    """
+    Download historical funding rate data for all symbols and dates.
+
+    Returns:
+        DataFrame with columns: symbol, ts, funding_time, fundingRate
+    """
+    print("=" * 80)
+    print("OKX CDN Historical Data Downloader")
+    print("=" * 80)
+    print(f"Date range: {start_date} → {end_date}")
+    print(f"Symbols: {len(symbols)}")
+
+    # Generate all download tasks
+    tasks = []
+    dates = list(generate_date_range(start_date, end_date))
+    print(f"Days: {len(dates)}")
+    print(f"Total downloads: {len(symbols) * len(dates):,}")
+    print("=" * 80 + "\n")
+
+    for date in dates:
+        for symbol in symbols:
+            url, sym, date_str = build_url(symbol, date)
+            tasks.append((url, sym, date_str))
+
+    # Download in parallel
+    all_records = []
+    completed = 0
+    failed = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(download_and_parse, url, sym, date_str): (sym, date_str)
+            for url, sym, date_str in tasks
+        }
+
+        for future in as_completed(futures):
+            sym, date_str = futures[future]
+            try:
+                records = future.result()
+                if records:
+                    all_records.extend(records)
+                    completed += 1
+                else:
+                    failed += 1
+
+                # Progress every 100 downloads
+                if (completed + failed) % 100 == 0:
+                    print(f"  Progress: {completed + failed}/{len(tasks)} "
+                          f"({len(all_records):,} records)")
+
+            except Exception as e:
+                failed += 1
+                print(f"  Error {sym} {date_str}: {e}")
+
+    print(f"\n{'='*80}")
+    print(f"Download complete!")
+    print(f"  Successful: {completed:,}")
+    print(f"  Failed: {failed:,}")
+    print(f"  Records: {len(all_records):,}")
+    print(f"{'='*80}\n")
+
+    # Convert to DataFrame
+    if not all_records:
+        print("❌ No data retrieved")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_records)
+    df = df.sort_values(['symbol', 'ts']).reset_index(drop=True)
+
+    return df
+
+
+def main():
+    """Main execution."""
+    # Download data
+    df = download_historical_data(START_DATE, END_DATE, SYMBOLS)
+
+    if df.empty:
+        print("No data to save")
+        return
+
+    # Save to CSV
+    output_dir = Path(__file__).parent.parent / "data"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    output_path = output_dir / "okx_funding_2year_cdn.csv"
+
+    df.to_csv(output_path, index=False)
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("DATASET SUMMARY")
+    print(f"{'='*80}")
+    print(f"Total records:  {len(df):,}")
+    print(f"Symbols:        {df['symbol'].nunique()}")
+    print(f"Date range:     {df['funding_time'].min()} → {df['funding_time'].max()}")
+    print(f"\nRecords per symbol:")
+    symbol_counts = df.groupby('symbol').size().sort_values(ascending=False)
+    for sym, count in symbol_counts.head(10).items():
+        print(f"  {sym:10s}: {count:,} records")
+
+    print(f"\nOutput file:    {output_path}")
+    print(f"File size:      {output_path.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"{'='*80}\n")
+
+    # Validation
+    print("DATA VALIDATION:")
+    print(f"  ✓ Unique timestamps: {df['ts'].nunique():,}")
+    print(f"  ✓ Rate range: {df['fundingRate'].min():.6f} to {df['fundingRate'].max():.6f}")
+    print(f"  ✓ Missing values: {df['fundingRate'].isna().sum()}")
+    print(f"  ✓ Duplicates: {df.duplicated(subset=['symbol', 'ts']).sum()}")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -24,14 +24,13 @@
 ## Development Environment & Tools
 
 ### Primary Toolchain
-- **Python Stack**: `uv` (management), `uv run --active python -m` (execution), `hatchling` (build backend), `maturin` (Rust integration), 3.12+ - **Avoid**: pip, conda, setuptools, poetry, standalone execution
+- **Python Stack**: `uv` (management), `uv run --active python -m` (execution), `maturin` (Rust integration), 3.12+ - **Avoid**: pip, conda, standalone execution
 - **Rust Stack**: `cargo`, cross-platform compilation, `cargo nextest run`, `cargo deny check`, coexists with Python
 - **Python Packages**: Prefer `httpx`, `platformdirs`, `orjson`, `ciso8601` over `requests`, `json`, `dateutil`, `arrow`, `maya`
 - **Claude Code Tools**: `Read`, `LS`, `Glob`, `Grep` over MCP
 - **Analysis**: `Semgrep`, `ast-grep`, `ShellCheck` - **GPU**: `tensorflow-metal`, `jax`, `torch`, `cupy`
 - **PDF Processing**: `mupdf-tools` (`mutool draw -F html`) for born-digital PDFs with clean HTML/block grouping; Poppler `pdftohtml -xml` for exact coordinates or complex column layouts
 - **Finance**: `backtesting.py` ONLY, `rangebar` crate - **Prohibited**: bt, vectorbt, mlfinlab, commercial libs
-- **Indicators (when needed)**: Reference talipp pattern (github.com/nardew/talipp) for O(1) incremental updates when rolling metrics are required
 - **Documentation**: ALL examples must use `uv run --active python -m` format, never standalone execution
 
 
@@ -67,46 +66,27 @@
 ### git-cliff Release Automation
 **Templates**: `~/.claude/tools/git-cliff/templates/` (cliff.toml, cliff-release-notes.toml, cz.toml.template)
 
-**AI Agent Workflow** (zero-config, Commitizen + git-cliff integration):
+**AI Agent Workflow** (zero-config, copy-paste to any AI coding agent):
 ```bash
-# Prerequisites: cargo, uvx, gh CLI
-# Pre-flight: auto-install git-cliff, initialize configs from templates
-
+# Auto-install + initialize configs + commit/release automation
 command -v git-cliff >/dev/null || cargo install git-cliff
 [ ! -f cliff.toml ] && cp ~/.claude/tools/git-cliff/templates/cliff.toml .
 [ ! -f cliff-release-notes.toml ] && cp ~/.claude/tools/git-cliff/templates/cliff-release-notes.toml .
 [ ! -f .cz.toml ] && cp ~/.claude/tools/git-cliff/templates/cz.toml.template .cz.toml
 
-# 1) Commit: synthesize conventional commit from staged diff (AI-driven)
-uvx --from commitizen cz check --message "$MSG"
+# AI: synthesize conventional commit from `git diff --cached`
 git commit -m "$MSG"
 
-# 2) Version bump + changelog (git-cliff replaces commitizen changelog)
+# Release: bump → changelog → push → GitHub release
 uvx --from commitizen cz bump --yes
 git-cliff --config cliff.toml --output CHANGELOG.md
 git-cliff --config cliff-release-notes.toml --latest --output RELEASE_NOTES.md
 git add CHANGELOG.md RELEASE_NOTES.md && git commit --amend --no-edit
-
-# 3) Publish commits and tag
 git push --follow-tags
-
-# 4) Surface CI and monitor
-gh run view --web
-
-# 5) GitHub Release (auto-generated from git-cliff)
 TAG="v$(grep '^version = ' .cz.toml | cut -d'"' -f2)"
 gh release create "$TAG" --verify-tag --title "$(basename $(pwd)) $TAG" -F RELEASE_NOTES.md
-
-# 6) Telemetry: milestone commit SHA and tag, surface all URLs
-echo "📦 Release: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/releases/tag/$TAG"
-echo "🔗 CI Run: $(gh run list --limit 1 --json url --jq '.[0].url')"
-echo "📝 Commit: $(git rev-parse HEAD)"
+echo "📦 https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/releases/tag/$TAG"
 ```
-
-**Notes**:
-- Commitizen handles SemVer validation and version bumping
-- git-cliff generates CHANGELOG.md (detailed) and RELEASE_NOTES.md (user-facing)
-- Use Git LFS for large binaries if needed
 
 ## Credential Management & Security
 

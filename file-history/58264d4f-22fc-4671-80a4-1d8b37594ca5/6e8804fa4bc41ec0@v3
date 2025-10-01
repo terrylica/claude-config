@@ -67,46 +67,77 @@
 ### git-cliff Release Automation
 **Templates**: `~/.claude/tools/git-cliff/templates/` (cliff.toml, cliff-release-notes.toml, cz.toml.template)
 
-**AI Agent Workflow** (zero-config, Commitizen + git-cliff integration):
+**AI Agent Workflow** (zero-config, AI-driven):
 ```bash
 # Prerequisites: cargo, uvx, gh CLI
-# Pre-flight: auto-install git-cliff, initialize configs from templates
 
+# Pre-flight: Workspace State Analysis (AI-driven)
+git status --short --untracked-files=all > /tmp/git_status.txt
+git diff --stat > /tmp/diff_unstaged.txt
+git diff --cached --stat > /tmp/diff_staged.txt
+
+# AI Decision Logic:
+#   - Build artifacts (*.whl, *.log, target/, __pycache__/) → .gitignore
+#   - Source files (*.rs, *.py, *.toml, *.md) → git add
+#   - Modified tracked session files → git add
+#   - Sensitive (.env, *credentials*, *secret*, *.pem, *.key) → NEVER add, warn
+#   - Existing .gitignore patterns → skip
+git add [AI-selected files]
+git diff --cached --stat
+
+# 1) Auto-install git-cliff
 command -v git-cliff >/dev/null || cargo install git-cliff
-[ ! -f cliff.toml ] && cp ~/.claude/tools/git-cliff/templates/cliff.toml .
-[ ! -f cliff-release-notes.toml ] && cp ~/.claude/tools/git-cliff/templates/cliff-release-notes.toml .
-[ ! -f .cz.toml ] && cp ~/.claude/tools/git-cliff/templates/cz.toml.template .cz.toml
 
-# 1) Commit: synthesize conventional commit from staged diff (AI-driven)
+# 2) Initialize configs from templates
+for f in cliff.toml cliff-release-notes.toml .cz.toml; do
+  [ ! -f "$f" ] && [ -f ~/.claude/tools/git-cliff/templates/${f%.toml.template}.toml ] && \
+    cp ~/.claude/tools/git-cliff/templates/${f%.toml.template}.toml ./$f
+done
+
+# 3) Parse project version (Cargo.toml, package.json, or default)
+if [ -f Cargo.toml ]; then
+  VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d'"' -f2)
+elif [ -f package.json ]; then
+  VERSION=$(grep '"version"' package.json | head -1 | cut -d'"' -f4)
+else
+  VERSION="0.1.0"
+fi
+
+# 4) Sync .cz.toml with project version
+[ -f .cz.toml ] && [ -n "$VERSION" ] && \
+  sed -i.bak "s/^version = .*/version = \"$VERSION\"/" .cz.toml && rm .cz.toml.bak
+
+# 5) Commit (AI synthesizes $MSG from git diff --cached)
 uvx --from commitizen cz check --message "$MSG"
 git commit -m "$MSG"
 
-# 2) Version bump + changelog (git-cliff replaces commitizen changelog)
+# 6) Version bump + changelog
 uvx --from commitizen cz bump --yes
 git-cliff --config cliff.toml --output CHANGELOG.md
 git-cliff --config cliff-release-notes.toml --latest --output RELEASE_NOTES.md
 git add CHANGELOG.md RELEASE_NOTES.md && git commit --amend --no-edit
 
-# 3) Publish commits and tag
+# 7) Push with tags
 git push --follow-tags
 
-# 4) Surface CI and monitor
+# 8) Surface CI (optional: gh run watch for streaming)
 gh run view --web
 
-# 5) GitHub Release (auto-generated from git-cliff)
+# 9) GitHub Release
 TAG="v$(grep '^version = ' .cz.toml | cut -d'"' -f2)"
 gh release create "$TAG" --verify-tag --title "$(basename $(pwd)) $TAG" -F RELEASE_NOTES.md
 
-# 6) Telemetry: milestone commit SHA and tag, surface all URLs
+# 10) Telemetry
 echo "📦 Release: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/releases/tag/$TAG"
 echo "🔗 CI Run: $(gh run list --limit 1 --json url --jq '.[0].url')"
 echo "📝 Commit: $(git rev-parse HEAD)"
 ```
 
 **Notes**:
-- Commitizen handles SemVer validation and version bumping
-- git-cliff generates CHANGELOG.md (detailed) and RELEASE_NOTES.md (user-facing)
-- Use Git LFS for large binaries if needed
+- AI agent analyzes workspace state and intelligently stages changes
+- Auto-syncs version from Cargo.toml/package.json to .cz.toml
+- Commitizen handles SemVer validation, git-cliff generates changelogs
+- Use Git LFS for large binaries
 
 ## Credential Management & Security
 

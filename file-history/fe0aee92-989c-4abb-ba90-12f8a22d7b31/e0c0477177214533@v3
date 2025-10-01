@@ -1,0 +1,472 @@
+# MQL5 Article Extraction System - Production Guide
+
+## 🎯 Objective
+Production-grade system for extracting MQL5 trading articles with:
+- Elegant formatting with local images
+- Proper MQL5 syntax highlighting
+- Batch processing with checkpoints
+- Robust error recovery with retry logic
+- Quality validation
+- Comprehensive logging
+
+**Use Case:** Training data collection for algorithmic trading seq-2-seq models
+
+---
+
+## 🚀 Quick Start
+
+### **Extract All Articles (Recommended)**
+```bash
+# Auto-discover and extract all 77 articles
+python mql5_extract.py discover-and-extract
+
+# With options
+python mql5_extract.py discover-and-extract --user-id 29210372 --verbose
+```
+
+### **Extract Single Article**
+```bash
+python mql5_extract.py single https://www.mql5.com/en/articles/19625
+```
+
+### **Batch from File**
+```bash
+# Create URL file first
+python mql5_extract.py discover-and-extract --save-urls urls.txt --dry-run
+
+# Extract all
+python mql5_extract.py batch urls.txt
+```
+
+---
+
+## 📁 System Architecture
+
+### **File Structure**
+```
+/mql5/
+├── mql5_extract.py          # Main CLI (NEW - production interface)
+├── config.yaml              # Configuration (NEW)
+├── lib/                     # Shared library (NEW)
+│   ├── __init__.py
+│   ├── extractor.py        # Enhanced extractor with retry
+│   ├── discovery.py        # URL discovery
+│   ├── batch_processor.py  # Batch orchestration
+│   ├── logger.py           # Logging system
+│   └── config_manager.py   # Config management
+├── browser_scraper.py      # Legacy (backward compat)
+├── simple_mql5_extractor.py # Legacy (backward compat)
+└── simple_extraction_results/ # Output directory
+    └── {user_id}/          # Hierarchical structure
+        └── article_{id}/
+            ├── article.md
+            ├── metadata.json
+            ├── images_manifest.json
+            └── images/
+```
+
+### **Output Structure**
+```
+simple_extraction_results/
+├── 29210372/                 # User ID (Allan Munene Mutiiria)
+│   ├── article_19625/
+│   │   ├── article.md       # Clean markdown with MQL5 syntax
+│   │   ├── metadata.json    # Extraction metadata
+│   │   ├── images_manifest.json
+│   │   └── images/          # Local images
+│   └── article_19624/
+├── jslopes/                  # User ID (Jocimar Lopes)
+│   └── article_19626/
+├── extraction_summary.json   # Batch statistics (NEW)
+└── extraction.log           # Detailed logs (NEW)
+```
+
+---
+
+## 🔧 Configuration
+
+### **config.yaml**
+All settings are configurable via YAML:
+
+```yaml
+extraction:
+  output_dir: "simple_extraction_results"
+  headless: true              # Run browser without UI (anti-detection enabled)
+  timeout_ms: 30000           # Page load timeout
+
+retry:
+  max_attempts: 3             # Retry failed extractions
+  initial_backoff_seconds: 5  # Exponential backoff delay
+  exponential_base: 2
+
+batch:
+  rate_limit_seconds: 2       # Delay between articles
+  checkpoint_file: ".extraction_checkpoint.json"
+  resume_on_restart: true     # Auto-resume from checkpoint
+  continue_on_error: true     # Keep going if some fail
+
+logging:
+  level: "INFO"               # DEBUG, INFO, WARNING, ERROR
+  file: "extraction.log"
+  console: true
+
+validation:
+  min_word_count: 500         # Quality check
+  min_code_blocks: 1
+  reject_login_popup: true
+
+discovery:
+  default_user_id: "29210372" # Allan Munene Mutiiria
+```
+
+**Override via CLI:**
+```bash
+python mql5_extract.py batch urls.txt --output my_results/ --verbose
+```
+
+---
+
+## 📊 CLI Usage
+
+### **Three Operational Modes:**
+
+#### **1. Single Article**
+```bash
+# Extract one article
+python mql5_extract.py single https://www.mql5.com/en/articles/19625
+
+# With debugging (show browser)
+python mql5_extract.py single https://... --no-headless --verbose
+```
+
+#### **2. Batch Processing**
+```bash
+# Extract from URL file
+python mql5_extract.py batch urls.txt
+
+# Resume interrupted extraction
+python mql5_extract.py batch urls.txt --resume
+
+# Test with limited articles
+python mql5_extract.py batch urls.txt --max-articles 5
+
+# Custom output directory
+python mql5_extract.py batch urls.txt --output /path/to/output
+```
+
+#### **3. Auto-Discovery + Extraction**
+```bash
+# Discover and extract all articles for user
+python mql5_extract.py discover-and-extract
+
+# For different user
+python mql5_extract.py discover-and-extract --user-id USER_ID
+
+# Save discovered URLs without extracting
+python mql5_extract.py discover-and-extract --save-urls urls.txt --dry-run
+
+# Limited extraction (testing)
+python mql5_extract.py discover-and-extract --max-articles 10
+```
+
+### **Common Options**
+```bash
+--config FILE       # Custom config file (default: config.yaml)
+--output DIR        # Override output directory
+--headless          # Force headless mode
+--no-headless       # Show browser (debugging)
+--verbose / -v      # DEBUG level logging
+--quiet / -q        # ERROR level only
+--dry-run           # Show what would be done
+```
+
+---
+
+## ✨ Key Features
+
+### **1. Retry Logic with Exponential Backoff**
+- Automatically retries failed extractions (3 attempts default)
+- Exponential backoff: 5s → 10s → 20s
+- Configurable in `config.yaml`
+
+### **2. Checkpoint System**
+```bash
+# Start extraction
+python mql5_extract.py batch urls.txt
+
+# If interrupted, resume automatically
+python mql5_extract.py batch urls.txt --resume
+
+# Checkpoint file: .extraction_checkpoint.json
+```
+
+### **3. Quality Validation**
+- Minimum word count (500 default)
+- Minimum code blocks (1 default)
+- Login popup detection
+- Fails fast on invalid content
+
+### **4. Comprehensive Logging**
+```bash
+# File logging (extraction.log)
+# Real-time console output
+# Structured with timestamps and article IDs
+
+# Adjust verbosity
+python mql5_extract.py batch urls.txt --verbose    # DEBUG
+python mql5_extract.py batch urls.txt --quiet      # ERROR only
+```
+
+### **5. Statistics Generation**
+After batch processing, `extraction_summary.json` contains:
+```json
+{
+  "summary": {
+    "total": 77,
+    "successful": 75,
+    "failed": 2,
+    "skipped": 0,
+    "duration_seconds": 450
+  },
+  "statistics": {
+    "total_words": 402341,
+    "total_images": 234,
+    "total_code_blocks": 568,
+    "unique_users": 5,
+    "users": ["29210372", "jslopes", "ssn", "m.aboud", "metaquotes"]
+  },
+  "failed_articles": [
+    {"article_id": "19626", "error": "Timeout after 3 retries"}
+  ]
+}
+```
+
+### **6. Rate Limiting**
+- 2-second delay between articles (configurable)
+- Respectful to mql5.com servers
+- Prevents rate limiting/blocking
+
+---
+
+## 🎯 Production Workflows
+
+### **Workflow 1: Extract All Articles**
+```bash
+# One command to rule them all
+python mql5_extract.py discover-and-extract
+```
+
+This will:
+1. Discover all 77 articles via browser automation
+2. Extract each article with retry logic
+3. Download all images locally
+4. Generate statistics summary
+5. Save progress checkpoint after each article
+
+### **Workflow 2: Custom User Extraction**
+```bash
+# Discover URLs for custom user
+python mql5_extract.py discover-and-extract \
+  --user-id jslopes \
+  --save-urls jslopes_urls.txt
+
+# Extract with custom config
+python mql5_extract.py batch jslopes_urls.txt \
+  --config production.yaml \
+  --output jslopes_articles/
+```
+
+### **Workflow 3: Resume Failed Run**
+```bash
+# Start extraction (fails at article 50)
+python mql5_extract.py batch urls.txt
+
+# Check logs
+tail -f extraction.log
+
+# Resume from checkpoint
+python mql5_extract.py batch urls.txt --resume
+```
+
+### **Workflow 4: Testing & Debugging**
+```bash
+# Test with 5 articles
+python mql5_extract.py discover-and-extract \
+  --max-articles 5 \
+  --no-headless \
+  --verbose
+
+# Dry run to preview
+python mql5_extract.py batch urls.txt --dry-run
+```
+
+---
+
+## 📊 Quality Verification
+
+### **Check Extraction Results**
+```bash
+# Count extracted articles
+find simple_extraction_results/ -name "article.md" | wc -l
+
+# Check MQL5 syntax highlighting
+grep -r "```mql5" simple_extraction_results/ | wc -l
+
+# Check images downloaded
+find simple_extraction_results/ -name "*.png" -o -name "*.jpg" | wc -l
+
+# View summary statistics
+cat simple_extraction_results/extraction_summary.json
+```
+
+### **Validate Individual Article**
+```bash
+# Check word count
+wc -w simple_extraction_results/29210372/article_19625/article.md
+
+# Check images
+ls simple_extraction_results/29210372/article_19625/images/
+
+# View metadata
+cat simple_extraction_results/29210372/article_19625/metadata.json
+```
+
+---
+
+## 🔑 Technical Details
+
+### **Content Extraction**
+- **Target Selector**: `div.content` for article content
+- **MQL5 Detection**: HTML `<pre class="code">` elements for 100% accuracy
+- **Image Processing**: Automatic download with descriptive filenames
+- **Link Handling**: Resolves relative URLs, fixes malformed links
+- **Formatting**: BeautifulSoup → Markdown with preserved structure
+
+### **Hierarchical Organization**
+- **Top Level**: User ID folders (e.g., `29210372/`)
+- **Second Level**: Article folders (e.g., `article_19625/`)
+- **Files**: Simplified names (`article.md`, `metadata.json`)
+- **Traceability**: Full context from folder path
+
+### **Error Recovery**
+- **Retry Logic**: 3 attempts with exponential backoff
+- **Validation**: Quality checks before saving
+- **Checkpoint**: Progress saved after each article
+- **Continue-on-error**: Batch processing doesn't stop on failures
+
+---
+
+## 📚 Data Source
+
+- **Primary Source**: https://www.mql5.com/en/users/29210372/publications
+- **Author**: Allan Munene Mutiiria (77 technical articles)
+- **Content Type**: MQL5 trading strategy implementations
+- **Total Volume**: ~400,000+ words of technical content
+- **Date Range**: Articles from 2021-2025
+
+---
+
+## 🆘 Troubleshooting
+
+### **Issue: Headless browser blocked (404 or empty page)**
+**Fixed in v1.0.0** - Anti-detection enabled by default:
+- Realistic user-agent header
+- Standard viewport (1920x1080)
+- Locale and timezone spoofing
+
+If still encountering issues:
+```bash
+# Test with visible browser (for debugging only)
+python mql5_extract.py single URL --no-headless
+```
+
+### **Issue: Extraction fails with timeout**
+```bash
+# Increase timeout in config.yaml
+extraction:
+  timeout_ms: 60000  # 60 seconds
+
+# Or use verbose logging to debug
+python mql5_extract.py single URL --verbose
+```
+
+### **Issue: Browser crashes**
+```bash
+# Run with UI to see what's happening
+python mql5_extract.py single URL --no-headless
+
+# Check system resources
+# Playwright requires ~500MB RAM per browser instance
+```
+
+### **Issue: Login popup detected**
+```bash
+# Check if articles are actually public
+# Verify URL is correct article link
+# Check validation settings in config.yaml
+```
+
+### **Issue: Resume not working**
+```bash
+# Manually load checkpoint
+cat .extraction_checkpoint.json
+
+# Clear and restart
+rm .extraction_checkpoint.json
+python mql5_extract.py batch urls.txt
+```
+
+---
+
+## 🔄 Migration from Legacy Scripts
+
+### **Old Way**
+```bash
+uvx --with playwright python browser_scraper.py
+uvx --with beautifulsoup4 --with html2text python extract_all_77_articles.py
+```
+
+### **New Way**
+```bash
+python mql5_extract.py discover-and-extract
+```
+
+**Backward Compatibility:**
+- `browser_scraper.py` still works
+- `simple_mql5_extractor.py` still works
+- Both kept for reference/testing
+
+---
+
+## 📝 Summary
+
+### **Production Features Added**
+✅ CLI interface with 3 operational modes
+✅ YAML configuration with CLI overrides
+✅ Comprehensive file + console logging
+✅ Exponential backoff retry logic
+✅ Checkpoint-based resume capability
+✅ Quality validation before saving
+✅ Batch statistics generation
+✅ Rate limiting for respectful scraping
+✅ Hierarchical user_id/article_id organization
+✅ Complete error context and reporting
+
+### **Quick Reference**
+```bash
+# Extract everything
+python mql5_extract.py discover-and-extract
+
+# Single article
+python mql5_extract.py single URL
+
+# Batch processing
+python mql5_extract.py batch urls.txt
+
+# Resume interrupted
+python mql5_extract.py batch urls.txt --resume
+
+# Help
+python mql5_extract.py --help
+python mql5_extract.py COMMAND --help
+```

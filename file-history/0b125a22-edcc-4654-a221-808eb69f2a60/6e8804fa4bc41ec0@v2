@@ -24,16 +24,57 @@
 ## Development Environment & Tools
 
 ### Primary Toolchain
-- **Python Stack**: `uv` (management), `uv run --active python -m` (execution), `hatchling` (build backend), `maturin` (Rust integration), 3.12+ - **Avoid**: pip, conda, setuptools, poetry, standalone execution
+- **Python Stack**: `uv` (management), `uv run --active python -m` (execution), `maturin` (Rust integration), 3.12+ - **Avoid**: pip, conda, standalone execution
 - **Rust Stack**: `cargo`, cross-platform compilation, `cargo nextest run`, `cargo deny check`, coexists with Python
 - **Python Packages**: Prefer `httpx`, `platformdirs`, `orjson`, `ciso8601` over `requests`, `json`, `dateutil`, `arrow`, `maya`
 - **Claude Code Tools**: `Read`, `LS`, `Glob`, `Grep` over MCP
 - **Analysis**: `Semgrep`, `ast-grep`, `ShellCheck` - **GPU**: `tensorflow-metal`, `jax`, `torch`, `cupy`
 - **PDF Processing**: `mupdf-tools` (`mutool draw -F html`) for born-digital PDFs with clean HTML/block grouping; Poppler `pdftohtml -xml` for exact coordinates or complex column layouts
 - **Finance**: `backtesting.py` ONLY, `rangebar` crate - **Prohibited**: bt, vectorbt, mlfinlab, commercial libs
-- **Indicators (when needed)**: Reference talipp pattern (github.com/nardew/talipp) for O(1) incremental updates when rolling metrics are required
+- **Technical Indicators**: Follow [talipp](https://github.com/nardew/talipp) incremental pattern - O(1) updates, no history buffers, stateless after initialization
 - **Documentation**: ALL examples must use `uv run --active python -m` format, never standalone execution
 
+
+### Technical Indicator Design Pattern (talipp-inspired)
+
+**Reference**: https://github.com/nardew/talipp - Incremental technical analysis library
+
+**Core Principles**:
+- **O(1) Incremental Updates**: Each new value computed in constant time, independent of history size
+- **No History Buffers**: Only maintain current state (e.g., previous EMA value), not entire value series
+- **Stateless After Init**: Initialization may require bootstrap (e.g., SMA seed), then pure incremental updates
+- **Industry-Standard Formulas**: Use canonical formulas (Bloomberg, TradingView compatibility)
+
+**EMA Pattern (Standard)**:
+```rust
+// Industry formula: α = 2 / (period + 1)
+const PERIOD: usize = 20;  // Short-term: 20, Medium: 50, Long: 200
+const ALPHA: f64 = 2.0 / (PERIOD as f64 + 1.0);  // ≈ 0.095 for period=20
+
+// Incremental update (O(1), no history needed)
+new_ema = ALPHA * new_value + (1.0 - ALPHA) * previous_ema
+
+// Use Option<T> for explicit initialization state
+pub struct EMATracker {
+    value: Option<FixedPoint>,  // None until initialized
+    alpha: f64,
+    period: usize,
+}
+```
+
+**Key Benefits**:
+- Efficient streaming (real-time market data processing)
+- Minimal memory footprint (no Vec/deque accumulation)
+- Composable (indicators can chain: EMA of EMA, etc.)
+- Testable (deterministic state transitions)
+
+**Anti-Patterns to Avoid**:
+- ✗ Storing full price history in Vec for recalculation
+- ✗ Hardcoded smoothing factors without period relationship
+- ✗ O(n) recalculation on each update
+- ✗ Implicit initialization (use `Option<T>` to make "not ready" explicit)
+
+---
 
 ### Mandatory Rust Code Quality Enforcement (2025 Best Practices)
 - **Zero Tolerance Policy**: All commits blocked unless passing `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`

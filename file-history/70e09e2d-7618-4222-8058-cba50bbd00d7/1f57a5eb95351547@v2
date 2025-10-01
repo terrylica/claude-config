@@ -1,0 +1,194 @@
+# Victor Hogrefre's OKX Funding Rate Arbitrage Strategy
+
+## Executive Summary
+
+**Author:** Victor Hogrefre (CBO)
+**Auditor:** Terry Li
+**Strategy Type:** Market-neutral funding rate arbitrage on OKX USDT-margined perpetuals
+**Backtest Period:** 2025-06-25 → 2025-09-27 (~94.0 days)
+**Key Results:**
+- Final Equity: 1.158546 (starting from 1.0)
+- APY (CAGR): **7,708%**
+- Sharpe Ratio: **19.48**
+
+## Strategy Architecture
+
+Victor's analysis consists of three interconnected Python scripts:
+
+### 1. `funding_arb_strat_1.py` - Portfolio Strategy Backtester (v8)
+**Purpose:** Implements and backtests the top-5 funding rate arbitrage portfolio strategy
+
+**Key Features:**
+- Top-5 selection by absolute funding rate magnitude
+- Deterministic weight allocation with min/max constraints
+- Sticky rebalancer with value-aware execution gating
+- VIP-7 fee modeling with 60% maker blend assumption
+- 8-hour rebalancing cadence (configurable to daily)
+
+### 2. `pull_funding_arb_hist.py` - Historical Data Downloader (v8)
+**Purpose:** Downloads up to 3 months of historical funding rate data from OKX API
+
+**Capabilities:**
+- Auto-detects available USDT-SWAP instruments
+- Handles OKX's 3-month API limitation
+- Computes annualized APY per funding event
+- Outputs combined CSV for backtesting
+
+### 3. `next_funding_rate.py` - Real-Time Signal Generator (v2.3)
+**Purpose:** Estimates next funding rate and generates trading signals with leverage modeling
+
+**Advanced Features:**
+- 12x leverage modeling (borrowed share = 12/13)
+- ROE (return on equity) calculations
+- Break-even analysis for positive/negative funding scenarios
+- Real-time premium-index tracking
+- 3-day realized net APY computation
+
+---
+
+## Strategy Rules (From Victor's Specification)
+
+### 1. Universe & Signal Selection
+- **Method:** Pick top 5 symbols by |fundingRate| at each snapshot
+- **Data:** OKX USDT-margined perpetuals funding rates
+
+### 2. Position Sizing (Weight Allocation)
+- **Minimum weight per symbol:** 5%
+- **Maximum weight per symbol:** 50%
+- **Constraint:** Weights sum to 100%
+- **Allocator:** Deterministic single-pass algorithm that:
+  1. Seeds each top-5 symbol with min_w (5%)
+  2. Distributes remaining weight by rank (higher |rate| gets priority)
+  3. Caps each symbol at max_w (50%)
+  4. Renormalizes to sum=1
+
+### 3. Rebalancing Cadence
+- **Default:** Every 8 hours (aligned with OKX funding settlement)
+- **Alternative:** Daily (configurable)
+
+### 4. Min-Hold Period
+- **Rule:** After any executed rebalance, hold ≥24 hours before next trade
+- **Purpose:** Prevents excessive trading and fee drag
+
+### 5. Hurdle Filter (Advantage Gate)
+- **Threshold:** Target basket must beat current basket by ≥3 bps per snapshot
+- **Calculation:** `(gross_target - gross_current) * 10,000`
+- **Purpose:** Only rebalance when meaningful edge exists
+
+### 6. Value-vs-Cost Gate (Fee-Aware Execution)
+- **Logic:**
+  1. Estimate turnover from current → target
+  2. Calculate fee drag from turnover
+  3. Execute only if: `advantage_bps >= fee_drag_bps`
+- **Prevents:** Trading when transaction costs exceed expected profit
+
+### 7. No-Trade Bands
+- **Band size:** ±5% around current weights
+- **Behavior:**
+  - If target weight is within band → keep current weight
+  - If target weight is outside band → move to target
+- **Purpose:** Reduces noise trading on minor weight adjustments
+
+### 8. Fee Model (VIP-7 with 60% Maker Blend)
+- **Spot Maker:** -0.005% (rebate)
+- **Spot Taker:** +0.020%
+- **Perp Maker:** -0.005% (rebate)
+- **Perp Taker:** +0.020%
+- **Effective fees:** Blended at 60% maker / 40% taker assumption
+- **Application:** Fees scale with turnover (both spot and perp legs)
+
+### 9. Return Calculation
+- **Per snapshot:**
+  - `gross_factor = Σ weight_i × (1 + |fundingRate_i|)` for all positions
+  - `net_factor = gross_factor × fee_factor`
+  - `equity = equity_prev × net_factor`
+- **Compounding:** Equity compounds over time through continuous rebalancing
+
+### 10. Leverage Modeling (next_funding_rate.py only)
+- **Spot leverage:** 12x
+- **Borrowed share:** 12/13 ≈ 92.31%
+- **Equity share:** 1/13 ≈ 7.69%
+- **Financing costs:**
+  - Positive funding: USDT borrow @ 4% APR or BTC external loan @ 2.5% APR
+  - Negative funding: Coin borrow per VIP-7 schedule (e.g., BTC @ 1%, ETH @ 2.5%)
+
+---
+
+## Backtesting Results (Portfolio Strategy v8)
+
+```
+Period:     2025-06-25 → 2025-09-27  (~94.0 days)
+Final eq:   1.158546  (start 1.0)
+APY (CAGR): 7708%
+Sharpe:     19.48
+```
+
+### Interpretation
+- **15.85% return in 94 days** translates to exceptionally high annualized returns
+- **Sharpe ratio of 19.48** indicates extremely high risk-adjusted returns
+- Strategy appears highly consistent during the backtest period
+
+### Key Performance Drivers
+1. **Absolute value extraction:** Capturing both positive and negative funding rates
+2. **Top-5 concentration:** Focus on highest-magnitude opportunities
+3. **Sticky rebalancing:** Minimizes unnecessary trades and fee drag
+4. **Value-aware gating:** Only trades when profit exceeds costs
+
+---
+
+## File Outputs
+
+### Portfolio Backtester
+- **CSV:** `okx_funding_arb_portfolio_v8.csv` (full snapshot history)
+- **Chart:** `okx_funding_arb_portfolio_v8.png` (equity curve visualization)
+
+### Data Downloader
+- **Per-symbol CSVs:** `okx_funding_arb_<SYMBOL>.csv`
+- **Combined CSV:** `okx_funding_arb_1y.csv` (input for backtester)
+
+### Signal Generator
+- **CSV:** `funding_abs_net.csv` (real-time signal table)
+
+---
+
+## Strategy Implementation Notes
+
+### Arbitrage Mechanics (Absolute Funding)
+For each funding event:
+- **Positive funding rate (FR > 0):**
+  - Longs pay shorts
+  - **Action:** Long spot + Short perp → collect funding
+  - **Cost:** Spot financing (margin interest or external loan)
+
+- **Negative funding rate (FR < 0):**
+  - Shorts pay longs
+  - **Action:** Short spot + Long perp → collect funding
+  - **Cost:** Coin borrow cost for shorting spot
+
+### Risk Characteristics
+- **Market-neutral:** Delta-hedged (long spot = short perp notional)
+- **Funding risk:** Risk that funding rates reverse before next rebalance
+- **Execution risk:** Slippage when entering/exiting positions
+- **Liquidation risk:** If using leverage, need sufficient margin buffer
+- **Counter-party risk:** Exchange solvency (OKX)
+
+---
+
+## Technical Dependencies
+
+### Required Packages
+- Python 3.10+
+- pandas
+- matplotlib
+- numpy
+- requests
+
+### Data Requirements
+- OKX API access (public endpoints for historical data)
+- Optional: OKX API keys for authenticated real-time data (next_funding_rate.py)
+
+---
+
+## Questions for Victor (Audit Items)
+
+See `AUDIT_REPORT.md` for detailed technical audit findings and recommendations.

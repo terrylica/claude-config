@@ -1,0 +1,757 @@
+# Dukascopy Range Bar Construction - Design Q&A Log
+**Status:** ✅ Complete - All Questions Resolved (Q1-Q9)
+**Date:** 2025-09-30
+**Purpose:** Record design decisions for polishing dukascopy-rangebar-construction.md
+
+---
+
+## Decision Log
+
+### Q1: Volume Strategy (Critical Path) ✅ DECIDED
+
+**Question:** Which volume handling approach should be canonical?
+
+**Options Presented:**
+- A) Simple liquidity sum for all instruments
+- B) Tick count as volume for all instruments
+- C) ⭐ Dual tracking (both metrics available)
+- D) Instrument-specific (no dual tracking)
+
+**Decision:** **C - Dual tracking with maximum Forex information retention**
+
+**Implications:**
+```rust
+struct DukascopyRangeBar {
+    pub base: RangeBar,
+    pub spread_stats: SpreadStats {
+        tick_count: u32,              // Always track
+        total_bid_liquidity: FixedPoint,  // Always track
+        total_ask_liquidity: FixedPoint,  // Always track
+        avg_spread: FixedPoint,
+        min_spread: FixedPoint,
+        max_spread: FixedPoint,
+    }
+}
+```
+
+**Rationale:**
+- Preserves both semantics (liquidity + activity)
+- Downstream consumers can choose appropriate metric
+- Maximizes information retention for Forex analysis
+
+---
+
+### Q2: Direction Inference Logic ✅ DECIDED
+
+**Question:** How to handle `is_buyer_maker` field for synthetic trades?
+
+**Research Findings:**
+- Binance semantics: `is_buyer_maker=true` → buyer is passive (maker), seller aggressive (taker)
+- Dukascopy provides **quote data only** (bid/ask/volumes), NOT trade data
+- No actual trade direction available for ANY instrument (Forex, Crypto, all)
+
+**Options Considered:**
+- A) Infer from bid/ask volume asymmetry: `is_buyer_maker = bid_volume > ask_volume`
+- B) Inverted logic
+- C) Spread asymmetry heuristic
+- D) ⭐ Explicit "unknown" - set to `None`
+
+**Decision:** **D - Set `is_buyer_maker = None` for all Dukascopy data**
+
+**Implications:**
+```rust
+AggTrade {
+    // ... other fields
+    is_buyer_maker: None,  // Explicit: direction unknown (quote data, not trades)
+    is_best_match: None,   // N/A for Dukascopy
+}
+```
+
+**Rationale:**
+- Honest semantics: Dukascopy = quotes, not trades
+- Forces conscious handling by downstream consumers
+- Avoids false confidence in inferred/synthetic direction
+- `Option<bool>` pattern already exists in struct
+
+---
+
+### Q3: RangeBar Structure Extension ✅ DECIDED
+
+**Question:** How to return range bars with Dukascopy-specific information?
+
+**Options Presented:**
+- A) Return standard `RangeBar` (discard spread data)
+- B) ⭐ Return wrapped structure `DukascopyRangeBar`
+- C) Add fields directly to core `RangeBar`
+
+**Decision:** **B - Wrapper pattern with `DukascopyRangeBar`**
+
+**Implications:**
+```rust
+pub struct DukascopyRangeBar {
+    pub base: RangeBar,           // Standard OHLCV + microstructure
+    pub spread_stats: SpreadStats, // Dukascopy-specific metrics
+}
+
+pub struct SpreadStats {
+    pub avg_spread: FixedPoint,
+    pub min_spread: FixedPoint,
+    pub max_spread: FixedPoint,
+    pub tick_count: u32,
+    pub total_bid_liquidity: FixedPoint,
+    pub total_ask_liquidity: FixedPoint,
+}
+```
+
+**Rationale:**
+- Zero changes to core `RangeBar` struct (maintains "zero core changes" principle)
+- Preserves all Dukascopy-specific information
+- Consumers can unwrap `.base` for standard bar access
+- Clean separation: aggTrades → RangeBar, Dukascopy → DukascopyRangeBar
+
+---
+
+## Summary of All Decisions
+
+| Aspect | Decision | Status |
+|--------|----------|--------|
+| Volume semantics | Dual tracking (liquidity + tick_count) | ✅ |
+| Direction inference | `is_buyer_maker = None` (explicit unknown) | ✅ |
+| Structure | Wrapper pattern `DukascopyRangeBar { base, spread_stats }` | ✅ |
+| Core algorithm changes | Zero (adapter pattern) | ✅ |
+| Incomplete bar handling | Implement `get_incomplete_bar()` in processor | ✅ |
+| Error handling | Module-level `DukascopyError` with `From` traits | ✅ |
+| Moving average | talipp-inspired EMA (α=2/(period+1), Option<T>) | ✅ |
+| Zero-volume filtering | Process all ticks, track zero-volume frequency | ✅ |
+| Implementation sequencing | Parallel tracks with dependency gates | ✅ |
+| Documentation structure | Keep top-down flow + executive summary + quick reference | ✅ |
+
+---
+
+## Next Steps
+- ✅ All questions resolved (Q1-Q9)
+- **Ready**: Polish `dukascopy-rangebar-construction.md` with all decisions
+- **Pending**: User review and `LGTM` signal for autonomous polishing
+
+---
+
+**Last Updated:** 2025-09-30 (Q1-Q9 complete - ready for document polishing)
+
+### Q4: Incomplete Bar Handling ✅ DECIDED
+
+**Question:** Where should partial bar state live?
+
+**Context Discovery:**
+- `RangeBarProcessor.get_incomplete_bar()` already exists (stubbed, returns `None`)
+- `StreamingProcessor` already tries to use it for final bar at stream end
+- Existing design intent: expose incomplete bars, just not yet implemented
+
+**Options Considered:**
+- A) Builder maintains shadow state (duplicate)
+- B) ⭐ Implement `get_incomplete_bar()` in core processor
+- C) No incomplete bar support
+
+**Decision:** **B - Implement processor method (completes existing design)**
+
+**Implications:**
+```rust
+// In RangeBarProcessor - IMPLEMENT existing stub
+impl RangeBarProcessor {
+    pub fn get_incomplete_bar(&self) -> Option<RangeBar> {
+        self.current_bar_state.as_ref().map(|state| state.bar.clone())
+    }
+}
+
+// In DukascopyRangeBarBuilder - wrap it with spread stats
+impl DukascopyRangeBarBuilder {
+    pub fn get_incomplete_bar(&self) -> Option<DukascopyRangeBar> {
+        self.processor.get_incomplete_bar().map(|base| {
+            DukascopyRangeBar {
+                base,
+                spread_stats: self.current_spread_stats.clone(),
+            }
+        })
+    }
+}
+```
+
+**Rationale:**
+- Single source of truth (processor owns bar state)
+- Benefits BOTH aggTrades and Dukascopy streaming
+- Completes existing feature (not adding new one)
+- Minimal implementation: expose existing internal state
+- Streaming already depends on this - currently broken (returns None)
+
+---
+
+
+### Q5: Error Handling - Unknown Instrument ✅ DECIDED
+
+**Question:** What happens when instrument isn't in config (unknown decimal factor)?
+
+**Deep Dive Analysis:**
+- Existing system already uses `Result<_, ProcessingError>` pattern
+- `process_single_trade()` returns `Result<Option<RangeBar>, ProcessingError>`
+- Integration is natural and clean
+
+**Options Considered:**
+- A) Panic/abort
+- B) Return Result::Err (requires integration analysis)
+- C) Use default decimal factor (silent corruption)
+- D) Log warning + default
+
+**Decision:** **B - Return Result with Approach 3 (Module-level error)**
+
+**Implications:**
+```rust
+// New module-level error type
+pub enum DukascopyError {
+    Conversion(ConversionError),
+    Processing(ProcessingError),
+    Network(reqwest::Error),        // Future: HTTP fetching
+    Decompression(std::io::Error),  // Future: LZMA errors
+}
+
+// Conversion-specific errors
+pub enum ConversionError {
+    UnsupportedInstrument { instrument: String },
+    InvalidDecimalFactor { instrument: String },
+}
+
+// Automatic conversion with From trait
+impl From<ProcessingError> for DukascopyError {
+    fn from(e: ProcessingError) -> Self {
+        DukascopyError::Processing(e)
+    }
+}
+
+impl From<ConversionError> for DukascopyError {
+    fn from(e: ConversionError) -> Self {
+        DukascopyError::Conversion(e)
+    }
+}
+
+// Builder signature
+impl DukascopyRangeBarBuilder {
+    pub fn process_tick(&mut self, tick: &DukascopyTick) 
+        -> Result<Option<DukascopyRangeBar>, DukascopyError> 
+    {
+        let synthetic_trade = tick_to_synthetic_trade(tick, instrument)?; // Auto-converts
+        let base_bar = self.processor.process_single_trade(synthetic_trade)?; // Auto-converts
+        Ok(base_bar.map(|base| DukascopyRangeBar { base, spread_stats }))
+    }
+}
+```
+
+**Rationale:**
+- Graceful error propagation (production-safe)
+- Clean module boundaries (Dukascopy owns its error semantics)
+- Future-proof (encompasses network, decompression errors)
+- Automatic `?` operator conversion via `From` trait
+- Clear error messages for debugging
+- Prevents silent data corruption from wrong decimal factors
+
+**Why Not Approach 2 (extend ProcessingError)?**
+- Couples Dukascopy concerns to core error type
+- Doesn't accommodate network/decompression errors naturally
+- Less modular architecture
+
+---
+
+
+### Q6: Moving Average Definition ✅ DECIDED
+
+**Question:** Which moving average type for spread tracking in real-time streaming?
+
+**Research:** Studied talipp library (github.com/nardew/talipp)
+
+**Key Insights:**
+- Industry-standard EMA: `α = 2 / (period + 1)` not hardcoded
+- O(1) incremental updates: only need previous EMA value
+- Bootstrap pattern: SMA of first N values (optional)
+- Explicit initialization with `Option<T>`
+
+**Options Considered:**
+- A) Simple Moving Average (needs tick count state)
+- B) EMA with hardcoded α=0.1
+- C) Volume-weighted average (complex)
+
+**Decision:** **talipp-inspired EMA with Option 3 (No Bootstrap)**
+
+**Implications:**
+```rust
+pub struct EMATracker {
+    value: Option<FixedPoint>,  // None until initialized
+    period: usize,               // e.g., 20 for short-term
+    alpha: f64,                  // 2/(period+1)
+    tick_count: u32,
+}
+
+impl EMATracker {
+    pub fn new(period: usize) -> Self {
+        Self {
+            value: None,
+            period,
+            alpha: 2.0 / (period as f64 + 1.0),
+            tick_count: 0,
+        }
+    }
+    
+    pub fn update(&mut self, new_value: FixedPoint) {
+        self.tick_count += 1;
+        
+        match self.value {
+            None if self.tick_count >= self.period as u32 => {
+                self.value = Some(new_value);  // Initialize on Nth tick
+            }
+            Some(prev) => {
+                // Incremental EMA (O(1))
+                let alpha_fp = FixedPoint::from_f64(self.alpha);
+                self.value = Some(
+                    alpha_fp * new_value + (FixedPoint::ONE - alpha_fp) * prev
+                );
+            }
+            _ => {} // Accumulating ticks
+        }
+    }
+}
+
+// Usage in SpreadStats:
+pub struct SpreadStats {
+    pub avg_spread: EMATracker,         // Period 20 EMA
+    pub avg_bid_liquidity: EMATracker,
+    pub avg_ask_liquidity: EMATracker,
+    pub min_spread: FixedPoint,
+    pub max_spread: FixedPoint,
+    pub tick_count: u32,
+    pub total_bid_liquidity: FixedPoint,
+    pub total_ask_liquidity: FixedPoint,
+}
+```
+
+**Rationale:**
+- Industry-standard formula (matches Bloomberg/TradingView)
+- O(1) performance (stateless after initialization)
+- No buffer allocation (minimal memory)
+- Explicit initialization with Option<FixedPoint>
+- Reusable EMATracker for all metrics
+- Period=20 recommended for intra-bar spread tracking
+
+**User Memory Update:**
+- Added talipp pattern to ~/.claude/CLAUDE.md for future reference
+- Line: "Follow talipp pattern - O(1) incremental updates, α=2/(period+1), Option<T> initialization, stateless after bootstrap"
+
+---
+
+
+### Q7: Zero-Volume Tick Handling ✅ DECIDED
+
+**Question:** Should Dukascopy zero-volume ticks be filtered or processed?
+
+**Original Assumption:** Zero-volume ticks should be filtered (similar to Binance aggTrades)
+
+**User Insight Challenge:** "Why do we need to filter out zero volume data? I don't think it matters because even when it's zero volume, as long as we have new tick coming in, then... perhaps we should be paying a lot of attention to it to see if we ever encounter such data from the data stream."
+
+**Key Realization:**
+- Zero-volume ticks still represent market activity (quote updates)
+- Tick arrival itself is informationally significant
+- Quote updates without volume indicate market maker repositioning
+- Filtering discards potentially valuable market microstructure data
+
+**Decision:** **Process all ticks regardless of volume (no filtering)**
+
+**Implications:**
+```rust
+// In DukascopyRangeBarBuilder - no volume filtering
+impl DukascopyRangeBarBuilder {
+    pub fn process_tick(&mut self, tick: &DukascopyTick)
+        -> Result<Option<DukascopyRangeBar>, DukascopyError>
+    {
+        // Process ALL ticks - no volume check
+        let synthetic_trade = tick_to_synthetic_trade(tick, instrument)?;
+        let base_bar = self.processor.process_single_trade(synthetic_trade)?;
+
+        // Track zero-volume ticks as metric
+        if tick.bid_volume == 0.0 && tick.ask_volume == 0.0 {
+            self.spread_stats.zero_volume_tick_count += 1;
+        }
+
+        Ok(base_bar.map(|base| DukascopyRangeBar { base, spread_stats }))
+    }
+}
+
+// Enhanced SpreadStats to track zero-volume frequency
+pub struct SpreadStats {
+    pub avg_spread: EMATracker,
+    pub avg_bid_liquidity: EMATracker,
+    pub avg_ask_liquidity: EMATracker,
+    pub min_spread: FixedPoint,
+    pub max_spread: FixedPoint,
+    pub tick_count: u32,
+    pub zero_volume_tick_count: u32,  // NEW: track frequency
+    pub total_bid_liquidity: FixedPoint,
+    pub total_ask_liquidity: FixedPoint,
+}
+```
+
+**Rationale:**
+- Tick arrival = market activity, regardless of volume
+- Zero-volume ticks reveal market maker quote adjustments
+- Filtering loses microstructure information
+- Tracking frequency provides valuable diagnostic metric
+- Aligns with Forex market reality (quotes update frequently)
+
+**Semantic Difference from aggTrades:**
+- aggTrades = actual executed trades (always have volume by definition)
+- Dukascopy ticks = market maker quotes (volume optional)
+- Zero-volume tick = quote repositioning without matched trade
+
+---
+
+
+### Q8: Implementation Sequencing ✅ DECIDED
+
+**Question:** Should implementation follow strict phased approach or allow parallel work?
+
+**Context:**
+- Original design proposed Phase 1 (core adapter) → validate → Phase 2 (enhancements)
+- All core decisions now made (Q1-Q7)
+- Dependencies clearly identified
+
+**Options Considered:**
+- A) Strict sequential: Phase 1 complete → validate → Phase 2 start
+- B) Parallel work with dependency tracking (core + tests simultaneously)
+- C) Flexible: implement features as dependencies resolve
+
+**Decision:** **B - Parallel work with dependency tracking**
+
+**Implications:**
+
+**Can Start Immediately (Parallel Track 1 - Core):**
+```rust
+// 1. DukascopyTick struct + binary parser
+// 2. InstrumentConfig + decimal factor lookup
+// 3. tick_to_synthetic_trade() conversion
+// 4. DukascopyError enum + From traits
+// 5. Implement RangeBarProcessor::get_incomplete_bar()
+```
+
+**Can Start Immediately (Parallel Track 2 - Support):**
+```rust
+// 1. EMATracker struct (reusable helper)
+// 2. SpreadStats struct definition
+// 3. DukascopyRangeBar wrapper struct
+// 4. Unit tests for EMATracker
+```
+
+**Sequential Dependencies:**
+```
+DukascopyRangeBarBuilder depends on:
+  ✓ tick_to_synthetic_trade()  (Track 1)
+  ✓ DukascopyError             (Track 1)
+  ✓ SpreadStats                (Track 2)
+  ✓ DukascopyRangeBar          (Track 2)
+```
+
+**Rationale:**
+- Core and support structures are independent
+- Tests can be written alongside implementation
+- Faster delivery (parallel work streams)
+- Clear dependency gates prevent integration issues
+- Both tracks converge at builder implementation
+
+**Implementation Order:**
+1. **Week 1**: Core conversion logic + EMATracker + tests
+2. **Week 2**: Builder integration + SpreadStats tracking
+3. **Week 3**: Validation suite + documentation
+4. **Week 4**: Integration tests + performance benchmarks
+
+---
+
+
+### Q9: Documentation Structure ✅ DECIDED
+
+**Question:** Should design document maintain current flow or reorganize for different audiences?
+
+**Current Structure:**
+1. Problem Statement (data structure mismatch)
+2. Adapter Pattern (architectural approach)
+3. Mid-Price Conversion (technical details)
+4. Volume Semantics (dual tracking)
+5. Implementation Details (code structure)
+6. Validation Strategy (testing)
+
+**Options Considered:**
+- A) Keep current top-down flow (problem → solution → implementation)
+- B) Reorganize to Quick Start → Deep Dive → Advanced Topics
+- C) Split into multiple documents (architecture, implementation, API)
+
+**Decision:** **A - Keep current top-down flow (with enhancement)**
+
+**Enhancement Applied:**
+```markdown
+# NEW: Executive Summary section at top
+## Executive Summary (2-3 paragraphs)
+- Core challenge: Dukascopy provides quotes, not trades
+- Solution: Adapter pattern with mid-price conversion
+- Key insight: Preserve all Forex-specific information (spread stats)
+- Implementation: Zero core changes, wrapper pattern
+
+[Rest of document maintains current structure]
+
+# NEW: Quick Reference section before Implementation Details
+## Quick Reference
+- Conversion: mid_price = (bid + ask) / 2
+- Volume: dual tracking (liquidity + tick_count)
+- Direction: is_buyer_maker = None
+- Structure: DukascopyRangeBar { base, spread_stats }
+- Errors: DukascopyError with From traits
+```
+
+**Rationale:**
+- Current flow is logical and comprehensive
+- Adding executive summary helps busy readers
+- Quick reference provides implementation cheat sheet
+- Avoids complexity of multi-document maintenance
+- Single source of truth for design decisions
+
+**Document Sections (Final):**
+1. Executive Summary (NEW)
+2. Problem Statement
+3. Architectural Approach (Adapter Pattern)
+4. Technical Details (mid-price, volume, direction)
+5. Quick Reference (NEW)
+6. Implementation Structure
+7. Validation Strategy
+8. Phase Planning
+
+---
+
+
+### Q10: Buy/Sell Segregation for Dukascopy ✅ DECIDED
+
+**Question:** How to handle buy/sell volume segregation when trade direction is unknown?
+
+**Context Discovery:**
+- RangeBar tracks `buy_volume`/`sell_volume` separately for order flow analysis
+- Segregation requires `is_buyer_maker` boolean to classify trades
+- Q2 decided: Dukascopy should use `is_buyer_maker = None` (explicit unknown)
+- But AggTrade uses `bool` (not `Option<bool>`) throughout codebase
+
+**Gap Analysis:**
+- Changing to `Option<bool>` = BREAKING CHANGE to core struct
+- Affects ~200 lines across types.rs (new, update_with_trade, tests)
+- Buy/sell segregation logic requires boolean decision
+
+**Options Considered:**
+- A) Change AggTrade to `is_buyer_maker: Option<bool>` (breaking change)
+- B) Use `is_buyer_maker = false` as default (lose explicit unknown semantics)
+- C) Add `unknown_direction_volume` field to RangeBar (new field)
+- D) ⭐ Don't track buy/sell segregation for Dukascopy at all
+
+**Decision:** **D - No buy/sell segregation for Dukascopy data**
+
+**Implications:**
+```rust
+// In tick_to_synthetic_trade()
+AggTrade {
+    // ... other fields
+    is_buyer_maker: false,  // Arbitrary default (not used)
+    // Volume goes to RangeBar.volume, but buy_volume/sell_volume stay at 0
+}
+
+// In DukascopyRangeBar
+pub struct DukascopyRangeBar {
+    pub base: RangeBar {
+        volume: FixedPoint,        // Total (bid_vol + ask_vol)
+        buy_volume: FixedPoint(0), // Not tracked (unknown direction)
+        sell_volume: FixedPoint(0), // Not tracked (unknown direction)
+        // ... other fields
+    },
+    pub spread_stats: SpreadStats {
+        // Dukascopy-specific metrics capture what we CAN measure:
+        total_bid_liquidity: FixedPoint,  // Available at bid
+        total_ask_liquidity: FixedPoint,  // Available at ask
+        // ... other fields
+    }
+}
+```
+
+**Rationale:**
+- Semantic honesty: Don't pretend to know trade direction when we don't
+- aggTrades = real trades → full microstructure (buy/sell segregation)
+- Dukascopy = quotes → no trade direction → no segregation
+- SpreadStats captures what we CAN measure (bid/ask liquidity asymmetry)
+- Zero breaking changes to core AggTrade struct
+- Clean separation of data source semantics
+
+**What Goes in RangeBar.volume?**
+- For Dukascopy: `volume = total_bid_liquidity + total_ask_liquidity`
+- buy_volume and sell_volume both stay at FixedPoint(0)
+- Downstream consumers see volume (for activity tracking) but no directional flow
+
+**Trade Count Handling:**
+- `individual_trade_count` = tick_count (each quote = 1 "trade")
+- `buy_trade_count` = 0 (unknown direction)
+- `sell_trade_count` = 0 (unknown direction)
+
+**Note:** This decision resolves GAP-1 and GAP-2 from integration analysis.
+
+---
+
+
+### Q11: RangeBar.volume Field Value ✅ DECIDED (Implicit from Q10)
+
+**Question:** With dual tracking (Q1), what single value goes into RangeBar.volume?
+
+**Resolution:** Q10 decision answers this:
+- `RangeBar.volume = total_bid_liquidity + total_ask_liquidity`
+- Represents total available liquidity aggregated across all ticks in the bar
+- Semantic meaning: "How much liquidity was offered during this price movement"
+
+**Implications:**
+```rust
+// In tick_to_synthetic_trade()
+let total_liquidity = tick.ask_volume + tick.bid_volume;
+
+AggTrade {
+    volume: FixedPoint::from_f64(total_liquidity),
+    // This flows through to RangeBar.volume
+}
+
+// RangeBar accumulates this across all ticks
+self.volume += trade.volume;  // Sum of all liquidity seen
+```
+
+**Rationale:**
+- Single value for compatibility with existing RangeBar API
+- SpreadStats tracks granular metrics (bid vs ask separately)
+- Consumers can use `.base.volume` for total or `.spread_stats.total_bid_liquidity` for specifics
+
+**Note:** This decision resolves GAP-2 from integration analysis.
+
+---
+
+
+### Q12: Mid-Price Edge Case Validation ✅ DECIDED
+
+**Question:** How to handle edge cases in mid-price calculation?
+
+**Edge Cases Identified:**
+1. `bid = 0.0` → mid_price = ask/2 (WRONG)
+2. `ask = 0.0` → mid_price = bid/2 (WRONG)
+3. `bid > ask` → crossed market (data corruption)
+4. `spread > 10%` → stale quote (outlier)
+
+**Real-World Occurrence:**
+- Market open: First tick may have bid=0 or ask=0
+- Network issues: Stale quotes with inverted bid/ask
+- Flash crashes: Temporary crossed markets
+
+**Options Considered:**
+- A) No validation (trust Dukascopy data quality)
+- B) Validate and skip invalid ticks
+- C) Validate and return Result::Err
+- D) ⭐ Validate with configurable strictness
+
+**Decision:** **D - Validate with configurable strictness levels**
+
+**Implications:**
+```rust
+pub enum ValidationStrictness {
+    Permissive,  // Warn but process (log outliers)
+    Strict,      // Error on invalid ticks
+    Paranoid,    // Error on suspicious patterns (spread > 1%, etc.)
+}
+
+pub fn validate_tick(
+    tick: &DukascopyTick,
+    strictness: ValidationStrictness,
+) -> Result<(), ConversionError> {
+    // Critical checks (all levels)
+    if tick.bid <= 0.0 {
+        return Err(ConversionError::InvalidBid { bid: tick.bid });
+    }
+    if tick.ask <= 0.0 {
+        return Err(ConversionError::InvalidAsk { ask: tick.ask });
+    }
+    if tick.bid > tick.ask {
+        return Err(ConversionError::CrossedMarket {
+            bid: tick.bid,
+            ask: tick.ask
+        });
+    }
+
+    // Strictness-dependent checks
+    match strictness {
+        ValidationStrictness::Permissive => Ok(()),
+        ValidationStrictness::Strict => {
+            let spread_pct = (tick.ask - tick.bid) / tick.bid * 100.0;
+            if spread_pct > 10.0 {
+                return Err(ConversionError::ExcessiveSpread {
+                    spread_pct
+                });
+            }
+            Ok(())
+        }
+        ValidationStrictness::Paranoid => {
+            let spread_pct = (tick.ask - tick.bid) / tick.bid * 100.0;
+            if spread_pct > 1.0 {
+                return Err(ConversionError::SuspiciousSpread {
+                    spread_pct
+                });
+            }
+            // Additional checks: reasonable price ranges, etc.
+            Ok(())
+        }
+    }
+}
+
+// In DukascopyRangeBarBuilder
+pub struct DukascopyRangeBarBuilder {
+    processor: RangeBarProcessor,
+    tick_counter: i64,
+    validation_strictness: ValidationStrictness,  // Configurable
+}
+
+impl DukascopyRangeBarBuilder {
+    pub fn process_tick(&mut self, tick: &DukascopyTick)
+        -> Result<Option<DukascopyRangeBar>, DukascopyError>
+    {
+        // Validate first
+        validate_tick(tick, self.validation_strictness)?;
+
+        // Calculate mid-price (guaranteed valid now)
+        let mid_price = (tick.ask + tick.bid) / 2.0;
+
+        // Continue processing...
+    }
+}
+```
+
+**Enhanced ConversionError:**
+```rust
+pub enum ConversionError {
+    UnsupportedInstrument { instrument: String },
+    InvalidDecimalFactor { instrument: String },
+    InvalidBid { bid: f64 },
+    InvalidAsk { ask: f64 },
+    CrossedMarket { bid: f64, ask: f64 },
+    ExcessiveSpread { spread_pct: f64 },
+    SuspiciousSpread { spread_pct: f64 },
+}
+```
+
+**Rationale:**
+- Permissive: Production use (trust Dukascopy quality)
+- Strict: Development/testing (catch obvious issues)
+- Paranoid: Data quality audits (flag all anomalies)
+- Configurable at builder construction time
+- Clear error messages for debugging
+
+**Default Recommendation:** `ValidationStrictness::Strict` for production
+
+**Note:** This decision resolves GAP-3 from integration analysis.
+
+---
+

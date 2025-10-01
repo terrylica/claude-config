@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""
+Download OKX Funding Rate Historical Data from Monthly Folders (All Days)
+
+Discovery: Monthly folder contains daily files for ALL dates!
+URL Format: https://www.okx.com/cdn/okex/traderecords/swaprate/monthly/{YYYYMM}/allswaprate-swaprate-{YYYY-MM-DD}.zip
+
+Much faster: ~730 files vs 43,800 files (one file per day, all symbols included)
+"""
+
+import requests
+import pandas as pd
+import zipfile
+import io
+from datetime import datetime, timedelta
+from pathlib import Path
+import chardet
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Configuration
+BASE_URL = "https://www.okx.com/cdn/okex/traderecords/swaprate/monthly"
+START_DATE = "2023-10-01"
+END_DATE = "2025-10-01"
+
+# Target symbols (USDT perpetuals only)
+TARGET_SYMBOLS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT", "MATIC", "LTC",
+    "AVAX", "SHIB", "LINK", "UNI", "ATOM", "ETC", "FIL", "AAVE", "ALGO", "NEAR",
+    "APE", "SNX", "SAND", "MANA", "GALA", "AXS", "THETA", "EGLD", "XTZ", "FTM",
+    "RUNE", "1INCH", "ENJ", "BAT", "ZRX", "COMP", "MKR", "SUSHI", "CRV", "YFI",
+    "STX", "INJ", "AR", "FLOW", "ICP", "EOS", "XLM", "VET", "TRX",
+    "LDO", "ARB", "OP", "PEPE", "WLD", "SUI", "SEI", "TON", "BONK", "ORDI",
+]
+
+MAX_WORKERS = 20
+
+
+def generate_date_range(start: str, end: str):
+    """Generate all dates in range."""
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+
+    current = start_dt
+    while current <= end_dt:
+        yield current
+        current += timedelta(days=1)
+
+
+def build_url(date: datetime) -> tuple[str, str]:
+    """
+    Build daily URL in monthly folder.
+
+    Returns:
+        (url, date_str)
+    """
+    # Folder uses YYYYMM format
+    folder = date.strftime("%Y%m")
+
+    # File uses YYYY-MM-DD format
+    file_date = date.strftime("%Y-%m-%d")
+
+    url = f"{BASE_URL}/{folder}/allswaprate-swaprate-{file_date}.zip"
+
+    return url, file_date
+
+
+def download_and_parse_day(url: str, date_str: str, target_symbols: set) -> list:
+    """
+    Download daily ZIP, extract CSV, parse funding rates for target symbols.
+
+    Returns:
+        List of records: [{symbol, ts, funding_time, fundingRate}, ...]
+    """
+    try:
+        # Download ZIP
+        response = requests.get(url, timeout=30)
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+
+        # Extract CSV from ZIP
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            csv_filename = zf.namelist()[0]
+            csv_data = zf.read(csv_filename)
+
+        # Detect encoding (CSV has Chinese headers)
+        encoding_result = chardet.detect(csv_data)
+        encoding = encoding_result['encoding'] or 'utf-8'
+
+        # Parse CSV
+        df = pd.read_csv(
+            io.BytesIO(csv_data),
+            encoding=encoding,
+            on_bad_lines='skip'
+        )
+
+        # Filter to USDT-SWAP symbols
+        df = df[df.iloc[:, 0].str.contains('-USDT-SWAP', na=False)]
+
+        # Extract symbol from instrument_name (first column)
+        df['symbol'] = df.iloc[:, 0].str.replace('-USDT-SWAP', '')
+
+        # Filter to target symbols
+        df = df[df['symbol'].isin(target_symbols)]
+
+        if df.empty:
+            return []
+
+        # Extract columns
+        records = []
+        for _, row in df.iterrows():
+            try:
+                # real_funding_rate (4th column, 0-indexed = 3)
+                # funding_time (5th column, 0-indexed = 4)
+                rate = float(row.iloc[3])
+                ts = int(row.iloc[4])
+                symbol = row['symbol']
+
+                records.append({
+                    'symbol': symbol,
+                    'ts': ts,
+                    'funding_time': datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S"),
+                    'fundingRate': rate,
+                })
+            except (ValueError, KeyError, IndexError):
+                continue
+
+        return records
+
+    except Exception:
+        return []
+
+
+def download_historical_data(start_date: str, end_date: str, symbols: list) -> pd.DataFrame:
+    """
+    Download historical funding rate data from daily files in monthly folders.
+
+    Returns:
+        DataFrame with columns: symbol, ts, funding_time, fundingRate
+    """
+    print("=" * 80)
+    print("OKX Monthly Folder - All Days Downloader")
+    print("=" * 80)
+    print(f"Date range: {start_date} → {end_date}")
+    print(f"Target symbols: {len(symbols)}")
+
+    # Generate date list
+    dates = list(generate_date_range(start_date, end_date))
+    print(f"Days: {len(dates)}")
+    print(f"Workers: {MAX_WORKERS}")
+    print("=" * 80 + "\n")
+
+    # Download in parallel
+    all_records = []
+    target_symbols_set = set(symbols)
+    completed = 0
+    failed = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {}
+        for date in dates:
+            url, date_str = build_url(date)
+            future = executor.submit(download_and_parse_day, url, date_str, target_symbols_set)
+            futures[future] = date_str
+
+        for future in as_completed(futures):
+            date_str = futures[future]
+            try:
+                records = future.result()
+                if records:
+                    all_records.extend(records)
+                    completed += 1
+                else:
+                    failed += 1
+
+                # Progress every 50 downloads
+                if (completed + failed) % 50 == 0:
+                    print(f"  Progress: {completed}/{len(dates)} "
+                          f"({len(all_records):,} records)")
+
+            except Exception:
+                failed += 1
+
+    print(f"\n{'='*80}")
+    print(f"Download complete!")
+    print(f"  Successful: {completed:,}")
+    print(f"  Failed/Not Found: {failed:,}")
+    print(f"  Total records: {len(all_records):,}")
+    print(f"{'='*80}\n")
+
+    # Convert to DataFrame
+    if not all_records:
+        print("❌ No data retrieved")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_records)
+
+    # Remove duplicates and sort
+    df = df.drop_duplicates(subset=['symbol', 'ts'])
+    df = df.sort_values(['symbol', 'ts']).reset_index(drop=True)
+
+    return df
+
+
+def main():
+    """Main execution."""
+    output_dir = Path(__file__).parent.parent / "data"
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Download data
+    df = download_historical_data(START_DATE, END_DATE, TARGET_SYMBOLS)
+
+    if df.empty:
+        print("❌ No data to analyze")
+        return
+
+    output_path = output_dir / "okx_funding_2year_daily.csv"
+    df.to_csv(output_path, index=False)
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("DATASET SUMMARY")
+    print(f"{'='*80}")
+    print(f"Total records:  {len(df):,}")
+    print(f"Symbols:        {df['symbol'].nunique()}")
+    print(f"Date range:     {df['funding_time'].min()} → {df['funding_time'].max()}")
+
+    # Expected records per symbol
+    dates_count = (datetime.strptime(END_DATE, "%Y-%m-%d") -
+                   datetime.strptime(START_DATE, "%Y-%m-%d")).days
+    expected_per_symbol = dates_count * 3  # 3 settlements per day
+
+    print(f"\nExpected records per symbol: ~{expected_per_symbol}")
+
+    print(f"\nTop symbols by record count:")
+    symbol_counts = df.groupby('symbol').size().sort_values(ascending=False)
+    for sym, count in symbol_counts.head(10).items():
+        print(f"  {sym:10s}: {count:,} records")
+
+    print(f"\nOutput file:    {output_path}")
+    print(f"File size:      {output_path.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"{'='*80}\n")
+
+    # Validation
+    print("DATA VALIDATION:")
+    print(f"  ✓ Unique timestamps: {df['ts'].nunique():,}")
+    print(f"  ✓ Rate range: {df['fundingRate'].min():.6f} to {df['fundingRate'].max():.6f}")
+    print(f"  ✓ Missing values: {df['fundingRate'].isna().sum()}")
+    print(f"  ✓ Duplicates: {df.duplicated(subset=['symbol', 'ts']).sum()}")
+
+    # Coverage analysis
+    print(f"\n  Coverage by symbol:")
+    for sym, count in symbol_counts.head(5).items():
+        coverage = (count / expected_per_symbol) * 100
+        print(f"    {sym}: {coverage:.1f}% ({count}/{expected_per_symbol})")
+
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

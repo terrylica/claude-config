@@ -1,0 +1,230 @@
+"""
+URL discovery for MQL5 articles using browser automation.
+
+Enhanced version of browser_scraper.py with:
+- Configurable user ID
+- Better error handling and retries
+- URL validation
+- Multiple output formats
+"""
+
+import asyncio
+import re
+from typing import List, Optional
+from pathlib import Path
+
+from playwright.async_api import async_playwright
+
+from .logger import get_logger
+from .config_manager import Config
+
+logger = get_logger(__name__)
+
+
+class DiscoveryError(Exception):
+    """Exception for URL discovery failures."""
+    pass
+
+
+class URLDiscovery:
+    """
+    Discover MQL5 article URLs via browser automation.
+
+    Handles the JavaScript-based "more" link that loads additional articles.
+    """
+
+    def __init__(self, config: Config):
+        """
+        Initialize URL discovery with configuration.
+
+        Args:
+            config: Configuration object
+        """
+        self.config = config
+        logger.info("Initialized URLDiscovery", extra={
+            "default_user_id": config.discovery.default_user_id
+        })
+
+    async def discover_articles(self, user_id: Optional[str] = None) -> List[str]:
+        """
+        Discover all article URLs for a given user.
+
+        Args:
+            user_id: MQL5 user ID (defaults to config value)
+
+        Returns:
+            List of article URLs
+
+        Raises:
+            DiscoveryError: If discovery fails
+        """
+        user_id = user_id or self.config.discovery.default_user_id
+        url = f"https://www.mql5.com/en/users/{user_id}/publications"
+
+        logger.info(f"Discovering articles for user {user_id}", extra={"url": url})
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=self.config.extraction.headless)
+                page = await browser.new_page()
+
+                # Navigate to publications page
+                logger.debug(f"Navigating to {url}")
+                await page.goto(url, timeout=self.config.extraction.timeout_ms)
+                await page.wait_for_timeout(3000)
+
+                # Try to click "more" link to load additional articles
+                try:
+                    logger.debug("Looking for 'more' link...")
+                    more_link = await page.query_selector('a:has-text("more")')
+
+                    if more_link:
+                        logger.debug("Found 'more' link, clicking...")
+                        await more_link.click()
+                        await page.wait_for_timeout(5000)  # Wait for content to load
+                        logger.debug("Additional content loaded")
+                    else:
+                        logger.debug("No 'more' link found - all articles visible")
+
+                except Exception as e:
+                    logger.warning(f"Failed to click 'more' link: {e}")
+                    # Continue anyway - some articles may still be visible
+
+                # Extract all article URLs
+                logger.debug("Extracting article URLs...")
+                article_links = await page.query_selector_all('a[href*="/en/articles/"]')
+
+                urls = []
+                for link in article_links:
+                    href = await link.get_attribute('href')
+                    if href and '/en/articles/' in href:
+                        # Convert relative URLs to absolute
+                        if href.startswith('/'):
+                            href = f"https://www.mql5.com{href}"
+                        urls.append(href)
+
+                await browser.close()
+
+                # Clean and validate URLs
+                urls = self._process_urls(urls)
+
+                logger.info(f"Discovered {len(urls)} articles", extra={
+                    "user_id": user_id,
+                    "url_count": len(urls)
+                })
+
+                return urls
+
+        except Exception as e:
+            logger.error(f"Discovery failed: {e}", exc_info=True)
+            raise DiscoveryError(f"Failed to discover articles for user {user_id}: {e}")
+
+    def _process_urls(self, urls: List[str]) -> List[str]:
+        """
+        Clean, validate, and sort URLs.
+
+        Args:
+            urls: Raw list of URLs
+
+        Returns:
+            Processed list of unique, valid, sorted URLs
+        """
+        # Remove duplicates
+        unique_urls = list(set(urls))
+
+        # Validate URLs
+        valid_urls = []
+        for url in unique_urls:
+            if self._is_valid_article_url(url):
+                valid_urls.append(url)
+            else:
+                logger.warning(f"Skipping invalid URL: {url}")
+
+        # Sort by article ID (descending - newest first)
+        valid_urls.sort(
+            key=lambda x: int(re.search(r'/articles/(\d+)', x).group(1)) if re.search(r'/articles/(\d+)', x) else 0,
+            reverse=True
+        )
+
+        logger.debug(f"Processed {len(urls)} raw URLs to {len(valid_urls)} valid URLs")
+
+        return valid_urls
+
+    def _is_valid_article_url(self, url: str) -> bool:
+        """
+        Validate article URL format.
+
+        Args:
+            url: URL to validate
+
+        Returns:
+            True if valid article URL
+        """
+        # Must be HTTPS
+        if not url.startswith('https://'):
+            return False
+
+        # Must be from mql5.com
+        if 'mql5.com' not in url:
+            return False
+
+        # Must have article ID
+        if not re.search(r'/articles/(\d+)', url):
+            return False
+
+        # Should not have fragments or unusual query params
+        if '#' in url or '?' in url:
+            # Allow utm_source and similar tracking params
+            if not re.search(r'\?(utm_|ref=)', url):
+                return False
+
+        return True
+
+    async def save_urls(self, urls: List[str], output_file: str):
+        """
+        Save discovered URLs to file.
+
+        Args:
+            urls: List of URLs
+            output_file: Output file path
+        """
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, 'w') as f:
+            for url in urls:
+                f.write(f"{url}\n")
+
+        logger.info(f"Saved {len(urls)} URLs to {output_file}")
+
+    def load_urls(self, input_file: str) -> List[str]:
+        """
+        Load URLs from file.
+
+        Args:
+            input_file: Input file path
+
+        Returns:
+            List of URLs
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+        """
+        input_path = Path(input_file)
+
+        if not input_path.exists():
+            raise FileNotFoundError(f"URL file not found: {input_file}")
+
+        urls = []
+        with open(input_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith('#'):
+                    # Handle numbered format: "1→https://..."
+                    if '→' in line:
+                        line = line.split('→', 1)[1]
+                    urls.append(line)
+
+        logger.info(f"Loaded {len(urls)} URLs from {input_file}")
+        return urls

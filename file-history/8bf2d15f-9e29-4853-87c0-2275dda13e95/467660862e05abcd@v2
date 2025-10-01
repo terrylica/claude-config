@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""
+OKX Funding Arbitrage — CORRECTED Portfolio Strategy (No Look-Ahead Bias)
+
+This is a CORRECTED version of Victor's backtester that eliminates temporal bias:
+- Uses T-1 rates for portfolio selection (realistic information set)
+- Applies T rates for returns (what actually happened)
+- Shows true performance without look-ahead
+
+Key Differences from Victor's Version:
+1. Selection uses PREVIOUS period rates (T-1)
+2. Returns use CURRENT period rates (T) - what you actually earn
+3. Added skip_first=True to avoid undefined T-1 on first period
+
+Author: Terry Li (Audit/Correction)
+Based on: Victor Hogrefre's funding_arb_strat_1.py (v8)
+Date: 2025-09-30
+
+Usage:
+    uv run --with pandas,matplotlib python funding_arb_strat_corrected.py
+"""
+
+from collections import defaultdict
+from datetime import timedelta
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+# =================== Configuration =================== #
+CSV_PATH = Path(__file__).parent.parent / "data" / "okx_funding_arb_1y.csv"
+OUT_CSV  = Path(__file__).parent / "okx_funding_arb_corrected_results.csv"
+OUT_PNG  = Path(__file__).parent / "okx_funding_arb_corrected_chart.png"
+INITIAL_EQUITY = 1.0
+START_DATE = None
+END_DATE   = None
+
+# VIP-7 fee schedule (same as Victor's)
+SPOT_MAKER = -0.00005
+SPOT_TAKER =  0.00020
+PERP_MAKER = -0.00005
+PERP_TAKER =  0.00020
+MAKER_RATIO = 0.60
+
+# Portfolio rules (same as Victor's)
+TOP_K = 5
+MAX_W = 0.50
+MIN_W = 0.05
+REBALANCE = "8h"
+MIN_HOLD_HOURS = 24.0
+HURDLE_BPS = 3.0
+BAND = 0.05
+
+PROGRESS_EVERY = 200
+
+# =============================================================== #
+
+def load_data(csv_path: str) -> pd.DataFrame:
+    """Load funding rate data from CSV."""
+    df = pd.read_csv(csv_path)
+    need = {"symbol", "funding_time", "fundingRate"}
+    miss = need - set(df.columns)
+    if miss:
+        raise ValueError(f"Missing columns: {sorted(miss)}")
+    df["funding_time"] = pd.to_datetime(df["funding_time"], utc=True, errors="coerce")
+    df = df.dropna(subset=["funding_time", "fundingRate"]).copy()
+    df["fundingRate"] = pd.to_numeric(df["fundingRate"], errors="coerce")
+    df = df.dropna(subset=["fundingRate"]).copy()
+    df = df.sort_values(["funding_time", "symbol"]).reset_index(drop=True)
+    return df
+
+
+def filter_window(df: pd.DataFrame, start: str | None, end: str | None) -> pd.DataFrame:
+    """Filter data by date range."""
+    if start:
+        df = df[df["funding_time"] >= pd.Timestamp(start, tz="UTC")]
+    if end:
+        df = df[df["funding_time"] <= pd.Timestamp(end, tz="UTC")]
+    return df.reset_index(drop=True)
+
+
+def blended_fees():
+    """Calculate effective fees with maker/taker blend."""
+    spot_eff = MAKER_RATIO * SPOT_MAKER + (1 - MAKER_RATIO) * SPOT_TAKER
+    perp_eff = MAKER_RATIO * PERP_MAKER + (1 - MAKER_RATIO) * PERP_TAKER
+    return float(spot_eff), float(perp_eff)
+
+
+def fee_factor_for_turnover(turnover: float) -> float:
+    """Calculate fee drag from portfolio turnover."""
+    spot_eff, perp_eff = blended_fees()
+    turn_leg = float(np.clip(turnover, 0.0, 1.0))
+    spot_factor = (1 - spot_eff) ** (2 * turn_leg)
+    perp_factor = (1 - perp_eff) ** (2 * turn_leg)
+    return float(spot_factor * perp_factor)
+
+
+def capped_topk_weights_minmax(rates: pd.Series, k: int = TOP_K,
+                                max_w: float = MAX_W, min_w: float = MIN_W) -> dict:
+    """
+    Deterministic allocator with min/max caps.
+    Same as Victor's implementation.
+    """
+    sr = rates.abs().nlargest(k)
+    if sr.empty:
+        return {}
+    syms = list(sr.index)
+    n = len(syms)
+    w = pd.Series(0.0, index=syms)
+
+    seed_total = min_w * n
+    if seed_total > 1.0:
+        base = min(max_w, 1.0 / n)
+        w += base
+        remaining = 1.0 - base * n
+    else:
+        w += min_w
+        remaining = 1.0 - seed_total
+
+    if remaining > 1e-12:
+        headroom = (max_w - w).clip(lower=0.0)
+        for s in syms:
+            if remaining <= 1e-12:
+                break
+            add = float(min(headroom[s], remaining))
+            if add > 0:
+                w[s] += add
+                remaining -= add
+
+    total = float(w.sum())
+    if total > 0:
+        w /= total
+    return {s: float(w[s]) for s in syms}
+
+
+def portfolio_gross_factor(weights: dict, rates: pd.Series) -> float:
+    """Calculate portfolio gross return factor."""
+    return sum(weights.get(s, 0.0) * (1.0 + abs(float(rates.get(s, 0.0))))
+               for s in set(weights) | set(rates.index))
+
+
+def l1_half_turnover(new_w: dict, old_w: dict) -> float:
+    """Calculate L1 half-turnover between portfolios."""
+    syms = set(new_w) | set(old_w)
+    return 0.5 * sum(abs(new_w.get(s, 0.0) - old_w.get(s, 0.0)) for s in syms)
+
+
+def apply_no_trade_bands(target: dict, current: dict, band: float) -> dict:
+    """Apply no-trade bands to reduce noise trading."""
+    out = dict(current)
+    for s, tw in target.items():
+        cw = current.get(s, 0.0)
+        lo, hi = cw - band, cw + band
+        if tw > hi or tw < lo:
+            out[s] = tw
+        else:
+            out[s] = cw
+    for s, cw in current.items():
+        if s not in target:
+            lo, _ = cw - band, cw + band
+            out[s] = max(0.0, lo)
+    total = sum(out.values())
+    if total > 0:
+        out = {s: w / total for s, w in out.items() if w > 1e-12}
+    return out
+
+
+def build_portfolio_strategy_corrected(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    CORRECTED backtester with NO look-ahead bias.
+
+    Key Fix: Uses T-1 rates for selection, T rates for returns.
+    """
+    # Resample to snapshots
+    if REBALANCE == "daily":
+        snap = df.set_index("funding_time").groupby("symbol")["fundingRate"].resample("1D").last().dropna().reset_index()
+    else:
+        snap = df.set_index("funding_time").groupby("symbol")["fundingRate"].resample("8H").last().dropna().reset_index()
+
+    snap = snap.sort_values(["funding_time", "symbol"]).reset_index(drop=True)
+    times = sorted(snap["funding_time"].unique())
+
+    print(f"Total snapshots: {len(times)}")
+
+    rows = []
+    equity = INITIAL_EQUITY
+    prev_w = defaultdict(float)
+    last_change_time = None
+
+    for i, t in enumerate(times, 1):
+        # ================================================================
+        # CRITICAL FIX: Use PREVIOUS period rates for selection
+        # ================================================================
+        if i == 1:
+            # Skip first period - no T-1 available
+            print(f"[{i}/{len(times)}] {t}: Skipping (no T-1 data)")
+            continue
+
+        # Get PREVIOUS rates (T-1) for selection
+        t_prev = times[i-2]  # i-2 because enumerate starts at 1
+        g_prev = snap[snap["funding_time"] == t_prev]
+        rates_prev = g_prev.set_index("symbol")["fundingRate"]
+
+        # Get CURRENT rates (T) for returns
+        g_curr = snap[snap["funding_time"] == t]
+        rates_curr = g_curr.set_index("symbol")["fundingRate"]
+
+        # Select portfolio using T-1 rates (what we knew yesterday)
+        target = capped_topk_weights_minmax(rates_prev, k=TOP_K, max_w=MAX_W, min_w=MIN_W)
+        top_syms = list(target.keys())
+
+        # Calculate advantages using CURRENT rates
+        gross_current = portfolio_gross_factor(prev_w, rates_curr)
+        gross_target  = portfolio_gross_factor(target, rates_curr)
+
+        # Min-hold check
+        can_change = True
+        if last_change_time is not None:
+            elapsed = (t - last_change_time).total_seconds() / 3600.0
+            can_change = elapsed >= MIN_HOLD_HOURS
+
+        advantage_bps = (gross_target - gross_current) * 1e4
+
+        new_w = dict(prev_w)
+        executed = False
+
+        # Rebalancing decision
+        if can_change and advantage_bps >= HURDLE_BPS:
+            turnover_full = l1_half_turnover(target, prev_w)
+            fee_factor_full = fee_factor_for_turnover(turnover_full)
+            fee_drag_bps_full = (1.0 - fee_factor_full) * 1e4
+            if advantage_bps >= fee_drag_bps_full:
+                clipped = apply_no_trade_bands(target, prev_w, BAND)
+                turnover = l1_half_turnover(clipped, prev_w)
+                fee_factor = fee_factor_for_turnover(turnover)
+                new_w = clipped
+                executed = True
+                last_change_time = t
+            else:
+                turnover = 0.0
+                fee_factor = 1.0
+        else:
+            turnover = 0.0
+            fee_factor = 1.0
+
+        # Apply returns using CURRENT rates (what actually happened)
+        gross = portfolio_gross_factor(new_w, rates_curr)
+        net = gross * fee_factor
+        equity *= net
+
+        rec = {
+            "funding_time": t,
+            "top5_symbols_selected": ",".join(top_syms),
+            "selection_source": f"T-1 ({t_prev})",
+            "gross_current": gross_current,
+            "gross_target": gross_target,
+            "advantage_bps": advantage_bps,
+            "executed": executed,
+            "turnover": turnover,
+            "fee_factor": fee_factor,
+            "gross_factor": gross,
+            "net_factor": net,
+            "equity": equity,
+        }
+        for s, w in new_w.items():
+            rec[f"w_{s}"] = w
+
+        rows.append(rec)
+        prev_w = new_w
+
+        if i % PROGRESS_EVERY == 0:
+            print(f"[{i}/{len(times)}] {t}: equity={equity:.6f}")
+
+    out = pd.DataFrame(rows).sort_values("funding_time").reset_index(drop=True)
+    return out
+
+
+def summarize_and_plot(out: pd.DataFrame) -> None:
+    """Generate summary statistics and chart."""
+    if out.empty:
+        print("No rows produced.")
+        return
+
+    start = out["funding_time"].iloc[0]
+    end   = out["funding_time"].iloc[-1]
+    days = (end - start).total_seconds() / 86400.0
+    final_eq = out["equity"].iloc[-1]
+    cagr = (final_eq / INITIAL_EQUITY) ** (365.0 / days) - 1.0 if days > 0 else np.nan
+
+    # Daily Sharpe
+    daily = out.set_index("funding_time")["equity"].resample("1D").ffill()
+    dr = daily.pct_change().dropna()
+    sharpe = dr.mean() / dr.std(ddof=1) * np.sqrt(365) if dr.std(ddof=1) > 0 else np.nan
+
+    out.to_csv(OUT_CSV, index=False)
+
+    plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 1)
+    plt.plot(out["funding_time"], out["equity"], linewidth=1.6, color='#2E86AB')
+    plt.title("CORRECTED Backtest (No Look-Ahead) — Uses T-1 Rates for Selection",
+              fontsize=12, fontweight='bold')
+    plt.ylabel("Equity (normalized)")
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(2, 1, 2)
+    plt.plot(out["funding_time"], out["advantage_bps"], linewidth=1.0, color='#A23B72', alpha=0.7)
+    plt.axhline(y=HURDLE_BPS, color='r', linestyle='--', alpha=0.5, label=f'Hurdle ({HURDLE_BPS} bps)')
+    plt.ylabel("Advantage (bps)")
+    plt.xlabel("Date (UTC)")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(OUT_PNG, dpi=150)
+    plt.close()
+
+    print("\n" + "="*80)
+    print("=== CORRECTED Portfolio Strategy Results (NO LOOK-AHEAD) ===")
+    print("="*80)
+    print(f"Period:     {start.date()} → {end.date()}  (~{days:.1f} days)")
+    print(f"Final eq:   {final_eq:.6f}  (start {INITIAL_EQUITY})")
+    print(f"APY (CAGR): {cagr*100:.2f}%")
+    print(f"Sharpe:     {sharpe:.2f}")
+    print(f"\nCSV:        {OUT_CSV}")
+    print(f"Chart:      {OUT_PNG}")
+    print("\n" + "="*80)
+    print("COMPARISON TO VICTOR'S RESULTS:")
+    print("="*80)
+    print(f"Victor's APY:    7,708%")
+    print(f"Corrected APY:   {cagr*100:.2f}%")
+    print(f"Difference:      {7708 - cagr*100:.2f} percentage points")
+    print(f"Bias Factor:     {7708 / (cagr*100) if cagr > 0 else float('inf'):.1f}x")
+    print("="*80)
+
+
+def main():
+    print("="*80)
+    print("CORRECTED BACKTESTER - NO LOOK-AHEAD BIAS")
+    print("="*80)
+    print("\nKey Fixes:")
+    print("  1. Portfolio selection uses T-1 rates (previous period)")
+    print("  2. Returns apply T rates (what actually happened)")
+    print("  3. First period skipped (no T-1 available)")
+    print("\n" + "="*80)
+
+    if not CSV_PATH.exists():
+        print(f"❌ ERROR: Data file not found: {CSV_PATH}")
+        print("\nPlease run Victor's data downloader first:")
+        print("  cd ../scripts")
+        print("  uv run python pull_funding_arb_hist.py")
+        return
+
+    df = load_data(str(CSV_PATH))
+    print(f"\n✓ Loaded {len(df)} funding rate records")
+    print(f"  Date range: {df['funding_time'].min()} → {df['funding_time'].max()}")
+    print(f"  Symbols: {df['symbol'].nunique()} unique")
+
+    df = filter_window(df, START_DATE, END_DATE)
+    out = build_portfolio_strategy_corrected(df)
+    summarize_and_plot(out)
+
+
+if __name__ == "__main__":
+    main()
