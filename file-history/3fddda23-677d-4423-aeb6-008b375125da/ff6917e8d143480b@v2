@@ -1,0 +1,184 @@
+# Orthogonality Filtering Experiment
+
+**Date**: 2025-10-03
+**Objective**: Quantify information loss vs redundancy removal across VIF and correlation thresholds
+**Context**: Phase 5 of OOD robustness pipeline (EL-1009)
+
+## Experiment Design
+
+### Hypothesis
+Multicollinearity filtering improves model robustness by removing redundant features, but aggressive filtering loses predictive information. Testing multiple threshold magnitudes reveals optimal balance.
+
+### Input
+- **Dataset**: SOL 5-minute OHLCV sample data
+- **Features**: 89 production-safe atoms (all causal, validated temporal safety)
+- **Sample size**: 10,000 bars (configurable)
+
+### Output
+- Feature lists per filtering round
+- VIF values and correlation matrices
+- Variance retention metrics
+- Category coverage analysis
+- Comparative findings report
+
+## Filtering Rounds
+
+### Round 1: VIF ≤ 50 (Minimal filtering)
+**Goal**: Baseline - remove only extreme multicollinearity
+**Method**: Iterative VIF calculation, remove highest VIF > 50
+
+### Round 2: VIF ≤ 20 (Moderate filtering)
+**Goal**: Standard threshold for feature engineering
+**Method**: Iterative VIF calculation, remove highest VIF > 20
+
+### Round 3: VIF ≤ 10 (Aggressive filtering)
+**Goal**: Strict orthogonality requirement
+**Method**: Iterative VIF calculation, remove highest VIF > 10
+
+### Round 4: VIF ≤ 5 (Ultra-strict filtering)
+**Goal**: Near-perfect orthogonality
+**Method**: Iterative VIF calculation, remove highest VIF > 5
+
+### Round 5: Correlation-based (Alternative approach)
+**Goal**: Compare VIF vs correlation methods
+**Subsets**:
+- 5a: |r| ≤ 0.95 (minimal)
+- 5b: |r| ≤ 0.90 (moderate)
+- 5c: |r| ≤ 0.80 (aggressive)
+
+## Implementation
+
+### Script Sequence
+
+1. **compute_atoms.py**
+   - Load SOL 5-min data
+   - Compute all 89 atoms via library
+   - Drop NaN rows
+   - Validate data sufficiency
+   - Save: `results/raw/atoms_full.csv`
+
+2. **run_vif_analysis.py**
+   - Load full atom dataset
+   - For each threshold [50, 20, 10, 5]:
+     - Calculate VIF for all features
+     - Remove feature with max VIF if > threshold
+     - Repeat until all VIF ≤ threshold
+     - Log removals with VIF values
+     - Save feature list and metrics
+   - Save: `results/raw/features_vif_{threshold}.txt`, `results/metrics/vif_removal_log_{threshold}.csv`
+
+3. **run_correlation_analysis.py**
+   - Load full atom dataset
+   - For each threshold [0.95, 0.90, 0.80]:
+     - Calculate correlation matrix
+     - Find pairs with |r| > threshold
+     - Remove feature with higher average |r|
+     - Repeat until no pairs exceed threshold
+     - Log removals with correlation values
+     - Save feature list and metrics
+   - Save: `results/raw/features_corr_{threshold}.txt`, `results/metrics/corr_removal_log_{threshold}.csv`
+
+4. **generate_report.py**
+   - Load all feature lists
+   - Calculate variance retention per round
+   - Categorize features by type (returns, rolling, calendar, etc.)
+   - Generate comparison table
+   - Save: `FINDINGS.md`
+
+### Execution
+```bash
+cd experiments/orthogonality_filtering_20251003
+
+# Generate dataset
+docker exec ml-dev python -m compute_atoms
+
+# Run filtering rounds
+docker exec ml-dev python -m run_vif_analysis
+docker exec ml-dev python -m run_correlation_analysis
+
+# Generate report
+docker exec ml-dev python -m generate_report
+```
+
+## Service Level Objectives (SLOs)
+
+### Correctness
+- **VIF calculation accuracy**: Numerical precision < 1e-10
+  - Validation: Verify VIF formula (1 / (1 - R²)) against statsmodels
+- **Correlation calculation accuracy**: Pairwise correlation error < 1e-10
+  - Validation: Use pandas.DataFrame.corr() (out-of-box)
+- **Variance retention accuracy**: Explained variance ratio error < 1e-10
+  - Validation: np.var() on feature subsets
+
+### Availability
+- **Data sufficiency**: >= 100 valid rows after NaN drop
+  - Raises ValueError if insufficient
+- **Feature count validation**: >= 2 features for VIF calculation
+  - Raises ValueError if < 2 features remain
+- **Threshold validation**: VIF thresholds > 1, correlation thresholds in (0, 1)
+  - Raises ValueError on invalid config
+
+### Observability
+- **Removal logging**: Every feature removal logged with reason and metric value
+  - Format: `timestamp,feature_name,removal_reason,metric_value`
+- **Error propagation**: All exceptions raised, no silent failures
+  - No try/except fallbacks
+  - No default values on error
+- **Progress tracking**: Print feature count after each removal iteration
+
+### Maintainability
+- **Out-of-box implementations only**:
+  - statsmodels.stats.outliers_influence.variance_inflation_factor
+  - pandas.DataFrame.corr()
+  - numpy variance calculations
+- **No custom algorithms**: Zero manual VIF or correlation implementations
+- **Configuration-driven**: All thresholds in config.yaml, not hardcoded
+- **Reproducibility**: Fixed random seed if sampling required
+
+## Expected Outcomes
+
+### Variance Retention Pattern
+Expect exponential decay: VIF 50 retains ~95%, VIF 5 retains ~60-70%
+
+### Category Coverage
+Tier 1 features (returns, rolling, calendar) should survive even VIF 5
+
+### Multicollinearity Culprits
+Expect removal of:
+- `fourier_*` → `hour_of_day_*`, `day_of_week_*` duplicates
+- `rolling_mean_*` → `ewm_mean_*` high correlation
+- `stl_trend_*` → `ewm_mean_*` trend overlap
+
+### Optimal Threshold
+Hypothesis: VIF 10-20 balances redundancy removal and information retention
+
+## Files
+
+### Configuration
+- `config.yaml` - Thresholds and parameters
+
+### Scripts
+- `compute_atoms.py` - Dataset generation
+- `run_vif_analysis.py` - VIF filtering rounds 1-4
+- `run_correlation_analysis.py` - Correlation filtering round 5
+- `generate_report.py` - Comparative analysis
+
+### Results
+- `results/raw/atoms_full.csv` - 89-atom dataset
+- `results/raw/features_vif_{threshold}.txt` - Feature lists per VIF round
+- `results/raw/features_corr_{threshold}.txt` - Feature lists per correlation round
+- `results/metrics/vif_removal_log_{threshold}.csv` - VIF removal logs
+- `results/metrics/corr_removal_log_{threshold}.csv` - Correlation removal logs
+- `FINDINGS.md` - Comparative analysis report (generated)
+
+## References
+
+### Implementation
+- VIF formula: 1 / (1 - R²) where R² is regression of feature on all others
+- statsmodels documentation: https://www.statsmodels.org/stable/generated/statsmodels.stats.outliers_influence.variance_inflation_factor.html
+- Correlation thresholds: Dormann et al. (2013) "Collinearity: a review of methods to deal with it"
+
+### Context
+- Phase 5 of NEXT_STEPS.md: Feature selection for OOD robustness
+- STL stateful implementation: ml_feature_set/atoms/STL_STATEFUL_IMPLEMENTATION.md
+- Atom library: 89/89 production-safe, all causal

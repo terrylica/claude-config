@@ -1,0 +1,214 @@
+"""
+Test stateful STL integration
+
+Validates:
+1. Stateful STL formulas work with atom framework
+2. Models cached correctly in _STL_MODELS
+3. Transform uses cached models (no refitting)
+4. Output matches expected decomposition properties
+5. All errors propagate (no silent failures)
+
+SLOs:
+- Correctness: Decomposition sum error < 1e-10
+- Availability: Handles all valid input lengths >= 2*period
+- Observability: All exceptions raised with clear messages
+- Maintainability: Single test file, pytest-based
+"""
+
+import pytest
+import pandas as pd
+import numpy as np
+from ml_feature_set.atoms.formulas.layer_b_baselines import (
+    _stl_trend,
+    _stl_seasonal,
+    _stl_resid,
+    _STL_MODELS
+)
+
+
+@pytest.fixture
+def sample_data():
+    """Generate synthetic OHLCV data with known seasonality"""
+    n = 100
+    t = np.arange(n)
+
+    # Trend + seasonality + noise
+    trend = 100 + 0.5 * t
+    seasonal = 5 * np.sin(2 * np.pi * t / 7)  # 7-period cycle
+    noise = np.random.normal(0, 0.5, n)
+
+    close = trend + seasonal + noise
+
+    df = pd.DataFrame({
+        'close': close,
+        'open': close - 0.1,
+        'high': close + 0.2,
+        'low': close - 0.2,
+        'volume': np.random.uniform(1000, 2000, n)
+    }, index=pd.date_range('2024-01-01', periods=n, freq='5min'))
+
+    return df
+
+
+def test_stl_formulas_run_without_error(sample_data):
+    """Test STL formulas execute successfully"""
+    params = {'seasonal': 7, 'trend': 21}
+
+    trend = _stl_trend(sample_data, params)
+    seasonal = _stl_seasonal(sample_data, params)
+    resid = _stl_resid(sample_data, params)
+
+    assert isinstance(trend, pd.Series)
+    assert isinstance(seasonal, pd.Series)
+    assert isinstance(resid, pd.Series)
+    assert len(trend) == len(sample_data)
+    assert len(seasonal) == len(sample_data)
+    assert len(resid) == len(sample_data)
+
+
+def test_stl_model_caching(sample_data):
+    """Test models cached in _STL_MODELS"""
+    _STL_MODELS.clear()
+
+    params = {'seasonal': 7, 'trend': 21}
+    model_key = "stl_7_21"
+
+    # First call should create model
+    assert model_key not in _STL_MODELS
+    _stl_trend(sample_data, params)
+    assert model_key in _STL_MODELS
+
+    # Second call should reuse model
+    model_before = _STL_MODELS[model_key]
+    _stl_trend(sample_data, params)
+    model_after = _STL_MODELS[model_key]
+    assert model_before is model_after  # Same object
+
+
+def test_stl_decomposition_sum(sample_data):
+    """Test decomposition reconstructs original: trend + seasonal + resid = close"""
+    params = {'seasonal': 7, 'trend': 21}
+
+    trend = _stl_trend(sample_data, params)
+    seasonal = _stl_seasonal(sample_data, params)
+    resid = _stl_resid(sample_data, params)
+
+    reconstructed = trend + seasonal + resid
+    reconstruction_error = np.abs(reconstructed - sample_data['close']).max()
+
+    assert reconstruction_error < 1e-10, f"Reconstruction error {reconstruction_error} exceeds 1e-10"
+
+
+def test_stl_missing_params_raises():
+    """Test missing params raises ValueError"""
+    df = pd.DataFrame({
+        'close': [1, 2, 3, 4, 5]
+    }, index=pd.date_range('2024-01-01', periods=5, freq='1h'))
+
+    with pytest.raises(KeyError):  # params['seasonal'] will raise KeyError
+        _stl_trend(df, {})
+
+
+def test_stl_insufficient_data_raises(sample_data):
+    """Test insufficient data raises ValueError from StatefulSTLAtoms"""
+    _STL_MODELS.clear()  # Clear cache to force refit
+
+    params = {'seasonal': 7, 'trend': 21}
+
+    # Need >= 2*period = 14 rows, provide only 10
+    short_df = sample_data.iloc[:10]
+
+    with pytest.raises(ValueError, match="Insufficient data"):
+        _stl_trend(short_df, params)
+
+
+def test_stl_invalid_params_raises():
+    """Test invalid params (even numbers) raise ValueError"""
+    df = pd.DataFrame({
+        'close': np.random.randn(100)
+    }, index=pd.date_range('2024-01-01', periods=100, freq='1h'))
+
+    # seasonal must be odd
+    with pytest.raises(ValueError, match="must be odd"):
+        _stl_trend(df, {'seasonal': 8, 'trend': 21})
+
+    # trend must be odd
+    with pytest.raises(ValueError, match="must be odd"):
+        _stl_trend(df, {'seasonal': 7, 'trend': 20})
+
+    # trend must be > seasonal
+    with pytest.raises(ValueError, match="must be >"):
+        _stl_trend(df, {'seasonal': 21, 'trend': 7})
+
+
+def test_stl_multiple_configs_cached_separately(sample_data):
+    """Test different param configs cached as separate models"""
+    _STL_MODELS.clear()
+
+    params1 = {'seasonal': 7, 'trend': 21}
+    params2 = {'seasonal': 13, 'trend': 31}
+
+    _stl_trend(sample_data, params1)
+    _stl_trend(sample_data, params2)
+
+    assert "stl_7_21" in _STL_MODELS
+    assert "stl_13_31" in _STL_MODELS
+    assert len(_STL_MODELS) == 2
+
+
+def test_stl_seasonal_pattern_consistency(sample_data):
+    """Test seasonal pattern repeats correctly across transform calls"""
+    params = {'seasonal': 7, 'trend': 21}
+
+    # Get seasonal component
+    seasonal = _stl_seasonal(sample_data, params)
+
+    # First period
+    first_period = seasonal.iloc[:7].values
+
+    # Second period should match (approximately, due to time alignment)
+    second_period = seasonal.iloc[7:14].values
+
+    # Patterns should be similar (correlation > 0.9)
+    correlation = np.corrcoef(first_period, second_period)[0, 1]
+    assert correlation > 0.9, f"Seasonal pattern correlation {correlation} < 0.9"
+
+
+def test_stl_with_library_integration(sample_data):
+    """Test STL atoms work through AtomLibrary.compute_all()"""
+    from ml_feature_set.atoms.library import load_library_from_formulas
+
+    _STL_MODELS.clear()
+
+    lib = load_library_from_formulas()
+    stl_atoms = [a for a in lib.atoms if 'stl_' in a.name and a.status == 'production']
+
+    assert len(stl_atoms) == 6, f"Expected 6 production STL atoms, found {len(stl_atoms)}"
+
+    # Compute all STL atoms
+    atoms_df = lib.compute_all(sample_data, layers=['B'])
+
+    # Check STL columns exist
+    stl_cols = [c for c in atoms_df.columns if 'stl_' in c]
+    assert len(stl_cols) >= 6, f"Expected >= 6 STL columns, found {len(stl_cols)}: {stl_cols}"
+
+    # Check no NaN values
+    for col in stl_cols:
+        nan_count = atoms_df[col].isna().sum()
+        assert nan_count == 0, f"Column {col} has {nan_count} NaN values"
+
+
+def test_stl_atoms_marked_causal(sample_data):
+    """Test STL atoms marked as causal=True and status='production'"""
+    from ml_feature_set.atoms.library import load_library_from_formulas
+
+    lib = load_library_from_formulas()
+    stl_atoms = [a for a in lib.atoms if 'stl_' in a.name]
+
+    for atom in stl_atoms:
+        assert atom.causal is True, f"Atom {atom.name} has causal={atom.causal}, expected True"
+        assert atom.status == 'production', f"Atom {atom.name} has status={atom.status}, expected 'production'"
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])

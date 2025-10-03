@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""
+Download 2 years of OKX funding rate data using multiple approaches.
+
+Strategy:
+1. Try OKX API for last 3 months (maximum available)
+2. Use repeated API calls with proper pagination
+3. Handle rate limits and errors gracefully
+"""
+
+import requests
+import pandas as pd
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+
+BASE_URL = "https://www.okx.com"
+REQUEST_LIMIT = 400
+SLEEP_SEC = 0.15
+
+# Top liquid perpetuals
+SYMBOLS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT", "MATIC", "LTC",
+    "AVAX", "SHIB", "LINK", "UNI", "ATOM", "ETC", "FIL", "AAVE", "ALGO", "NEAR",
+    "APE", "SNX", "SAND", "MANA", "GALA", "AXS", "THETA", "EGLD", "XTZ", "FTM",
+    "RUNE", "1INCH", "ENJ", "BAT", "ZRX", "COMP", "MKR", "SUSHI", "CRV", "YFI",
+    "STX", "INJ", "AR", "FLOW", "ICP", "EOS", "XLM", "VET", "TRX", "FIL",
+    "LDO", "ARB", "OP", "PEPE", "WLD", "SUI", "SEI", "TON", "BONK", "ORDI",
+    "STRK", "TIA", "PYTH", "JUP", "WIF", "BOME", "ETHFI", "ENA", "W",
+]
+
+def okx_get(endpoint: str, params: dict) -> dict:
+    """Make GET request to OKX API."""
+    path = f"/api/v5{endpoint}"
+    url = BASE_URL + path
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != "0":
+            print(f"  Warning: {data.get('msg')} for {params.get('instId', '')}")
+            return {"data": []}
+        return data
+    except Exception as e:
+        print(f"  Error: {e} for {params.get('instId', '')}")
+        return {"data": []}
+
+
+def fetch_funding_history_paginated(symbol: str, max_pages: int = 100) -> list:
+    """
+    Fetch funding rate history with pagination.
+    OKX API returns max 3 months, paginate backwards.
+    """
+    inst_id = f"{symbol}-USDT-SWAP"
+    all_rows = []
+    after = None  # Start from most recent
+
+    print(f"\n{symbol}: Fetching...")
+
+    for page in range(max_pages):
+        params = {
+            "instId": inst_id,
+            "limit": str(REQUEST_LIMIT),
+        }
+        if after:
+            params["after"] = after  # Get older records
+
+        data = okx_get("/public/funding-rate-history", params)
+        records = data.get("data", [])
+
+        if not records:
+            break
+
+        # Extract funding rates
+        for item in records:
+            try:
+                ts = int(item["fundingTime"])
+                rate = float(item["fundingRate"]) if item.get("fundingRate") not in (None, "") else None
+                if rate is not None:
+                    all_rows.append({
+                        "symbol": symbol,
+                        "ts": ts,
+                        "funding_time": datetime.fromtimestamp(ts/1000, tz=None).strftime("%Y-%m-%d %H:%M:%S"),
+                        "fundingRate": rate,
+                    })
+            except (ValueError, KeyError) as e:
+                continue
+
+        # Pagination
+        after = records[-1]["fundingTime"]
+
+        print(f"  Page {page+1}: {len(records)} records (total: {len(all_rows)})")
+
+        # Rate limit
+        time.sleep(SLEEP_SEC)
+
+        # Break if we've hit the 3-month limit (API constraint)
+        if len(all_rows) > 1000:  # ~3 months = ~270 snapshots * 3 = ~900
+            break
+
+    print(f"  ✓ {symbol}: {len(all_rows)} records")
+    return all_rows
+
+
+def main():
+    """Download 2 years of data (or maximum available)."""
+    print("=" * 80)
+    print("OKX Funding Rate Historical Data Downloader")
+    print("=" * 80)
+    print(f"\nTarget: 2 years of data for {len(SYMBOLS)} symbols")
+    print(f"Note: OKX API limited to ~3 months, will get maximum available")
+    print("=" * 80)
+
+    all_data = []
+
+    for symbol in SYMBOLS:
+        rows = fetch_funding_history_paginated(symbol, max_pages=50)
+        all_data.extend(rows)
+
+        # Progress
+        if len(all_data) > 0 and len(all_data) % 10000 == 0:
+            print(f"\n  Progress: {len(all_data):,} total records\n")
+
+    # Convert to DataFrame
+    if not all_data:
+        print("\n❌ No data retrieved")
+        return
+
+    df = pd.DataFrame(all_data)
+    df = df.sort_values(["symbol", "ts"]).reset_index(drop=True)
+
+    # Save
+    output_dir = Path(__file__).parent.parent / "data"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    output_path = output_dir / "okx_funding_2year.csv"
+
+    df.to_csv(output_path, index=False)
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("DOWNLOAD COMPLETE")
+    print(f"{'='*80}")
+    print(f"Total records:  {len(df):,}")
+    print(f"Symbols:        {df['symbol'].nunique()}")
+    print(f"Date range:     {df['funding_time'].min()} → {df['funding_time'].max()}")
+    print(f"Output file:    {output_path}")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

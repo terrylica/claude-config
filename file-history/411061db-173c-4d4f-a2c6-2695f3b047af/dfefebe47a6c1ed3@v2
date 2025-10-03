@@ -1,0 +1,238 @@
+"""
+Utility functions for okx-price-provider.
+
+This module provides helper functions for:
+- Symbol normalization (BTC → BTC-USDT)
+- Date range validation
+- Timestamp formatting
+- Month string formatting
+"""
+
+from datetime import datetime
+from typing import List, Tuple
+import pandas as pd
+
+
+def normalize_symbol(symbol: str, market_type: str = "spot") -> str:
+    """
+    Normalize symbol to OKX format.
+
+    Args:
+        symbol: Raw symbol (e.g., "BTC", "ETH", "BTC-USDT")
+        market_type: "spot" or "swap" (determines suffix)
+
+    Returns:
+        Normalized symbol (e.g., "BTC-USDT" for spot, "BTC-USDT-SWAP" for swap)
+
+    Examples:
+        >>> normalize_symbol("BTC", "spot")
+        'BTC-USDT'
+        >>> normalize_symbol("BTC-USDT", "spot")
+        'BTC-USDT'
+        >>> normalize_symbol("BTC", "swap")
+        'BTC-USDT-SWAP'
+    """
+    symbol = symbol.upper().strip()
+
+    if market_type == "spot":
+        if "-USDT" not in symbol:
+            return f"{symbol}-USDT"
+        return symbol
+    elif market_type == "swap":
+        if "-USDT-SWAP" not in symbol:
+            base = symbol.replace("-USDT", "").replace("-SWAP", "")
+            return f"{base}-USDT-SWAP"
+        return symbol
+    else:
+        raise ValueError(f"Unknown market_type: {market_type}. Must be 'spot' or 'swap'.")
+
+
+def denormalize_symbol(okx_symbol: str) -> str:
+    """
+    Convert OKX symbol to base symbol (reverse of normalize_symbol).
+
+    Args:
+        okx_symbol: OKX format symbol (e.g., "BTC-USDT", "ETH-USDT-SWAP")
+
+    Returns:
+        Base symbol (e.g., "BTC", "ETH")
+
+    Examples:
+        >>> denormalize_symbol("BTC-USDT")
+        'BTC'
+        >>> denormalize_symbol("BTC-USDT-SWAP")
+        'BTC'
+    """
+    return okx_symbol.split("-")[0]
+
+
+def validate_date_range(start_date: str, end_date: str) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    """
+    Validate and parse date range strings.
+
+    Args:
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+
+    Returns:
+        Tuple of (start_timestamp, end_timestamp) with UTC timezone
+
+    Raises:
+        ValueError: If dates are invalid or end_date < start_date
+
+    Examples:
+        >>> start, end = validate_date_range("2023-10-01", "2023-12-31")
+        >>> print(start)
+        2023-10-01 00:00:00+00:00
+    """
+    try:
+        start_ts = pd.Timestamp(start_date, tz="UTC")
+        end_ts = pd.Timestamp(end_date, tz="UTC")
+    except Exception as e:
+        raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
+
+    if end_ts < start_ts:
+        raise ValueError(f"end_date ({end_date}) must be >= start_date ({start_date})")
+
+    return start_ts, end_ts
+
+
+def format_month(year: int, month: int) -> str:
+    """
+    Format year and month as YYYYMM string.
+
+    Args:
+        year: Year (e.g., 2023)
+        month: Month (1-12)
+
+    Returns:
+        Formatted string (e.g., "202310")
+
+    Examples:
+        >>> format_month(2023, 10)
+        '202310'
+        >>> format_month(2023, 1)
+        '202301'
+    """
+    if not (1 <= month <= 12):
+        raise ValueError(f"Month must be 1-12, got {month}")
+
+    return f"{year:04d}{month:02d}"
+
+
+def parse_month_string(month_str: str) -> Tuple[int, int]:
+    """
+    Parse YYYYMM or YYYY-MM string into (year, month).
+
+    Args:
+        month_str: Month string (e.g., "202310" or "2023-10")
+
+    Returns:
+        Tuple of (year, month)
+
+    Examples:
+        >>> parse_month_string("202310")
+        (2023, 10)
+        >>> parse_month_string("2023-10")
+        (2023, 10)
+    """
+    month_str = month_str.replace("-", "")
+
+    if len(month_str) != 6:
+        raise ValueError(f"Invalid month string: {month_str}. Expected YYYYMM or YYYY-MM")
+
+    try:
+        year = int(month_str[:4])
+        month = int(month_str[4:6])
+    except ValueError as e:
+        raise ValueError(f"Invalid month string: {month_str}. Error: {e}")
+
+    if not (1 <= month <= 12):
+        raise ValueError(f"Invalid month: {month}. Must be 1-12")
+
+    return year, month
+
+
+def generate_month_range(start_month: str, end_month: str) -> List[str]:
+    """
+    Generate list of month strings between start and end (inclusive).
+
+    Args:
+        start_month: Start month (YYYY-MM or YYYYMM)
+        end_month: End month (YYYY-MM or YYYYMM)
+
+    Returns:
+        List of month strings in YYYYMM format
+
+    Examples:
+        >>> generate_month_range("2023-10", "2023-12")
+        ['202310', '202311', '202312']
+        >>> generate_month_range("2023-12", "2024-02")
+        ['202312', '202401', '202402']
+    """
+    start_year, start_mon = parse_month_string(start_month)
+    end_year, end_mon = parse_month_string(end_month)
+
+    start_date = pd.Timestamp(year=start_year, month=start_mon, day=1)
+    end_date = pd.Timestamp(year=end_year, month=end_mon, day=1)
+
+    if end_date < start_date:
+        raise ValueError(f"end_month ({end_month}) must be >= start_month ({start_month})")
+
+    months = []
+    current = start_date
+
+    while current <= end_date:
+        months.append(format_month(current.year, current.month))
+        # Advance to next month
+        if current.month == 12:
+            current = pd.Timestamp(year=current.year + 1, month=1, day=1)
+        else:
+            current = pd.Timestamp(year=current.year, month=current.month + 1, day=1)
+
+    return months
+
+
+def estimate_compression_ratio(uncompressed_size: int, compressed_size: int) -> float:
+    """
+    Calculate compression ratio.
+
+    Args:
+        uncompressed_size: Original size in bytes
+        compressed_size: Compressed size in bytes
+
+    Returns:
+        Compression ratio (e.g., 25.0 means 25x smaller)
+
+    Examples:
+        >>> estimate_compression_ratio(100_000_000, 4_000_000)
+        25.0
+    """
+    if compressed_size == 0:
+        return 0.0
+
+    return uncompressed_size / compressed_size
+
+
+def format_bytes(size_bytes: int) -> str:
+    """
+    Format bytes as human-readable string.
+
+    Args:
+        size_bytes: Size in bytes
+
+    Returns:
+        Formatted string (e.g., "1.23 GB")
+
+    Examples:
+        >>> format_bytes(1536)
+        '1.50 KB'
+        >>> format_bytes(2_500_000_000)
+        '2.33 GB'
+    """
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.2f} {unit}"
+        size_bytes /= 1024.0
+
+    return f"{size_bytes:.2f} PB"

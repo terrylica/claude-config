@@ -1,0 +1,232 @@
+#!/bin/bash
+# Migration script for reorganizing ml-feature-experiments to pipeline-stage model
+# Generated: 2025-10-01
+# Safe execution with dry-run support
+
+set -e  # Exit on error
+
+DRY_RUN=false
+VERBOSE=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dry-run) DRY_RUN=true; shift ;;
+        --verbose) VERBOSE=true; shift ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+log() {
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+    fi
+}
+
+execute() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "[DRY-RUN] $*"
+    else
+        log "Executing: $*"
+        eval "$@"
+    fi
+}
+
+echo "🚀 ML Feature Experiments - Pipeline Stage Migration"
+echo "=================================================="
+echo ""
+echo "Mode: $([ "$DRY_RUN" == "true" ] && echo "DRY-RUN (no changes)" || echo "LIVE EXECUTION")"
+echo ""
+
+# Phase 1: Create directory structure
+echo "📁 Phase 1: Creating directory structure..."
+echo ""
+
+directories=(
+    "0_core/sync"
+    "0_core/validation"
+    "0_core/constraints"
+    "1_data_collection/binance"
+    "1_data_collection/gap_filling"
+    "2_feature_engineering/microstructure"
+    "2_feature_engineering/cycleness"
+    "2_feature_engineering/fitness"
+    "3_model_validation/nested_cv"
+    "3_model_validation/walk_forward"
+    "4_experiments/multi_objective_optimization"
+    "4_experiments/generator_evaluation"
+    "5_automation/pipelines"
+    "5_automation/cli"
+    "archive/failed_experiments"
+    "archive/dead_code"
+    "examples"
+    "tests"
+    "docs/guides"
+    "docs/references"
+)
+
+for dir in "${directories[@]}"; do
+    execute "mkdir -p '$dir'"
+done
+
+echo "✅ Phase 1 complete: Directory structure created"
+echo ""
+
+# Phase 2: Prune - Delete empty files
+echo "🗑️  Phase 2: Pruning dead code..."
+echo ""
+
+# Delete empty Python files in docs/ideas_brewing
+if [[ -d "docs/ideas_brewing" ]]; then
+    empty_files=$(find docs/ideas_brewing -name "*.py" -type f -empty 2>/dev/null || true)
+    if [[ -n "$empty_files" ]]; then
+        for file in $empty_files; do
+            execute "rm '$file'"
+        done
+    fi
+fi
+
+echo "✅ Phase 2 complete: Dead code removed"
+echo ""
+
+# Phase 3: Archive failed experiments
+echo "📦 Phase 3: Archiving failed experiments..."
+echo ""
+
+if [[ -d "docs/ideas_brewing/archive" ]]; then
+    execute "git mv docs/ideas_brewing/archive/* archive/failed_experiments/ 2>/dev/null || true"
+fi
+
+echo "✅ Phase 3 complete: Failed experiments archived"
+echo ""
+
+# Phase 4: Move core utilities
+echo "🔧 Phase 4: Migrating core utilities..."
+echo ""
+
+# Move DataSourceManager and sync utilities
+if [[ -d "core/sync" ]]; then
+    execute "git mv core/sync/* 0_core/sync/"
+fi
+
+# Move market constraints
+if [[ -f "utils/market_constraints.py" ]]; then
+    execute "git mv utils/market_constraints.py 0_core/constraints/"
+fi
+
+# Move temporal validation utilities
+if [[ -f "feature_engineering/playground/temporal_validation_utils.py" ]]; then
+    execute "git mv feature_engineering/playground/temporal_validation_utils.py 0_core/validation/"
+fi
+
+echo "✅ Phase 4 complete: Core utilities migrated"
+echo ""
+
+# Phase 5: Move data collection scripts
+echo "📊 Phase 5: Migrating data collection..."
+echo ""
+
+data_collection_files=(
+    "ml_feature_set/data_collection/binance_public_data_collector.py"
+    "ml_feature_set/data_collection/comprehensive_gap_analyzer.py"
+    "ml_feature_set/data_collection/multi_source_gap_filler.py"
+    "ml_feature_set/data_collection/universal_gap_filler.py"
+    "ml_feature_set/data_collection/ultrathink_safe_gap_filler.py"
+)
+
+for file in "${data_collection_files[@]}"; do
+    if [[ -f "$file" ]]; then
+        basename=$(basename "$file")
+        if [[ "$basename" == *"binance"* ]]; then
+            execute "git mv '$file' 1_data_collection/binance/"
+        else
+            execute "git mv '$file' 1_data_collection/gap_filling/"
+        fi
+    fi
+done
+
+echo "✅ Phase 5 complete: Data collection migrated"
+echo ""
+
+# Phase 6: Move microstructure features (SOTA only)
+echo "🎯 Phase 6: Migrating microstructure features (SOTA only)..."
+echo ""
+
+# Keep SOTA versions, archive duplicates
+microstructure_sota_files=(
+    "feature_engineering/playground/core_microstructure/bipower_variation_sota.py"
+    "feature_engineering/playground/core_microstructure/realized_variance_sota.py"
+    "feature_engineering/playground/core_microstructure/market_impact_features_sota.py"
+)
+
+for file in "${microstructure_sota_files[@]}"; do
+    if [[ -f "$file" ]]; then
+        basename=$(basename "$file")
+        # Remove _sota suffix for cleaner names
+        new_name="${basename/_sota/}"
+        execute "git mv '$file' '2_feature_engineering/microstructure/$new_name'"
+    fi
+done
+
+# Archive non-SOTA duplicates
+microstructure_old_files=$(find feature_engineering/playground/core_microstructure -name "*.py" ! -name "*_sota.py" -type f 2>/dev/null || true)
+for file in $microstructure_old_files; do
+    execute "git mv '$file' archive/failed_experiments/"
+done
+
+echo "✅ Phase 6 complete: Microstructure features migrated"
+echo ""
+
+# Phase 7: Move cycleness features
+echo "🔄 Phase 7: Migrating cycleness features..."
+echo ""
+
+if [[ -d "feature_engineering/playground/cycleness_prediction_mvp" ]]; then
+    execute "git mv feature_engineering/playground/cycleness_prediction_mvp/* 2_feature_engineering/cycleness/"
+fi
+
+echo "✅ Phase 7 complete: Cycleness features migrated"
+echo ""
+
+# Phase 8: Move fitness framework
+echo "🏆 Phase 8: Migrating fitness framework..."
+echo ""
+
+if [[ -d "feature_engineering/playground/custom_fitness" ]]; then
+    execute "git mv feature_engineering/playground/custom_fitness/* 2_feature_engineering/fitness/"
+fi
+
+echo "✅ Phase 8 complete: Fitness framework migrated"
+echo ""
+
+# Phase 9: Move validation scripts
+echo "✅ Phase 9: Migrating validation scripts..."
+echo ""
+
+# Nested CV
+if [[ -d "feature_engineering/playground/nested_hv_blocked_cv" ]]; then
+    execute "git mv feature_engineering/playground/nested_hv_blocked_cv/* 3_model_validation/nested_cv/"
+fi
+
+# Rolling origin / walk-forward
+if [[ -d "feature_engineering/playground/rolling_origin_demo" ]]; then
+    execute "git mv feature_engineering/playground/rolling_origin_demo/* 3_model_validation/walk_forward/"
+fi
+
+echo "✅ Phase 9 complete: Validation scripts migrated"
+echo ""
+
+# Phase 10: Summary
+echo ""
+echo "=================================================="
+echo "✅ Migration complete!"
+echo "=================================================="
+echo ""
+echo "Next steps:"
+echo "1. Update imports in all Python files"
+echo "2. Create __init__.py files"
+echo "3. Test imports and run key scripts"
+echo "4. Commit changes: git add -A && git commit -m 'refactor: reorganize to pipeline-stage model'"
+echo ""
+echo "Run with --dry-run to preview changes without executing"
+echo "Run with --verbose for detailed logging"

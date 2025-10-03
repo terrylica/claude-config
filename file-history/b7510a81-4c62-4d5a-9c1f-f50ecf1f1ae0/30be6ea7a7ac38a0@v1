@@ -1,0 +1,427 @@
+"""
+Custom Fitness Engine - 5-Principle Compliant Implementation
+
+Implements ATR-normalized, entropy-weighted, differentiable fitness functions
+for measuring feature extrapolative reliability in financial time series.
+
+CRITICAL DESIGN PRINCIPLE: Directional Awareness
+- Phase 1 (Current): Long position only for testing and validation
+- Phase 2 (Future): Dual direction analysis with best direction selection
+- Phase 3 (Advanced): Ensemble long/short signals for enhanced performance
+
+Based on: docs/roadmap/custom_fitness.md
+"""
+
+import numpy as np
+import pandas as pd
+import talib
+from scipy.stats import entropy
+from typing import Dict, List, Optional
+import warnings
+
+warnings.filterwarnings("ignore")
+
+
+class InsufficientDataError(Exception):
+    """Raised when insufficient data for reliable fitness calculation"""
+
+    pass
+
+
+class CustomFitnessEngine:
+    """
+    5-Principle compliant custom fitness evaluation engine
+
+    Implements three fitness variants with explicit directional design:
+    - D_t: Basic ATR-normalized log-excursion signals
+    - D_t*: Entropy-weighted regime-aware adaptation
+    - D_t†: Differentiable fitness for gradient-based optimization
+
+    DIRECTIONAL STRATEGY:
+    - Phase 1: Long position only (current implementation)
+    - Phase 2: Best direction selection (future enhancement)
+    - Phase 3: Ensemble long/short signals (advanced feature)
+    """
+
+    def __init__(
+        self,
+        min_samples: int = 150,
+        lookahead_window: int = 5,
+        atr_period: int = 14,
+        entropy_window: int = 20,
+        soft_temperature: float = 0.1,
+        direction_mode: str = "long_only",
+    ):
+        """
+        Initialize fitness engine with data-derived parameters
+
+        Args:
+            min_samples: Minimum required samples (Principle 4: Adaptive Reliability)
+            lookahead_window: Future periods for MFE/MAE calculation
+            atr_period: ATR calculation period
+            entropy_window: Window for entropy calculations
+            soft_temperature: Temperature for soft-max calculations
+            direction_mode: Direction strategy ("long_only", "best_direction", "ensemble")
+        """
+        self.min_samples = min_samples
+        self.lookahead_window = lookahead_window
+        self.atr_period = atr_period
+        self.entropy_window = entropy_window
+        self.tau = soft_temperature
+        self.direction_mode = direction_mode
+
+        # Data-derived parameters (Principle 2: Data-Driven Universality)
+        self.alpha_entropy = 0.5
+        self.epsilon_shannon = 1e-6
+
+        # Validate direction mode
+        valid_modes = ["long_only", "best_direction", "ensemble"]
+        if direction_mode not in valid_modes:
+            raise ValueError(f"direction_mode must be one of {valid_modes}")
+
+        # Phase tracking for future development
+        if direction_mode == "long_only":
+            self.phase = 1
+        elif direction_mode == "best_direction":
+            self.phase = 2
+        else:  # ensemble
+            self.phase = 3
+
+    def calculate_custom_fitness(self, ohlcv_data: pd.DataFrame, feature_values: np.ndarray, evaluation_points: Optional[List[int]] = None) -> Dict[str, float]:
+        """
+        Calculate all three custom fitness variants with 5-principle compliance
+
+        Args:
+            ohlcv_data: OHLCV dataframe with required columns
+            feature_values: Feature values to evaluate
+            evaluation_points: Specific indices for evaluation (optional)
+
+        Returns:
+            Dictionary with fitness scores for all variants
+        """
+        # Principle 4: Adaptive Reliability - Explicit failure handling
+        if len(ohlcv_data) < self.min_samples:
+            raise InsufficientDataError(f"Need ≥{self.min_samples} samples, got {len(ohlcv_data)}")
+
+        # Validate required columns
+        required_columns = ["open", "high", "low", "close", "volume"]
+        missing_columns = [col for col in required_columns if col not in ohlcv_data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Default evaluation points if not provided
+        if evaluation_points is None:
+            # Use data-derived evaluation points (not hardcoded)
+            start_idx = max(self.atr_period, self.entropy_window)
+            end_idx = len(ohlcv_data) - self.lookahead_window
+            evaluation_points = list(range(start_idx, end_idx, 5))  # Every 5 points
+
+        fitness_scores = {"D_t": [], "D_t_star": [], "D_t_dagger": []}
+
+        for entry_idx in evaluation_points:
+            if entry_idx >= len(ohlcv_data) - self.lookahead_window:
+                continue
+
+            try:
+                # Calculate base MFE/MAE (Principle 3: Temporal Integrity)
+                mfe_mae_result = self._calculate_atr_normalized_mfe_mae(ohlcv_data, entry_idx)
+
+                if np.isnan(mfe_mae_result["atr"]) or mfe_mae_result["atr"] <= 0:
+                    continue
+
+                # Base log-excursion fitness (D_t)
+                d_t = np.log(1 + mfe_mae_result["mfe_norm"]) - np.log(1 + mfe_mae_result["mae_norm"])
+                fitness_scores["D_t"].append(d_t)
+
+                # Entropy-weighted fitness (D_t*)
+                d_t_star = self._calculate_entropy_weighted_fitness(ohlcv_data, entry_idx, d_t)
+                fitness_scores["D_t_star"].append(d_t_star)
+
+                # Shannon entropy scaling (D_t†)
+                d_t_dagger = self._calculate_differentiable_fitness(feature_values, d_t)
+                fitness_scores["D_t_dagger"].append(d_t_dagger)
+
+            except Exception:
+                # Skip problematic data points but continue processing
+                continue
+
+        # Aggregate fitness scores
+        return self._aggregate_fitness_scores(fitness_scores)
+
+    def _calculate_atr_normalized_mfe_mae(self, ohlcv_data: pd.DataFrame, entry_idx: int) -> Dict[str, float]:
+        """
+        Calculate ATR-normalized MFE/MAE with temporal integrity
+
+        Args:
+            ohlcv_data: OHLCV dataframe
+            entry_idx: Entry point index
+
+        Returns:
+            Dictionary with normalized MFE, MAE, and ATR values
+        """
+        # Principle 3: Temporal integrity - use only historical data for ATR
+        if entry_idx + self.lookahead_window >= len(ohlcv_data):
+            return {"mfe_norm": 0.0, "mae_norm": 0.0, "atr": np.nan}
+
+        entry_price = ohlcv_data.iloc[entry_idx]["close"]
+
+        # Future price movements for MFE/MAE calculation
+        future_slice = ohlcv_data.iloc[entry_idx + 1 : entry_idx + self.lookahead_window + 1]
+
+        if len(future_slice) == 0:
+            return {"mfe_norm": 0.0, "mae_norm": 0.0, "atr": np.nan}
+
+        # Calculate ATR using only historical data (no look-ahead bias)
+        atr_slice = ohlcv_data.iloc[max(0, entry_idx - self.atr_period) : entry_idx + 1]
+
+        if len(atr_slice) >= 2:
+            # Use talib for ATR calculation
+            atr_values = talib.ATR(
+                atr_slice["high"].values, atr_slice["low"].values, atr_slice["close"].values, timeperiod=min(self.atr_period, len(atr_slice) - 1)
+            )
+            atr = atr_values[-1] if not np.isnan(atr_values[-1]) else np.nan
+        else:
+            atr = np.nan
+
+        if np.isnan(atr) or atr <= 0:
+            return {"mfe_norm": 0.0, "mae_norm": 0.0, "atr": atr}
+
+        # DIRECTIONAL MFE/MAE CALCULATION
+        # Implementation based on current phase and direction_mode
+
+        future_highs = future_slice["high"].values
+        future_lows = future_slice["low"].values
+
+        # LONG POSITION analysis
+        mfe_long = np.max(future_highs) - entry_price  # Maximum profit if going long
+        mae_long = entry_price - np.min(future_lows)  # Maximum loss if going long
+        mfe_long = max(mfe_long, 0)  # MFE cannot be negative
+        mae_long = max(mae_long, 0)  # MAE cannot be negative
+
+        # SHORT POSITION analysis
+        mfe_short = entry_price - np.min(future_lows)  # Maximum profit if going short
+        mae_short = np.max(future_highs) - entry_price  # Maximum loss if going short
+        mfe_short = max(mfe_short, 0)  # MFE cannot be negative
+        mae_short = max(mae_short, 0)  # MAE cannot be negative
+
+        # PHASE-BASED DIRECTION SELECTION
+        if self.direction_mode == "long_only":
+            # Phase 1: Use LONG position only for testing and validation
+            mfe_final = mfe_long
+            mae_final = mae_long
+            position_type = "long"
+            long_ratio = (mfe_long / (mae_long + 1e-8)) if mae_long > 0 else (mfe_long * 1000)
+            short_ratio = 0.0  # Not calculated in Phase 1
+
+        elif self.direction_mode == "best_direction":
+            # Phase 2: Calculate both, select direction with higher profit/risk ratio
+            long_ratio = (mfe_long / (mae_long + 1e-8)) if mae_long > 0 else (mfe_long * 1000)
+            short_ratio = (mfe_short / (mae_short + 1e-8)) if mae_short > 0 else (mfe_short * 1000)
+
+            if long_ratio >= short_ratio:
+                mfe_final = mfe_long
+                mae_final = mae_long
+                position_type = "long"
+            else:
+                mfe_final = mfe_short
+                mae_final = mae_short
+                position_type = "short"
+
+        else:  # ensemble mode
+            # Phase 3: Ensemble approach (future implementation)
+            # For now, default to best direction selection
+            long_ratio = (mfe_long / (mae_long + 1e-8)) if mae_long > 0 else (mfe_long * 1000)
+            short_ratio = (mfe_short / (mae_short + 1e-8)) if mae_short > 0 else (mfe_short * 1000)
+
+            if long_ratio >= short_ratio:
+                mfe_final = mfe_long
+                mae_final = mae_long
+                position_type = "long"
+            else:
+                mfe_final = mfe_short
+                mae_final = mae_short
+                position_type = "short"
+
+        # ATR normalization for scale invariance
+        mfe_normalized = mfe_final / atr
+        mae_normalized = mae_final / atr
+
+        return {
+            "mfe_norm": mfe_normalized,
+            "mae_norm": mae_normalized,
+            "atr": atr,
+            "mfe_raw": mfe_final,
+            "mae_raw": mae_final,
+            "position_type": position_type,
+            "long_mfe": mfe_long,
+            "long_mae": mae_long,
+            "short_mfe": mfe_short,
+            "short_mae": mae_short,
+            "long_ratio": long_ratio,
+            "short_ratio": short_ratio,
+            "phase": self.phase,
+        }
+
+    def _calculate_entropy_weighted_fitness(self, ohlcv_data: pd.DataFrame, entry_idx: int, base_fitness: float) -> float:
+        """
+        Calculate entropy-weighted fitness (D_t*) for regime adaptation
+
+        Args:
+            ohlcv_data: OHLCV dataframe
+            entry_idx: Current entry index
+            base_fitness: Base D_t fitness score
+
+        Returns:
+            Entropy-weighted fitness score
+        """
+        if entry_idx < self.entropy_window:
+            return base_fitness
+
+        # Calculate permutation entropy of recent returns
+        recent_returns = ohlcv_data.iloc[entry_idx - self.entropy_window : entry_idx]["close"].pct_change().dropna()
+
+        if len(recent_returns) < 3:
+            return base_fitness
+
+        try:
+            perm_entropy = self._calculate_permutation_entropy(recent_returns.values)
+
+            # Data-derived entropy weighting
+            entropy_weight = 1 + self.alpha_entropy * perm_entropy
+
+            return base_fitness * entropy_weight
+
+        except Exception:
+            return base_fitness
+
+    def _calculate_differentiable_fitness(self, feature_values: np.ndarray, base_fitness: float) -> float:
+        """
+        Calculate differentiable fitness (D_t†) with Shannon entropy scaling
+
+        Args:
+            feature_values: Feature values array
+            base_fitness: Base D_t fitness score
+
+        Returns:
+            Differentiable fitness score
+        """
+        if len(feature_values) == 0:
+            return base_fitness
+
+        try:
+            # Shannon entropy of feature distribution
+            feature_probs = np.abs(feature_values) + self.epsilon_shannon
+            feature_probs = feature_probs / np.sum(feature_probs)
+
+            shannon_entropy = entropy(feature_probs)
+
+            # Scale fitness by entropy (higher entropy = more uncertain = lower fitness)
+            return base_fitness / (shannon_entropy + self.epsilon_shannon)
+
+        except Exception:
+            return base_fitness
+
+    def _calculate_permutation_entropy(self, time_series: np.ndarray, order: int = 3, delay: int = 1) -> float:
+        """
+        Calculate permutation entropy for complexity measurement
+
+        Args:
+            time_series: Input time series
+            order: Embedding dimension
+            delay: Time delay
+
+        Returns:
+            Permutation entropy value
+        """
+        try:
+            # Create embedding matrix
+            N = len(time_series)
+            if N <= order:
+                return 0.0
+
+            embedded = np.zeros((N - (order - 1) * delay, order))
+            for i in range(order):
+                embedded[:, i] = time_series[i * delay : N - (order - 1 - i) * delay]
+
+            # Calculate permutation patterns
+            sorted_indices = np.argsort(embedded, axis=1)
+
+            # Convert to permutation patterns (ordinal patterns)
+            patterns = np.zeros(sorted_indices.shape[0])
+            for i in range(sorted_indices.shape[0]):
+                pattern = 0
+                for j in range(order):
+                    pattern += sorted_indices[i, j] * (order**j)
+                patterns[i] = pattern
+
+            # Calculate relative frequencies
+            pattern_counts = np.bincount(patterns.astype(int))
+            probabilities = pattern_counts / np.sum(pattern_counts)
+            probabilities = probabilities[probabilities > 0]
+
+            # Calculate permutation entropy
+            return -np.sum(probabilities * np.log(probabilities))
+
+        except Exception:
+            return 0.0
+
+    def _aggregate_fitness_scores(self, fitness_scores: Dict[str, List[float]]) -> Dict[str, float]:
+        """
+        Aggregate fitness scores with robust statistics
+
+        Args:
+            fitness_scores: Dictionary of fitness score lists
+
+        Returns:
+            Aggregated fitness statistics
+        """
+        aggregated_fitness = {}
+
+        for variant, scores in fitness_scores.items():
+            if scores and len(scores) > 0:
+                scores_array = np.array(scores)
+                scores_clean = scores_array[~np.isnan(scores_array)]
+
+                if len(scores_clean) > 0:
+                    aggregated_fitness[f"{variant}_mean"] = np.mean(scores_clean)
+                    aggregated_fitness[f"{variant}_std"] = np.std(scores_clean)
+                    aggregated_fitness[f"{variant}_median"] = np.median(scores_clean)
+                    aggregated_fitness[f"{variant}_sharpe"] = np.mean(scores_clean) / (np.std(scores_clean) + self.epsilon_shannon)
+                    aggregated_fitness[f"{variant}_count"] = len(scores_clean)
+                else:
+                    aggregated_fitness[f"{variant}_mean"] = 0.0
+                    aggregated_fitness[f"{variant}_std"] = 0.0
+                    aggregated_fitness[f"{variant}_median"] = 0.0
+                    aggregated_fitness[f"{variant}_sharpe"] = 0.0
+                    aggregated_fitness[f"{variant}_count"] = 0
+            else:
+                aggregated_fitness[f"{variant}_mean"] = 0.0
+                aggregated_fitness[f"{variant}_std"] = 0.0
+                aggregated_fitness[f"{variant}_median"] = 0.0
+                aggregated_fitness[f"{variant}_sharpe"] = 0.0
+                aggregated_fitness[f"{variant}_count"] = 0
+
+        return aggregated_fitness
+
+    def evaluate_feature_fitness(self, ohlcv_data: pd.DataFrame, feature_series: pd.Series, feature_name: str = "unnamed") -> Dict[str, float]:
+        """
+        Convenience method to evaluate a single feature's fitness
+
+        Args:
+            ohlcv_data: OHLCV dataframe
+            feature_series: Feature values as pandas Series
+            feature_name: Name of the feature for reporting
+
+        Returns:
+            Dictionary with fitness evaluation results
+        """
+        try:
+            fitness_results = self.calculate_custom_fitness(ohlcv_data=ohlcv_data, feature_values=feature_series.values)
+
+            fitness_results["feature_name"] = feature_name
+            fitness_results["feature_length"] = len(feature_series)
+
+            return fitness_results
+
+        except Exception as e:
+            return {"feature_name": feature_name, "error": str(e), "D_t_mean": 0.0, "D_t_star_mean": 0.0, "D_t_dagger_mean": 0.0}

@@ -1,0 +1,62 @@
+"""
+okx-price-provider: Universal OKX price data provider with tick-level data from CDN.
+
+This library provides real spot prices from OKX using tick-level aggtrades data.
+Key features:
+- CDN download (no rate limits)
+- Raw tick data storage in Parquet
+- Flexible on-demand resampling
+- Parquet-backed cache with zstd compression
+- Production-ready: typed, documented
+
+Example usage:
+    >>> from pathlib import Path
+    >>> from okx_price_provider import download_month_ticks
+    >>>
+    >>> # Download October 2023 tick data
+    >>> download_month_ticks(
+    ...     msg_type="allspot",
+    ...     year=2023,
+    ...     month=10,
+    ...     output_parquet=Path("data/okx_ticks/202310.parquet"),
+    ...     symbols_filter=["BTC-USDT", "ETH-USDT"]
+    ... )
+    >>>
+    >>> # Load and resample on-demand
+    >>> import pandas as pd
+    >>> df = pd.read_parquet("data/okx_ticks/202310.parquet")
+    >>> btc = df[df["symbol"] == "BTC-USDT"]
+    >>> candles_1h = btc.set_index("timestamp").resample("1H").agg({
+    ...     "price": ["first", "max", "min", "last"],
+    ...     "size": "sum"
+    ... })
+"""
+
+__version__ = "0.1.0"
+
+from .cdn_downloader import (
+    download_month_ticks,
+    download_and_parse_day,
+    construct_cdn_url,
+)
+
+from .tick_provider import (
+    TickPriceProvider,
+)
+
+from .utils import (
+    normalize_symbol,
+    denormalize_symbol,
+)
+
+__all__ = [
+    # CDN Downloader
+    "download_month_ticks",
+    "download_and_parse_day",
+    "construct_cdn_url",
+    # Tick Provider
+    "TickPriceProvider",
+    # Utils
+    "normalize_symbol",
+    "denormalize_symbol",
+]

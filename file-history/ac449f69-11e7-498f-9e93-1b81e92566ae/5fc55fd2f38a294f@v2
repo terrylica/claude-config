@@ -1,0 +1,350 @@
+"""
+Transaction Costs Modeling Module
+
+Realistic transaction cost modeling for crypto trading backtests.
+Critical for accurate profit estimation - backtests without transaction costs
+can be 5-10x too optimistic.
+
+Components:
+- Maker/Taker fees (Binance: 0.075% maker, 0.1% taker with BNB discount)
+- Slippage (market impact from order size)
+- Spread costs (bid-ask spread)
+
+Author: ML Feature Experiments - OOD Trading Profit Implementation
+Date: 2025-10-01
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Dict, Literal, Optional
+from dataclasses import dataclass
+
+
+@dataclass
+class BinanceFeeSchedule:
+    """
+    Binance fee schedule with BNB discount
+
+    Spot trading fees (as of 2025):
+    - Without BNB: 0.1% maker, 0.1% taker
+    - With BNB (25% discount): 0.075% maker, 0.075% taker
+    - VIP 0 (default): 0.1% / 0.1%
+    - VIP 1 (>50 BTC 30d vol): 0.09% / 0.1%
+
+    Using conservative defaults: 0.075% maker, 0.1% taker (with BNB)
+    """
+    maker_fee: float = 0.00075  # 0.075% with BNB discount
+    taker_fee: float = 0.001    # 0.1% with BNB discount
+    use_bnb_discount: bool = True
+
+
+@dataclass
+class SlippageModel:
+    """
+    Slippage model for market impact
+
+    Slippage increases with:
+    - Order size (larger orders move market more)
+    - Volatility (more volatile = wider spreads)
+    - Liquidity (lower liquidity = more slippage)
+
+    Conservative estimates:
+    - Small orders (<$1000): 0.05% (0.5 bps)
+    - Medium orders ($1000-$10000): 0.1% (1 bp)
+    - Large orders (>$10000): 0.2% (2 bps)
+    """
+    base_slippage_pct: float = 0.0005  # 0.05% base slippage
+    volatility_multiplier: float = 1.0  # Multiplier based on ATR
+    liquidity_multiplier: float = 1.0   # Multiplier based on volume
+
+
+class TransactionCostModel:
+    """
+    Comprehensive transaction cost model for realistic backtesting
+
+    Models three types of costs:
+    1. Exchange fees (maker/taker)
+    2. Slippage (market impact)
+    3. Spread costs (bid-ask spread)
+    """
+
+    def __init__(
+        self,
+        fee_schedule: Optional[BinanceFeeSchedule] = None,
+        slippage_model: Optional[SlippageModel] = None,
+        include_spread: bool = True
+    ):
+        """
+        Initialize transaction cost model
+
+        Args:
+            fee_schedule: Fee schedule (defaults to Binance with BNB)
+            slippage_model: Slippage parameters
+            include_spread: Whether to model spread costs
+        """
+        self.fee_schedule = fee_schedule or BinanceFeeSchedule()
+        self.slippage_model = slippage_model or SlippageModel()
+        self.include_spread = include_spread
+
+    def calculate_fee(
+        self,
+        order_value: float,
+        order_type: Literal["market", "limit"] = "market"
+    ) -> float:
+        """
+        Calculate exchange fee for order
+
+        Args:
+            order_value: Order value in quote currency (USDT)
+            order_type: "market" (taker) or "limit" (maker)
+
+        Returns:
+            Fee amount in quote currency
+        """
+        if order_type == "market":
+            fee_pct = self.fee_schedule.taker_fee
+        else:  # limit order
+            fee_pct = self.fee_schedule.maker_fee
+
+        return order_value * fee_pct
+
+    def calculate_slippage(
+        self,
+        order_value: float,
+        current_price: float,
+        volatility: Optional[float] = None,
+        volume: Optional[float] = None
+    ) -> float:
+        """
+        Calculate slippage cost for market order
+
+        Slippage increases with:
+        - Order size (% of typical volume)
+        - Volatility (wider spreads in volatile markets)
+        - Low liquidity (thin order books)
+
+        Args:
+            order_value: Order value in quote currency
+            current_price: Current market price
+            volatility: Optional ATR or realized volatility (normalized)
+            volume: Optional recent volume (for liquidity adjustment)
+
+        Returns:
+            Slippage cost in quote currency
+        """
+        # Base slippage
+        base_slippage = self.slippage_model.base_slippage_pct
+
+        # Volatility adjustment (higher vol = more slippage)
+        vol_multiplier = self.slippage_model.volatility_multiplier
+        if volatility is not None:
+            vol_multiplier = 1.0 + (volatility * 2.0)  # Scale volatility impact
+
+        # Liquidity adjustment (lower volume = more slippage)
+        liq_multiplier = self.slippage_model.liquidity_multiplier
+        if volume is not None and volume > 0:
+            # Assume order_value as % of volume affects slippage
+            order_size_pct = order_value / (volume * current_price)
+            liq_multiplier = 1.0 + min(order_size_pct * 10.0, 2.0)  # Cap at 3x
+
+        # Total slippage
+        total_slippage_pct = base_slippage * vol_multiplier * liq_multiplier
+
+        return order_value * total_slippage_pct
+
+    def calculate_spread_cost(
+        self,
+        order_value: float,
+        bid_ask_spread_pct: float = 0.0001
+    ) -> float:
+        """
+        Calculate cost of crossing bid-ask spread
+
+        For market orders, you pay half the spread on average.
+
+        Args:
+            order_value: Order value in quote currency
+            bid_ask_spread_pct: Bid-ask spread as percentage (default 0.01% / 1 bp)
+
+        Returns:
+            Spread cost in quote currency
+        """
+        if not self.include_spread:
+            return 0.0
+
+        # Pay half the spread for market orders
+        return order_value * (bid_ask_spread_pct / 2.0)
+
+    def calculate_total_cost(
+        self,
+        order_value: float,
+        order_type: Literal["market", "limit"] = "market",
+        current_price: Optional[float] = None,
+        volatility: Optional[float] = None,
+        volume: Optional[float] = None,
+        bid_ask_spread_pct: float = 0.0001
+    ) -> Dict[str, float]:
+        """
+        Calculate total transaction costs (fees + slippage + spread)
+
+        Args:
+            order_value: Order value in quote currency
+            order_type: "market" or "limit"
+            current_price: Current market price (for slippage calculation)
+            volatility: Recent volatility measure
+            volume: Recent volume
+            bid_ask_spread_pct: Bid-ask spread percentage
+
+        Returns:
+            Dictionary with cost breakdown
+        """
+        # Exchange fee
+        fee = self.calculate_fee(order_value, order_type)
+
+        # Slippage (only for market orders)
+        slippage = 0.0
+        if order_type == "market" and current_price is not None:
+            slippage = self.calculate_slippage(
+                order_value,
+                current_price,
+                volatility,
+                volume
+            )
+
+        # Spread cost (only for market orders)
+        spread_cost = 0.0
+        if order_type == "market":
+            spread_cost = self.calculate_spread_cost(order_value, bid_ask_spread_pct)
+
+        total_cost = fee + slippage + spread_cost
+
+        return {
+            'fee': fee,
+            'slippage': slippage,
+            'spread': spread_cost,
+            'total': total_cost,
+            'total_pct': (total_cost / order_value) * 100 if order_value > 0 else 0.0
+        }
+
+    def apply_costs_to_returns(
+        self,
+        returns: pd.Series,
+        trades_per_return: int = 2  # 1 entry + 1 exit
+    ) -> pd.Series:
+        """
+        Apply transaction costs to returns series
+
+        Assumes each return represents a round-trip trade (entry + exit).
+
+        Args:
+            returns: Series of period returns
+            trades_per_return: Number of trades per return period (default 2 = round trip)
+
+        Returns:
+            Returns series with costs subtracted
+        """
+        # Conservative estimate: taker fee for both entry and exit
+        cost_per_trade = self.fee_schedule.taker_fee
+        cost_per_return = cost_per_trade * trades_per_return
+
+        # Also include slippage
+        cost_per_return += self.slippage_model.base_slippage_pct * trades_per_return
+
+        # Subtract costs from returns
+        adjusted_returns = returns - cost_per_return
+
+        return adjusted_returns
+
+    def get_cost_summary(self) -> str:
+        """
+        Get summary of cost model parameters
+
+        Returns:
+            Formatted string with cost parameters
+        """
+        summary = []
+        summary.append("=" * 60)
+        summary.append("TRANSACTION COST MODEL SUMMARY")
+        summary.append("=" * 60)
+        summary.append("")
+        summary.append("💰 Exchange Fees (Binance):")
+        summary.append(f"  Maker Fee:         {self.fee_schedule.maker_fee * 100:.3f}%")
+        summary.append(f"  Taker Fee:         {self.fee_schedule.taker_fee * 100:.3f}%")
+        summary.append(f"  BNB Discount:      {'Yes' if self.fee_schedule.use_bnb_discount else 'No'}")
+        summary.append("")
+        summary.append("📊 Slippage Model:")
+        summary.append(f"  Base Slippage:     {self.slippage_model.base_slippage_pct * 100:.3f}%")
+        summary.append(f"  Vol Multiplier:    {self.slippage_model.volatility_multiplier:.2f}x")
+        summary.append(f"  Liq Multiplier:    {self.slippage_model.liquidity_multiplier:.2f}x")
+        summary.append("")
+        summary.append("📈 Spread Costs:")
+        summary.append(f"  Include Spread:    {'Yes' if self.include_spread else 'No'}")
+        summary.append("")
+        summary.append("🔄 Round-Trip Cost Estimate:")
+        # Estimate for typical market order round trip
+        typical_order = 1000.0  # $1000 USDT
+        costs = self.calculate_total_cost(
+            typical_order,
+            order_type="market",
+            current_price=100.0,  # Dummy price
+            volatility=0.02,
+            volume=1000000
+        )
+        summary.append(f"  Total Cost:        ${costs['total']:.2f} ({costs['total_pct']:.3f}%)")
+        summary.append(f"    - Fee:           ${costs['fee']:.2f}")
+        summary.append(f"    - Slippage:      ${costs['slippage']:.2f}")
+        summary.append(f"    - Spread:        ${costs['spread']:.2f}")
+        summary.append("")
+        summary.append("  Round-Trip (2x):   ~{:.3f}% of position size".format(costs['total_pct'] * 2))
+        summary.append("=" * 60)
+
+        return "\n".join(summary)
+
+
+def create_realistic_cost_model() -> TransactionCostModel:
+    """
+    Create realistic cost model with Binance fees + conservative slippage
+
+    Returns:
+        Configured TransactionCostModel
+    """
+    return TransactionCostModel(
+        fee_schedule=BinanceFeeSchedule(
+            maker_fee=0.00075,  # 0.075% with BNB
+            taker_fee=0.001,    # 0.1% with BNB
+            use_bnb_discount=True
+        ),
+        slippage_model=SlippageModel(
+            base_slippage_pct=0.0005,  # 0.05% base
+            volatility_multiplier=1.0,
+            liquidity_multiplier=1.0
+        ),
+        include_spread=True
+    )
+
+
+if __name__ == "__main__":
+    # Demo usage
+    print("💰 Transaction Cost Model - Demo\n")
+
+    # Create cost model
+    cost_model = create_realistic_cost_model()
+
+    # Print summary
+    print(cost_model.get_cost_summary())
+
+    # Example cost calculation
+    print("\n📊 Example: $10,000 Market Order")
+    costs = cost_model.calculate_total_cost(
+        order_value=10000.0,
+        order_type="market",
+        current_price=100.0,
+        volatility=0.02,  # 2% recent volatility
+        volume=5000  # 500,000 USDT recent volume
+    )
+    print(f"  Fee:              ${costs['fee']:.2f}")
+    print(f"  Slippage:         ${costs['slippage']:.2f}")
+    print(f"  Spread:           ${costs['spread']:.2f}")
+    print(f"  Total Cost:       ${costs['total']:.2f} ({costs['total_pct']:.3f}%)")
+
+    print("\n✅ Transaction cost model ready for realistic backtesting")

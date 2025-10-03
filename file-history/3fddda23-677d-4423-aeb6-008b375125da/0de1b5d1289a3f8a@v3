@@ -1,0 +1,83 @@
+# Performance Optimization Blacklist
+
+**Status:** Reference only - NOT priority for current project
+**Reason:** Not in high-frequency domain; performance gains don't justify complexity
+**Usage:** Grow this list to avoid future deep-dives into performance rabbit holes
+
+---
+
+## Blacklisted Categories
+
+### 1. JIT Compilation & Acceleration
+- **Numba `@jit(nopython=True)`** - 10-100x speedup for numerical loops
+- **Numba `@guvectorize`** - Custom ufuncs with multi-element operations
+- **Numba `@vectorize`** - Scalar → array functions
+- **Pandas `engine='numba'` in `.rolling().apply()`** - 50x faster (188ms vs 3.92s, >1M rows)
+- **Cython typed memoryviews** - 100x speedup with C-level performance
+- **PyPy interpreter** - Alternative Python interpreter with JIT
+
+### 2. GPU Acceleration
+- **cuDF (RAPIDS)** - 150x faster pandas operations on GPU
+- **cuDF.pandas** - Zero-code-change GPU acceleration (`%load_ext cudf.pandas`)
+- **Polars GPU engine** - GPU-powered dataframes (beta)
+- **CuPy** - GPU-accelerated NumPy alternative
+- **JAX** - GPU/TPU-accelerated NumPy with auto-differentiation
+
+### 3. Memory Optimizations
+- **Categorical dtypes** - 60x memory reduction (35MB → 586KB for low-cardinality)
+- **Downcasting** - `pd.to_numeric(downcast='float')` (15MB → 4.8MB, 3x reduction)
+- **Copy-on-Write (CoW)** - `pd.options.mode.copy_on_write=True` (pandas 2.0+)
+- **PyArrow memory backend** - Columnar memory format
+- **Sparse arrays** - `pd.arrays.SparseArray` for mostly-zero data
+- **Memory-mapped files** - `np.memmap()` for out-of-core processing
+
+### 4. I/O Acceleration
+- **PyArrow backend** - `dtype_backend='pyarrow'` (35x faster reads, 650MB in seconds)
+- **Parquet format** - Columnar storage with compression
+- **ADBC drivers** - Arrow Database Connectivity (huge performance improvements)
+- **Calamine Excel engine** - 5x faster than openpyxl, 20x faster than odf
+- **fastparquet** - Pure-Python Parquet implementation
+- **pyarrow.parquet` with compression** - zstd, snappy, gzip
+
+### 5. Alternative High-Performance Libraries
+- **Polars** - 3-22x faster than pandas (Rust-based, lazy evaluation)
+- **Polars lazy mode** - `pl.scan_csv()` with query optimization
+- **Vaex** - Out-of-core dataframes (billions of rows)
+- **Dask** - Parallel/distributed pandas
+- **Modin** - Drop-in pandas replacement (Ray/Dask backend)
+- **Bottleneck** - 99x faster nan-aware functions (`bn.nanmean`, `bn.move_mean`)
+
+### 6. Specialized Optimizations
+- **`np.lib.stride_tricks.sliding_window_view()`** - Zero-copy rolling windows
+- **eval()/query()** - 50% faster for large DataFrames (>100K rows)
+- **Broadcasting** - Eliminate loops with NumPy broadcasting
+- **`np.einsum` with optimize=True** - Optimized tensor contractions
+- **scipy.linalg (BLAS/LAPACK)** - Hardware-optimized linear algebra
+- **Intel MKL** - Math Kernel Library for Intel CPUs
+
+### 7. Parallelization
+- **joblib.Parallel** - Easy parallelization with sklearn
+- **multiprocessing.Pool** - Process-based parallelism
+- **concurrent.futures** - Thread/process pools
+- **Dask delayed/futures** - Task graph parallelization
+- **Ray** - Distributed computing framework
+- **Numba parallel=True** - Automatic loop parallelization
+
+### 8. Fast Computation Libraries (When Optimized Implementations Exist)
+- **Bottleneck** - 99x faster nan-aware operations vs NumPy (already listed but emphasizing)
+- **PyArrow compute functions** - Vectorized operations on Arrow arrays
+- **PyEMD C++ backend** - `fathon` package (Cython/C optimized EMD, focus on speed not features)
+- **OpenCL/CUDA accelerated libraries** - Device-specific optimizations
+
+---
+
+## When to Reconsider This Blacklist
+
+**Revisit performance optimizations only if:**
+1. Processing >10M rows regularly
+2. Real-time/streaming requirements emerge
+3. Feature generation takes >10 minutes
+4. Memory constraints become blocking issue
+5. Moving to high-frequency trading (sub-second latency)
+
+**Current decision:** Focus on feature creativity over performance optimization.

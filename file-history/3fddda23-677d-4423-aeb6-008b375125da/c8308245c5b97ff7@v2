@@ -1,0 +1,344 @@
+"""
+Atom Library - Core classes for systematic feature generation
+
+This module provides:
+- AtomSpec: Specification for a single feature atom
+- AtomLibrary: Manager for loading and computing atom catalog
+"""
+
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Callable, Optional
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AtomSpec:
+    """
+    Specification for a single feature atom
+
+    Attributes:
+        name: Unique atom identifier (e.g., "is_us_holiday", "garch_11_vol")
+        layer: Orthogonality layer (A-H)
+        library: Source library (e.g., "holidays", "statsmodels", "arch")
+        formula: Python callable that computes the atom from DataFrame
+        lookback: Minimum historical bars required
+        dependencies: Required packages (for fail-soft degradation)
+        status: Production status (production/experimental/research-only)
+        description: Human-readable description
+        params: Parameter dictionary for formula
+    """
+
+    name: str
+    layer: str
+    library: str
+    formula: Callable[[pd.DataFrame, Dict[str, Any]], pd.Series]
+    lookback: int
+    dependencies: List[str] = field(default_factory=list)
+    status: str = "production"
+    description: str = ""
+    params: Dict[str, Any] = field(default_factory=dict)
+
+    def compute(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Compute atom on input DataFrame
+
+        Args:
+            df: Input DataFrame with OHLCV data and 'actual_ready_time' column
+
+        Returns:
+            pd.Series with computed atom values (same index as df)
+
+        Raises:
+            ValueError: If required columns missing
+            RuntimeError: If computation fails
+        """
+        try:
+            # Check dependencies
+            for dep in self.dependencies:
+                try:
+                    __import__(dep)
+                except ImportError:
+                    raise ImportError(
+                        f"Atom '{self.name}' requires '{dep}' which is not installed. "
+                        f"Install with: pip install {dep}"
+                    )
+
+            # Check lookback
+            if len(df) < self.lookback:
+                raise ValueError(
+                    f"Atom '{self.name}' requires {self.lookback} bars, "
+                    f"but DataFrame has only {len(df)} rows"
+                )
+
+            # Compute atom
+            result = self.formula(df, self.params)
+
+            # Validate output
+            if not isinstance(result, pd.Series):
+                raise TypeError(
+                    f"Atom formula for '{self.name}' must return pd.Series, "
+                    f"got {type(result)}"
+                )
+
+            if len(result) != len(df):
+                raise ValueError(
+                    f"Atom '{self.name}' returned Series of length {len(result)}, "
+                    f"expected {len(df)}"
+                )
+
+            # Set index to match input
+            result.index = df.index
+            result.name = self.name
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to compute atom '{self.name}': {e}")
+            raise RuntimeError(f"Atom computation failed: {self.name}") from e
+
+
+class AtomLibrary:
+    """
+    Manager for atom catalog - loads, organizes, and computes atoms
+    """
+
+    def __init__(self, atoms: Optional[List[AtomSpec]] = None):
+        """
+        Initialize atom library
+
+        Args:
+            atoms: List of AtomSpec objects (if None, library starts empty)
+        """
+        self.atoms: List[AtomSpec] = atoms if atoms is not None else []
+        self._atoms_by_layer: Dict[str, List[AtomSpec]] = {}
+        self._atoms_by_name: Dict[str, AtomSpec] = {}
+
+        self._build_indexes()
+
+    def _build_indexes(self):
+        """Build internal indexes for fast lookups"""
+        self._atoms_by_layer.clear()
+        self._atoms_by_name.clear()
+
+        for atom in self.atoms:
+            # Index by layer
+            if atom.layer not in self._atoms_by_layer:
+                self._atoms_by_layer[atom.layer] = []
+            self._atoms_by_layer[atom.layer].append(atom)
+
+            # Index by name
+            if atom.name in self._atoms_by_name:
+                logger.warning(f"Duplicate atom name: {atom.name}")
+            self._atoms_by_name[atom.name] = atom
+
+    def add_atom(self, atom: AtomSpec):
+        """Add a single atom to library"""
+        self.atoms.append(atom)
+        self._build_indexes()
+
+    def add_atoms(self, atoms: List[AtomSpec]):
+        """Add multiple atoms to library"""
+        self.atoms.extend(atoms)
+        self._build_indexes()
+
+    def get_atom(self, name: str) -> Optional[AtomSpec]:
+        """Get atom by name"""
+        return self._atoms_by_name.get(name)
+
+    def get_atoms_by_layer(self, layer: str) -> List[AtomSpec]:
+        """Get all atoms for a specific layer"""
+        return self._atoms_by_layer.get(layer, [])
+
+    def get_atoms_by_library(self, library: str) -> List[AtomSpec]:
+        """Get all atoms from a specific library"""
+        return [a for a in self.atoms if a.library == library]
+
+    def get_atoms_by_status(self, status: str) -> List[AtomSpec]:
+        """Get all atoms with specific status"""
+        return [a for a in self.atoms if a.status == status]
+
+    def compute_atom(self, name: str, df: pd.DataFrame) -> pd.Series:
+        """
+        Compute a single atom by name
+
+        Args:
+            name: Atom name
+            df: Input DataFrame
+
+        Returns:
+            pd.Series with computed values
+
+        Raises:
+            KeyError: If atom not found
+        """
+        atom = self.get_atom(name)
+        if atom is None:
+            raise KeyError(f"Atom '{name}' not found in library")
+
+        return atom.compute(df)
+
+    def compute_layer(
+        self, layer: str, df: pd.DataFrame, fail_soft: bool = True
+    ) -> pd.DataFrame:
+        """
+        Compute all atoms for a specific layer
+
+        Args:
+            layer: Layer identifier (A-H)
+            df: Input DataFrame with OHLCV data
+            fail_soft: If True, skip atoms that fail (log warning); if False, raise exception
+
+        Returns:
+            pd.DataFrame with computed atoms as columns (same index as input df)
+        """
+        atoms = self.get_atoms_by_layer(layer)
+
+        if not atoms:
+            logger.warning(f"No atoms found for layer {layer}")
+            return pd.DataFrame(index=df.index)
+
+        logger.info(f"Computing {len(atoms)} atoms for layer {layer}")
+
+        results = {}
+        failed = []
+
+        for atom in atoms:
+            try:
+                results[atom.name] = atom.compute(df)
+            except Exception as e:
+                if fail_soft:
+                    logger.warning(
+                        f"Skipping atom '{atom.name}' due to error: {e}"
+                    )
+                    failed.append(atom.name)
+                else:
+                    raise
+
+        logger.info(
+            f"Layer {layer} computed: {len(results)} succeeded, {len(failed)} failed"
+        )
+
+        return pd.DataFrame(results, index=df.index)
+
+    def compute_all(
+        self, df: pd.DataFrame, layers: Optional[List[str]] = None, fail_soft: bool = True
+    ) -> pd.DataFrame:
+        """
+        Compute all atoms across specified layers
+
+        Args:
+            df: Input DataFrame
+            layers: List of layer IDs to compute (default: all layers A-H)
+            fail_soft: If True, skip failing atoms; if False, raise on first failure
+
+        Returns:
+            pd.DataFrame with all computed atoms (wide format)
+        """
+        if layers is None:
+            layers = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+
+        all_results = pd.DataFrame(index=df.index)
+
+        for layer in layers:
+            logger.info(f"Processing layer {layer}...")
+            layer_df = self.compute_layer(layer, df, fail_soft=fail_soft)
+            all_results = pd.concat([all_results, layer_df], axis=1)
+
+        logger.info(
+            f"Computed {len(all_results.columns)} total atoms across {len(layers)} layers"
+        )
+
+        return all_results
+
+    def summary(self) -> pd.DataFrame:
+        """
+        Generate summary statistics for library
+
+        Returns:
+            DataFrame with atom counts by layer, library, status
+        """
+        summary_data = []
+
+        for atom in self.atoms:
+            summary_data.append({
+                'name': atom.name,
+                'layer': atom.layer,
+                'library': atom.library,
+                'status': atom.status,
+                'lookback': atom.lookback,
+                'n_dependencies': len(atom.dependencies)
+            })
+
+        return pd.DataFrame(summary_data)
+
+    def count_by_layer(self) -> Dict[str, int]:
+        """Count atoms per layer"""
+        counts = {}
+        for layer in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
+            counts[layer] = len(self.get_atoms_by_layer(layer))
+        return counts
+
+    def count_by_library(self) -> Dict[str, int]:
+        """Count atoms per library"""
+        libraries = set(a.library for a in self.atoms)
+        return {lib: len(self.get_atoms_by_library(lib)) for lib in libraries}
+
+    def count_by_status(self) -> Dict[str, int]:
+        """Count atoms per status"""
+        statuses = set(a.status for a in self.atoms)
+        return {status: len(self.get_atoms_by_status(status)) for status in statuses}
+
+    def __len__(self) -> int:
+        """Total number of atoms in library"""
+        return len(self.atoms)
+
+    def __repr__(self) -> str:
+        """String representation"""
+        layer_counts = self.count_by_layer()
+        total = sum(layer_counts.values())
+        return f"AtomLibrary({total} atoms across {len(layer_counts)} layers)"
+
+
+def create_empty_library() -> AtomLibrary:
+    """Create an empty atom library (for programmatic population)"""
+    return AtomLibrary()
+
+
+def load_library_from_formulas() -> AtomLibrary:
+    """
+    Load atom library from formula modules (ml_feature_set.atoms.formulas)
+
+    This imports layer-specific formula modules and registers their atoms.
+
+    Returns:
+        AtomLibrary with all registered atoms
+    """
+    lib = AtomLibrary()
+
+    # Import layer formula modules
+    try:
+        from ml_feature_set.atoms.formulas import layer_a_calendars
+        lib.add_atoms(layer_a_calendars.get_atoms())
+        logger.info(f"Loaded {len(layer_a_calendars.get_atoms())} atoms from Layer A")
+    except ImportError:
+        logger.warning("Layer A formulas not found, skipping")
+
+    try:
+        from ml_feature_set.atoms.formulas import layer_b_baselines
+        lib.add_atoms(layer_b_baselines.get_atoms())
+        logger.info(f"Loaded {len(layer_b_baselines.get_atoms())} atoms from Layer B")
+    except ImportError:
+        logger.warning("Layer B formulas not found, skipping")
+
+    # Add more layers as they're implemented
+    # try:
+    #     from ml_feature_set.atoms.formulas import layer_c_timefreq
+    #     lib.add_atoms(layer_c_timefreq.get_atoms())
+    # except ImportError:
+    #     pass
+
+    logger.info(f"Loaded total: {len(lib)} atoms")
+    return lib

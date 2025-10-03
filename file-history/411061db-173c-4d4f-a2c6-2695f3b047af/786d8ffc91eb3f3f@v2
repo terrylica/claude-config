@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+Analyze historical funding rates to determine:
+1. Which symbols had best arbitrage opportunities
+2. Optimal rebalancing frequency
+3. How often the top-5 selection changes
+
+This provides data-driven insights for symbol filtering and strategy parameters.
+
+Run with: uv run --active python analyze_funding_rates.py
+"""
+
+import logging
+import zipfile
+from io import BytesIO
+from pathlib import Path
+from typing import List
+import calendar
+
+import httpx
+import pandas as pd
+import numpy as np
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+OKX_CDN_BASE = "https://www.okx.com/cdn/okex/traderecords/swaprate/monthly"
+
+
+def download_funding_rate_day(year: int, month: int, day: int) -> pd.DataFrame:
+    """Download funding rate data for a single day."""
+    month_str = f"{year:04d}{month:02d}"
+    filename = f"allswaprate-swaprate-{year:04d}-{month:02d}-{day:02d}.zip"
+    url = f"{OKX_CDN_BASE}/{month_str}/{filename}"
+
+    logger.info(f"Downloading {year}-{month:02d}-{day:02d}...")
+
+    try:
+        with httpx.Client(timeout=60) as client:
+            response = client.get(url)
+            response.raise_for_status()
+
+        zip_buffer = BytesIO(response.content)
+
+        with zipfile.ZipFile(zip_buffer, 'r') as zf:
+            csv_filename = f"allswaprate-swaprate-{year:04d}-{month:02d}-{day:02d}.csv"
+            with zf.open(csv_filename) as csv_file:
+                # Read with GBK encoding
+                df = pd.read_csv(BytesIO(csv_file.read()), encoding='gbk')
+
+                # Normalize bilingual column names
+                df.columns = [col.split('/')[0] for col in df.columns]
+
+                # Convert timestamp
+                df['timestamp'] = pd.to_datetime(df['funding_time'], unit='ms', utc=True)
+
+                # Extract base symbol (e.g., "BTC-USDT-SWAP" -> "BTC-USDT")
+                df['symbol'] = df['instrument_name'].str.replace('-SWAP', '')
+
+                # Convert rates to float
+                df['funding_rate'] = pd.to_numeric(df['funding_rate'], errors='coerce')
+                df['real_funding_rate'] = pd.to_numeric(df['real_funding_rate'], errors='coerce')
+
+                # Select relevant columns
+                df = df[['timestamp', 'symbol', 'funding_rate', 'real_funding_rate']]
+
+                logger.info(f"  Loaded {len(df)} funding rate records")
+                return df
+
+    except httpx.HTTPError as e:
+        logger.error(f"Failed to download {year}-{month:02d}-{day:02d}: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"Error processing {year}-{month:02d}-{day:02d}: {e}")
+        return pd.DataFrame()
+
+
+def download_month_funding_rates(year: int, month: int) -> pd.DataFrame:
+    """Download all funding rate data for a month."""
+    num_days = calendar.monthrange(year, month)[1]
+
+    all_days = []
+    for day in range(1, num_days + 1):
+        day_df = download_funding_rate_day(year, month, day)
+        if not day_df.empty:
+            all_days.append(day_df)
+
+    if not all_days:
+        raise ValueError(f"No funding rate data downloaded for {year}-{month:02d}")
+
+    combined = pd.concat(all_days, ignore_index=True)
+    combined = combined.sort_values(['timestamp', 'symbol']).reset_index(drop=True)
+
+    logger.info(f"Combined: {len(combined):,} total funding rate records")
+    return combined
+
+
+def analyze_top_n_stability(df: pd.DataFrame, n: int = 5, abs_rates: bool = True) -> dict:
+    """
+    Analyze how stable the top-N selection is over time.
+
+    Args:
+        df: Funding rate data
+        n: Top N symbols to track
+        abs_rates: If True, use absolute value (arbitrage in both directions)
+
+    Returns:
+        Dict with stability statistics
+    """
+    # Sort by timestamp to get chronological order
+    df = df.sort_values('timestamp')
+
+    # Get unique timestamps (funding rate updates)
+    timestamps = df['timestamp'].unique()
+
+    logger.info(f"Analyzing top-{n} stability across {len(timestamps)} funding rate periods...")
+
+    top_n_history = []
+
+    for ts in timestamps:
+        period_data = df[df['timestamp'] == ts].copy()
+
+        if abs_rates:
+            period_data['abs_rate'] = period_data['real_funding_rate'].abs()
+            top_symbols = period_data.nlargest(n, 'abs_rate')['symbol'].tolist()
+        else:
+            top_symbols = period_data.nlargest(n, 'real_funding_rate')['symbol'].tolist()
+
+        top_n_history.append({
+            'timestamp': ts,
+            'top_symbols': top_symbols,
+        })
+
+    # Calculate how often top-N changes
+    changes = 0
+    for i in range(1, len(top_n_history)):
+        prev_set = set(top_n_history[i-1]['top_symbols'])
+        curr_set = set(top_n_history[i]['top_symbols'])
+
+        # Count number of symbols that changed
+        if prev_set != curr_set:
+            changes += 1
+
+    change_rate = changes / (len(top_n_history) - 1) if len(top_n_history) > 1 else 0
+
+    # Calculate time between funding rate updates
+    if len(timestamps) > 1:
+        time_diffs = [(timestamps[i+1] - timestamps[i]).total_seconds() / 3600
+                      for i in range(len(timestamps) - 1)]
+        avg_update_frequency = np.mean(time_diffs)
+    else:
+        avg_update_frequency = 8.0  # Default assumption
+
+    return {
+        'total_periods': len(top_n_history),
+        'num_changes': changes,
+        'change_rate': change_rate,
+        'avg_update_frequency_hours': avg_update_frequency,
+        'top_n_history': top_n_history,
+    }
+
+
+def analyze_symbol_statistics(df: pd.DataFrame) -> pd.DataFrame:
+    """Analyze funding rate statistics per symbol."""
+
+    stats = df.groupby('symbol').agg({
+        'real_funding_rate': ['count', 'mean', 'std', 'min', 'max'],
+    })
+
+    stats.columns = ['num_periods', 'mean_rate', 'std_rate', 'min_rate', 'max_rate']
+    stats['abs_mean_rate'] = df.groupby('symbol')['real_funding_rate'].apply(lambda x: x.abs().mean())
+    stats['abs_max_rate'] = df.groupby('symbol')['real_funding_rate'].apply(lambda x: x.abs().max())
+
+    # Sort by absolute mean rate (best arbitrage opportunities on average)
+    stats = stats.sort_values('abs_mean_rate', ascending=False)
+
+    return stats
+
+
+def main():
+    """Main analysis workflow."""
+    print("\n" + "=" * 90)
+    print("Funding Rate Analysis - October 2023")
+    print("=" * 90 + "\n")
+
+    # Download funding rate data
+    output_file = Path("data/funding_rates_202310.parquet")
+
+    if output_file.exists():
+        print(f"Loading existing data from {output_file}...")
+        df = pd.read_parquet(output_file)
+    else:
+        print("Downloading October 2023 funding rate data...")
+        df = download_month_funding_rates(year=2023, month=10)
+
+        # Save for future use
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(output_file, index=False)
+        print(f"Saved to {output_file}")
+
+    print(f"\nLoaded {len(df):,} funding rate records")
+    print(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+    print(f"Unique symbols: {df['symbol'].nunique()}")
+    print(f"Unique periods: {df['timestamp'].nunique()}")
+
+    # Analyze symbol statistics
+    print(f"\n{'=' * 90}")
+    print("Symbol Statistics (Top 50 by absolute mean funding rate)")
+    print('=' * 90)
+
+    stats = analyze_symbol_statistics(df)
+
+    print(f"{'Rank':>4} {'Symbol':15} {'Periods':>8} {'Mean Rate':>12} {'Abs Mean':>12} {'Max Abs':>12}")
+    print('-' * 90)
+
+    for i, (symbol, row) in enumerate(stats.head(50).iterrows(), 1):
+        print(f"{i:4d} {symbol:15s} {int(row['num_periods']):8d} "
+              f"{row['mean_rate']:11.6f}% {row['abs_mean_rate']:11.6f}% {row['abs_max_rate']:11.6f}%")
+
+    # Analyze top-5 stability
+    print(f"\n{'=' * 90}")
+    print("Top-5 Selection Stability Analysis")
+    print('=' * 90)
+
+    stability = analyze_top_n_stability(df, n=5, abs_rates=True)
+
+    print(f"Total funding rate periods:     {stability['total_periods']}")
+    print(f"Average update frequency:       {stability['avg_update_frequency_hours']:.1f} hours")
+    print(f"Number of top-5 changes:        {stability['num_changes']}")
+    print(f"Change rate:                    {stability['change_rate']*100:.1f}%")
+    print(f"Expected changes per day:       {stability['change_rate'] * 24 / stability['avg_update_frequency_hours']:.1f}")
+
+    # Show first 10 periods to demonstrate volatility
+    print(f"\nFirst 10 funding rate periods (demonstrating top-5 changes):")
+    print('-' * 90)
+
+    for i, period in enumerate(stability['top_n_history'][:10]):
+        ts = period['timestamp']
+        symbols = ', '.join(period['top_symbols'])
+        print(f"{i+1:2d}. {ts}: {symbols}")
+
+    # Identify symbols that appeared in top-5
+    all_top_symbols = set()
+    for period in stability['top_n_history']:
+        all_top_symbols.update(period['top_symbols'])
+
+    print(f"\n{'=' * 90}")
+    print("Symbols That Appeared in Top-5 (Historical)")
+    print('=' * 90)
+    print(f"Total unique symbols in top-5: {len(all_top_symbols)}")
+    print(f"Symbols: {', '.join(sorted(all_top_symbols)[:30])}...")
+
+    # Count frequency of appearance
+    symbol_counts = {}
+    for period in stability['top_n_history']:
+        for symbol in period['top_symbols']:
+            symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+
+    sorted_counts = sorted(symbol_counts.items(), key=lambda x: x[1], reverse=True)
+
+    print(f"\nTop 20 most frequently selected:")
+    print(f"{'Rank':>4} {'Symbol':15} {'Appearances':>12} {'Pct of Time':>12}")
+    print('-' * 90)
+
+    for i, (symbol, count) in enumerate(sorted_counts[:20], 1):
+        pct = count / stability['total_periods'] * 100
+        print(f"{i:4d} {symbol:15s} {count:12d} {pct:11.1f}%")
+
+    # Recommendations
+    print(f"\n{'=' * 90}")
+    print("Recommendations for Victor's Strategy")
+    print('=' * 90)
+
+    print(f"\n1. OPTIMAL REBALANCING FREQUENCY:")
+    print(f"   • Funding rates update every {stability['avg_update_frequency_hours']:.1f} hours")
+    print(f"   • Top-5 changes {stability['change_rate']*100:.1f}% of the time")
+    print(f"   • Recommend: Check every {stability['avg_update_frequency_hours']:.0f} hours (align with OKX updates)")
+
+    print(f"\n2. REQUIRED SYMBOL POOL:")
+    print(f"   • {len(all_top_symbols)} unique symbols appeared in top-5 historically")
+    print(f"   • Top 20 symbols cover {sum(c for _, c in sorted_counts[:20]) / stability['total_periods'] * 100:.1f}% of selections")
+    print(f"   • Recommend: Download top {len(all_top_symbols)} symbols minimum")
+
+    print(f"\n3. STORAGE OPTIMIZATION:")
+    # Estimate based on previous analysis
+    estimated_size = len(all_top_symbols) / 509 * 801
+    print(f"   • {len(all_top_symbols)} symbols ≈ {estimated_size:.0f} MB (vs 801 MB for all)")
+    print(f"   • Savings: {(1 - estimated_size/801)*100:.1f}%")
+
+    # Save symbol list
+    symbol_list_file = Path("data/funding_rate_top_symbols.txt")
+    symbol_list_file.write_text('\n'.join(sorted(all_top_symbols)))
+    print(f"\n✓ Saved symbol list to: {symbol_list_file}")
+
+    print(f"\n{'=' * 90}")
+
+
+if __name__ == "__main__":
+    main()

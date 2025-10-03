@@ -1,0 +1,107 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Docker Development Environment
+
+This project uses Docker to ensure environment consistency across all contributors and CI/CD pipelines.
+
+### Container Management
+
+**Start the container** (one-time setup):
+```bash
+docker run -d --name ml-dev \
+  -v "$(pwd)":/workspace \
+  -v "$HOME/.ssh":/home/vscode/.ssh:ro \
+  -v "$HOME/.aws":/home/vscode/.aws:ro \
+  -w /workspace \
+  ml-feature-set-dev sleep infinity
+```
+
+**Build the Docker image** (when Dockerfile changes):
+```bash
+docker build -t ml-feature-set-dev .devcontainer/
+```
+
+**Stop the container**:
+```bash
+docker stop ml-dev
+docker rm ml-dev
+```
+
+**Check container status**:
+```bash
+docker ps --filter name=ml-dev
+```
+
+### Running Python Scripts
+
+**IMPORTANT:** All Python scripts must be run as modules using `docker exec ml-dev python -m` pattern:
+
+```bash
+# Run feature set validation
+docker exec ml-dev python -m ml_feature_set.run_feature_set_validation
+
+# Run tests
+docker exec ml-dev python -m pytest tests/
+
+# Run specific module
+docker exec ml-dev python -m ml_feature_set.validate_feature_set
+```
+
+**Never use standalone execution** (e.g., `python script.py`). Always use `-m` module format.
+
+### Installing Dependencies
+
+Dependencies are installed automatically during container creation via `pip install -e '.[dev]'`.
+
+If you need to reinstall:
+```bash
+docker exec ml-dev pip install -e '.[dev]'
+```
+
+### Environment Details
+
+- **Python**: 3.10.13
+- **TA-Lib**: 0.5.1 (installed via conda-forge)
+- **Package Manager**: conda + pip
+- **Working Directory**: `/workspace` (mounted from your local repo)
+
+### Troubleshooting
+
+**Container not running?**
+```bash
+docker ps -a --filter name=ml-dev  # Check if stopped
+docker start ml-dev                 # Restart if needed
+```
+
+**Need to access container shell?**
+```bash
+docker exec -it ml-dev bash
+```
+
+**Rebuild from scratch?**
+```bash
+docker stop ml-dev && docker rm ml-dev
+docker build --no-cache -t ml-feature-set-dev .devcontainer/
+# Then run the docker run command above
+```
+
+## Anaconda ToS Fix
+
+**Issue:** Anaconda requires Terms of Service acceptance since July 2025.
+
+**Solution:** The Dockerfile includes `ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true` to auto-accept ToS in non-interactive environments.
+
+**References:**
+- Stack Overflow: https://stackoverflow.com/questions/79702788/
+- Anaconda docs: https://www.anaconda.com/docs/getting-started/tos-plugin
+
+## Git Workflow
+
+This repository follows a **1-file-per-PR** policy. When submitting pull requests:
+- Only commit actual feature code
+- Do not commit CLAUDE.md, .cursor/rules/, or other workspace files
+- Keep PRs focused and minimal
+
+These workspace files are gitignored to keep PRs clean.

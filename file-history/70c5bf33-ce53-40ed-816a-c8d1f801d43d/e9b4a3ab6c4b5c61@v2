@@ -1,0 +1,201 @@
+import logging
+import os
+import time
+
+import pandas as pd
+
+from ml_feature_set.feature_constructor import FeatureConstructor
+from ml_feature_set.helpers.demo_helpers import extract_info_from_file_path, sample_data_loader
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def test_prediction(feature_set_path, sample_data_paths, logger):
+    """
+    Test feature set prediction functionality using the new multi-data source design
+
+    Args:
+        feature_set_path: Feature set path
+        sample_data_paths: Sample data path or list of paths
+        logger: Logger
+
+    Returns:
+        Prediction result
+    """
+    # Extract basic information from filename or path
+    if isinstance(sample_data_paths, list) and len(sample_data_paths) > 0:
+        primary_path = next((path for path in sample_data_paths if "ohlcv_1x" in path or "ohlcv-1x" in path), sample_data_paths[0])
+    else:
+        primary_path = sample_data_paths
+
+    info = extract_info_from_file_path(primary_path)
+    base_interval = info.get("interval", "1h")
+    exchange = info.get("source_descriptor", "").split("-")[0] if "-" in info.get("source_descriptor", "") else "binance"
+    symbol = (
+        info.get("source_descriptor", "").split("-")[1]
+        if "-" in info.get("source_descriptor", "") and len(info.get("source_descriptor", "").split("-")) > 1
+        else "BTC/USDT"
+    )
+
+    # Use prepare_data_sources_for_feature_set to prepare data source list
+    logger.info("Preparing feature set data")
+    if sample_data_paths is None:
+        raise ValueError("sample_data_paths must be provided for prediction testing")
+
+    logger.info("Loading data sources using feature_set_utils.prepare_data_sources_for_feature_set")
+
+    # Define function to load data from sample data paths, for prepare_data_sources_for_feature_set
+    def custom_data_loader(template):
+        return sample_data_loader(template, sample_data_paths, logger)
+
+    logger.info("Loading data sources using feature_set_utils.prepare_data_sources_for_feature_set")
+    logger.info(f"Basic settings: interval={base_interval}, exchange={exchange}, symbol={symbol}")
+
+    # Prepare data sources - 现在这个函数会自动进行时间范围过滤
+    source_data_list = prepare_data_sources_for_feature_set(
+        feature_set_path=feature_set_path,
+        data_loader_func=custom_data_loader,
+        source_to_interval={"ohlcv": base_interval, "fear_greed_index": "1d", "btc_dominance": "1d"},
+        moving_window_size=30,
+        auto_resample=True,
+        filter_common_time_range=True,  # 启用时间范围过滤
+    )
+
+    # Ensure at least one data source was loaded
+    if not source_data_list:
+        raise ValueError("No data sources were successfully loaded")
+
+    # Get primary data source using the correct method
+    primary_source = FeatureConstructor.get_primary_data_source(feature_set_path, source_data_list)
+    primary_df = primary_source["data_df"]
+
+    # 检查过滤后的数据量
+    date_column = "actual_ready_time"  # 始终使用actual_ready_time进行时间对齐
+    if len(primary_df) < 100:  # 需要至少100个点进行有效预测
+        raise ValueError(f"Only {len(primary_df)} data points remain after filtering, insufficient for effective prediction")
+
+    # Calculate validation and test start times using filtered primary data
+    validation_start_time = primary_df[date_column].iloc[len(primary_df) // 3]
+    test_start_time = primary_df[date_column].iloc[len(primary_df) * 2 // 3]
+
+    logger.info(f"Validation set start time: {validation_start_time}")
+    logger.info(f"Test set start time: {test_start_time}")
+
+    # Create FeatureConstructor instance with filtered data
+    fc = FeatureConstructor(
+        source_data_list=source_data_list,
+        feature_set_path=feature_set_path,
+        validation_start_time=validation_start_time,
+        test_start_time=test_start_time,
+        moving_window_size=30,
+    )
+
+    # Create data source list for prediction
+    pred_source_list = []
+
+    # Get current time point (using the last available time point)
+    current_time = primary_df[date_column].iloc[-1]
+    logger.info(f"Predicting for time point: {current_time}")
+
+    # Process each data source
+    for source in source_data_list:
+        source_df = source["data_df"].copy()
+        source_name = source["name"]
+
+        # Ensure actual_ready_time column exists and is in correct format
+        if date_column not in source_df.columns:
+            raise ValueError(f"Data source {source_name} missing '{date_column}' column, which is required for feature calculation")
+        source_df[date_column] = pd.to_datetime(source_df[date_column])
+
+        # Get required historical data length for this data source
+        lookback_length = fc.data_buffers[source_name]
+
+        # Find the index of the last data point not exceeding current time point
+        # Always use actual_ready_time for time alignment
+        last_valid_idx = (source_df[date_column] <= current_time).sum() - 1
+        if last_valid_idx < 0:
+            logger.warning(f"Data source {source_name} has no data points earlier than {current_time}")
+            continue
+
+        # Calculate start index, ensuring sufficient historical data
+        start_idx = max(0, last_valid_idx - lookback_length + 1)
+
+        # Select lookback_length data points before current time point
+        current_df = source_df.iloc[start_idx : last_valid_idx + 1]
+
+        # Check if data length is sufficient
+        if len(current_df) < lookback_length:
+            logger.warning(
+                f"Data source {source_name} has only {len(current_df)} data points before time point {current_time}, "
+                f"less than required {lookback_length} points"
+            )
+
+        logger.debug(f"Data source {source_name}: Using data from {current_df[date_column].min()} to {current_df[date_column].max()}")
+
+        # Create prediction data source
+        pred_source_list.append(
+            {
+                "name": source_name,
+                "data_df": current_df,
+                "interval": source["interval"],
+                "type": source["type"],
+                "resample_factor": source["resample_factor"],
+                "source_descriptor": source["source_descriptor"],
+                "ready_time_offset": source.get("ready_time_offset"),  # Pass through the time offset
+            }
+        )
+
+    # Build test feature
+    test_feature = fc.get_test_feature()
+    logger.info("test_feature extra_info:")
+    for key, value in test_feature.extra_info.items():
+        logger.info(f"    {key}: {value}")
+
+    # Get prediction result (to be implemented)
+    return {}
+
+
+# Example usage
+def main():
+    # Use the same data path and feature set as in run_feature_set_validation.py
+    sample_data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "sample_data"))
+
+    # Use the same feature_set as in run_feature_set_validation.py
+    # feature_set_path = "ohlcv_support-resistance_sizex_v2"
+    # feature_set_path = "ohlcv_oscillator_sizex_v2"
+    # feature_set_path = "ohlcv_classic79-with-resample_sizex_v1"
+    # feature_set_path = "ohlcv_rsi14_sizex_v1"
+    # feature_set_path = "simple_atr_sizex_v1"
+    # feature_set_path = "simple_macd_sizex_v1"
+    # feature_set_path = "simple_fluid-dynamics_sizex_v1"
+    # feature_set_path = "simple_bbands_sizex_v1"
+    # feature_set_path = "simple_fibonacci_sizex_v1"
+    # feature_set_path = "simple_fear_greed_sizex_v1"
+    # feature_set_path = "ohlcv_comprehensive_sizex_v3"
+    # feature_set_path = "ohlcv_comprehensive_sizex_v4"
+    # feature_set_path = "simple_ml-feature_sizex_v1"
+    # feature_set_path = "ohlcv_comprehensive_sizex_v5"
+    feature_set_path = "ohlcv_trend_momentum_sizex_v1"
+    # Use the same multi-data source example as in run_feature_set_validation.py
+    sample_data_paths = [
+        f"{sample_data_dir}/resampled_binance_SOL-5m.csv",
+        f"{sample_data_dir}/fear_and_greed.csv",
+    ]
+
+    logger.info(f"Testing feature set: {feature_set_path}")
+    logger.info(f"Using data sources: {sample_data_paths}")
+
+    start_time = time.time()
+
+    # Test prediction
+    test_prediction(feature_set_path, sample_data_paths, logger)
+
+    end_time = time.time()
+    logger.info(f"Prediction completed, time taken: {end_time - start_time:.2f} seconds")
+
+
+if __name__ == "__main__":
+    main()

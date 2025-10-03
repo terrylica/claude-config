@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""
+Download OKX Funding Rate Historical Data from Monthly Bulk Files
+
+Uses monthly aggregate files which contain ALL symbols in one ZIP.
+Much faster than daily downloads: ~24 files vs 43,800 files!
+
+URL Format: https://www.okx.com/cdn/okex/traderecords/swaprate/monthly/{YYYYMM}/allswaprate-swaprate-{YYYY-MM-DD}.zip
+Note: Date appears to be last day of month
+"""
+
+import requests
+import pandas as pd
+import zipfile
+import io
+from datetime import datetime, timedelta
+from pathlib import Path
+import chardet
+from dateutil.relativedelta import relativedelta
+
+# Configuration
+BASE_URL = "https://www.okx.com/cdn/okex/traderecords/swaprate/monthly"
+START_DATE = "2023-10-01"  # 2 years back
+END_DATE = "2025-10-01"
+
+# Target symbols (USDT perpetuals only)
+TARGET_SYMBOLS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT", "MATIC", "LTC",
+    "AVAX", "SHIB", "LINK", "UNI", "ATOM", "ETC", "FIL", "AAVE", "ALGO", "NEAR",
+    "APE", "SNX", "SAND", "MANA", "GALA", "AXS", "THETA", "EGLD", "XTZ", "FTM",
+    "RUNE", "1INCH", "ENJ", "BAT", "ZRX", "COMP", "MKR", "SUSHI", "CRV", "YFI",
+    "STX", "INJ", "AR", "FLOW", "ICP", "EOS", "XLM", "VET", "TRX",
+    "LDO", "ARB", "OP", "PEPE", "WLD", "SUI", "SEI", "TON", "BONK", "ORDI",
+]
+
+
+def generate_month_range(start: str, end: str):
+    """Generate first day of each month in range."""
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+
+    current = start_dt.replace(day=1)
+    while current <= end_dt:
+        yield current
+        current += relativedelta(months=1)
+
+
+def get_last_day_of_month(date: datetime) -> datetime:
+    """Get last day of given month."""
+    next_month = date + relativedelta(months=1)
+    last_day = next_month.replace(day=1) - timedelta(days=1)
+    return last_day
+
+
+def build_url(month_date: datetime) -> tuple[str, str]:
+    """
+    Build monthly bulk URL.
+
+    Returns:
+        (url, month_str)
+    """
+    # URL uses YYYYMM format for folder
+    folder = month_date.strftime("%Y%m")
+
+    # File name uses last day of month
+    last_day = get_last_day_of_month(month_date)
+    file_date = last_day.strftime("%Y-%m-%d")
+
+    url = f"{BASE_URL}/{folder}/allswaprate-swaprate-{file_date}.zip"
+    month_str = month_date.strftime("%Y-%m")
+
+    return url, month_str
+
+
+def download_and_parse_month(url: str, month_str: str, target_symbols: set) -> list:
+    """
+    Download monthly ZIP, extract CSV, parse funding rates for target symbols.
+
+    Returns:
+        List of records: [{symbol, ts, funding_time, fundingRate}, ...]
+    """
+    try:
+        print(f"  Downloading {month_str}...", end=" ", flush=True)
+
+        # Download ZIP
+        response = requests.get(url, timeout=30)
+        if response.status_code == 404:
+            print("❌ Not found")
+            return []
+        response.raise_for_status()
+
+        # Extract CSV from ZIP
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            csv_filename = zf.namelist()[0]
+            csv_data = zf.read(csv_filename)
+
+        # Detect encoding (CSV has Chinese headers)
+        encoding_result = chardet.detect(csv_data)
+        encoding = encoding_result['encoding'] or 'utf-8'
+
+        # Parse CSV
+        df = pd.read_csv(
+            io.BytesIO(csv_data),
+            encoding=encoding,
+            on_bad_lines='skip'
+        )
+
+        # Filter to USDT-SWAP symbols
+        # Column format: "BTC-USDT-SWAP"
+        df = df[df.iloc[:, 0].str.contains('-USDT-SWAP', na=False)]
+
+        # Extract symbol from instrument_name (first column)
+        df['symbol'] = df.iloc[:, 0].str.replace('-USDT-SWAP', '')
+
+        # Filter to target symbols
+        df = df[df['symbol'].isin(target_symbols)]
+
+        if df.empty:
+            print("⚠️ No target symbols found")
+            return []
+
+        # Extract columns (handles Chinese headers)
+        records = []
+        for _, row in df.iterrows():
+            try:
+                # Get real_funding_rate (4th column, 0-indexed = 3)
+                # Get funding_time (5th column, 0-indexed = 4)
+                rate = float(row.iloc[3])
+                ts = int(row.iloc[4])
+                symbol = row['symbol']
+
+                records.append({
+                    'symbol': symbol,
+                    'ts': ts,
+                    'funding_time': datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S"),
+                    'fundingRate': rate,
+                })
+            except (ValueError, KeyError, IndexError):
+                continue
+
+        print(f"✓ {len(records):,} records ({df['symbol'].nunique()} symbols)")
+        return records
+
+    except Exception as e:
+        print(f"❌ Error: {str(e)[:50]}")
+        return []
+
+
+def download_historical_data(start_date: str, end_date: str, symbols: list) -> pd.DataFrame:
+    """
+    Download historical funding rate data from monthly bulk files.
+
+    Returns:
+        DataFrame with columns: symbol, ts, funding_time, fundingRate
+    """
+    print("=" * 80)
+    print("OKX Monthly Bulk Data Downloader")
+    print("=" * 80)
+    print(f"Date range: {start_date} → {end_date}")
+    print(f"Target symbols: {len(symbols)}")
+
+    # Generate month list
+    months = list(generate_month_range(start_date, end_date))
+    print(f"Months: {len(months)}")
+    print("=" * 80 + "\n")
+
+    # Download each month
+    all_records = []
+    target_symbols_set = set(symbols)
+
+    for month_date in months:
+        url, month_str = build_url(month_date)
+        records = download_and_parse_month(url, month_str, target_symbols_set)
+        all_records.extend(records)
+
+    print(f"\n{'='*80}")
+    print(f"Download complete!")
+    print(f"  Total records: {len(all_records):,}")
+    print(f"{'='*80}\n")
+
+    # Convert to DataFrame
+    if not all_records:
+        print("❌ No data retrieved")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_records)
+    df = df.sort_values(['symbol', 'ts']).reset_index(drop=True)
+
+    return df
+
+
+def main():
+    """Main execution."""
+    output_dir = Path(__file__).parent.parent / "data"
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Download data
+    df = download_historical_data(START_DATE, END_DATE, TARGET_SYMBOLS)
+
+    if df.empty:
+        print("❌ No data to analyze")
+        return
+
+    output_path = output_dir / "okx_funding_2year_monthly.csv"
+    df.to_csv(output_path, index=False)
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("DATASET SUMMARY")
+    print(f"{'='*80}")
+    print(f"Total records:  {len(df):,}")
+    print(f"Symbols:        {df['symbol'].nunique()}")
+    print(f"Date range:     {df['funding_time'].min()} → {df['funding_time'].max()}")
+
+    print(f"\nTop symbols by record count:")
+    symbol_counts = df.groupby('symbol').size().sort_values(ascending=False)
+    for sym, count in symbol_counts.head(10).items():
+        print(f"  {sym:10s}: {count:,} records")
+
+    print(f"\nOutput file:    {output_path}")
+    print(f"File size:      {output_path.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"{'='*80}\n")
+
+    # Validation
+    print("DATA VALIDATION:")
+    print(f"  ✓ Unique timestamps: {df['ts'].nunique():,}")
+    print(f"  ✓ Rate range: {df['fundingRate'].min():.6f} to {df['fundingRate'].max():.6f}")
+    print(f"  ✓ Missing values: {df['fundingRate'].isna().sum()}")
+    print(f"  ✓ Duplicates: {df.duplicated(subset=['symbol', 'ts']).sum()}")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

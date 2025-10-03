@@ -1,0 +1,138 @@
+//! Error types for Dukascopy range bar processing
+//!
+//! Type-specific error handling (Q22):
+//! - Fatal: Config errors (UnsupportedInstrument), Processing errors → Abort
+//! - Skip: Validation errors (CrossedMarket, ExcessiveSpread) → Log + Continue
+//! - Safety: Abort if >10% error rate (SystemicDataQualityIssue)
+
+use crate::core::processor::ProcessingError;
+use thiserror::Error;
+
+/// Top-level Dukascopy processing error
+///
+/// Enables automatic conversion from component errors via From trait (Q5).
+/// Categorizes errors by recovery strategy (Q22).
+#[derive(Error, Debug)]
+pub enum DukascopyError {
+    /// Tick conversion failure (validation, unknown instrument, price range)
+    #[error("Conversion error: {0}")]
+    Conversion(#[from] ConversionError),
+
+    /// Core range bar processing error (algorithm failure)
+    #[error("Processing error: {0}")]
+    Processing(#[from] ProcessingError),
+}
+
+/// Tick conversion and validation errors
+///
+/// Recovery policy (Q22):
+/// - UnsupportedInstrument, InvalidDecimalFactor → FATAL (abort)
+/// - CrossedMarket, ExcessiveSpread, InvalidPriceRange → SKIP (log + continue)
+/// - SystemicDataQualityIssue → FATAL (>10% error rate detected)
+#[derive(Error, Debug)]
+pub enum ConversionError {
+    /// Instrument not found in embedded config (Q20)
+    #[error("Unsupported instrument: {instrument} (not in embedded config)")]
+    UnsupportedInstrument { instrument: String },
+
+    /// Bid price <= 0 (invalid quote)
+    #[error("Invalid bid price: {bid} (must be > 0)")]
+    InvalidBid { bid: f64 },
+
+    /// Ask price <= 0 (invalid quote)
+    #[error("Invalid ask price: {ask} (must be > 0)")]
+    InvalidAsk { ask: f64 },
+
+    /// Crossed market: bid > ask (data corruption)
+    #[error("Crossed market: bid={bid} > ask={ask}")]
+    CrossedMarket { bid: f64, ask: f64 },
+
+    /// Spread exceeds threshold (stale quote)
+    #[error("Excessive spread: {spread_pct:.2}% (threshold: {threshold_pct:.2}%)")]
+    ExcessiveSpread {
+        spread_pct: f64,
+        threshold_pct: f64,
+    },
+
+    /// Suspicious spread pattern (paranoid mode)
+    #[error("Suspicious spread: {spread_pct:.2}% (threshold: {threshold_pct:.2}%)")]
+    SuspiciousSpread {
+        spread_pct: f64,
+        threshold_pct: f64,
+    },
+
+    /// Converted price outside instrument type range (Q18)
+    #[error(
+        "Invalid price {price} for {instrument_type:?}: expected range [{min}, {max}]"
+    )]
+    InvalidPriceRange {
+        price: f64,
+        instrument_type: InstrumentType,
+        min: f64,
+        max: f64,
+    },
+
+    /// Systemic data quality issue: >10% error rate (Q22)
+    #[error("Systemic data quality issue: {error_rate:.2}% error rate (threshold: 10%)")]
+    SystemicDataQualityIssue { error_rate: f64 },
+
+    /// FixedPoint conversion error (f64 → FixedPoint)
+    #[error("FixedPoint conversion failed for '{value}': {error}")]
+    FixedPointConversion { value: String, error: String },
+}
+
+/// Instrument asset class for type-specific validation (Q18, Q20)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstrumentType {
+    /// Foreign exchange pairs (EUR/USD, GBP/USD, etc.)
+    /// Price range: 0.01 - 10,000 (narrow, catches decimal factor errors)
+    Forex,
+
+    /// Cryptocurrency pairs (BTC/USD, ETH/USD, etc.)
+    /// Price range: 0.0001 - 1,000,000 (wide, SHIB to BTC)
+    Crypto,
+
+    /// Commodities (Gold, Oil, etc.)
+    /// Price range: 0.01 - 100,000
+    Commodity,
+
+    /// Equities (stocks, indices)
+    /// Price range: 0.01 - 100,000
+    Equity,
+}
+
+impl InstrumentType {
+    /// Get type-specific price validation range (Q18)
+    pub fn price_range(&self) -> (f64, f64) {
+        match self {
+            InstrumentType::Forex => (0.01, 10_000.0),
+            InstrumentType::Crypto => (0.0001, 1_000_000.0),
+            InstrumentType::Commodity => (0.01, 100_000.0),
+            InstrumentType::Equity => (0.01, 100_000.0),
+        }
+    }
+}
+
+/// Validation strictness level for tick processing (Q12)
+///
+/// Configurable at builder construction time.
+/// - Permissive: Production (trust Dukascopy quality)
+/// - Strict: Development (catch obvious issues) [DEFAULT]
+/// - Paranoid: Data quality audits (flag all anomalies)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationStrictness {
+    /// Basic checks only (bid > 0, ask > 0, bid < ask)
+    Permissive,
+
+    /// + Spread < 10% (catches obvious errors) [DEFAULT]
+    Strict,
+
+    /// + Spread < 1% (flags suspicious data)
+    Paranoid,
+}
+
+impl Default for ValidationStrictness {
+    fn default() -> Self {
+        ValidationStrictness::Strict
+    }
+}

@@ -1,0 +1,422 @@
+# Orthogonality Layers (A-H)
+
+**Purpose:** Strategic organization of feature atoms to ensure orthogonality by construction
+
+**Key Principle:** Each layer is orthogonalized against all previous layers to minimize redundancy while maximizing information content.
+
+---
+
+## Layer A: Calendars & Market Structure
+
+**Purpose:** Time-invariant event dummies and cyclical encodings
+
+**Why first:** Known in advance (no lookback), provides baseline temporal structure
+
+**Libraries:**
+- `holidays` - Market holiday calendars
+- `Greykite` (Silverkite) - Fourier seasonality, changepoint encoders
+
+**Typical atoms:** 10-30
+- `trading_day_flag` (boolean)
+- `days_to_next_holiday` (integer, -30 to 30)
+- `is_fomc_week` (boolean)
+- `hour_of_day_sin`, `hour_of_day_cos` (cyclical encoding)
+- `day_of_week_sin`, `day_of_week_cos`
+- `fourier_annual_1`, `fourier_annual_2` (seasonal harmonics)
+
+**Lookback:** 0 bars (calendar features are forward-looking)
+
+**Orthogonalization:** None (base layer - all other layers regress against this)
+
+**Implementation notes:**
+- Holidays must align with exchange timezone
+- Use `datetime.fromtimestamp(ts/1000, tz=timezone.utc)` for Binance data
+- Sin/cos encoding ensures continuity at boundaries (hour 23 → hour 0)
+
+---
+
+## Layer B: Trend/Volatility Baselines
+
+**Purpose:** First-order price/volume dynamics (returns, volatility, lags)
+
+**Why second:** Establishes baseline stationarity; most features will correlate with price movement
+
+**Libraries:**
+- `statsmodels` - ARIMA/STL decomposition, rolling OLS
+- `arch` - GARCH volatility models, realized variance
+- `mlforecast` - Fast lag/rolling/expanding features
+
+**Typical atoms:** 100-200
+- `returns_lag_1` to `returns_lag_20` (20 atoms)
+- `ewma_z_score_span_20` (normalized price deviation)
+- `realized_vol_5m` (sum of squared 5-min returns)
+- `atr_14` (average true range, 14-period)
+- `rolling_sharpe_20` (rolling Sharpe ratio)
+- `stl_trend`, `stl_seasonal`, `stl_resid` (STL decomposition)
+- `garch_vol_forecast` (conditional volatility from GARCH(1,1))
+- `rolling_mean_20`, `rolling_std_20` (moving average/std)
+
+**Lookback:** 5-250 bars (depends on indicator period)
+
+**Orthogonalization:** Partial regression on Layer A
+- For each Layer B atom `X`:
+  - Regress `X ~ Layer_A_features` (OLS)
+  - Keep residuals as orthogonalized feature: `X_orth = X - X_hat`
+- Alternative: Use GLS residuals from baseline ARIMA(p,1,q) fitted on returns
+
+**Why this works:** Removes calendar/seasonal patterns from price features, leaving only "surprise" component
+
+**Implementation notes:**
+- Use `statsmodels.tsa.seasonal.STL` for decomposition
+- GARCH fitting can fail on low-volatility periods → use try/except with fallback to rolling std
+- Clip extreme z-scores to [-5, 5] to prevent outlier domination
+
+---
+
+## Layer C: Multi-Resolution (Time-Frequency)
+
+**Purpose:** Decompose signals into frequency bands (trend vs cycles vs noise)
+
+**Why third:** Frequency content often correlated with trend (Layer B), but residual band energies add orthogonal information
+
+**Libraries:**
+- `PyWavelets` - Discrete/continuous wavelet transforms
+- `ssqueezepy` - Synchrosqueezed wavelet transforms (sharp time-freq)
+- `librosa` - Spectral features (centroid, bandwidth, rolloff)
+- `FOOOF` (specparam) - Parameterize PSD into aperiodic + peaks
+- `Spectrum` - Parametric PSD (Burg, Yule-Walker, ARMA)
+
+**Typical atoms:** 50-150
+- `dwt_detail_L1_energy` (wavelet detail level 1 energy)
+- `dwt_detail_L2_energy` (level 2, lower frequency)
+- `dwt_approx_energy` (approximation coefficients)
+- `spectral_centroid` (center of mass of spectrum)
+- `spectral_bandwidth` (width of spectrum around centroid)
+- `psd_aperiodic_slope` (1/f exponent from FOOOF)
+- `psd_peak1_cf` (center frequency of dominant peak)
+- `psd_peak1_power` (power at dominant peak)
+- `ar_coeff_1`, `ar_coeff_2` (autoregressive parameters from Burg)
+
+**Lookback:** 64-512 bars (power-of-2 for FFT/DWT efficiency)
+
+**Orthogonalization:** Hierarchical regression on lower frequencies
+1. Compute all Layer C atoms
+2. For each frequency band (low to high):
+   - Regress band energy on **lower frequency bands** + Layer A + Layer B
+   - Keep residuals
+3. This ensures higher-frequency features capture information NOT explained by lower frequencies
+
+**Why this works:** Price trends (Layer B) dominate low-frequency bands; by regressing higher bands on lower bands, we isolate "excess" high-frequency activity (e.g., microstructure noise, HFT activity)
+
+**Implementation notes:**
+- Use `pywt.wavedec(close, 'db4', level=5)` for DWT
+- FOOOF requires PSD input → use `scipy.signal.welch()` first
+- For crypto: map "frequency" to bar periods (e.g., 0.1 Hz ≈ 10 bars for 5m data)
+
+---
+
+## Layer D: Ordinal/Entropy/Complexity
+
+**Purpose:** Order-based structure (robust to rescaling, monotonic transforms)
+
+**Why fourth:** Entropy/complexity measures often correlate with volatility (Layer B), but permutation patterns add rotation-invariant information
+
+**Libraries:**
+- `ordpy` - Permutation entropy, ordinal patterns, ordinal networks
+- `antropy` - Sample entropy, approximate entropy, multiscale entropy
+- `nolds` - Lyapunov exponents, Hurst parameter, correlation dimension
+- `infomeasure` - Mutual information, conditional entropy
+
+**Typical atoms:** 30-60
+- `perm_entropy_d3` (permutation entropy, embedding dim=3)
+- `perm_entropy_d5` (embedding dim=5)
+- `sample_entropy` (regularity measure, template length=2)
+- `approx_entropy` (similar to sample entropy, faster)
+- `multiscale_entropy_scale2` (coarse-grain scale=2)
+- `hurst_exponent` (long-range dependence, 0.5=random walk, >0.5=trending)
+- `lyapunov_max` (largest Lyapunov exponent, >0=chaos)
+- `correlation_dim` (fractal dimension of attractor)
+- `mi_lag1` (mutual information with lag-1 self)
+
+**Lookback:** 100-1000 bars (embedding methods need sufficient data)
+
+**Orthogonalization:** HSIC/distance correlation screening vs Layers A-C
+1. Compute all Layer D atoms
+2. For each atom, compute HSIC (Hilbert-Schmidt Independence Criterion) or distance correlation (`dcor`) with:
+   - All Layer A atoms (pooled)
+   - All Layer B atoms (pooled)
+   - All Layer C atoms (pooled)
+3. If max dependency > threshold (e.g., dCor > 0.7), drop the atom
+4. Keep only atoms with dCor < 0.7 against all previous layers
+
+**Why this works:** Entropy/complexity measures capture **nonlinear** dependencies that linear regression (used in Layers B-C) cannot orthogonalize. HSIC/dCor detect nonlinear redundancy.
+
+**Implementation notes:**
+- Use `ordpy.permutation_entropy(close, order=3)` for permutation entropy
+- Hurst exponent interpretation: 0.5=Brownian, <0.5=mean-reverting, >0.5=trending
+- Lyapunov computation is expensive → use `nolds.lyap_r()` (fast estimate)
+
+---
+
+## Layer E: Topological/Graph Signatures
+
+**Purpose:** Shape invariants from persistence homology and visibility graphs
+
+**Why fifth:** Captures "shape" of time series in high-dimensional space (e.g., loops, voids, connectivity)
+
+**Libraries:**
+- `ts2vg` - Visibility graphs (natural/horizontal)
+- `gudhi` - Persistent homology, Rips complexes, alpha complexes
+- `ripser` - Fast Vietoris-Rips persistence
+- `persim` - Persistence images/landscapes, Wasserstein distances
+- `scikit-tda` - Unified TDA interface
+
+**Typical atoms:** 20-50
+- `vg_avg_degree` (average node degree in visibility graph)
+- `vg_clustering_coeff` (network clustering)
+- `vg_assortativity` (degree correlation)
+- `persistence_landscape_L1_norm` (sum of absolute values in 1st landscape)
+- `betti_0_max` (max number of connected components)
+- `betti_1_max` (max number of 1-dimensional holes/loops)
+- `persistence_entropy` (entropy of persistence diagram)
+- `wasserstein_dist_to_noise` (distance to noise baseline)
+
+**Lookback:** 50-500 bars (sliding window for delay embeddings)
+
+**Orthogonalization:** Random feature kernels + projection removal
+1. Compute all Layer E atoms
+2. Generate random feature map from persistence diagrams (via RBF kernel on diagram points)
+3. Project onto orthogonal complement of Layers A-D feature space:
+   - Fit Ridge regression: `E_atom ~ [A, B, C, D]`
+   - Keep residuals: `E_atom_orth = E_atom - E_atom_hat`
+
+**Why this works:** TDA features capture topological invariants (e.g., cycles in price-volume embeddings) not captured by spectral/entropy methods
+
+**Implementation notes:**
+- Visibility graphs are fast: `ts2vg.NaturalVG().build(close)`
+- Persistence requires delay embedding: use Takens embedding with delay=τ (autocorrelation zero-crossing)
+- For crypto: 2D embedding = (price[t], volume[t]) more interpretable than delay embedding
+
+---
+
+## Layer F: Motifs/Discords/Change Points
+
+**Purpose:** Structural breaks and recurring patterns
+
+**Why sixth:** Change points often align with volatility spikes (Layer B), but motif/discord *distances* are orthogonal
+
+**Libraries:**
+- `stumpy` - Matrix profile (motifs, discords, snippets)
+- `ruptures` - Change point detection (Pelt, Binseg, BottomUp)
+- `EMD-signal` - Empirical Mode Decomposition → IMFs
+- `Spectrum` - AR parameter change detection
+
+**Typical atoms:** 30-70
+- `discord_score` (matrix profile minimum, anomaly strength)
+- `nearest_motif_distance` (distance to nearest similar subsequence)
+- `motif_count_threshold_0.1` (# subsequences within 10% distance)
+- `changepoint_recency` (bars since last changepoint)
+- `changepoint_count_100` (# changepoints in last 100 bars)
+- `imf1_energy_ratio` (energy in 1st IMF / total energy)
+- `imf2_energy_ratio` (2nd IMF)
+- `ar_param_shift` (change in AR(p) coefficients)
+
+**Lookback:** 100-1000 bars (motif/discord search window)
+
+**Orthogonalization:** Partial out trend/volatility (Layer B) BEFORE computing features
+1. Detrend returns using STL or ARIMA residuals (from Layer B)
+2. Compute Layer F atoms on **residuals**, not raw price
+3. This ensures discord scores detect "unusual patterns in detrended space," not just "price went up a lot"
+
+**Alternative:** Regress Layer F atoms on Layer B volatility features, keep residuals
+
+**Why this works:** Raw discord scores correlate with volatility spikes; detrending isolates *shape* anomalies independent of magnitude
+
+**Implementation notes:**
+- Matrix profile: `stumpy.stump(close, m=20)` (m=subsequence length)
+- Changepoint: `ruptures.Pelt(model='rbf').fit_predict(close, pen=10)`
+- IMFs: `emd.sift.sift(close)` → returns list of IMFs (from high to low frequency)
+
+---
+
+## Layer G: Anomaly/Drift Meta-Features
+
+**Purpose:** Risk indicators for gating (not direct prediction)
+
+**Why seventh:** These are "meta" features (probabilities, p-values) derived from other features
+
+**Libraries:**
+- `alibi-detect` - Drift detectors (KS test, MMD, classifier-based)
+- `pyod` - Outlier detection (Isolation Forest, COPOD, ECOD)
+- `river` - Online drift detection (ADWIN, DDM, KSWIN)
+
+**Typical atoms:** 10-20
+- `isolation_forest_score` (anomaly score, 0=normal, 1=outlier)
+- `copod_outlier_prob` (copula-based outlier probability)
+- `drift_pval_ks` (KS test p-value vs reference window)
+- `drift_pval_mmd` (Maximum Mean Discrepancy p-value)
+- `adwin_drift_detected` (boolean, online drift flag)
+
+**Lookback:** 100-500 bars (reference distribution window)
+
+**Use case:** **Gating/position sizing**, NOT direct features
+- If `isolation_forest_score > 0.8` → reduce position size
+- If `drift_pval_ks < 0.01` → switch to regime-aware model
+
+**Orthogonalization:** Not needed (these are meta-features for model gating, not included in feature matrix)
+
+**Implementation notes:**
+- Fit anomaly detectors on **training data only**, score on test
+- Drift detectors compare "recent window" vs "reference window" (e.g., last 50 bars vs previous 200)
+- DO NOT use these for prediction → leakage risk (future outlier labels leak into features)
+
+---
+
+## Layer H: Kitchen Sink Auto-Features
+
+**Purpose:** Broad sweeps of automated features, then aggressive pruning
+
+**Why last:** These tools generate hundreds of features with unknown redundancy → prune heavily
+
+**Libraries:**
+- `tsfresh` - 795 features with relevance filtering
+- `tsfel` - Domain-grouped features (statistical/spectral/temporal)
+- `tsflex` - Vectorized rolling/window pipelines
+- `seglearn` - Sliding-window feature workflows
+- `cesium` - End-to-end feature extraction
+- `pycatch22` - 22 canonical fast features
+- `scikit-fda` - Functional PCA (basis expansions)
+
+**Typical atoms:** 100-500 (before pruning) → 20-50 (after pruning)
+- `tsfresh_*` (hundreds of auto-generated features)
+- `catch22_DN_HistogramMode_5` (distribution of distances in 5-bin histogram)
+- `catch22_SB_BinaryStats_mean` (mean of binary discretization)
+- `fpca_score_1`, `fpca_score_2` (functional PCA scores)
+- `tsfel_ECDF_Percentile_0.25` (empirical CDF at 25th percentile)
+
+**Lookback:** 50-500 bars (varies by feature)
+
+**Orthogonalization:** Aggressive mRMR/HSIC/VIF after generation
+1. Compute ALL Layer H atoms (e.g., 500 features from tsfresh)
+2. Filter 1: Univariate relevance vs target (mutual info > threshold)
+3. Filter 2: Pairwise redundancy (for each pair, drop lower-MI feature if |ρ| > 0.9 or VIF > 10)
+4. Filter 3: Conditional novelty (HSIC screening vs Layers A-F pooled)
+5. Keep only top-20 by MI after redundancy removal
+
+**Why this works:** Kitchen sinks are "generate many, keep few" strategies; by filtering against Layers A-F, we ensure survivors add novel information
+
+**Implementation notes:**
+- `tsfresh` can be slow → use `n_jobs=-1` for parallelism
+- `catch22` is fast (< 1s per series) → good for quick prototyping
+- `scikit-fda` requires functional representation → use B-spline basis with 10-20 knots
+
+---
+
+## Assembly Pipeline (Layer-by-Layer Workflow)
+
+### Step 1: Compute Layer A (Base)
+```python
+layer_a = compute_layer('A', df)  # 30 calendar features
+atoms_df = layer_a.copy()
+```
+
+### Step 2: Compute + Orthogonalize Layer B
+```python
+layer_b = compute_layer('B', df)  # 200 baseline features
+
+# Orthogonalize against Layer A
+for col in layer_b.columns:
+    X_a = atoms_df.values  # Layer A features
+    y_b = layer_b[col].values
+
+    # Fit OLS: y_b ~ X_a
+    from sklearn.linear_model import LinearRegression
+    model = LinearRegression().fit(X_a, y_b)
+
+    # Keep residuals
+    layer_b[col] = y_b - model.predict(X_a)
+
+atoms_df = pd.concat([atoms_df, layer_b], axis=1)
+```
+
+### Step 3: Compute + Orthogonalize Layer C
+```python
+layer_c = compute_layer('C', df)  # 150 time-freq features
+
+# Hierarchical orthogonalization (each band vs lower bands + A + B)
+freq_order = ['dwt_approx', 'dwt_detail_L4', 'dwt_detail_L3', 'dwt_detail_L2', 'dwt_detail_L1']
+for band in freq_order:
+    band_cols = [col for col in layer_c.columns if band in col]
+    lower_bands = atoms_df.columns  # All previous layers + lower freq bands
+
+    for col in band_cols:
+        X_lower = atoms_df[lower_bands].values
+        y_band = layer_c[col].values
+
+        model = LinearRegression().fit(X_lower, y_band)
+        layer_c[col] = y_band - model.predict(X_lower)
+
+    # Add orthogonalized band to atoms_df
+    atoms_df = pd.concat([atoms_df, layer_c[band_cols]], axis=1)
+```
+
+### Step 4: Compute + HSIC Filter Layer D
+```python
+layer_d = compute_layer('D', df)  # 60 entropy features
+
+# HSIC screening vs all previous layers
+from dcor import distance_correlation
+pooled_prev = atoms_df.values
+
+for col in layer_d.columns:
+    y_d = layer_d[col].values
+
+    # Compute distance correlation with each previous layer
+    dcor_vals = [distance_correlation(pooled_prev[:, i], y_d) for i in range(pooled_prev.shape[1])]
+    max_dcor = max(dcor_vals)
+
+    if max_dcor < 0.7:  # Keep only if low dependency
+        atoms_df[col] = y_d
+    # else: drop this atom (redundant)
+```
+
+### Step 5-8: Repeat for Layers E, F, G, H
+- Layer E: Random feature kernel + projection removal
+- Layer F: Detrend via Layer B STL residuals
+- Layer G: Keep as separate gating features (not in atoms_df)
+- Layer H: mRMR/VIF filtering vs Layers A-F
+
+---
+
+## Expected Atom Counts by Layer
+
+| Layer | Atoms (Before Orth) | Atoms (After Orth) | Reduction |
+|-------|---------------------|--------------------|-----------|
+| A     | 30                  | 30                 | 0%        |
+| B     | 200                 | 180                | 10%       |
+| C     | 150                 | 100                | 33%       |
+| D     | 60                  | 30                 | 50%       |
+| E     | 50                  | 20                 | 60%       |
+| F     | 70                  | 30                 | 57%       |
+| G     | 20                  | N/A (gating)       | N/A       |
+| H     | 500                 | 20                 | 96%       |
+| **TOTAL** | **1080**        | **410**            | **62%**   |
+
+**Final wide CSV:** ~410 orthogonalized atoms (ready for Phase 2: IPSS+VIF selection)
+
+---
+
+## Summary of Orthogonalization Strategies
+
+| Layer | Strategy | Tool | Threshold |
+|-------|----------|------|-----------|
+| A | None (base) | - | - |
+| B | Partial regression | OLS residuals vs A | - |
+| C | Hierarchical regression | OLS residuals vs lower freqs + A + B | - |
+| D | Nonlinear dependency filter | HSIC / dCor | < 0.7 |
+| E | Projection removal | Ridge residuals vs A-D | - |
+| F | Detrend before compute | Use Layer B STL residuals | - |
+| G | Separate (gating only) | - | - |
+| H | Post-hoc aggressive filter | mRMR + VIF vs A-F | VIF < 10, MI top-20 |
+
+**Key insight:** Different layers need different orthogonalization approaches because they capture different types of information (linear, spectral, nonlinear, topological).

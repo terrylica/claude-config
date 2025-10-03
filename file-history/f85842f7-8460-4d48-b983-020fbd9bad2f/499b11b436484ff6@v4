@@ -1,0 +1,100 @@
+//! Dukascopy range bar construction from tick data
+//!
+//! Converts Dukascopy market maker quotes (bid/ask with volumes) to range bars
+//! using mid-price as synthetic trade price. Wrapper pattern preserves standard
+//! RangeBar compatibility while adding Forex-specific microstructure information.
+//!
+//! # Architecture
+//!
+//! - **Zero core changes** (Q19): Wraps RangeBarProcessor, no algorithm modifications
+//! - **Adapter pattern** (Q3): DukascopyRangeBar { base, spread_stats }
+//! - **Type inference** (Q20): Instrument type from config structure
+//! - **Error propagation** (Q22): Raise immediately, no fallbacks/defaults
+//!
+//! # Quick Start
+//!
+//! ```rust,no_run
+//! use rangebar::data::dukascopy::{
+//!     DukascopyRangeBarBuilder,
+//!     DukascopyTick,
+//!     ValidationStrictness,
+//! };
+//!
+//! let mut builder = DukascopyRangeBarBuilder::new(
+//!     25,                           // 25 bps threshold
+//!     "EURUSD",                     // Forex major
+//!     ValidationStrictness::Strict  // Default validation
+//! );
+//!
+//! // Process tick stream (example with dummy data)
+//! let tick_stream: Vec<DukascopyTick> = vec![];
+//! for tick in tick_stream {
+//!     match builder.process_tick(&tick) {
+//!         Ok(Some(bar)) => {
+//!             // Bar completed (threshold breached)
+//!             println!("Bar: O={} H={} L={} C={} V={}",
+//!                      bar.base.open, bar.base.high, bar.base.low,
+//!                      bar.base.close, bar.base.volume);
+//!             println!("Spread: avg={} min={} max={}",
+//!                      bar.spread_stats.avg_spread(),
+//!                      bar.spread_stats.min_spread,
+//!                      bar.spread_stats.max_spread);
+//!         }
+//!         Ok(None) => {
+//!             // Tick processed, bar accumulating
+//!         }
+//!         Err(e) => {
+//!             // Validation or processing error
+//!             eprintln!("Error: {:?}", e);
+//!             // Implement error recovery policy (Q22)
+//!         }
+//!     }
+//! }
+//!
+//! // Get final incomplete bar
+//! if let Some(partial) = builder.get_incomplete_bar() {
+//!     println!("Partial bar at stream end");
+//! }
+//! ```
+//!
+//! # Data Structure Differences
+//!
+//! | Aspect | Binance aggTrades | Dukascopy Ticks |
+//! |--------|------------------|-----------------|
+//! | Type | Actual trades | Market maker quotes |
+//! | Price | Single execution price | Bid + Ask |
+//! | Volume | Quantity traded | Available liquidity |
+//! | Direction | is_buyer_maker (bool) | Unknown (quotes) |
+//!
+//! # Volume Semantics (Q10, Q11)
+//!
+//! - `RangeBar.volume` = total_bid_liquidity + total_ask_liquidity
+//! - `buy_volume` = 0 (direction unknown)
+//! - `sell_volume` = 0 (direction unknown)
+//! - `SpreadStats` tracks bid/ask asymmetry
+//!
+//! # Error Recovery (Q22)
+//!
+//! - **Fatal** (abort): Config errors, Processing errors
+//! - **Skip** (log + continue): Validation errors (CrossedMarket, ExcessiveSpread)
+//! - **Safety**: Abort if >10% error rate detected
+//!
+//! # Implementation Resolutions (Q19-Q22)
+//!
+//! - Q19: RangeBarProcessor has state (current_bar_state field)
+//! - Q20: Instrument type inferred from config path
+//! - Q21: Integer division on FixedPoint is mathematically correct
+//! - Q22: Type-specific error handling with 10% threshold
+
+pub mod builder;
+pub mod config;
+pub mod conversion;
+pub mod error;
+pub mod fetcher;
+pub mod types;
+
+// Re-export main types for convenience
+pub use builder::DukascopyRangeBarBuilder;
+pub use error::{ConversionError, DukascopyError, InstrumentType, ValidationStrictness};
+pub use fetcher::DukascopyFetcher;
+pub use types::{DukascopyRangeBar, DukascopyTick, SpreadStats};

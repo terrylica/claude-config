@@ -1,0 +1,335 @@
+"""
+Streaming downloader for OKX aggregate trade data from CDN.
+
+This module provides zero-CSV storage downloading:
+- Download ZIP files from OKX CDN
+- Stream extract and process in memory
+- No persistent raw data storage
+- Progress tracking with tqdm
+"""
+
+from io import BytesIO
+import logging
+from pathlib import Path
+from typing import Callable, List, Optional
+import zipfile
+
+import pandas as pd
+import requests
+from tqdm import tqdm
+
+from .utils import parse_month_string, format_month
+
+logger = logging.getLogger(__name__)
+
+
+# OKX CDN base URL
+OKX_CDN_BASE = "https://static.okx.com/cdn/okex/traderecords"
+
+
+def construct_cdn_url(msg_type: str, month_str: str, filename: str) -> str:
+    """
+    Construct OKX CDN URL for specific file.
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        month_str: Month in YYYYMM format (e.g., "202310")
+        filename: Filename (e.g., "allspot-aggtrades-2023-10-01.zip")
+
+    Returns:
+        Full CDN URL
+
+    Examples:
+        >>> url = construct_cdn_url("allspot", "202310", "allspot-aggtrades-2023-10-01.zip")
+        >>> print(url)
+        https://static.okx.com/cdn/okex/traderecords/allspot/monthly/202310/allspot-aggtrades-2023-10-01.zip
+    """
+    return f"{OKX_CDN_BASE}/{msg_type}/monthly/{month_str}/{filename}"
+
+
+def list_okx_files(msg_type: str, month_str: str) -> List[str]:
+    """
+    List available files for a given month from OKX CDN.
+
+    Note: OKX doesn't provide a directory listing API, so this function
+    generates expected filenames based on the month's days.
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        month_str: Month in YYYYMM or YYYY-MM format
+
+    Returns:
+        List of expected filenames
+
+    Examples:
+        >>> files = list_okx_files("allspot", "2023-10")
+        >>> len(files)  # October has 31 days
+        31
+        >>> files[0]
+        'allspot-aggtrades-2023-10-01.zip'
+    """
+    year, month = parse_month_string(month_str)
+
+    # Determine number of days in month
+    import calendar
+    num_days = calendar.monthrange(year, month)[1]
+
+    # Generate filenames for each day
+    filenames = []
+    for day in range(1, num_days + 1):
+        filename = f"{msg_type}-aggtrades-{year:04d}-{month:02d}-{day:02d}.zip"
+        filenames.append(filename)
+
+    return filenames
+
+
+def download_file_to_memory(url: str, desc: Optional[str] = None) -> BytesIO:
+    """
+    Download file from URL to memory with progress bar.
+
+    Args:
+        url: URL to download
+        desc: Description for progress bar
+
+    Returns:
+        BytesIO object with file contents
+
+    Raises:
+        requests.HTTPError: If download fails
+    """
+    response = requests.get(url, stream=True, timeout=60)
+    response.raise_for_status()
+
+    # Get total file size from headers
+    total_size = int(response.headers.get("content-length", 0))
+
+    # Download with progress bar
+    bytes_buffer = BytesIO()
+    with tqdm(
+        total=total_size,
+        unit="B",
+        unit_scale=True,
+        desc=desc or "Downloading",
+        disable=total_size == 0,
+    ) as pbar:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                bytes_buffer.write(chunk)
+                pbar.update(len(chunk))
+
+    bytes_buffer.seek(0)
+    return bytes_buffer
+
+
+def stream_parse_zip_csv(
+    zip_buffer: BytesIO,
+    chunk_callback: Callable[[pd.DataFrame], None],
+    chunk_size: int = 100_000,
+) -> int:
+    """
+    Stream parse CSV from ZIP buffer without disk writes.
+
+    Args:
+        zip_buffer: BytesIO containing ZIP file
+        chunk_callback: Function to process each CSV chunk
+        chunk_size: Number of rows per chunk
+
+    Returns:
+        Total number of rows processed
+
+    Examples:
+        >>> def process_chunk(chunk_df):
+        ...     print(f"Processing {len(chunk_df)} rows")
+        >>>
+        >>> zip_buffer = download_file_to_memory("https://example.com/data.zip")
+        >>> total_rows = stream_parse_zip_csv(zip_buffer, process_chunk)
+        >>> print(f"Processed {total_rows} total rows")
+    """
+    total_rows = 0
+
+    with zipfile.ZipFile(zip_buffer, "r") as zf:
+        for csv_filename in zf.namelist():
+            if not csv_filename.endswith(".csv"):
+                continue
+
+            logger.info(f"Parsing {csv_filename} from ZIP")
+
+            with zf.open(csv_filename) as csv_file:
+                # Stream read CSV in chunks
+                for chunk_df in pd.read_csv(csv_file, chunksize=chunk_size):
+                    chunk_callback(chunk_df)
+                    total_rows += len(chunk_df)
+
+    return total_rows
+
+
+def download_and_stream_okx_data(
+    msg_type: str,
+    month_str: str,
+    chunk_callback: Callable[[pd.DataFrame], None],
+    skip_errors: bool = True,
+) -> dict:
+    """
+    Download OKX data for a month and stream process without disk storage.
+
+    This is the main entry point for zero-CSV downloading. It:
+    1. Lists expected files for the month
+    2. Downloads each ZIP to memory
+    3. Stream extracts and parses CSVs
+    4. Calls chunk_callback for each chunk (typically 100k rows)
+    5. Discards ZIP/CSV from memory (no disk writes)
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        month_str: Month in YYYYMM or YYYY-MM format
+        chunk_callback: Function to process each CSV chunk
+        skip_errors: If True, continue on download errors (e.g., missing files)
+
+    Returns:
+        Dict with statistics: {
+            'files_downloaded': int,
+            'files_failed': int,
+            'total_rows': int,
+            'failed_files': List[str]
+        }
+
+    Examples:
+        >>> from okx_price_provider import StreamingVWAPAggregator
+        >>>
+        >>> aggregator = StreamingVWAPAggregator(resample_freq="8H")
+        >>>
+        >>> stats = download_and_stream_okx_data(
+        ...     msg_type="allspot",
+        ...     month_str="2023-10",
+        ...     chunk_callback=aggregator.process_chunk
+        ... )
+        >>>
+        >>> vwap_df = aggregator.finalize()
+        >>> print(f"Processed {stats['total_rows']:,} rows from {stats['files_downloaded']} files")
+    """
+    filenames = list_okx_files(msg_type, month_str)
+    month_formatted = format_month(*parse_month_string(month_str))
+
+    stats = {
+        "files_downloaded": 0,
+        "files_failed": 0,
+        "total_rows": 0,
+        "failed_files": [],
+    }
+
+    logger.info(
+        f"Starting download for {msg_type} {month_str} ({len(filenames)} files expected)"
+    )
+
+    for filename in tqdm(filenames, desc=f"Processing {month_str}"):
+        url = construct_cdn_url(msg_type, month_formatted, filename)
+
+        try:
+            # Download ZIP to memory
+            zip_buffer = download_file_to_memory(url, desc=f"Downloading {filename}")
+
+            # Stream parse and process
+            rows_processed = stream_parse_zip_csv(zip_buffer, chunk_callback)
+
+            stats["files_downloaded"] += 1
+            stats["total_rows"] += rows_processed
+
+            logger.info(f"✓ {filename}: {rows_processed:,} rows processed")
+
+        except requests.HTTPError as e:
+            logger.warning(f"✗ {filename}: HTTP error {e.response.status_code}")
+            stats["files_failed"] += 1
+            stats["failed_files"].append(filename)
+
+            if not skip_errors:
+                raise
+
+        except Exception as e:
+            logger.error(f"✗ {filename}: Unexpected error: {e}")
+            stats["files_failed"] += 1
+            stats["failed_files"].append(filename)
+
+            if not skip_errors:
+                raise
+
+        finally:
+            # Explicitly clean up memory
+            if "zip_buffer" in locals():
+                del zip_buffer
+
+    logger.info(
+        f"Download complete: {stats['files_downloaded']} succeeded, "
+        f"{stats['files_failed']} failed, {stats['total_rows']:,} total rows"
+    )
+
+    return stats
+
+
+def download_okx_month(
+    msg_type: str,
+    month_str: str,
+    output_parquet: Path,
+    resample_freq: str = "8H",
+    skip_errors: bool = True,
+) -> dict:
+    """
+    High-level function to download and process a full month of OKX data.
+
+    This is a convenience function that combines downloading, VWAP aggregation,
+    and Parquet caching into a single call.
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        month_str: Month in YYYYMM or YYYY-MM format
+        output_parquet: Path to save processed VWAP Parquet file
+        resample_freq: VWAP aggregation frequency (default: "8H")
+        skip_errors: Continue on download errors
+
+    Returns:
+        Dict with download statistics and cache info
+
+    Examples:
+        >>> stats = download_okx_month(
+        ...     msg_type="allspot",
+        ...     month_str="2023-10",
+        ...     output_parquet=Path("data/okx_price_cache/vwap_8h.parquet")
+        ... )
+        >>> print(f"Downloaded {stats['files_downloaded']} files")
+        >>> print(f"Cache size: {stats['cache_size_mb']:.2f} MB")
+    """
+    from .parser import StreamingVWAPAggregator
+    from .cache import ParquetVWAPCache
+
+    # Initialize aggregator
+    aggregator = StreamingVWAPAggregator(resample_freq=resample_freq)
+
+    # Download and stream process
+    download_stats = download_and_stream_okx_data(
+        msg_type=msg_type,
+        month_str=month_str,
+        chunk_callback=aggregator.process_chunk,
+        skip_errors=skip_errors,
+    )
+
+    # Finalize VWAP computation
+    vwap_df = aggregator.finalize()
+
+    # Save to Parquet cache
+    output_parquet.parent.mkdir(parents=True, exist_ok=True)
+    cache = ParquetVWAPCache(cache_dir=output_parquet.parent)
+
+    if output_parquet.exists():
+        # Append to existing cache
+        cache.append(vwap_df)
+    else:
+        # Create new cache
+        cache.save(vwap_df)
+
+    # Get cache stats
+    cache_size_bytes = output_parquet.stat().st_size if output_parquet.exists() else 0
+
+    return {
+        **download_stats,
+        "vwap_rows": len(vwap_df),
+        "cache_size_mb": cache_size_bytes / 1024 / 1024,
+    }

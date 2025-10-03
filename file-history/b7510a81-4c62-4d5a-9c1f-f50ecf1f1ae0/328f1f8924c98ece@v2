@@ -1,0 +1,154 @@
+"""
+DataSourceManager - Lightweight wrapper around gapless-crypto-data
+
+This provides API compatibility with ml-feature-set's DataSourceManager
+while using gapless-crypto-data as the underlying data provider.
+
+Author: ML Feature Experiments
+Date: 2025-10-01
+"""
+
+import pandas as pd
+from pathlib import Path
+from typing import Optional, Union
+from datetime import datetime, timedelta
+import tempfile
+
+from gapless_crypto_data.collectors.binance_public_data_collector import BinancePublicDataCollector
+from utils.market_constraints import DataProvider, Interval, MarketType
+
+
+class DataSourceManager:
+    """
+    Lightweight data source manager using gapless-crypto-data.
+
+    Provides API-compatible interface with ml-feature-set's DataSourceManager
+    but uses gapless-crypto-data for actual data collection.
+
+    Example:
+        >>> dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+        >>> df = dsm.get_data(symbol="SOLUSDT", interval=Interval.ONE_HOUR,
+        ...                   start_date="2024-01-01", end_date="2024-01-31")
+    """
+
+    def __init__(self, provider: DataProvider, market_type: MarketType):
+        """
+        Initialize DataSourceManager.
+
+        Args:
+            provider: Data provider (BINANCE or GAPLESS)
+            market_type: Market type (SPOT or FUTURES)
+        """
+        self.provider = provider
+        self.market_type = market_type
+        self._cache = {}  # Simple in-memory cache
+
+    @classmethod
+    def create(cls, provider: DataProvider, market_type: MarketType) -> "DataSourceManager":
+        """
+        Factory method to create DataSourceManager instance.
+
+        Args:
+            provider: Data provider
+            market_type: Market type
+
+        Returns:
+            DataSourceManager instance
+        """
+        return cls(provider, market_type)
+
+    def get_data(
+        self,
+        symbol: str,
+        interval: Union[Interval, str],
+        start_date: Optional[Union[str, datetime]] = None,
+        end_date: Optional[Union[str, datetime]] = None,
+        lookback_days: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        Get OHLCV data for specified symbol and interval.
+
+        Args:
+            symbol: Trading symbol (e.g., "SOLUSDT")
+            interval: Trading interval (e.g., Interval.ONE_HOUR or "1h")
+            start_date: Start date (optional, defaults to 30 days ago)
+            end_date: End date (optional, defaults to now)
+            lookback_days: Alternative to start_date - lookback N days from end_date
+
+        Returns:
+            pandas.DataFrame with columns:
+                - date: timestamp
+                - open, high, low, close: price data
+                - volume: base asset volume
+                - close_time: close timestamp
+                - quote_asset_volume: quote asset volume
+                - number_of_trades: trade count
+                - taker_buy_base_asset_volume: taker buy volume (base)
+                - taker_buy_quote_asset_volume: taker buy volume (quote)
+        """
+        # Convert Interval enum to string if needed
+        if isinstance(interval, Interval):
+            interval_str = interval.value
+        else:
+            interval_str = str(interval)
+
+        # Handle date defaults
+        if end_date is None:
+            end_date = datetime.now()
+        elif isinstance(end_date, str):
+            end_date = pd.to_datetime(end_date)
+
+        if start_date is None:
+            if lookback_days:
+                start_date = end_date - timedelta(days=lookback_days)
+            else:
+                start_date = end_date - timedelta(days=30)  # Default 30 days
+        elif isinstance(start_date, str):
+            start_date = pd.to_datetime(start_date)
+
+        # Create cache key
+        cache_key = f"{symbol}_{interval_str}_{start_date}_{end_date}"
+
+        # Check cache
+        if cache_key in self._cache:
+            return self._cache[cache_key].copy()
+
+        # Collect data using gapless-crypto-data
+        with tempfile.TemporaryDirectory() as tmpdir:
+            collector = BinancePublicDataCollector(
+                symbol=symbol,
+                start_date=start_date.strftime("%Y-%m-%d"),
+                end_date=end_date.strftime("%Y-%m-%d"),
+                output_dir=tmpdir
+            )
+
+            result = collector.collect_timeframe_data(interval_str)
+            df = result['dataframe']
+
+        # Cache the result
+        self._cache[cache_key] = df.copy()
+
+        return df
+
+    def get_available_symbols(self) -> list:
+        """
+        Get list of available symbols.
+
+        Returns:
+            List of symbol strings
+        """
+        # Known symbols from gapless-crypto-data
+        return ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT']
+
+    def get_available_intervals(self) -> list:
+        """
+        Get list of available intervals.
+
+        Returns:
+            List of interval strings
+        """
+        return [interval.value for interval in Interval]
+
+    def clear_cache(self):
+        """Clear the internal data cache."""
+        self._cache.clear()

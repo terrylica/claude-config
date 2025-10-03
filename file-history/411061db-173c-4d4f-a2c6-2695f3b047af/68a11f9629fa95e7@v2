@@ -1,0 +1,362 @@
+# Backtest Audit Investigation Plan
+## Systematic Root Cause Analysis
+
+**Version:** 1.0.0
+**Created:** 2025-10-02
+**Status:** Phase 1 - In Progress
+**Owner:** Terry Li
+
+---
+
+## Service Level Objectives
+
+### Correctness SLO
+- Target: 100% accuracy in P&L calculations
+- Metric: `|computed_pnl - actual_pnl| / actual_pnl < 0.001`
+- Violation: Any systematic calculation error > 0.1%
+
+### Availability SLO
+- Target: All required data accessible for backtest period
+- Metric: `available_bars / expected_bars >= 0.99`
+- Violation: >1% missing data without documented gaps
+
+### Observability SLO
+- Target: All calculation steps traceable
+- Metric: Ability to reproduce any period's P&L from raw data
+- Violation: Unable to trace calculation for >5% of periods
+
+### Maintainability SLO
+- Target: Investigation findings documented with version control
+- Metric: All code changes linked to investigation findings
+- Violation: Undocumented calculation changes
+
+---
+
+## Critical Issues (Priority Ordered)
+
+### ISSUE-001: Zero Perpetual Symbols in 1-Min Bars
+**Severity:** CRITICAL
+**Status:** ✅ RESOLVED (Phase 1)
+**Reporter:** audit_backtest.py:152-157
+**Finding:**
+```
+Spot symbols: 355
+Perp symbols: 0
+```
+
+**Root Cause:** Download and aggregation pipeline only processes spot market.
+- scripts/download_month.py: No SWAP market parameter
+- scripts/aggregate_month.py: Only aggregates spot symbols
+- v1.9-modular.py:114: `market_type="spot"` hardcoded
+
+**Investigation Steps:**
+- [x] Check v1.9-modular.py perp price loading logic → spot-only provider
+- [x] Search all 1-min bar files for "-SWAP" pattern → 0 matches
+- [x] Verify download pipeline includes perp data → NOT INCLUDED
+- [x] Check if backtester uses funding rates to derive perp prices → NO
+
+**Resolution:** See INVESTIGATION_FINDINGS.md Option A vs B
+
+**References:**
+- Code: v1.9-modular.py:114 (spot-only provider)
+- Code: v1.9-modular.py:287 (SWAP → spot conversion)
+- Finding: INVESTIGATION_FINDINGS.md Phase 1
+
+---
+
+### ISSUE-002: Perfect Market Neutrality (Zero Variance)
+**Severity:** CRITICAL
+**Status:** ✅ RESOLVED (Phase 1)
+**Reporter:** audit_backtest.py:159-174
+**Finding:**
+```python
+Market P&L (spot + perp):
+  Mean: $0.00
+  Median: $0.00
+  Std Dev: $0.00  # <- Zero variance across ALL periods
+```
+
+**Root Cause:** Synthetic calculation using same spot prices
+```python
+# v1.9-modular.py:358-361
+spot_pnl = (exit_price - entry_price) * position_size
+perp_pnl = (entry_price - exit_price) * position_size
+# Therefore: perp_pnl = -spot_pnl ALWAYS
+# Therefore: market_pnl = 0 ALWAYS
+```
+
+**Investigation Steps:**
+- [x] Read v1.9-modular.py spot_pnl calculation → line 358
+- [x] Read v1.9-modular.py perp_pnl calculation → line 361
+- [x] Check if calculations are independent → COUPLED (same prices)
+- [x] Sample 5 random periods: manual P&L calculation → Confirmed synthetic
+- [x] Verify position sizing: spot_qty == perp_qty → YES (1:1 hedge)
+
+**Impact:** Backtest ignores basis risk (±0.5-2 pp APY typically)
+
+**Resolution:** See INVESTIGATION_FINDINGS.md Option A vs B
+
+**References:**
+- Code: v1.9-modular.py:358-361 (synthetic calculation)
+- Finding: INVESTIGATION_FINDINGS.md Phase 1
+
+---
+
+### ISSUE-003: Systematic Bias (0% Positive Market P&L)
+**Severity:** HIGH
+**Status:** ✅ RESOLVED (Phase 1 - byproduct of ISSUE-002)
+**Reporter:** audit_backtest.py:187-196
+**Finding:**
+```
+Positive market P&L: 0.0% of periods
+```
+
+**Root Cause:** Direct consequence of ISSUE-002
+- perp_pnl = -spot_pnl mathematically
+- market_pnl = 0 for ALL periods
+- 0% positive because it's exactly zero (not positive, not negative)
+
+**Investigation Steps:**
+- [x] Wait for ISSUE-002 resolution → Resolved
+- [x] Confirmed synthetic calculation → Expected behavior
+- [x] Documented as design limitation → See INVESTIGATION_FINDINGS.md
+
+**Status:** Expected behavior given synthetic calculation. No further action unless Option B selected.
+
+---
+
+### ISSUE-004: P&L Reconciliation Mismatch
+**Severity:** MEDIUM
+**Status:** OPEN
+**Reporter:** audit_backtest.py:283-294
+**Finding:**
+```
+Expected P&L: $60,404.12 (capital gain)
+Actual P&L:   $60,411.49 (sum of period_pnl)
+Difference:   $7.36 (0.012%)
+```
+
+**Hypothesis:**
+1. Floating-point precision accumulation
+2. Fee calculation rounding per period
+3. Initial capital calculation error
+
+**Investigation Steps:**
+- [ ] Load results parquet, sum period_pnl with high precision
+- [ ] Compare capital[0] - period_pnl[0] (initial capital calc)
+- [ ] Compare capital[-1] vs capital[0] + sum(period_pnl)
+- [ ] Check if $7.36 = multiple of fee rounding unit
+
+**References:**
+- Results: results/v1.9-modular-20230101-20250831.parquet
+- Code: v1.9-modular.py (capital tracking section)
+
+**Acceptance Criteria:**
+- Difference < $1.00 (rounding tolerance) OR
+- Identified systematic calculation error and fix implemented
+
+---
+
+### ISSUE-005: Missing Spread Costs
+**Severity:** MEDIUM
+**Status:** OPEN (design limitation)
+**Reporter:** AUDIT_SUMMARY.md:4.2
+**Impact:** APY overestimated by ~1-3 pp
+
+**Implementation Required:**
+```python
+# Add to v1.9-modular.py fee calculation
+SPREAD_BPS = {
+    'BTC-USDT': 0.5,
+    'ETH-USDT': 1.0,
+    # ... other pairs
+}
+SETTLEMENT_MULTIPLIER = 1.5  # Wider spreads during funding
+
+spread_cost = turnover * SPREAD_BPS[symbol] * SETTLEMENT_MULTIPLIER / 1e4
+total_cost = fee_cost + spread_cost
+```
+
+**Investigation Steps:**
+- [ ] Research typical bid-ask spreads for top 20 pairs
+- [ ] Measure spread widening during settlement (if live data available)
+- [ ] Implement spread cost model
+- [ ] Re-run backtest, compare APY change
+
+---
+
+### ISSUE-006: No Out-of-Sample Validation
+**Severity:** MEDIUM
+**Status:** OPEN (testing gap)
+**Reporter:** AUDIT_SUMMARY.md:8
+**Risk:** Overfitting undetected
+
+**Implementation Required:**
+```python
+# Split backtest:
+# In-sample: 2023-01-01 to 2023-12-31 (12 months)
+# Out-of-sample: 2024-01-01 to 2025-08-31 (20 months)
+
+# Expected degradation: 20-33% Sharpe reduction
+```
+
+**Investigation Steps:**
+- [ ] Run v1.9-modular.py for 2023 only (in-sample)
+- [ ] Run v1.9-modular.py for 2024-2025 (out-of-sample)
+- [ ] Compare Sharpe, max drawdown, win rate
+- [ ] Document degradation percentage
+
+---
+
+### ISSUE-007: Timestamp Gaps
+**Severity:** LOW
+**Status:** OPEN (validation)
+**Reporter:** audit_backtest.py:82-91
+**Finding:**
+```
+Found 2 gaps > 1.5 min
+Max gap: 2.0 minutes
+```
+
+**Investigation Steps:**
+- [ ] Identify exact timestamps of gaps
+- [ ] Check if coordinated (both spot and perp missing)
+- [ ] Verify against known exchange maintenance windows
+- [ ] Document as expected vs data quality issue
+
+---
+
+## Investigation Phases
+
+### Phase 1: Perpetual Data Source Analysis
+**Status:** ✅ COMPLETE (2025-10-02)
+**Actual Time:** 25 min
+**Resolved:** ISSUE-001, ISSUE-002, ISSUE-003
+
+**Root Cause Identified:**
+- NO perpetual data in 1-min bars
+- perp_pnl = -spot_pnl (synthetic calculation)
+- market_pnl = 0 ALWAYS (mathematical enforcement)
+
+**Deliverable:** ✅ `INVESTIGATION_FINDINGS.md` - Phase 1 complete
+
+**Decision Required:** See Phase 2 for Option A vs Option B
+
+---
+
+### Phase 2: Delta-Neutral Calculation Validation
+**Status:** ⏸ PAUSED (awaiting user decision)
+**Blocking:** User must choose Option A or Option B
+
+**Decision Point:**
+
+**Option A:** Accept Synthetic Calculation
+- Keep current implementation
+- Document limitations in AUDIT_SUMMARY.md
+- Proceed to Phase 3-5 (spread costs, out-of-sample, gaps)
+- Estimated APY overstatement: +0.5 to +2.0 pp
+
+**Option B:** Implement Real Perpetual Data (RECOMMENDED)
+- Download SWAP market data (21 months × ~1.5 GB = 32 GB)
+- Aggregate to 1-min bars (+7 GB storage)
+- Modify v1.9-modular.py to use real perp prices
+- Re-run 32-month backtest
+- Effort: ~8 hours
+- More realistic performance: APY -0.5 to -2.0 pp adjustment
+
+**Deliverable:** User decision required before proceeding
+
+---
+
+### Phase 3: P&L Reconciliation Trace
+**Status:** BLOCKED (awaiting Phase 2)
+**Estimated Time:** 20 min
+**Blocking:** ISSUE-004
+
+**Tasks:**
+1. High-precision P&L summation
+2. Capital tracking verification
+3. Rounding error analysis
+
+**Deliverable:** `INVESTIGATION_FINDINGS.md` - Phase 3 section
+
+---
+
+### Phase 4: Gap Analysis
+**Status:** BLOCKED (awaiting Phase 3)
+**Estimated Time:** 15 min
+**Blocking:** ISSUE-007
+
+**Tasks:**
+1. Identify gap timestamps
+2. Cross-reference exchange maintenance
+3. Document as expected or issue
+
+**Deliverable:** `INVESTIGATION_FINDINGS.md` - Phase 4 section
+
+---
+
+### Phase 5: Enhancement Implementation
+**Status:** BLOCKED (awaiting all phases)
+**Estimated Time:** 4 hours
+**Blocking:** ISSUE-005, ISSUE-006
+
+**Tasks:**
+1. Implement spread cost model
+2. Implement out-of-sample test
+3. Re-run backtests
+4. Update documentation
+
+**Deliverable:**
+- v1.10-modular.py (with spread costs)
+- out_of_sample_test.py
+- Updated AUDIT_SUMMARY.md
+
+---
+
+## Error Handling Policy
+
+**All investigation code must:**
+- Raise exceptions on any data inconsistency
+- No silent fallbacks or default values
+- No retry logic (fail fast)
+- Propagate errors to caller
+
+**Example:**
+```python
+# CORRECT
+if perp_data is None:
+    raise ValueError(f"Perp data not found for {symbol} at {timestamp}")
+
+# INCORRECT
+if perp_data is None:
+    perp_data = {}  # Silent fallback - NOT ALLOWED
+```
+
+---
+
+## Version History
+
+### v1.0.0 (2025-10-02)
+- Initial investigation plan
+- 7 issues identified from audit
+- 5 phases defined
+- SLOs established
+
+---
+
+## References
+
+### Primary Sources
+- AUDIT_SUMMARY.md (audit findings)
+- audit_backtest.py (validation script)
+- v1.9-modular.py (backtester implementation)
+
+### Data Sources
+- data/1min_bars/ (aggregated price data)
+- data/funding_rates/ (funding rate data)
+- results/v1.9-modular-20230101-20250831.parquet (backtest results)
+
+### External References
+- Academic research findings (see AUDIT_SUMMARY.md:6)
+- Industry best practices (see AUDIT_SUMMARY.md:6.2)

@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""
+Download funding rates and tick data for Q4 2023 (Oct, Nov, Dec).
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "libs" / "okx-price-provider" / "src"))
+
+from okx_price_provider.cdn_downloader import download_month_data
+import pandas as pd
+
+
+def download_funding_rates(year, month):
+    """Download funding rates for a month."""
+    print(f"\n{'='*80}")
+    print(f"Downloading Funding Rates: {year}-{month:02d}")
+    print('='*80)
+
+    output_file = Path(f"data/funding_rates_{year}{month:02d}.parquet")
+
+    if output_file.exists():
+        print(f"✓ Already exists: {output_file}")
+        return
+
+    # Download from CDN
+    df = download_month_data(
+        year=year,
+        month=month,
+        market_type="swap",
+        data_type="swaprate"
+    )
+
+    # Save
+    output_file.parent.mkdir(exist_ok=True)
+    df.to_parquet(output_file)
+
+    print(f"✓ Saved {len(df):,} funding rate records to {output_file}")
+
+
+def download_tick_data(year, month):
+    """Download tick data for a month."""
+    print(f"\n{'='*80}")
+    print(f"Downloading Tick Data: {year}-{month:02d}")
+    print('='*80)
+
+    output_file = Path(f"data/okx_ticks/{year}{month:02d}.parquet")
+
+    if output_file.exists():
+        size_mb = output_file.stat().st_size / 1024 / 1024
+        print(f"✓ Already exists: {output_file} ({size_mb:.1f} MB)")
+        return
+
+    # Download from CDN
+    df = download_month_data(
+        year=year,
+        month=month,
+        market_type="spot",
+        data_type="aggtrades"
+    )
+
+    # Save
+    output_file.parent.mkdir(exist_ok=True)
+    df.to_parquet(output_file, compression='zstd', compression_level=9)
+
+    size_mb = output_file.stat().st_size / 1024 / 1024
+    print(f"✓ Saved {len(df):,} trades to {output_file} ({size_mb:.1f} MB)")
+
+
+def main():
+    """Download Q4 2023 data."""
+
+    months = [
+        (2023, 10),  # October
+        (2023, 11),  # November
+        (2023, 12),  # December
+    ]
+
+    print("="*80)
+    print("Downloading Q4 2023 Data (Oct, Nov, Dec)")
+    print("="*80)
+
+    # Download funding rates first (small, fast)
+    print("\n" + "="*80)
+    print("STEP 1: Downloading Funding Rates")
+    print("="*80)
+
+    for year, month in months:
+        download_funding_rates(year, month)
+
+    # Download tick data (large, slow)
+    print("\n" + "="*80)
+    print("STEP 2: Downloading Tick Data")
+    print("="*80)
+    print("\nThis will download ~2.4 GB of data. Continue? [y/N]: ", end='', flush=True)
+
+    # Auto-confirm if running non-interactively
+    import sys
+    if not sys.stdin.isatty():
+        print("y (auto-confirmed)")
+        proceed = True
+    else:
+        proceed = input().strip().lower() == 'y'
+
+    if not proceed:
+        print("\nSkipping tick data download.")
+        print("You can download later by running this script again.")
+        return
+
+    for year, month in months:
+        download_tick_data(year, month)
+
+    print("\n" + "="*80)
+    print("DOWNLOAD COMPLETE")
+    print("="*80)
+
+    # Summary
+    print("\nData files:")
+    for year, month in months:
+        funding_file = Path(f"data/funding_rates_{year}{month:02d}.parquet")
+        tick_file = Path(f"data/okx_ticks/{year}{month:02d}.parquet")
+
+        if funding_file.exists():
+            df = pd.read_parquet(funding_file)
+            print(f"  Funding {year}-{month:02d}: {len(df):,} records")
+
+        if tick_file.exists():
+            df = pd.read_parquet(tick_file)
+            size_mb = tick_file.stat().st_size / 1024 / 1024
+            print(f"  Ticks   {year}-{month:02d}: {len(df):,} trades ({size_mb:.0f} MB)")
+
+
+if __name__ == "__main__":
+    main()

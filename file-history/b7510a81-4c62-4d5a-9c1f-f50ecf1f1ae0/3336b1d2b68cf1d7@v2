@@ -1,0 +1,258 @@
+"""Tests for CustomFitnessEngine with pandas-ta integration."""
+
+import pytest
+import pandas as pd
+import numpy as np
+
+from feature_engineering.playground.custom_fitness.fitness_engine import (
+    CustomFitnessEngine,
+    InsufficientDataError
+)
+
+
+class TestCustomFitnessEngineInitialization:
+    """Test CustomFitnessEngine initialization."""
+
+    def test_default_initialization(self):
+        """Test default initialization."""
+        engine = CustomFitnessEngine()
+
+        assert engine.min_samples == 150
+        assert engine.lookahead_window == 5
+        assert engine.atr_period == 14
+        assert engine.direction_mode == "long_only"
+        assert engine.phase == 1
+
+    def test_custom_initialization(self):
+        """Test initialization with custom parameters."""
+        engine = CustomFitnessEngine(
+            min_samples=200,
+            lookahead_window=10,
+            atr_period=20,
+            direction_mode="best_direction"
+        )
+
+        assert engine.min_samples == 200
+        assert engine.lookahead_window == 10
+        assert engine.atr_period == 20
+        assert engine.direction_mode == "best_direction"
+        assert engine.phase == 2
+
+    def test_invalid_direction_mode(self):
+        """Test invalid direction mode raises ValueError."""
+        with pytest.raises(ValueError, match="direction_mode must be one of"):
+            CustomFitnessEngine(direction_mode="invalid_mode")
+
+
+class TestCustomFitnessCalculation:
+    """Test fitness calculation with pandas-ta ATR."""
+
+    def test_calculate_fitness_basic(self, sample_ohlcv_data, sample_feature_values):
+        """Test basic fitness calculation."""
+        engine = CustomFitnessEngine(min_samples=50)
+
+        results = engine.calculate_custom_fitness(
+            ohlcv_data=sample_ohlcv_data,
+            feature_values=sample_feature_values
+        )
+
+        # Check all fitness variants are present
+        assert 'D_t_mean' in results
+        assert 'D_t_star_mean' in results
+        assert 'D_t_dagger_mean' in results
+
+        # Check statistical measures
+        assert 'D_t_std' in results
+        assert 'D_t_median' in results
+        assert 'D_t_sharpe' in results
+        assert 'D_t_count' in results
+
+    def test_insufficient_data_error(self, sample_feature_values):
+        """Test InsufficientDataError with too few samples."""
+        engine = CustomFitnessEngine(min_samples=150)
+
+        # Create small dataset
+        small_data = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=50, freq='1h'),
+            'open': np.random.randn(50) + 100,
+            'high': np.random.randn(50) + 101,
+            'low': np.random.randn(50) + 99,
+            'close': np.random.randn(50) + 100,
+            'volume': np.random.randint(1000, 10000, 50)
+        })
+
+        with pytest.raises(InsufficientDataError, match="Need ≥150 samples"):
+            engine.calculate_custom_fitness(
+                ohlcv_data=small_data,
+                feature_values=sample_feature_values[:50]
+            )
+
+    def test_missing_required_columns(self, sample_feature_values):
+        """Test ValueError with missing required columns."""
+        engine = CustomFitnessEngine(min_samples=50)
+
+        # Create data without 'high' column
+        incomplete_data = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=100, freq='1h'),
+            'open': np.random.randn(100) + 100,
+            'low': np.random.randn(100) + 99,
+            'close': np.random.randn(100) + 100,
+            'volume': np.random.randint(1000, 10000, 100)
+        })
+
+        with pytest.raises(ValueError, match="Missing required columns"):
+            engine.calculate_custom_fitness(
+                ohlcv_data=incomplete_data,
+                feature_values=sample_feature_values
+            )
+
+
+class TestATRCalculationWithPandasTA:
+    """Test ATR calculation specifically with pandas-ta."""
+
+    def test_atr_calculation_pandas_ta(self, sample_ohlcv_data):
+        """Test that ATR is calculated correctly using pandas-ta."""
+        engine = CustomFitnessEngine(min_samples=50, atr_period=14)
+
+        # Calculate MFE/MAE which internally uses ATR
+        entry_idx = 50
+        result = engine._calculate_atr_normalized_mfe_mae(
+            ohlcv_data=sample_ohlcv_data,
+            entry_idx=entry_idx
+        )
+
+        # ATR should be calculated and positive
+        assert 'atr' in result
+        assert not np.isnan(result['atr'])
+        assert result['atr'] > 0
+
+        # Normalized values should be present
+        assert 'mfe_norm' in result
+        assert 'mae_norm' in result
+
+    def test_atr_with_minimal_data(self):
+        """Test ATR calculation with minimal data points."""
+        engine = CustomFitnessEngine(min_samples=20, atr_period=5)
+
+        # Create minimal dataset
+        data = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=30, freq='1h'),
+            'open': [100, 101, 99, 100, 102, 101, 100, 99, 101, 100] * 3,
+            'high': [102, 103, 101, 102, 104, 103, 102, 101, 103, 102] * 3,
+            'low': [99, 100, 98, 99, 101, 100, 99, 98, 100, 99] * 3,
+            'close': [101, 100, 99, 101, 103, 102, 101, 100, 102, 101] * 3,
+            'volume': [1000] * 30
+        })
+
+        result = engine._calculate_atr_normalized_mfe_mae(
+            ohlcv_data=data,
+            entry_idx=10
+        )
+
+        # Should calculate ATR even with minimal data
+        assert not np.isnan(result['atr'])
+        assert result['atr'] > 0
+
+
+class TestDirectionalFitness:
+    """Test directional fitness modes."""
+
+    def test_long_only_mode(self, sample_ohlcv_data):
+        """Test long_only direction mode."""
+        engine = CustomFitnessEngine(min_samples=50, direction_mode="long_only")
+
+        result = engine._calculate_atr_normalized_mfe_mae(
+            ohlcv_data=sample_ohlcv_data,
+            entry_idx=50
+        )
+
+        assert result['position_type'] == 'long'
+        assert result['phase'] == 1
+
+    def test_best_direction_mode(self, sample_ohlcv_data):
+        """Test best_direction mode selects optimal direction."""
+        engine = CustomFitnessEngine(min_samples=50, direction_mode="best_direction")
+
+        result = engine._calculate_atr_normalized_mfe_mae(
+            ohlcv_data=sample_ohlcv_data,
+            entry_idx=50
+        )
+
+        # Should have calculated both directions
+        assert 'long_mfe' in result
+        assert 'short_mfe' in result
+        assert 'long_ratio' in result
+        assert 'short_ratio' in result
+
+        # Should select a position type
+        assert result['position_type'] in ['long', 'short']
+        assert result['phase'] == 2
+
+
+class TestEntropyCalculations:
+    """Test entropy-based fitness calculations."""
+
+    def test_permutation_entropy(self):
+        """Test permutation entropy calculation."""
+        engine = CustomFitnessEngine()
+
+        # Simple time series
+        ts = np.array([1, 2, 3, 2, 1, 2, 3, 2, 1])
+        entropy = engine._calculate_permutation_entropy(ts, order=3)
+
+        assert isinstance(entropy, float)
+        assert entropy >= 0
+
+    def test_entropy_weighted_fitness(self, sample_ohlcv_data):
+        """Test entropy-weighted fitness calculation."""
+        engine = CustomFitnessEngine(min_samples=50, entropy_window=20)
+
+        base_fitness = 0.5
+        entry_idx = 50
+
+        weighted_fitness = engine._calculate_entropy_weighted_fitness(
+            ohlcv_data=sample_ohlcv_data,
+            entry_idx=entry_idx,
+            base_fitness=base_fitness
+        )
+
+        # Should return a modified fitness value
+        assert isinstance(weighted_fitness, float)
+
+
+class TestFeatureEvaluation:
+    """Test convenience methods for feature evaluation."""
+
+    def test_evaluate_feature_fitness(self, sample_ohlcv_data):
+        """Test evaluate_feature_fitness convenience method."""
+        engine = CustomFitnessEngine(min_samples=50)
+
+        feature_series = pd.Series(np.random.randn(100))
+
+        results = engine.evaluate_feature_fitness(
+            ohlcv_data=sample_ohlcv_data,
+            feature_series=feature_series,
+            feature_name="test_feature"
+        )
+
+        assert results['feature_name'] == 'test_feature'
+        assert results['feature_length'] == 100
+        assert 'D_t_mean' in results
+
+    def test_evaluate_feature_with_error(self):
+        """Test evaluate_feature_fitness with invalid data."""
+        engine = CustomFitnessEngine(min_samples=50)
+
+        # Invalid OHLCV data
+        invalid_data = pd.DataFrame({'invalid': [1, 2, 3]})
+        feature_series = pd.Series([1, 2, 3])
+
+        results = engine.evaluate_feature_fitness(
+            ohlcv_data=invalid_data,
+            feature_series=feature_series,
+            feature_name="test_feature"
+        )
+
+        # Should return error result
+        assert 'error' in results
+        assert results['D_t_mean'] == 0.0

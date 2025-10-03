@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""
+Test OKX API rate limits with realistic workload.
+
+This script tests downloading 10 symbols for October 2023 with 1H candles
+to validate we can handle the full dataset without hitting rate limits.
+
+Expected: ~1,720 API calls (~3 minutes @ 10 req/sec)
+
+Run with: uv run --active python test_rate_limits.py
+"""
+
+import logging
+import time
+from pathlib import Path
+
+from okx_price_provider import download_okx_candles
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
+def main():
+    """Test rate limits with 10 symbols."""
+
+    print("\n" + "=" * 80)
+    print("Testing OKX API Rate Limits - 10 Symbols, 1 Month, 1H Candles")
+    print("=" * 80 + "\n")
+
+    # Test parameters
+    test_symbols = [
+        "BTC", "ETH", "SOL", "DOGE", "MATIC",  # Top 5 by volume
+        "AVAX", "LINK", "UNI", "ATOM", "FIL"    # Additional diverse symbols
+    ]
+    start_date = "2023-10-01"
+    end_date = "2023-10-31"
+    cache_dir = Path("data/okx_price_cache_rate_test")
+    output_file = cache_dir / "candles_1h.parquet"
+
+    print(f"Test Configuration:")
+    print(f"  Symbols: {len(test_symbols)}")
+    print(f"  Date range: {start_date} to {end_date} (31 days)")
+    print(f"  Bar size: 1H")
+    print(f"  Expected API calls: ~{len(test_symbols) * 172} (56 per symbol)")
+    print(f"  Rate limit: 10 req/sec")
+    print(f"  Expected duration: ~3 minutes\n")
+
+    print(f"Symbols: {', '.join(test_symbols)}\n")
+
+    # Start timer
+    start_time = time.time()
+
+    try:
+        stats = download_okx_candles(
+            symbols=test_symbols,
+            start_date=start_date,
+            end_date=end_date,
+            output_parquet=output_file,
+            bar_size="1H",  # 1-hour candles
+            rate_limit=10,   # Conservative rate limit
+        )
+
+        elapsed = time.time() - start_time
+
+        print(f"\n{'=' * 80}")
+        print("Download Complete - SUCCESS!")
+        print(f"{'=' * 80}")
+        print(f"Symbols downloaded:  {stats['symbols_downloaded']}/{len(test_symbols)}")
+        print(f"Total candles:       {stats['num_candles']:,}")
+        print(f"Cache size:          {stats['cache_size_mb']:.2f} MB")
+        print(f"Elapsed time:        {elapsed:.1f} seconds ({elapsed/60:.1f} minutes)")
+        print(f"Avg req/sec:         {stats['num_candles']/elapsed:.1f}")
+        print(f"{'=' * 80}\n")
+
+        if stats['symbols_downloaded'] == len(test_symbols):
+            print("✓ All symbols downloaded successfully")
+            print("✓ No rate limit errors encountered")
+            print("\nConclusion: Safe to proceed with full dataset download")
+
+            # Extrapolate to full dataset
+            full_symbols = 56
+            estimated_time = (elapsed / len(test_symbols)) * full_symbols
+            print(f"\nEstimated time for full dataset (56 symbols):")
+            print(f"  {estimated_time:.1f} seconds (~{estimated_time/60:.1f} minutes)")
+        else:
+            print(f"⚠ Only {stats['symbols_downloaded']}/{len(test_symbols)} symbols succeeded")
+            print("Review logs for errors")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"\n{'=' * 80}")
+        print("Download FAILED")
+        print(f"{'=' * 80}")
+        print(f"Error: {e}")
+        print(f"Elapsed time: {elapsed:.1f} seconds")
+        print(f"\nThis might indicate:")
+        print("  - Rate limit exceeded (429 error)")
+        print("  - Network issues")
+        print("  - API unavailable")
+        print(f"\nRecommendation: Reduce rate_limit parameter")
+
+
+if __name__ == "__main__":
+    main()

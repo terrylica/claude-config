@@ -1,0 +1,200 @@
+"""Tests for DataSourceManager wrapper."""
+
+import pytest
+import pandas as pd
+from datetime import datetime, timedelta
+from unittest.mock import Mock, patch, MagicMock
+
+from core.sync.data_source_manager import DataSourceManager
+from utils.market_constraints import DataProvider, Interval, MarketType
+
+
+class TestDataSourceManagerInitialization:
+    """Test DataSourceManager initialization."""
+
+    def test_create_factory_method(self):
+        """Test factory method creates instance correctly."""
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+
+        assert isinstance(dsm, DataSourceManager)
+        assert dsm.provider == DataProvider.BINANCE
+        assert dsm.market_type == MarketType.SPOT
+        assert isinstance(dsm._cache, dict)
+
+    def test_direct_initialization(self):
+        """Test direct initialization."""
+        dsm = DataSourceManager(DataProvider.GAPLESS, MarketType.FUTURES)
+
+        assert dsm.provider == DataProvider.GAPLESS
+        assert dsm.market_type == MarketType.FUTURES
+
+
+class TestDataSourceManagerGetData:
+    """Test DataSourceManager.get_data() method."""
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_get_data_with_defaults(self, mock_collector_class, mock_binance_response):
+        """Test get_data with default parameters."""
+        # Setup mock
+        mock_collector = Mock()
+        mock_collector.collect_timeframe_data.return_value = mock_binance_response
+        mock_collector_class.return_value = mock_collector
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+        df = dsm.get_data(symbol='SOLUSDT', interval=Interval.ONE_HOUR)
+
+        # Verify results
+        assert isinstance(df, pd.DataFrame)
+        assert not df.empty
+        assert 'date' in df.columns
+        assert 'close' in df.columns
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_get_data_with_date_strings(self, mock_collector_class, mock_binance_response):
+        """Test get_data with date strings."""
+        mock_collector = Mock()
+        mock_collector.collect_timeframe_data.return_value = mock_binance_response
+        mock_collector_class.return_value = mock_collector
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+        df = dsm.get_data(
+            symbol='SOLUSDT',
+            interval='1h',
+            start_date='2024-01-01',
+            end_date='2024-01-31'
+        )
+
+        assert isinstance(df, pd.DataFrame)
+        mock_collector_class.assert_called_once()
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_get_data_with_lookback_days(self, mock_collector_class, mock_binance_response):
+        """Test get_data with lookback_days parameter."""
+        mock_collector = Mock()
+        mock_collector.collect_timeframe_data.return_value = mock_binance_response
+        mock_collector_class.return_value = mock_collector
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+        df = dsm.get_data(
+            symbol='SOLUSDT',
+            interval=Interval.ONE_HOUR,
+            lookback_days=7
+        )
+
+        assert isinstance(df, pd.DataFrame)
+
+    def test_get_data_invalid_date_range(self):
+        """Test get_data with invalid date range raises ValueError."""
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+
+        with pytest.raises(ValueError, match="Invalid date range"):
+            dsm.get_data(
+                symbol='SOLUSDT',
+                interval=Interval.ONE_HOUR,
+                start_date='2024-12-31',
+                end_date='2024-01-01'
+            )
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_get_data_invalid_symbol(self, mock_collector_class):
+        """Test get_data with invalid symbol raises ValueError."""
+        mock_collector_class.side_effect = ValueError("Symbol contains invalid characters")
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+
+        with pytest.raises(ValueError, match="Data collection validation error"):
+            dsm.get_data(
+                symbol='BTC/../etc/passwd',
+                interval=Interval.ONE_HOUR
+            )
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_get_data_empty_dataframe(self, mock_collector_class):
+        """Test get_data with empty DataFrame raises RuntimeError."""
+        mock_collector = Mock()
+        mock_collector.collect_timeframe_data.return_value = {
+            'dataframe': pd.DataFrame(),
+            'filepath': None,
+            'stats': {}
+        }
+        mock_collector_class.return_value = mock_collector
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+
+        with pytest.raises(RuntimeError, match="No data available"):
+            dsm.get_data(symbol='SOLUSDT', interval=Interval.ONE_HOUR)
+
+
+class TestDataSourceManagerCaching:
+    """Test DataSourceManager caching functionality."""
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_cache_stores_results(self, mock_collector_class, mock_binance_response):
+        """Test that results are cached."""
+        mock_collector = Mock()
+        mock_collector.collect_timeframe_data.return_value = mock_binance_response
+        mock_collector_class.return_value = mock_collector
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+
+        # First call - should hit collector (use explicit dates for cache consistency)
+        df1 = dsm.get_data(
+            symbol='SOLUSDT',
+            interval=Interval.ONE_HOUR,
+            start_date='2024-01-01',
+            end_date='2024-01-31'
+        )
+
+        # Second call with same parameters - should use cache
+        df2 = dsm.get_data(
+            symbol='SOLUSDT',
+            interval=Interval.ONE_HOUR,
+            start_date='2024-01-01',
+            end_date='2024-01-31'
+        )
+
+        # Collector should only be called once
+        assert mock_collector.collect_timeframe_data.call_count == 1
+
+        # DataFrames should be equal but different objects (copy)
+        pd.testing.assert_frame_equal(df1, df2)
+        assert df1 is not df2
+
+    @patch('core.sync.data_source_manager.BinancePublicDataCollector')
+    def test_clear_cache(self, mock_collector_class, mock_binance_response):
+        """Test cache clearing."""
+        mock_collector = Mock()
+        mock_collector.collect_timeframe_data.return_value = mock_binance_response
+        mock_collector_class.return_value = mock_collector
+
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+
+        # Get data and cache it
+        dsm.get_data(symbol='SOLUSDT', interval=Interval.ONE_HOUR)
+        assert len(dsm._cache) > 0
+
+        # Clear cache
+        dsm.clear_cache()
+        assert len(dsm._cache) == 0
+
+
+class TestDataSourceManagerHelpers:
+    """Test DataSourceManager helper methods."""
+
+    def test_get_available_symbols(self):
+        """Test get_available_symbols returns known symbols."""
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+        symbols = dsm.get_available_symbols()
+
+        assert isinstance(symbols, list)
+        assert 'SOLUSDT' in symbols
+        assert 'BTCUSDT' in symbols
+
+    def test_get_available_intervals(self):
+        """Test get_available_intervals returns all intervals."""
+        dsm = DataSourceManager.create(DataProvider.BINANCE, MarketType.SPOT)
+        intervals = dsm.get_available_intervals()
+
+        assert isinstance(intervals, list)
+        assert '1h' in intervals
+        assert '1m' in intervals

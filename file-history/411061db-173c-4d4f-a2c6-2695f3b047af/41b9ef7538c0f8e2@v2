@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+CORRECTED funding rate analysis - using proper 8-hour settlement periods.
+"""
+
+import pandas as pd
+from pathlib import Path
+
+# Load funding rate data
+df = pd.read_parquet('data/funding_rates_202310.parquet')
+
+print('=' * 90)
+print('CORRECTED ANALYSIS: Funding Rate Settlement Frequency')
+print('=' * 90)
+
+# Verify 8-hour pattern with BTC-USDT
+btc = df[df['symbol'] == 'BTC-USDT'].sort_values('timestamp')
+print(f'\nBTC-USDT records: {len(btc)}')
+print(f'Settlement pattern: Every 8 hours at 00:00, 08:00, 16:00 UTC')
+print(f'October 2023: {len(btc)} settlements (31 days * 3/day = 93)')
+
+# Round all timestamps to nearest 8-hour period
+df['settlement_period'] = df['timestamp'].dt.floor('8H')
+
+settlement_periods = df['settlement_period'].unique()
+print(f'\nTotal settlement periods: {len(settlement_periods)}')
+print(f'Expected: ~93 (31 days * 3/day)')
+
+# Analyze top-5 at each 8-hour settlement
+print(f'\n' + '=' * 90)
+print('Top-5 Selection at Each 8-Hour Settlement Period')
+print('=' * 90)
+
+top_5_history = []
+for period in sorted(settlement_periods):
+    period_data = df[df['settlement_period'] == period].copy()
+    period_data['abs_rate'] = period_data['real_funding_rate'].abs()
+
+    top_5 = period_data.nlargest(5, 'abs_rate')['symbol'].tolist()
+    top_5_history.append({
+        'period': period,
+        'top_5': top_5,
+    })
+
+# Calculate top-5 change frequency
+changes = 0
+for i in range(1, len(top_5_history)):
+    prev_set = set(top_5_history[i-1]['top_5'])
+    curr_set = set(top_5_history[i]['top_5'])
+    if prev_set != curr_set:
+        changes += 1
+
+change_rate = changes / (len(top_5_history) - 1) if len(top_5_history) > 1 else 0
+
+print(f'\nTotal 8-hour settlement periods: {len(top_5_history)}')
+print(f'Number of top-5 changes: {changes}')
+print(f'Change rate: {change_rate*100:.1f}%')
+print(f'Stable periods (no change): {len(top_5_history) - 1 - changes}')
+
+# Show first 10 settlements
+print(f'\nFirst 10 settlement periods:')
+for i, entry in enumerate(top_5_history[:10], 1):
+    period = entry['period']
+    symbols = ', '.join(entry['top_5'])
+    print(f'{i:2d}. {period}: {symbols}')
+
+# Count symbol frequency
+symbol_counts = {}
+for entry in top_5_history:
+    for symbol in entry['top_5']:
+        symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+
+sorted_counts = sorted(symbol_counts.items(), key=lambda x: x[1], reverse=True)
+
+print(f'\n' + '=' * 90)
+print('Symbols Appearing in Top-5 (Across 8-Hour Settlements)')
+print('=' * 90)
+print(f'\nTotal unique symbols: {len(symbol_counts)}')
+print(f'\nTop 30 most frequently selected:')
+print(f'{"Rank":>4} {"Symbol":15} {"Appearances":>12} {"% of Periods":>12}')
+print('-' * 90)
+
+for i, (symbol, count) in enumerate(sorted_counts[:30], 1):
+    pct = count / len(top_5_history) * 100
+    print(f'{i:4d} {symbol:15s} {count:12d} {pct:11.1f}%')
+
+# Calculate coverage
+top20_coverage = sum(c for _, c in sorted_counts[:20]) / (len(top_5_history) * 5) * 100
+top30_coverage = sum(c for _, c in sorted_counts[:30]) / (len(top_5_history) * 5) * 100
+
+print(f'\nCoverage Analysis:')
+print(f'  Top 20 symbols: {top20_coverage:.1f}% of all selections')
+print(f'  Top 30 symbols: {top30_coverage:.1f}% of all selections')
+
+# Recommendations
+print(f'\n' + '=' * 90)
+print('DATA-DRIVEN RECOMMENDATIONS FOR VICTOR\'S STRATEGY')
+print('=' * 90)
+
+print(f'\n1. REBALANCING FREQUENCY:')
+print(f'   ✓ OKX charges funding fees every 8 HOURS at 00:00, 08:00, 16:00 UTC')
+print(f'   ✓ Recommend: Rebalance every 8 hours (3x per day)')
+print(f'   ✓ NOT every 0.7 hours - that was a measurement error!')
+
+print(f'\n2. TOP-5 STABILITY:')
+print(f'   ✓ Top-5 changes {change_rate*100:.1f}% of the time between settlements')
+print(f'   ✓ {len(top_5_history) - 1 - changes} stable periods out of {len(top_5_history)-1}')
+print(f'   ✓ Recommend: Check funding rates ~30 min before each settlement')
+
+print(f'\n3. REQUIRED SYMBOL POOL:')
+print(f'   ✓ {len(symbol_counts)} symbols appeared in historical top-5')
+print(f'   ✓ Top 20 symbols cover {top20_coverage:.1f}% of selections')
+print(f'   ✓ Top 30 symbols cover {top30_coverage:.1f}% of selections')
+print(f'   ✓ Recommend: Download top 30-50 symbols (conservative)')
+
+print(f'\n4. STORAGE OPTIMIZATION:')
+estimated_size_30 = 30 / 509 * 801
+estimated_size_50 = 50 / 509 * 801
+print(f'   ✓ Top 30 symbols: ~{estimated_size_30:.0f} MB (vs 801 MB for all)')
+print(f'   ✓ Top 50 symbols: ~{estimated_size_50:.0f} MB (vs 801 MB for all)')
+print(f'   ✓ Savings: ~95% reduction in storage')
+
+# Save symbol lists
+top30_symbols = [s for s, c in sorted_counts[:30]]
+top50_symbols = [s for s, c in sorted_counts[:50]]
+
+Path('data/funding_rate_top30.txt').write_text('\n'.join(top30_symbols))
+Path('data/funding_rate_top50.txt').write_text('\n'.join(top50_symbols))
+
+print(f'\n✓ Saved top-30 symbols to: data/funding_rate_top30.txt')
+print(f'✓ Saved top-50 symbols to: data/funding_rate_top50.txt')
+
+print(f'\n' + '=' * 90)

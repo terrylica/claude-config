@@ -1,0 +1,45 @@
+# CLAUDE.md
+
+## Execution Pattern
+
+**Always run Python as module via Docker:**
+```bash
+docker exec ml-dev python -m <module_path>
+```
+
+## Docker Container
+
+- **Container name**: `ml-dev`
+- **Working directory**: `/workspace`
+- **Install command**: `docker exec ml-dev pip install -e '.[dev]'`
+
+## Project Context
+
+- **Dockerfile fix**: `ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true` resolves Anaconda ToS requirement (July 2025)
+- **PR policy**: 1 file per PR, no workspace files (CLAUDE.md, .cursor/rules/)
+
+## Feature Engineering Architecture
+
+### Data Pipeline Flow
+Raw CSV (date, OHLCV) → `sample_data_loader()` → `prepare_data_sources_for_feature_set()` → `adjust_data_time_with_offset()` (creates `actual_ready_time`) → feature extraction → validation
+
+### Key Concepts
+
+**`actual_ready_time` column**: Framework-generated (not in source CSVs). Formula: `actual_ready_time = date + ready_time_offset`. Simulates real-world data availability delays (e.g., 15m bar closes at 14:15, data available at 14:30 with 1-interval offset).
+
+**`resample_factors`**: Creates **multi-timeframe** data (different bar intervals), NOT multi-period (different lookbacks).
+- `[1, 7, 30]` on 15m base → 15m, 105m (1.75h), 450m (7.5h) bars via OHLCV aggregation
+- No hard limit on factors; codebase uses up to 4 `[1, 4, 12, 24]`
+- Multi-timeframe (bar duration) ≠ multi-period (lookback window like RSI-14 vs RSI-21)
+- This framework uses **BOTH**: RSI-14/21 each calculated on 15m/1h/4h timeframes
+
+**Lookback length**: Per-source via `get_source_lookback_length(source_name)`. Minimum historical bars needed before feature calculation (e.g., EMA-200 needs ≥200 bars). Total buffer = lookback + moving_window_size.
+
+**Backfilling**: Coarse-grained features (e.g., 3h) safely backfilled to fine-grained timeline (15m) using `backfill_features_safely()` to avoid temporal leakage.
+
+### Validation
+`actual_ready_time` used for all temporal operations (train/val/test splits, common time range filtering, lookahead bias testing). 30-step validation compares full-data features vs historical-only features (threshold: 1e-4 relative difference).
+
+## References
+
+- Anaconda ToS: https://stackoverflow.com/questions/79702788/

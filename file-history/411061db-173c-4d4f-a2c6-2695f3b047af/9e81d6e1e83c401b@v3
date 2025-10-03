@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""
+Download OKX Funding Rate Historical Data from CDN (Optimized v2)
+
+Improvements over v1:
+- Incremental saves every 500 downloads
+- Resume capability (skips existing data)
+- Progress checkpoints
+- Better error handling and reporting
+"""
+
+import requests
+import pandas as pd
+import zipfile
+import io
+from datetime import datetime, timedelta
+from pathlib import Path
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import chardet
+import json
+
+# Configuration
+BASE_URL = "https://www.okx.com/cdn/okex/traderecords/swaprate/daily"
+START_DATE = "2023-10-01"  # 2 years back
+END_DATE = "2025-10-01"
+
+# Top liquid perpetuals
+SYMBOLS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT", "MATIC", "LTC",
+    "AVAX", "SHIB", "LINK", "UNI", "ATOM", "ETC", "FIL", "AAVE", "ALGO", "NEAR",
+    "APE", "SNX", "SAND", "MANA", "GALA", "AXS", "THETA", "EGLD", "XTZ", "FTM",
+    "RUNE", "1INCH", "ENJ", "BAT", "ZRX", "COMP", "MKR", "SUSHI", "CRV", "YFI",
+    "STX", "INJ", "AR", "FLOW", "ICP", "EOS", "XLM", "VET", "TRX",
+    "LDO", "ARB", "OP", "PEPE", "WLD", "SUI", "SEI", "TON", "BONK", "ORDI",
+]
+
+# Parallel downloads
+MAX_WORKERS = 20  # Increased from 10
+RETRY_ATTEMPTS = 2  # Reduced from 3 for faster failure
+CHECKPOINT_INTERVAL = 500  # Save every 500 downloads
+
+
+def generate_date_range(start: str, end: str):
+    """Generate all dates in range."""
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+
+    current = start_dt
+    while current <= end_dt:
+        yield current
+        current += timedelta(days=1)
+
+
+def build_url(symbol: str, date: datetime) -> tuple[str, str, str]:
+    """Build CDN URL for a symbol and date."""
+    date_str = date.strftime("%Y-%m-%d")
+    date_folder = date.strftime("%Y%m%d")
+    inst_id = f"{symbol}-USDT-SWAP"
+
+    url = f"{BASE_URL}/{date_folder}/{inst_id}-swaprate-{date_str}.zip"
+    return url, symbol, date_str
+
+
+def download_and_parse(url: str, symbol: str, date_str: str) -> list:
+    """Download ZIP, extract CSV, parse funding rates."""
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            # Download ZIP
+            response = requests.get(url, timeout=15)
+            if response.status_code == 404:
+                return []  # Symbol didn't exist on this date
+            response.raise_for_status()
+
+            # Extract CSV from ZIP
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+                csv_filename = zf.namelist()[0]
+                csv_data = zf.read(csv_filename)
+
+            # Detect encoding (CSV has Chinese headers)
+            encoding_result = chardet.detect(csv_data)
+            encoding = encoding_result['encoding'] or 'utf-8'
+
+            # Parse CSV
+            df = pd.read_csv(
+                io.BytesIO(csv_data),
+                encoding=encoding,
+                on_bad_lines='skip'
+            )
+
+            # Extract columns (handles Chinese headers)
+            records = []
+            for _, row in df.iterrows():
+                try:
+                    # Get real_funding_rate (actual settled rate)
+                    rate_col = [c for c in df.columns if 'real' in c.lower() or '实际' in c][0]
+                    time_col = [c for c in df.columns if 'time' in c.lower() or '时间' in c][0]
+
+                    ts = int(row[time_col])
+                    rate = float(row[rate_col])
+
+                    records.append({
+                        'symbol': symbol,
+                        'ts': ts,
+                        'funding_time': datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S"),
+                        'fundingRate': rate,
+                    })
+                except (ValueError, KeyError, IndexError):
+                    continue
+
+            return records
+
+        except Exception:
+            if attempt == RETRY_ATTEMPTS - 1:
+                return []
+            time.sleep(0.2)
+
+    return []
+
+
+def load_checkpoint(checkpoint_path: Path) -> dict:
+    """Load checkpoint file if it exists."""
+    if checkpoint_path.exists():
+        with open(checkpoint_path, 'r') as f:
+            return json.load(f)
+    return {'completed': set(), 'failed': set()}
+
+
+def save_checkpoint(checkpoint_path: Path, completed: set, failed: set):
+    """Save checkpoint file."""
+    checkpoint_path.parent.mkdir(exist_ok=True, parents=True)
+    with open(checkpoint_path, 'w') as f:
+        json.dump({
+            'completed': list(completed),
+            'failed': list(failed),
+            'timestamp': datetime.now().isoformat()
+        }, f)
+
+
+def save_incremental_data(output_path: Path, new_records: list, append: bool = True):
+    """Save data incrementally."""
+    if not new_records:
+        return
+
+    df_new = pd.DataFrame(new_records)
+
+    if append and output_path.exists():
+        # Append to existing file
+        df_existing = pd.read_csv(output_path)
+        df = pd.concat([df_existing, df_new], ignore_index=True)
+        df = df.drop_duplicates(subset=['symbol', 'ts'])
+        df = df.sort_values(['symbol', 'ts']).reset_index(drop=True)
+    else:
+        df = df_new
+
+    df.to_csv(output_path, index=False)
+
+
+def download_historical_data(start_date: str, end_date: str, symbols: list,
+                              output_dir: Path) -> pd.DataFrame:
+    """
+    Download historical funding rate data with checkpointing.
+    """
+    print("=" * 80)
+    print("OKX CDN Historical Data Downloader v2 (Optimized)")
+    print("=" * 80)
+    print(f"Date range: {start_date} → {end_date}")
+    print(f"Symbols: {len(symbols)}")
+
+    # Setup paths
+    output_path = output_dir / "okx_funding_2year_cdn.csv"
+    checkpoint_path = output_dir / ".download_checkpoint.json"
+
+    # Load checkpoint
+    checkpoint = load_checkpoint(checkpoint_path)
+    completed_set = set(checkpoint.get('completed', []))
+    failed_set = set(checkpoint.get('failed', []))
+
+    # Generate all download tasks
+    tasks = []
+    dates = list(generate_date_range(start_date, end_date))
+    print(f"Days: {len(dates)}")
+
+    for date in dates:
+        for symbol in symbols:
+            url, sym, date_str = build_url(symbol, date)
+            task_key = f"{sym}_{date_str}"
+
+            # Skip already completed
+            if task_key not in completed_set and task_key not in failed_set:
+                tasks.append((url, sym, date_str, task_key))
+
+    total_tasks = len(symbols) * len(dates)
+    remaining = len(tasks)
+    already_done = len(completed_set)
+
+    print(f"Total downloads: {total_tasks:,}")
+    print(f"Already completed: {already_done:,}")
+    print(f"Remaining: {remaining:,}")
+    print(f"Workers: {MAX_WORKERS}")
+    print("=" * 80 + "\n")
+
+    if remaining == 0:
+        print("✓ All downloads already completed!")
+        return pd.read_csv(output_path) if output_path.exists() else pd.DataFrame()
+
+    # Download in parallel with checkpointing
+    batch_records = []
+    completed = already_done
+    failed = len(failed_set)
+    start_time = time.time()
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(download_and_parse, url, sym, date_str): (sym, date_str, task_key)
+            for url, sym, date_str, task_key in tasks
+        }
+
+        for future in as_completed(futures):
+            sym, date_str, task_key = futures[future]
+            try:
+                records = future.result()
+                if records:
+                    batch_records.extend(records)
+                    completed_set.add(task_key)
+                    completed += 1
+                else:
+                    failed_set.add(task_key)
+                    failed += 1
+
+                # Checkpoint every CHECKPOINT_INTERVAL downloads
+                if (completed + failed - already_done) % CHECKPOINT_INTERVAL == 0:
+                    # Save data incrementally
+                    save_incremental_data(output_path, batch_records, append=True)
+                    batch_records = []
+
+                    # Save checkpoint
+                    save_checkpoint(checkpoint_path, completed_set, failed_set)
+
+                    elapsed = time.time() - start_time
+                    rate = (completed + failed - already_done) / elapsed
+                    remaining_tasks = total_tasks - completed - failed
+                    eta_seconds = remaining_tasks / rate if rate > 0 else 0
+
+                    print(f"  ✓ Checkpoint: {completed}/{total_tasks} "
+                          f"({len(batch_records) + (pd.read_csv(output_path).shape[0] if output_path.exists() else 0):,} records) "
+                          f"[{rate:.1f} dl/s, ETA: {eta_seconds/60:.1f}m]")
+
+            except Exception as e:
+                failed_set.add(task_key)
+                failed += 1
+
+    # Save final batch
+    if batch_records:
+        save_incremental_data(output_path, batch_records, append=True)
+
+    # Final checkpoint
+    save_checkpoint(checkpoint_path, completed_set, failed_set)
+
+    print(f"\n{'='*80}")
+    print(f"Download complete!")
+    print(f"  Successful: {completed:,}")
+    print(f"  Failed: {failed:,}")
+    print(f"  Time: {(time.time() - start_time)/60:.1f} minutes")
+    print(f"{'='*80}\n")
+
+    # Load final dataset
+    if output_path.exists():
+        return pd.read_csv(output_path)
+    return pd.DataFrame()
+
+
+def main():
+    """Main execution."""
+    output_dir = Path(__file__).parent.parent / "data"
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Download data
+    df = download_historical_data(START_DATE, END_DATE, SYMBOLS, output_dir)
+
+    if df.empty:
+        print("❌ No data to analyze")
+        return
+
+    output_path = output_dir / "okx_funding_2year_cdn.csv"
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("DATASET SUMMARY")
+    print(f"{'='*80}")
+    print(f"Total records:  {len(df):,}")
+    print(f"Symbols:        {df['symbol'].nunique()}")
+    print(f"Date range:     {df['funding_time'].min()} → {df['funding_time'].max()}")
+    print(f"\nTop symbols by record count:")
+    symbol_counts = df.groupby('symbol').size().sort_values(ascending=False)
+    for sym, count in symbol_counts.head(10).items():
+        print(f"  {sym:10s}: {count:,} records")
+
+    print(f"\nOutput file:    {output_path}")
+    print(f"File size:      {output_path.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"{'='*80}\n")
+
+    # Validation
+    print("DATA VALIDATION:")
+    print(f"  ✓ Unique timestamps: {df['ts'].nunique():,}")
+    print(f"  ✓ Rate range: {df['fundingRate'].min():.6f} to {df['fundingRate'].max():.6f}")
+    print(f"  ✓ Missing values: {df['fundingRate'].isna().sum()}")
+    print(f"  ✓ Duplicates: {df.duplicated(subset=['symbol', 'ts']).sum()}")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

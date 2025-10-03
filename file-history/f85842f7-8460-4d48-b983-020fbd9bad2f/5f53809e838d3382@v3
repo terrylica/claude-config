@@ -1,0 +1,147 @@
+//! Instrument configuration with embedded TOML and type inference
+//!
+//! Configuration is embedded in binary via include_str! macro (Q15).
+//! Instrument type inferred from config path structure (Q20).
+//! Provides decimal factors for price conversion and type-specific validation.
+
+use crate::data::dukascopy::error::{ConversionError, InstrumentType};
+use once_cell::sync::Lazy;
+use serde::Deserialize;
+use std::collections::HashMap;
+
+/// Embedded instrument configuration TOML (Q15)
+///
+/// Path: docs/planning/research/dukascopy-instrument-config.toml
+/// Contains 1,607 instruments with decimal factors across asset classes.
+const INSTRUMENT_CONFIG_TOML: &str = include_str!(
+    "../../../docs/planning/research/dukascopy-instrument-config.toml"
+);
+
+/// Parsed instrument configuration (lazy static)
+static INSTRUMENT_CONFIG: Lazy<InstrumentConfigRoot> = Lazy::new(|| {
+    toml::from_str(INSTRUMENT_CONFIG_TOML)
+        .expect("Failed to parse embedded instrument config TOML")
+});
+
+/// Root configuration structure
+#[derive(Deserialize)]
+struct InstrumentConfigRoot {
+    instruments: InstrumentsRoot,
+}
+
+/// Top-level instrument categories
+#[derive(Deserialize)]
+struct InstrumentsRoot {
+    #[serde(default)]
+    forex: HashMap<String, HashMap<String, InstrumentEntry>>,
+
+    #[serde(default)]
+    crypto: HashMap<String, HashMap<String, InstrumentEntry>>,
+
+    #[serde(default)]
+    commodities: HashMap<String, HashMap<String, InstrumentEntry>>,
+
+    #[serde(default)]
+    equities: HashMap<String, HashMap<String, InstrumentEntry>>,
+}
+
+/// Individual instrument entry
+#[derive(Deserialize)]
+struct InstrumentEntry {
+    decimal_factor: f64,
+    // Other fields ignored (name, description, etc.)
+}
+
+/// Get instrument decimal factor and inferred type (Q20)
+///
+/// Single lookup provides both values needed for conversion and validation.
+/// Type inference from config path structure eliminates manual edits (Q20).
+///
+/// # Arguments
+///
+/// * `instrument` - Instrument symbol (e.g., "EURUSD", "BTCUSD")
+///
+/// # Returns
+///
+/// Tuple of (decimal_factor, instrument_type) or error if unsupported
+///
+/// # Examples
+///
+/// ```
+/// use rangebar::data::dukascopy::config::get_instrument_info;
+/// use rangebar::data::dukascopy::error::InstrumentType;
+///
+/// let (factor, typ) = get_instrument_info("EURUSD").unwrap();
+/// assert_eq!(factor, 100000);
+/// assert_eq!(typ, InstrumentType::Forex);
+/// ```
+pub fn get_instrument_info(instrument: &str) -> Result<(u32, InstrumentType), ConversionError> {
+    // Check forex (nested structure: forex.{subcategory}.{symbol})
+    for subcategory in INSTRUMENT_CONFIG.instruments.forex.values() {
+        if let Some(entry) = subcategory.get(instrument) {
+            return Ok((entry.decimal_factor as u32, InstrumentType::Forex));
+        }
+    }
+
+    // Check crypto (nested structure: crypto.{subcategory}.{symbol})
+    for subcategory in INSTRUMENT_CONFIG.instruments.crypto.values() {
+        if let Some(entry) = subcategory.get(instrument) {
+            return Ok((entry.decimal_factor as u32, InstrumentType::Crypto));
+        }
+    }
+
+    // Check commodities (nested structure)
+    for subcategory in INSTRUMENT_CONFIG.instruments.commodities.values() {
+        if let Some(entry) = subcategory.get(instrument) {
+            return Ok((entry.decimal_factor as u32, InstrumentType::Commodity));
+        }
+    }
+
+    // Check equities (nested structure)
+    for subcategory in INSTRUMENT_CONFIG.instruments.equities.values() {
+        if let Some(entry) = subcategory.get(instrument) {
+            return Ok((entry.decimal_factor as u32, InstrumentType::Equity));
+        }
+    }
+
+    Err(ConversionError::UnsupportedInstrument {
+        instrument: instrument.to_string(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_forex_instrument_lookup() {
+        let (factor, typ) = get_instrument_info("EURUSD").unwrap();
+        assert_eq!(factor, 100000);
+        assert_eq!(typ, InstrumentType::Forex);
+    }
+
+    #[test]
+    fn test_unsupported_instrument() {
+        let result = get_instrument_info("NONEXISTENT");
+        assert!(result.is_err());
+        match result {
+            Err(ConversionError::UnsupportedInstrument { instrument }) => {
+                assert_eq!(instrument, "NONEXISTENT");
+            }
+            _ => panic!("Expected UnsupportedInstrument error"),
+        }
+    }
+
+    #[test]
+    fn test_type_specific_price_ranges() {
+        // Forex: narrow range (Q18)
+        let (min, max) = InstrumentType::Forex.price_range();
+        assert_eq!(min, 0.01);
+        assert_eq!(max, 10_000.0);
+
+        // Crypto: wide range
+        let (min, max) = InstrumentType::Crypto.price_range();
+        assert_eq!(min, 0.0001);
+        assert_eq!(max, 1_000_000.0);
+    }
+}

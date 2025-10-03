@@ -1,0 +1,258 @@
+"""
+Feature Set Comparison Tool
+
+This script provides functionality for comparing two feature sets to ensure they produce
+identical or sufficiently similar results. It's particularly useful when refactoring
+feature sets or creating new versions, to validate that the changes don't affect the
+actual feature values being generated.
+
+The comparison includes:
+1. Verifying that both feature sets generate the same feature names
+2. Comparing the actual values of each feature across all data points
+3. Providing detailed statistics about any differences found
+
+Example usage:
+    python -m scripts.compare_feature_sets --feature_set_path1 ohlcv_rsi14_sizex_v1 --feature_set_path2 ohlcv_rsi14_sizex_v2
+
+Exit codes:
+    0: Feature sets produce identical results (within specified threshold)
+    1: Feature sets produce different results
+    2: Error during comparison
+"""
+
+import argparse
+import logging
+import os.path
+import sys
+import time
+import pandas as pd
+
+from ml_feature_set.feature_constructor import FeatureConstructor
+from ml_feature_set.helpers.demo_helpers import compare_dicts, extract_info_from_file_path
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+
+def compare_feature_sets(feature_set_path1, feature_set_path2, sample_data_paths, logger, threshold=1e-4):
+    """
+    Compare two feature sets to ensure they generate the same features.
+
+    Args:
+        feature_set_path1: First feature set path
+        feature_set_path2: Second feature set path
+        sample_data_paths: Sample data path or list of paths
+        logger: Logger
+        threshold: Threshold for numeric value comparison (default: 1e-4)
+
+    Returns:
+        Tuple of (is_identical, diff_stats) where:
+        - is_identical: Boolean indicating if the feature sets produce identical results
+        - diff_stats: Dictionary with statistics about differences
+    """
+
+    # Define function to load data from sample data paths
+    def sample_data_loader(template):
+        # Extract information from file path
+        if isinstance(sample_data_paths, list) and len(sample_data_paths) > 0:
+            for path in sample_data_paths:
+                try:
+                    info = extract_info_from_file_path(path)
+                    if info["name"] == template["name"]:
+                        logger.info(f"Found matching data file for source {template['name']}: {path}")
+                        data_df = pd.read_csv(path)
+
+                        # Ensure date column is in correct format
+                        if "date" in data_df.columns:
+                            data_df["date"] = pd.to_datetime(data_df["date"])
+
+                        # Ensure actual_ready_time is present and in correct format
+                        if "actual_ready_time" not in data_df.columns:
+                            if "date" in data_df.columns:
+                                data_df["actual_ready_time"] = data_df["date"]
+                            else:
+                                raise ValueError(f"Data file {path} missing both 'date' and 'actual_ready_time' columns")
+
+                        data_df["actual_ready_time"] = pd.to_datetime(data_df["actual_ready_time"])
+
+                        source_descriptor_postfix = info.get("source_descriptor", "")
+                        return data_df, source_descriptor_postfix
+                except Exception as e:
+                    logger.warning(f"Error processing data file {path}: {e!s}")
+
+        logger.warning(f"No matching data file found for source {template['name']}")
+        return None
+
+    logger.info(f"Comparing feature sets: '{feature_set_path1}' vs '{feature_set_path2}'")
+
+    # Prepare data sources for both feature sets (should be the same)
+    source_data_list = prepare_data_sources_for_feature_set(
+        feature_set_path=feature_set_path1,  # Using first feature set as template
+        data_loader_func=sample_data_loader,
+        source_to_interval={"ohlcv": "1h", "fear_greed_index": "1d", "btc_dominance": "1d"},
+        moving_window_size=30,
+        auto_resample=True,
+        filter_common_time_range=True,
+    )
+
+    # Ensure at least one data source was loaded
+    if not source_data_list:
+        raise ValueError("No data sources were successfully loaded")
+
+    # Get primary data source
+    primary_source = next((s for s in source_data_list if s["name"] == "ohlcv_1x"), source_data_list[0])
+    primary_df = primary_source["data_df"]
+
+    # Calculate validation and test times
+    validation_start_time = primary_df["actual_ready_time"].iloc[len(primary_df) // 3]
+    test_start_time = primary_df["actual_ready_time"].iloc[len(primary_df) * 2 // 3]
+
+    # Create FeatureConstructor instances for both feature sets
+    fc1 = FeatureConstructor(
+        source_data_list=source_data_list,
+        feature_set_path=feature_set_path1,
+        validation_start_time=validation_start_time,
+        test_start_time=test_start_time,
+        moving_window_size=30,
+    )
+
+    fc2 = FeatureConstructor(
+        source_data_list=source_data_list,
+        feature_set_path=feature_set_path2,
+        validation_start_time=validation_start_time,
+        test_start_time=test_start_time,
+        moving_window_size=30,
+    )
+
+    # Build features using both feature sets
+    logger.info(f"Building features using '{feature_set_path1}'...")
+    feature_df1, _ = fc1.feature_set.build_features(source_data_list)
+
+    logger.info(f"Building features using '{feature_set_path2}'...")
+    feature_df2, _ = fc2.feature_set.build_features(source_data_list)
+
+    # Check if the feature sets generate the same set of features
+    feature_names1 = set(feature_df1.columns)
+    feature_names2 = set(feature_df2.columns)
+
+    if feature_names1 != feature_names2:
+        logger.warning("Feature sets generate different feature names:")
+        logger.warning(f"Features only in '{feature_set_path1}': {feature_names1 - feature_names2}")
+        logger.warning(f"Features only in '{feature_set_path2}': {feature_names2 - feature_names1}")
+
+        # Use common features for comparison
+        common_features = feature_names1.intersection(feature_names2)
+        if not common_features:
+            raise ValueError("Feature sets have no common features to compare")
+
+        logger.info(f"Comparing {len(common_features)} common features")
+        feature_df1 = feature_df1[list(common_features)]
+        feature_df2 = feature_df2[list(common_features)]
+    else:
+        logger.info(f"Both feature sets generate the same set of {len(feature_names1)} features")
+
+    # Check if the feature values are the same
+    all_differences = []
+    diff_features = set()
+    max_diff = 0
+
+    # Compare each row
+    for i in range(min(len(feature_df1), len(feature_df2))):
+        differences = compare_dicts(feature_df1.iloc[i, :].to_dict(), feature_df2.iloc[i, :].to_dict(), threshold=threshold)
+
+        if differences:
+            all_differences.append((i, differences))
+            diff_features.update(differences.keys())
+
+            # Calculate maximum difference
+            for key, (val1, val2) in differences.items():
+                if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
+                    abs_diff = abs(val1 - val2)
+                    max_abs = max(abs(val1), abs(val2))
+                    if max_abs > 0:
+                        rel_diff = abs_diff / max_abs
+                        max_diff = max(max_diff, rel_diff)
+
+    # Generate report
+    diff_stats = {
+        "total_rows": min(len(feature_df1), len(feature_df2)),
+        "rows_with_differences": len(all_differences),
+        "total_features": len(feature_df1.columns),
+        "features_with_differences": len(diff_features),
+        "max_relative_difference": max_diff,
+        "different_feature_names": list(diff_features),
+    }
+
+    # Create a detailed report of differences
+    if all_differences:
+        logger.warning(f"Found differences in {len(all_differences)} out of {min(len(feature_df1), len(feature_df2))} rows")
+        logger.warning(f"Features with differences: {diff_features}")
+        logger.warning(f"Maximum relative difference: {max_diff}")
+
+        # Show detailed report for first few differences
+        max_examples = min(5, len(all_differences))
+        for i in range(max_examples):
+            row_idx, diffs = all_differences[i]
+            logger.warning(f"Row {row_idx} differences:")
+            for key, (val1, val2) in diffs.items():
+                logger.warning(f"  {key}: {val1} vs {val2}")
+
+        is_identical = False
+    else:
+        logger.info("Both feature sets produce identical results!")
+        is_identical = True
+
+    return is_identical, diff_stats
+
+
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Compare two feature sets")
+    parser.add_argument("--feature_set_path1", type=str, required=True, help="First feature set path")
+    parser.add_argument("--feature_set_path2", type=str, required=True, help="Second feature set path")
+    parser.add_argument("--threshold", type=float, default=1e-4, help="Threshold for numeric comparison (default: 1e-4)")
+    args = parser.parse_args()
+
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    logger = logging.getLogger()
+
+    # Get sample data paths
+    sample_data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "ml_feature_set", "sample_data"))
+
+    # Use the same sample data as in run_feature_set_validation.py
+    sample_data_paths = [
+        f"{sample_data_dir}/resampled_binance_BTC-2h.csv",
+        f"{sample_data_dir}/fear_and_greed.csv",
+    ]
+
+    # Compare feature sets
+    print(f"Comparing feature sets: '{args.feature_set_path1}' vs '{args.feature_set_path2}'")
+    start_time = time.time()
+
+    try:
+        is_identical, diff_stats = compare_feature_sets(args.feature_set_path1, args.feature_set_path2, sample_data_paths, logger, threshold=args.threshold)
+
+        # Print summary
+        print("\nComparison Summary:")
+        print(f"Total rows compared: {diff_stats['total_rows']}")
+        print(f"Total features compared: {diff_stats['total_features']}")
+        print(f"Rows with differences: {diff_stats['rows_with_differences']}")
+        print(f"Features with differences: {diff_stats['features_with_differences']}")
+
+        if diff_stats["features_with_differences"] > 0:
+            print(f"Features with differences: {diff_stats['different_feature_names']}")
+            print(f"Maximum relative difference: {diff_stats['max_relative_difference']}")
+
+        # Set exit code based on result
+        result = 0 if is_identical else 1
+
+    except Exception as e:
+        logger.error(f"Error comparing feature sets: {e!s}")
+        result = 2
+
+    end_time = time.time()
+    print(f"Time taken: {end_time - start_time:.2f} seconds")
+    return result
+
+
+if __name__ == "__main__":
+    sys.exit(main())

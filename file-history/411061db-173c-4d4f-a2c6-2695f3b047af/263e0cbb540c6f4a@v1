@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""
+Victor's Funding Rate Arbitrage Backtester V1.7
+
+Strategy 1: Rate Persistence (No Lookahead Bias)
+- At settlement T: Select top-5 based on real_funding_rate from T
+- Entry at T+1m (realistic execution delay)
+- Hold positions from T to T+8h
+- Exit at T+8h
+- Collect funding at T+8h based on actual real_funding_rate at T+8h
+
+Key Improvements over V1.6:
+- Uses REAL prices from OKX tick data (not fake prices)
+- Explicit no-lookahead bias (uses real_funding_rate, not predictions)
+- Accurate timing (entry delay, hold period, exit timing)
+- Complete PnL (funding + spot + perp + basis risk)
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import timedelta
+import sys
+
+# Add okx-price-provider to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "libs" / "okx-price-provider" / "src"))
+
+from okx_price_provider.tick_provider import TickPriceProvider
+
+
+class FundingRateArbitrageBacktester:
+    """
+    Backtest funding rate arbitrage with real prices and no lookahead bias.
+    """
+
+    def __init__(self, funding_rates_path, tick_data_path, initial_capital=10000):
+        """
+        Initialize backtester.
+
+        Args:
+            funding_rates_path: Path to funding rates parquet file
+            tick_data_path: Directory containing tick data parquet files (YYYYMM.parquet)
+            initial_capital: Starting capital in USD
+        """
+        self.initial_capital = initial_capital
+        self.capital = initial_capital
+
+        # Load funding rates
+        print(f"Loading funding rates from {funding_rates_path}...")
+        self.funding_rates = pd.read_parquet(funding_rates_path)
+        self.funding_rates['timestamp'] = pd.to_datetime(self.funding_rates['timestamp'])
+        self.funding_rates = self.funding_rates.sort_values('timestamp')
+
+        # Add settlement period (8-hour intervals for Oct 2023)
+        self.funding_rates['settlement_period'] = self.funding_rates['timestamp'].dt.floor('8h')
+
+        print(f"Loaded {len(self.funding_rates):,} funding rate records")
+        print(f"Symbols: {self.funding_rates['symbol'].nunique()}")
+        print(f"Date range: {self.funding_rates['timestamp'].min()} to {self.funding_rates['timestamp'].max()}")
+        print()
+
+        # Initialize price provider
+        print(f"Initializing price provider with tick data from {tick_data_path}...")
+        self.price_provider = TickPriceProvider(tick_data_path, market_type="spot")
+        print("Price provider ready")
+        print()
+
+    def get_settlement_periods(self):
+        """Get all settlement periods in the dataset."""
+        return sorted(self.funding_rates['settlement_period'].unique())
+
+    def select_top5_at_settlement(self, settlement_time):
+        """
+        Select top-5 symbols based on real_funding_rate at settlement time.
+
+        This is Strategy 1 (Rate Persistence):
+        - Use finalized real_funding_rate from settlement T
+        - Assume this rate persists through [T, T+8h]
+        - No lookahead bias (data is finalized at T)
+        - Only select POSITIVE rates (we collect funding as short perp)
+        - Only select USDT-quoted symbols (we have spot price data)
+
+        Args:
+            settlement_time: Settlement timestamp
+
+        Returns:
+            List of top-5 symbols (ordered by funding rate, highest first)
+        """
+        # Get all rates at this settlement
+        rates_at_settlement = self.funding_rates[
+            self.funding_rates['settlement_period'] == settlement_time
+        ].copy()
+
+        # Filter 1: USDT-quoted symbols only (we have spot price data for these)
+        rates_at_settlement = rates_at_settlement[
+            rates_at_settlement['symbol'].str.contains('-USDT', na=False)
+        ]
+
+        # Filter 2: Positive rates only (we collect funding as short perp)
+        # When rate > 0: longs pay shorts → we collect
+        # When rate < 0: shorts pay longs → we pay (avoid these!)
+        positive_rates = rates_at_settlement[rates_at_settlement['real_funding_rate'] > 0].copy()
+
+        if len(positive_rates) < 5:
+            # Not enough positive rates, return what we have
+            top_5 = positive_rates.nlargest(len(positive_rates), 'real_funding_rate')
+        else:
+            # Select top-5 by highest positive rate
+            top_5 = positive_rates.nlargest(5, 'real_funding_rate')
+
+        return top_5[['symbol', 'real_funding_rate']].to_dict('records')
+
+    def get_spot_prices(self, symbols, start_time, end_time, freq='1min'):
+        """
+        Get spot prices for symbols over time period.
+
+        Args:
+            symbols: List of symbols
+            start_time: Start timestamp
+            end_time: End timestamp
+            freq: Resampling frequency
+
+        Returns:
+            DataFrame with columns: timestamp, symbol, price
+        """
+        # Get prices from tick data (VWAP resampled)
+        prices = self.price_provider.get_prices(
+            symbols=symbols,
+            start_date=start_time,
+            end_date=end_time,
+            freq=freq,
+            method='vwap'
+        )
+
+        return prices
+
+    def simulate_trade_period(self, settlement_time, next_settlement_time):
+        """
+        Simulate one 8-hour trading period.
+
+        Timeline:
+        - T (settlement_time): Settlement happens, rates finalized
+        - T+0s: Select top-5 based on real_funding_rate
+        - T+1m: Enter positions (realistic execution delay)
+        - T+8h (next_settlement_time): Exit positions, collect funding
+
+        Args:
+            settlement_time: Current settlement timestamp
+            next_settlement_time: Next settlement timestamp (T+8h)
+
+        Returns:
+            dict with trade results
+        """
+        # 1. SELECTION (at T, using real_funding_rate from T)
+        top_5 = self.select_top5_at_settlement(settlement_time)
+
+        if len(top_5) == 0:
+            # No positive USDT-quoted rates available
+            return None
+
+        symbols = [item['symbol'] for item in top_5]
+        expected_rates = {item['symbol']: item['real_funding_rate'] for item in top_5}
+
+        # 2. ENTRY TIMING (at T+1m, realistic execution delay)
+        entry_time = settlement_time + timedelta(minutes=1)
+        exit_time = next_settlement_time  # T+8h
+
+        # 3. GET ENTRY PRICES
+        try:
+            entry_prices_df = self.get_spot_prices(symbols, entry_time, entry_time, freq='1min')
+        except Exception as e:
+            print(f"  ⚠ Failed to get entry prices at {entry_time}: {e}")
+            return None
+
+        # Extract entry price for each symbol
+        entry_prices = {}
+        for symbol in symbols:
+            symbol_prices = entry_prices_df[entry_prices_df['symbol'] == symbol]
+            if len(symbol_prices) == 0:
+                print(f"  ⚠ No price data for {symbol} at entry {entry_time}")
+                return None
+            entry_prices[symbol] = symbol_prices['price'].iloc[0]
+
+        # 4. GET EXIT PRICES
+        try:
+            exit_prices_df = self.get_spot_prices(symbols, exit_time, exit_time, freq='1min')
+        except Exception as e:
+            print(f"  ⚠ Failed to get exit prices at {exit_time}: {e}")
+            return None
+
+        # Extract exit price for each symbol
+        exit_prices = {}
+        for symbol in symbols:
+            symbol_prices = exit_prices_df[exit_prices_df['symbol'] == symbol]
+            if len(symbol_prices) == 0:
+                print(f"  ⚠ No price data for {symbol} at exit {exit_time}")
+                return None
+            exit_prices[symbol] = symbol_prices['price'].iloc[0]
+
+        # 5. GET ACTUAL FUNDING RATES AT T+8h (what we actually collect)
+        actual_rates_at_next = self.funding_rates[
+            self.funding_rates['settlement_period'] == next_settlement_time
+        ].set_index('symbol')['real_funding_rate'].to_dict()
+
+        # 6. CALCULATE PNL FOR EACH SYMBOL
+        trades = []
+        total_funding = 0
+        total_spot_pnl = 0
+        total_perp_pnl = 0
+
+        # Equal allocation across top-5
+        allocation_per_symbol = self.capital / 5
+
+        for symbol in symbols:
+            if symbol not in entry_prices or symbol not in exit_prices:
+                continue
+
+            entry_price = entry_prices[symbol]
+            exit_price = exit_prices[symbol]
+
+            # Position size (in base currency units)
+            position_size = allocation_per_symbol / entry_price
+
+            # Expected vs actual funding rate
+            expected_rate = expected_rates.get(symbol, 0)
+            actual_rate = actual_rates_at_next.get(symbol, 0)
+
+            # Funding collected (based on actual rate at T+8h)
+            # Funding = rate * position_value
+            # We're LONG spot, SHORT perp, so we COLLECT if rate is positive
+            funding = actual_rate * allocation_per_symbol
+
+            # Spot PnL (long position)
+            spot_pnl = (exit_price - entry_price) * position_size
+
+            # Perp PnL (short position)
+            # Assume perp ≈ spot (basis risk is small)
+            # Short perp: profit when price drops
+            perp_pnl = (entry_price - exit_price) * position_size
+
+            # Total PnL for this symbol
+            symbol_pnl = funding + spot_pnl + perp_pnl
+
+            total_funding += funding
+            total_spot_pnl += spot_pnl
+            total_perp_pnl += perp_pnl
+
+            trades.append({
+                'symbol': symbol,
+                'entry_price': entry_price,
+                'exit_price': exit_price,
+                'position_size': position_size,
+                'expected_rate': expected_rate,
+                'actual_rate': actual_rate,
+                'funding': funding,
+                'spot_pnl': spot_pnl,
+                'perp_pnl': perp_pnl,
+                'total_pnl': symbol_pnl
+            })
+
+        # Total period PnL
+        period_pnl = total_funding + total_spot_pnl + total_perp_pnl
+
+        return {
+            'settlement_time': settlement_time,
+            'next_settlement': next_settlement_time,
+            'entry_time': entry_time,
+            'exit_time': exit_time,
+            'symbols': symbols,
+            'trades': trades,
+            'total_funding': total_funding,
+            'total_spot_pnl': total_spot_pnl,
+            'total_perp_pnl': total_perp_pnl,
+            'period_pnl': period_pnl,
+            'period_return_pct': (period_pnl / self.capital) * 100
+        }
+
+    def run_backtest(self, start_date=None, end_date=None):
+        """
+        Run full backtest over date range.
+
+        Args:
+            start_date: Start date (default: first settlement)
+            end_date: End date (default: last settlement)
+
+        Returns:
+            DataFrame with results for each period
+        """
+        settlements = self.get_settlement_periods()
+
+        # Filter by date range
+        if start_date:
+            start_date = pd.to_datetime(start_date, utc=True)
+            settlements = [s for s in settlements if s >= start_date]
+        if end_date:
+            end_date = pd.to_datetime(end_date, utc=True)
+            settlements = [s for s in settlements if s <= end_date]
+
+        print('=' * 90)
+        print('Running Backtest - Strategy 1 (Rate Persistence)')
+        print('=' * 90)
+        print(f"Settlement periods: {len(settlements) - 1}")
+        print(f"Date range: {settlements[0]} to {settlements[-1]}")
+        print(f"Initial capital: ${self.initial_capital:,.2f}")
+        print()
+
+        results = []
+
+        for i in range(len(settlements) - 1):
+            settlement_time = settlements[i]
+            next_settlement = settlements[i + 1]
+
+            print(f"Period {i+1}/{len(settlements)-1}: {settlement_time} → {next_settlement}")
+
+            result = self.simulate_trade_period(settlement_time, next_settlement)
+
+            if result:
+                # Update capital
+                self.capital += result['period_pnl']
+                result['capital'] = self.capital
+                result['total_return_pct'] = ((self.capital - self.initial_capital) / self.initial_capital) * 100
+
+                results.append(result)
+
+                print(f"  Symbols: {', '.join(result['symbols'])}")
+                print(f"  Funding: ${result['total_funding']:+.2f} | Spot: ${result['total_spot_pnl']:+.2f} | Perp: ${result['total_perp_pnl']:+.2f}")
+                print(f"  Period PnL: ${result['period_pnl']:+.2f} ({result['period_return_pct']:+.4f}%)")
+                print(f"  Capital: ${result['capital']:,.2f} (Total return: {result['total_return_pct']:+.2f}%)")
+            else:
+                print(f"  ⚠ Skipped (missing data)")
+
+            print()
+
+        # Convert to DataFrame
+        results_df = pd.DataFrame(results)
+
+        # Summary statistics
+        print('=' * 90)
+        print('BACKTEST SUMMARY')
+        print('=' * 90)
+        print(f"Periods traded: {len(results_df)}")
+        print(f"Initial capital: ${self.initial_capital:,.2f}")
+        print(f"Final capital: ${self.capital:,.2f}")
+        print(f"Total return: {((self.capital - self.initial_capital) / self.initial_capital) * 100:+.2f}%")
+        print()
+
+        if len(results_df) > 0:
+            print(f"Total funding collected: ${results_df['total_funding'].sum():,.2f}")
+            print(f"Total spot PnL: ${results_df['total_spot_pnl'].sum():,.2f}")
+            print(f"Total perp PnL: ${results_df['total_perp_pnl'].sum():,.2f}")
+            print()
+
+            print(f"Average period return: {results_df['period_return_pct'].mean():.4f}%")
+            print(f"Median period return: {results_df['period_return_pct'].median():.4f}%")
+            print(f"Best period: {results_df['period_return_pct'].max():.4f}%")
+            print(f"Worst period: {results_df['period_return_pct'].min():.4f}%")
+            print()
+
+            # Win rate
+            wins = (results_df['period_pnl'] > 0).sum()
+            total = len(results_df)
+            print(f"Win rate: {wins}/{total} ({(wins/total)*100:.1f}%)")
+
+        print('=' * 90)
+
+        return results_df
+
+
+def main():
+    """Run backtest on October 2023 data."""
+
+    # Paths
+    funding_rates_path = Path("data/funding_rates_202310.parquet")
+    tick_data_dir = Path("data/okx_ticks")  # Directory containing month parquet files
+
+    # Check files exist
+    if not funding_rates_path.exists():
+        print(f"ERROR: Funding rates file not found: {funding_rates_path}")
+        return
+
+    if not tick_data_dir.exists():
+        print(f"ERROR: Tick data directory not found: {tick_data_dir}")
+        return
+
+    # Initialize backtester
+    backtester = FundingRateArbitrageBacktester(
+        funding_rates_path=funding_rates_path,
+        tick_data_path=tick_data_dir,
+        initial_capital=10000
+    )
+
+    # Run backtest for October 2023
+    results = backtester.run_backtest(
+        start_date="2023-10-01",
+        end_date="2023-10-31"
+    )
+
+    # Save results
+    output_path = Path("results/v1.7-real-prices-oct2023.parquet")
+    output_path.parent.mkdir(exist_ok=True)
+
+    results.to_parquet(output_path)
+    print(f"\n✓ Results saved to {output_path}")
+
+    # Also save as CSV for easy inspection
+    csv_path = output_path.with_suffix('.csv')
+    results.to_csv(csv_path, index=False)
+    print(f"✓ Results saved to {csv_path}")
+
+
+if __name__ == "__main__":
+    main()

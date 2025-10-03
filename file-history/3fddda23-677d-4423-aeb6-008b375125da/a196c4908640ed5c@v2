@@ -1,0 +1,271 @@
+"""
+VIF-based multicollinearity filtering (Rounds 1-4)
+
+Iterative VIF calculation:
+1. Calculate VIF for all features
+2. Remove feature with max VIF if > threshold
+3. Repeat until all VIF ≤ threshold
+
+SLOs:
+- Correctness: VIF calculation error < 1e-10 (statsmodels precision)
+- Availability: >= 2 features for VIF calculation (raises ValueError)
+- Observability: Log every removal with VIF value
+- Maintainability: statsmodels VIF only (out-of-box)
+
+Usage:
+    cd /workspace
+    python -m experiments.orthogonality_filtering_20251003.run_vif_analysis
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+import numpy as np
+import yaml
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+
+def load_config() -> dict:
+    """Load experiment configuration"""
+    config_path = Path(__file__).parent / "config.yaml"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def load_atoms(atoms_csv: Path) -> pd.DataFrame:
+    """
+    Load full atom dataset
+
+    Args:
+        atoms_csv: Path to atoms_full.csv
+
+    Returns:
+        DataFrame with 89 atom columns
+
+    Raises:
+        FileNotFoundError: If atoms_full.csv not found
+    """
+    if not atoms_csv.exists():
+        raise FileNotFoundError(
+            f"Atom dataset not found: {atoms_csv}\n"
+            f"Run compute_atoms.py first"
+        )
+
+    df = pd.read_csv(atoms_csv, index_col=0, parse_dates=True)
+    print(f"Loaded {len(df)} rows × {len(df.columns)} atom columns")
+
+    return df
+
+
+def calculate_vif(X: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate VIF for all features
+
+    Args:
+        X: Feature matrix (n_samples × n_features)
+
+    Returns:
+        DataFrame with columns: feature, VIF
+
+    Raises:
+        ValueError: If < 2 features (SLO: availability)
+    """
+    if len(X.columns) < 2:
+        raise ValueError(
+            f"Insufficient features for VIF: {len(X.columns)} < 2 "
+            f"(SLO: availability)"
+        )
+
+    # Standardize features (z-score) to prevent numerical issues
+    # Handle constant features (std=0) by replacing with small value
+    std = X.std()
+    std_safe = std.replace(0, 1e-10)  # Prevent division by zero
+    X_std = (X - X.mean()) / std_safe
+
+    vif_data = pd.DataFrame()
+    vif_data['feature'] = X.columns
+
+    # Calculate VIF for each feature (out-of-box statsmodels)
+    vif_values = []
+    for i in range(len(X_std.columns)):
+        try:
+            vif = variance_inflation_factor(X_std.values, i)
+            # Handle infinite VIF (perfect collinearity) as very large number
+            if np.isinf(vif) or np.isnan(vif):
+                vif = 1e10  # Treat as extremely high multicollinearity
+        except Exception:
+            # If VIF calculation fails, assume perfect collinearity
+            vif = 1e10
+        vif_values.append(vif)
+
+    vif_data['VIF'] = vif_values
+
+    return vif_data.sort_values('VIF', ascending=False)
+
+
+def filter_vif_iterative(
+    atoms_df: pd.DataFrame,
+    threshold: float,
+    removal_log: list,
+    max_iterations: int = 1000
+) -> pd.DataFrame:
+    """
+    Iteratively remove features with VIF > threshold
+
+    Args:
+        atoms_df: Full atom dataset
+        threshold: VIF threshold
+        removal_log: List to append removal records
+        max_iterations: Maximum iterations to prevent infinite loops
+
+    Returns:
+        Filtered DataFrame with all VIF ≤ threshold
+
+    Raises:
+        Any exception from calculate_vif()
+        RuntimeError: If max_iterations exceeded
+    """
+    X = atoms_df.copy()
+    iteration = 0
+
+    print(f"\nVIF threshold: {threshold}")
+    print(f"Initial features: {len(X.columns)}")
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        # Calculate VIF for all features
+        vif_df = calculate_vif(X)
+
+        # Find max VIF
+        max_vif_row = vif_df.iloc[0]
+        max_feature = max_vif_row['feature']
+        max_vif = max_vif_row['VIF']
+
+        # Check if done
+        if max_vif <= threshold:
+            print(f"\n✓ Converged after {iteration - 1} removals")
+            print(f"  Final features: {len(X.columns)}")
+            print(f"  Max VIF: {max_vif:.2f}")
+            break
+
+        # Remove feature with max VIF
+        print(f"  Iteration {iteration}: Remove '{max_feature}' (VIF={max_vif:.2f})")
+
+        removal_log.append({
+            'threshold': threshold,
+            'iteration': iteration,
+            'feature': max_feature,
+            'VIF': max_vif
+        })
+
+        X = X.drop(columns=[max_feature])
+
+    if iteration >= max_iterations:
+        raise RuntimeError(
+            f"VIF filtering did not converge after {max_iterations} iterations. "
+            f"Current max VIF: {max_vif:.2f}, threshold: {threshold}"
+        )
+
+    return X
+
+
+def run_vif_round(
+    atoms_df: pd.DataFrame,
+    threshold: float,
+    output_dir: Path,
+    metrics_dir: Path
+) -> tuple[list, pd.DataFrame]:
+    """
+    Run single VIF filtering round
+
+    Args:
+        atoms_df: Full atom dataset
+        threshold: VIF threshold
+        output_dir: Directory for feature lists
+        metrics_dir: Directory for removal logs
+
+    Returns:
+        (removal_log, filtered_df)
+    """
+    print("=" * 80)
+    print(f"VIF Round: Threshold = {threshold}")
+    print("=" * 80)
+
+    removal_log = []
+
+    # Filter
+    filtered_df = filter_vif_iterative(atoms_df, threshold, removal_log)
+
+    # Save feature list
+    feature_list_path = output_dir / f"features_vif_{threshold}.txt"
+    with open(feature_list_path, 'w') as f:
+        for feature in filtered_df.columns:
+            f.write(f"{feature}\n")
+
+    print(f"\n✓ Saved feature list: {feature_list_path}")
+    print(f"  Features retained: {len(filtered_df.columns)}")
+
+    return removal_log, filtered_df
+
+
+def save_removal_log(removal_log: list, output_path: Path):
+    """
+    Save VIF removal log to CSV
+
+    Args:
+        removal_log: List of removal records
+        output_path: Output CSV path
+    """
+    log_df = pd.DataFrame(removal_log)
+    log_df.to_csv(output_path, index=False)
+
+    print(f"\n✓ Saved removal log: {output_path}")
+    print(f"  Total removals: {len(log_df)}")
+
+
+def main():
+    """Execute VIF filtering rounds"""
+    print("=" * 80)
+    print("Orthogonality Filtering Experiment: VIF Analysis")
+    print("=" * 80)
+
+    # Load configuration
+    config = load_config()
+    vif_thresholds = config['vif_thresholds']
+
+    print(f"\nVIF thresholds: {vif_thresholds}")
+
+    # Load atom dataset
+    atoms_csv = Path(__file__).parent / config['output']['raw_dir'] / 'atoms_full.csv'
+    atoms_df = load_atoms(atoms_csv)
+
+    # Output directories
+    output_dir = Path(__file__).parent / config['output']['raw_dir']
+    metrics_dir = Path(__file__).parent / config['output']['metrics_dir']
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    # Run all VIF rounds
+    all_removal_logs = []
+
+    for threshold in vif_thresholds:
+        removal_log, filtered_df = run_vif_round(
+            atoms_df,
+            threshold,
+            output_dir,
+            metrics_dir
+        )
+        all_removal_logs.extend(removal_log)
+
+    # Save combined removal log
+    combined_log_path = metrics_dir / 'vif_removal_log_all.csv'
+    save_removal_log(all_removal_logs, combined_log_path)
+
+    print("\n" + "=" * 80)
+    print("VIF analysis complete")
+    print("=" * 80)
+
+
+if __name__ == '__main__':
+    main()

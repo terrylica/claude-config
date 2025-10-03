@@ -1,0 +1,387 @@
+"""
+Layer A: Calendar & Market Structure Features
+
+This module implements calendar-based atoms using:
+- holidays: Market holiday calendars
+- Greykite (Silverkite): Fourier seasonality features
+
+All atoms have lookback=0 (no historical data required, forward-looking calendar)
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, List
+from ml_feature_set.atoms.library import AtomSpec
+
+
+# =============================================================================
+# Formula Functions
+# =============================================================================
+
+def _is_us_holiday(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Binary flag: is today a US federal holiday?"""
+    try:
+        import holidays as hd
+    except ImportError:
+        raise ImportError("holidays package required: pip install holidays")
+
+    dates = pd.to_datetime(df['actual_ready_time']).dt.date
+    years = list(range(dates.min().year, dates.max().year + 1))
+    us_holidays = hd.US(years=years)
+
+    return pd.Series(dates.isin(us_holidays).astype(int), index=df.index)
+
+
+def _is_nyse_closed(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Binary flag: is NYSE closed today?"""
+    try:
+        import holidays as hd
+    except ImportError:
+        raise ImportError("holidays package required: pip install holidays")
+
+    dates = pd.to_datetime(df['actual_ready_time']).dt.date
+    years = list(range(dates.min().year, dates.max().year + 1))
+    nyse_holidays = hd.NYSE(years=years)
+
+    return pd.Series(dates.isin(nyse_holidays).astype(int), index=df.index)
+
+
+def _days_to_next_holiday(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Days until next US holiday (1-365)"""
+    try:
+        import holidays as hd
+    except ImportError:
+        raise ImportError("holidays package required: pip install holidays")
+
+    dates = pd.to_datetime(df['actual_ready_time']).dt.date
+    years = list(range(dates.min().year, dates.max().year + 2))  # Include next year
+    us_holidays = hd.US(years=years)
+
+    def days_to_next(date):
+        future_holidays = [h for h in us_holidays.keys() if h > date]
+        if not future_holidays:
+            return 365
+        return (min(future_holidays) - date).days
+
+    return pd.Series([days_to_next(d) for d in dates], index=df.index)
+
+
+def _days_since_last_holiday(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Days since last US holiday (1-365)"""
+    try:
+        import holidays as hd
+    except ImportError:
+        raise ImportError("holidays package required: pip install holidays")
+
+    dates = pd.to_datetime(df['actual_ready_time']).dt.date
+    years = list(range(dates.min().year - 1, dates.max().year + 1))
+    us_holidays = hd.US(years=years)
+
+    def days_since_last(date):
+        past_holidays = [h for h in us_holidays.keys() if h < date]
+        if not past_holidays:
+            return 365
+        return (date - max(past_holidays)).days
+
+    return pd.Series([days_since_last(d) for d in dates], index=df.index)
+
+
+def _hour_of_day_sin(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Cyclical encoding: hour of day (sin component)"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    hour = dt.dt.hour
+    return np.sin(2 * np.pi * hour / 24)
+
+
+def _hour_of_day_cos(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Cyclical encoding: hour of day (cos component)"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    hour = dt.dt.hour
+    return np.cos(2 * np.pi * hour / 24)
+
+
+def _day_of_week_sin(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Cyclical encoding: day of week (sin component)"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    day = dt.dt.dayofweek  # Monday=0, Sunday=6
+    return np.sin(2 * np.pi * day / 7)
+
+
+def _day_of_week_cos(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Cyclical encoding: day of week (cos component)"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    day = dt.dt.dayofweek
+    return np.cos(2 * np.pi * day / 7)
+
+
+def _fourier_daily_sin(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Fourier feature: daily seasonality (sin)"""
+    k = params.get('k', 1)  # Harmonic order
+    dt = pd.to_datetime(df['actual_ready_time'])
+    hour = dt.dt.hour
+    return np.sin(2 * np.pi * k * hour / 24)
+
+
+def _fourier_daily_cos(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Fourier feature: daily seasonality (cos)"""
+    k = params.get('k', 1)
+    dt = pd.to_datetime(df['actual_ready_time'])
+    hour = dt.dt.hour
+    return np.cos(2 * np.pi * k * hour / 24)
+
+
+def _fourier_weekly_sin(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Fourier feature: weekly seasonality (sin)"""
+    k = params.get('k', 1)
+    dt = pd.to_datetime(df['actual_ready_time'])
+    day = dt.dt.dayofweek
+    return np.sin(2 * np.pi * k * day / 7)
+
+
+def _fourier_weekly_cos(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Fourier feature: weekly seasonality (cos)"""
+    k = params.get('k', 1)
+    dt = pd.to_datetime(df['actual_ready_time'])
+    day = dt.dt.dayofweek
+    return np.cos(2 * np.pi * k * day / 7)
+
+
+def _is_month_end(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Binary flag: last 3 days of month"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    days_in_month = dt.dt.days_in_month
+    day_of_month = dt.dt.day
+    return (day_of_month >= days_in_month - 2).astype(int)
+
+
+def _is_month_start(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Binary flag: first 3 days of month"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    day_of_month = dt.dt.day
+    return (day_of_month <= 3).astype(int)
+
+
+def _is_quarter_end(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Binary flag: last 5 days of quarter"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    month = dt.dt.month
+    day = dt.dt.day
+    days_in_month = dt.dt.days_in_month
+
+    # Quarter end months: 3, 6, 9, 12
+    is_qtr_month = month.isin([3, 6, 9, 12])
+    is_last_5_days = day >= days_in_month - 4
+
+    return (is_qtr_month & is_last_5_days).astype(int)
+
+
+def _is_year_end(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Binary flag: last 10 trading days of year (December 15-31)"""
+    dt = pd.to_datetime(df['actual_ready_time'])
+    month = dt.dt.month
+    day = dt.dt.day
+
+    return ((month == 12) & (day >= 15)).astype(int)
+
+
+# =============================================================================
+# Atom Specifications
+# =============================================================================
+
+def get_atoms() -> List[AtomSpec]:
+    """
+    Get all Layer A (calendar) atoms
+
+    Returns:
+        List of AtomSpec objects for calendar features
+    """
+    atoms = []
+
+    # Holidays atoms
+    atoms.append(AtomSpec(
+        name='is_us_holiday',
+        layer='A',
+        library='holidays',
+        formula=_is_us_holiday,
+        lookback=0,
+        dependencies=['holidays'],
+        status='production',
+        description='Binary flag: US federal holiday'
+    ))
+
+    atoms.append(AtomSpec(
+        name='is_nyse_closed',
+        layer='A',
+        library='holidays',
+        formula=_is_nyse_closed,
+        lookback=0,
+        dependencies=['holidays'],
+        status='production',
+        description='Binary flag: NYSE closed (holidays + special closures)'
+    ))
+
+    atoms.append(AtomSpec(
+        name='days_to_next_us_holiday',
+        layer='A',
+        library='holidays',
+        formula=_days_to_next_holiday,
+        lookback=0,
+        dependencies=['holidays'],
+        status='production',
+        description='Days until next US holiday (1-365)'
+    ))
+
+    atoms.append(AtomSpec(
+        name='days_since_last_us_holiday',
+        layer='A',
+        library='holidays',
+        formula=_days_since_last_holiday,
+        lookback=0,
+        dependencies=['holidays'],
+        status='production',
+        description='Days since last US holiday (1-365)'
+    ))
+
+    # Cyclical encodings (simple)
+    atoms.append(AtomSpec(
+        name='hour_of_day_sin',
+        layer='A',
+        library='numpy',
+        formula=_hour_of_day_sin,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Cyclical hour encoding (sin component)'
+    ))
+
+    atoms.append(AtomSpec(
+        name='hour_of_day_cos',
+        layer='A',
+        library='numpy',
+        formula=_hour_of_day_cos,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Cyclical hour encoding (cos component)'
+    ))
+
+    atoms.append(AtomSpec(
+        name='day_of_week_sin',
+        layer='A',
+        library='numpy',
+        formula=_day_of_week_sin,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Cyclical day-of-week encoding (sin component)'
+    ))
+
+    atoms.append(AtomSpec(
+        name='day_of_week_cos',
+        layer='A',
+        library='numpy',
+        formula=_day_of_week_cos,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Cyclical day-of-week encoding (cos component)'
+    ))
+
+    # Fourier features (daily seasonality, 3 harmonics)
+    for k in [1, 2, 3]:
+        atoms.append(AtomSpec(
+            name=f'fourier_daily_sin_{k}',
+            layer='A',
+            library='greykite',
+            formula=_fourier_daily_sin,
+            lookback=0,
+            dependencies=[],
+            status='production',
+            description=f'Fourier daily seasonality (sin, harmonic {k})',
+            params={'k': k}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'fourier_daily_cos_{k}',
+            layer='A',
+            library='greykite',
+            formula=_fourier_daily_cos,
+            lookback=0,
+            dependencies=[],
+            status='production',
+            description=f'Fourier daily seasonality (cos, harmonic {k})',
+            params={'k': k}
+        ))
+
+    # Fourier features (weekly seasonality, 2 harmonics)
+    for k in [1, 2]:
+        atoms.append(AtomSpec(
+            name=f'fourier_weekly_sin_{k}',
+            layer='A',
+            library='greykite',
+            formula=_fourier_weekly_sin,
+            lookback=0,
+            dependencies=[],
+            status='production',
+            description=f'Fourier weekly seasonality (sin, harmonic {k})',
+            params={'k': k}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'fourier_weekly_cos_{k}',
+            layer='A',
+            library='greykite',
+            formula=_fourier_weekly_cos,
+            lookback=0,
+            dependencies=[],
+            status='production',
+            description=f'Fourier weekly seasonality (cos, harmonic {k})',
+            params={'k': k}
+        ))
+
+    # Month/quarter/year indicators
+    atoms.append(AtomSpec(
+        name='is_month_end',
+        layer='A',
+        library='pandas',
+        formula=_is_month_end,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Binary flag: last 3 days of month'
+    ))
+
+    atoms.append(AtomSpec(
+        name='is_month_start',
+        layer='A',
+        library='pandas',
+        formula=_is_month_start,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Binary flag: first 3 days of month'
+    ))
+
+    atoms.append(AtomSpec(
+        name='is_quarter_end',
+        layer='A',
+        library='pandas',
+        formula=_is_quarter_end,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Binary flag: last 5 days of quarter'
+    ))
+
+    atoms.append(AtomSpec(
+        name='is_year_end',
+        layer='A',
+        library='pandas',
+        formula=_is_year_end,
+        lookback=0,
+        dependencies=[],
+        status='production',
+        description='Binary flag: last 10 trading days of year (Dec 15-31)'
+    ))
+
+    return atoms

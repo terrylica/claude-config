@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""
+Production Safety Example: Filtering Non-Causal Atoms
+
+Demonstrates how to use causality filtering to prevent temporal leakage
+in production ML pipelines.
+"""
+
+import sys
+import pandas as pd
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def get_production_atoms(lib):
+    """
+    Get only causal atoms safe for online prediction
+
+    Returns:
+        List of AtomSpec objects that are causal (use only past data)
+    """
+    causal_atoms = [atom for atom in lib.atoms if atom.causal]
+    non_causal_atoms = [atom for atom in lib.atoms if not atom.causal]
+
+    print(f"📊 Total atoms: {len(lib.atoms)}")
+    print(f"✅ Causal (production-safe): {len(causal_atoms)}")
+    print(f"❌ Non-causal (offline-only): {len(non_causal_atoms)}")
+
+    if non_causal_atoms:
+        print(f"\n⚠️  Non-causal atoms excluded from production:")
+        for atom in non_causal_atoms:
+            print(f"   - {atom.name}: {atom.description}")
+
+    return causal_atoms
+
+
+def assert_all_causal(atoms):
+    """
+    Validate that all atoms in list are causal
+
+    Raises:
+        ValueError: If any atom is non-causal
+    """
+    for atom in atoms:
+        atom.assert_causal()  # Will raise if non-causal
+
+
+def demo_production_pipeline():
+    """
+    Example: Safe production pipeline with causality enforcement
+    """
+    print("\n" + "="*80)
+    print("PRODUCTION PIPELINE EXAMPLE")
+    print("="*80)
+
+    # Load library
+    print("\n1. Loading atom library...")
+    lib = load_library_from_formulas()
+
+    # Get only production-safe atoms
+    print("\n2. Filtering for causal atoms only...")
+    production_atoms = get_production_atoms(lib)
+
+    # Validate (this will raise if any non-causal atom slipped through)
+    print("\n3. Validating causality...")
+    try:
+        assert_all_causal(production_atoms)
+        print("   ✅ All atoms are causal - safe for production")
+    except ValueError as e:
+        print(f"   ❌ ERROR: {e}")
+        sys.exit(1)
+
+    # Load data
+    print("\n4. Loading data...")
+    df = pd.read_csv('ml_feature_set/sample_data/resampled_binance_SOL-5m.csv')
+    if 'actual_ready_time' not in df.columns:
+        df['actual_ready_time'] = pd.to_datetime(df['date'])
+    else:
+        df['actual_ready_time'] = pd.to_datetime(df['actual_ready_time'])
+    df = df.set_index('actual_ready_time')
+    print(f"   Loaded {len(df)} rows")
+
+    # Compute features (causal only)
+    print("\n5. Computing features (causal atoms only)...")
+    feature_dict = {}
+    for atom in production_atoms[:10]:  # Just first 10 for demo
+        feature_dict[atom.name] = atom.compute(df)
+        print(f"   ✓ {atom.name}")
+
+    # Create feature matrix
+    features = pd.DataFrame(feature_dict)
+    print(f"\n6. Feature matrix created: {features.shape}")
+    print(f"   {features.shape[0]} samples × {features.shape[1]} features")
+
+    print("\n✅ Production pipeline complete - no temporal leakage!")
+
+    return features
+
+
+def demo_offline_analysis():
+    """
+    Example: Offline analysis allowing non-causal atoms
+    """
+    print("\n" + "="*80)
+    print("OFFLINE ANALYSIS EXAMPLE")
+    print("="*80)
+
+    print("\n📊 Offline analysis can use ALL atoms (including non-causal STL)")
+    print("   This is safe because we're not doing online prediction\n")
+
+    lib = load_library_from_formulas()
+
+    # Use all atoms (including STL)
+    all_atoms = lib.atoms
+    print(f"Using all {len(all_atoms)} atoms (including non-causal)")
+
+    # Example: STL decomposition for post-hoc analysis
+    stl_trend = lib.get_atom('stl_trend_s7_t21')
+
+    print(f"\nSTL Atom: {stl_trend.name}")
+    print(f"   Causal: {stl_trend.causal}")
+    print(f"   Status: {stl_trend.status}")
+    print(f"   Description: {stl_trend.description}")
+
+    if not stl_trend.causal:
+        print(f"\n   ⚠️  This atom uses future data (LOESS smoothing)")
+        print(f"   ✅ OK for offline analysis")
+        print(f"   ❌ NOT OK for online prediction")
+
+
+def demo_causality_assertion():
+    """
+    Example: What happens when you try to use non-causal atom in production
+    """
+    print("\n" + "="*80)
+    print("CAUSALITY ASSERTION EXAMPLE")
+    print("="*80)
+
+    lib = load_library_from_formulas()
+    stl_trend = lib.get_atom('stl_trend_s7_t21')
+
+    print(f"\nAttempting to assert causality on STL atom...")
+    try:
+        stl_trend.assert_causal()
+        print("   ✅ Atom is causal")
+    except ValueError as e:
+        print(f"   ❌ ASSERTION FAILED:")
+        print(f"\n{e}\n")
+        print("   This protection prevents accidental temporal leakage!")
+
+
+if __name__ == '__main__':
+    print("="*80)
+    print("PRODUCTION SAFETY DEMONSTRATION")
+    print("Preventing Temporal Leakage in ML Pipelines")
+    print("="*80)
+
+    # Demo 1: Production pipeline (causal only)
+    features = demo_production_pipeline()
+
+    # Demo 2: Offline analysis (all atoms allowed)
+    demo_offline_analysis()
+
+    # Demo 3: Causality assertion (error handling)
+    demo_causality_assertion()
+
+    print("\n" + "="*80)
+    print("SUMMARY")
+    print("="*80)
+    print("\n✅ Production pipelines: Use get_production_atoms() to filter")
+    print("✅ Offline analysis: Use all atoms if needed")
+    print("✅ Safety: Call assert_causal() to enforce temporal safety")
+    print("\n📌 Always filter non-causal atoms before deployment!\n")

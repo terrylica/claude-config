@@ -1,0 +1,218 @@
+# CLAUDE.md
+
+## Execution Pattern
+
+**Always run Python as module via Docker:**
+```bash
+docker exec ml-dev python -m <module_path>
+```
+
+## Docker Container
+
+- **Runtime**: Colima (pure CLI, no GUI) - `colima start`
+- **Container name**: `ml-dev`
+- **Working directory**: `/workspace`
+- **Install command**: `docker exec ml-dev pip install -e '.[dev]'`
+
+## Project Context
+
+- **Dockerfile fix**: `ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true` resolves Anaconda ToS requirement (July 2025)
+- **Templates** (orthogonal design philosophies):
+  - `ohlcv_comprehensive_sizex_v5.py` (2025-05-23): Non-linear features (Hurst, entropy, regime classification)
+  - `ohlcv_fluid-dynamics_sizex_v1.py` (2025-04-29): Vectorized pandas patterns (.rolling, .shift, np.clip)
+
+## PR Policy (ZERO-TRUST WHITELIST)
+
+**Philosophy:** BLOCK EVERYTHING until explicitly approved
+
+**Automated enforcement:** `.github/workflows/enforce-production-only.yml`
+
+**Current whitelist:** EMPTY (nothing allowed)
+
+**Workflow:**
+1. Create PR with code changes
+2. PR will FAIL (expected - whitelist is empty)
+3. Review failed PR to see blocked files
+4. If approved, manually add pattern to whitelist in workflow file
+5. Commit whitelist update to main first
+6. Rebase/update PR - it will now pass
+
+**Example whitelist patterns:**
+```bash
+'^ml_feature_set/bundled/.*\.py$'     # Python files in bundled/
+'^pyproject\.toml$'                    # Project config
+'^README\.md$'                         # Root README only
+```
+
+**Whitelist location:** Line 45 in `.github/workflows/enforce-production-only.yml`
+
+**Policy:** Default deny - no files merge to main unless pattern is explicitly added to whitelist
+
+## Sample Data
+
+- **Binance timestamps**: Always use `datetime.fromtimestamp(ts/1000, tz=timezone.utc)` (naive conversion creates fake DST duplicates)
+
+## Key Architecture Points
+
+- **`actual_ready_time`**: Framework-generated (not in CSVs), simulates data availability delay
+- **`resample_factors`**: Multi-timeframe (different intervals via OHLCV aggregation), NOT multi-period (different lookbacks)
+
+## Feature Construction Patterns (Off-the-Shelf)
+
+**Pandas methods:**
+- `.ewm()` - Exponentially weighted (MACD, adaptive indicators)
+- `.expanding()` - Walk-forward cumulative features
+- `.rank(pct=True)` - Percentile normalization (0-1)
+- `.pipe()` - Method chaining for pipelines
+- `.groupby().transform()` - Group stats → original rows
+- `.interpolate(method='time')` - Time-aware missing data
+- `.resample().interpolate()` - Upsample with interpolation
+- Named aggs: `agg(vol_mean=('volume', 'mean'))`
+
+**sklearn transformers (OOD-robust):**
+- `PolynomialFeatures(interaction_only=True)` - Feature crosses (RSI×Volume)
+- `QuantileTransformer(output_distribution='normal')` - Outliers → Gaussian (robust)
+- `RobustScaler()` - IQR-based scaling (outlier-resistant)
+- `TimeSeriesSplit(gap=N)` - Walk-forward validation with gap
+
+**Robust statistics:**
+- `scipy.stats.median_abs_deviation()` - MAD (more robust than std)
+- `scipy.stats.mstats.winsorize()` - Cap extremes (vs trimming)
+- Downside deviation - Semi-variance for risk metrics
+
+**Signal decomposition (adaptive, non-stationary):**
+- `PyEMD` (emd package) - Empirical Mode Decomposition + Hilbert-Huang (non-linear, non-stationary)
+- `pywt.wavedec()` - Wavelet decomposition (trend/detail separation)
+- `statsmodels.tsa.seasonal.STL` - Seasonal/trend/residual split
+
+**Information theory & complexity (OOD-robust):**
+- `ordpy` - Permutation entropy (order-based, robust to noise)
+- `antropy` - Sample/approximate/multiscale entropy
+- `nolds.dfa()` - Detrended Fluctuation Analysis (long-range dependence, Hurst parameter)
+- `PyRQA` - Recurrence Quantification Analysis (dynamical system features)
+- `sklearn.feature_selection.mutual_info_regression()` - Mutual information (non-linear dependence)
+
+**Causal inference & regime detection:**
+- `tigramite` - Transfer entropy, Granger causality (causal discovery for time series)
+- `hmmlearn.GaussianHMM` - Hidden Markov Models (regime detection: bull/bear/neutral)
+
+**Spectral & cross-series analysis:**
+- `scipy.signal.coherence()` - Frequency coherence between series
+- `scipy.signal.csd()` - Cross-spectral density (phase relationships)
+- `scipy.fft` - Frequency domain features
+
+**Financial risk metrics:**
+- Maximum drawdown - Steepest peak-to-trough decline
+- Sortino ratio - Downside deviation (vs total volatility in Sharpe)
+- Calmar ratio - Return / max drawdown
+
+**Advanced aggregations:**
+- `statsmodels.regression.rolling.RollingOLS` - Rolling regression (beta over time)
+- `scipy.signal.fftconvolve()` - Fast convolution (moving averages)
+- `scipy.signal.find_peaks()` - Peak detection
+
+**Dependence structures:**
+- `pyvinecopulib` / `pycop` - Vine copulas, tail dependence (non-linear multivariate)
+
+**Realized measures (Andersen-Bollerslev framework):**
+- Realized volatility - Sum of squared intraperiod returns (5-min benchmark)
+- Bipower variation - Barndorff-Nielsen & Shephard (separates jumps from continuous volatility)
+- Jump detection - Realized variance minus bipower variation
+- Range-based volatility:
+  - Parkinson (5x more efficient than close-to-close)
+  - Garman-Klass (7.4x more efficient, assumes no jumps)
+  - Yang-Zhang (14x more efficient, handles opening jumps & drift)
+
+**Microstructure proxies (OHLCV-compatible):**
+- Amihud ILLIQ - `|return|/dollar_volume` (illiquidity measure)
+- High-low Amihud - `(high-low)/volume` (range-based illiquidity)
+- VPIN estimation - Volume-synchronized informed trading (classify buy/sell from price changes)
+- Kyle's lambda proxy - Market impact/adverse selection
+- Order flow imbalance - Tick rule (price > prev = buy, < prev = sell)
+
+**Fractal analysis:**
+- Higuchi fractal dimension - Complexity of time series trajectory
+- Box-counting dimension - Fractal structure of price patterns
+
+**Relational feature discovery:**
+- `getML` - Automated cross-table aggregations & conditional relationships (requires commercial/academic license)
+
+**Fast computation:**
+- `infomeasure` - Shannon entropy/mutual information (10x faster than scipy)
+
+**Math utilities:**
+- `np.einsum('ij,ik->jk')` - Efficient covariance matrices
+- Broadcasting - Pairwise operations without loops
+
+**Performance reference:** See `.claude/performance-blacklist.md` (not priority)
+
+**OOD robustness principles (2025 research):**
+- **Invariant features** - Extract features stable across distribution shifts (e.g., permutation entropy, DFA)
+- **Decoupling** - Separate task-relevant from task-irrelevant features (e.g., EMD separates trend/noise)
+- **Information-theoretic** - Mutual information, transfer entropy resist spurious correlations
+- **Robust estimators** - MAD, winsorization, quantile transforms handle outliers without overfitting
+- **Causal structures** - Focus on causal relationships (tigramite) vs correlations for regime shifts
+
+**Excluded:** tsfresh, catch22/featuretools (automated but not OOD-robust enough)
+
+## Orthogonality Assessment Methods
+
+**Traditional methods (correlation-based, weaker for OOD):**
+- Pearson/Spearman correlation (linear/monotonic only, threshold: |r| > 0.8)
+- VIF (Variance Inflation Factor) - thresholds: 5 (high), 10 (severe)
+- PCA explained variance - dimensionality assessment
+- Condition number - numerical stability
+
+**Advanced methods (OOD-robust):**
+- **HSIC (Hilbert-Schmidt Independence Criterion)** - Non-linear dependencies via kernel methods
+- **Knockoff filter** - FDR-controlled causal feature selection
+  - Multi-environment knockoffs (2025) - Invariant associations across distributions
+- **Graphical Lasso** - Sparse inverse covariance → conditional independence graph
+- **IPSS (Integrated Path Stability Selection)** - Bootstrap-based stability with FDR control
+- **ICA (Independent Component Analysis)** - Statistical independence (kurtosis-based)
+- **Mutual Information** - Non-linear dependence (information-theoretic)
+- Distance correlation - Non-linear dependencies
+
+**6-Stage Selection Pipeline (microstructure-lab):**
+1. Feature extraction → ~100-200 features
+2. Knockoff filter (FDR q=0.10) → ~50 features
+3. Graphical Lasso (conditional independence) → ~30 features
+4. HSIC non-linear → ~20 features
+5. IPSS stability (threshold=0.70) → ~15 features
+6. VIF validation (threshold=10) → Final 10-15 features
+
+**OOD-Robust Orthogonality Principles (2025 research):**
+- **Invariance testing** - Features stable across multiple environments/regimes
+- **Causal discovery** - Prefer causal relationships over correlations
+- **Null space orthogonality** - OOD samples lie orthogonal to in-distribution subspace
+- **Multi-environment consistency** - Associations robust across distributions
+- **Sparse conditional independence** - Graphical lasso identifies true dependencies
+- **Stability under perturbation** - Bootstrap/subsample consistency
+
+**Critical weaknesses to address:**
+- Single-environment knockoffs → Use multi-environment knockoffs
+- No explicit causal testing → Add invariant causal prediction (ICP)
+- No distributional shift simulation → Add synthetic regime perturbations
+- Correlation-based VIF → Supplement with kernel-based methods
+
+## References
+
+**Key Papers (Realized Measures & Microstructure):**
+- Andersen & Bollerslev (2001) - "The distribution of realized stock return volatility" (5-min benchmark)
+- Barndorff-Nielsen & Shephard (2004) - "Power and Bipower Variation" (jump detection)
+- Amihud (2002) - "Illiquidity and stock returns" (ILLIQ measure)
+- Yang & Zhang (2000) - "Drift-Independent Volatility Estimation" (range-based estimators)
+- Easley, López de Prado, O'Hara (2010) - "VPIN and a Proof of Concept" (order toxicity)
+- Kyle (1985) - "Continuous Auctions and Insider Trading" (lambda market impact)
+
+**Key Papers (Orthogonality & OOD-Robust Feature Selection):**
+- Gretton et al. (2007) - "A Kernel Statistical Test of Independence" (HSIC)
+- Barber & Candès (2015) - "Controlling the false discovery rate via knockoffs" (Knockoff filter)
+- Meinshausen & Bühlmann (2010) - "Stability selection" (Bootstrap-based selection)
+- Friedman et al. (2008) - "Sparse inverse covariance estimation with the graphical lasso"
+- Peters et al. (2016) - "Causal inference by using invariant prediction" (ICP)
+- Bellot & van der Schaar (2024) - "Searching for robust associations with multi-environment knockoffs"
+- Omelikechi et al. (2024) - "Nonparametric IPSS: Fast, flexible feature selection with FDR control"
+
+**Infrastructure:**
+- Anaconda ToS: https://stackoverflow.com/questions/79702788/

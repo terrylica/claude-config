@@ -1,0 +1,32 @@
+FROM mcr.microsoft.com/devcontainers/python:3.12
+
+# Install ta-lib system library
+RUN apt-get update && \
+    apt-get install -y wget build-essential && \
+    wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
+    tar -xzf ta-lib-0.4.0-src.tar.gz && \
+    cd ta-lib/ && \
+    ./configure --prefix=/usr && \
+    make && \
+    make install && \
+    cd .. && \
+    rm -rf ta-lib ta-lib-0.4.0-src.tar.gz && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install TA-Lib Python wrapper via pip
+RUN pip install --no-cache-dir TA-Lib==0.4.32
+
+# TODO: Uncomment the following ONLY when we want to use lint and reformat markdown files with `markdownlint-cli2-auto-fix.mdc` or else we can just rely on the markdownlint extension: `davidanson.vscode-markdownlint`
+# RUN apt-get update && apt-get install -y curl && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && apt-get install -y nodejs && runuser -u vscode -- npm config set prefix '~/.local' && apt-get clean && rm -rf /var/lib/apt/lists/*
+# RUN npm install -g markdownlint-cli2
+
+# Install and upgrade pip
+RUN pip3 install --upgrade pip
+
+# All Python dependencies are now managed through pyproject.toml
+# and installed via the postCreateCommand in devcontainer.json
+# which uses pip install -e '.[dev]'
+
+# Add .local/bin to PATH for the vscode user to remove WARNINGs
+RUN echo "export PATH=\$PATH:/home/vscode/.local/bin" >> /home/vscode/.bashrc

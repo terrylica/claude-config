@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""
+Analyze compression efficiency and test alternatives.
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import time
+
+# Load data
+print("Loading full dataset...")
+df = pd.read_parquet('data/okx_ticks/202310.parquet')
+
+print('=' * 80)
+print('Current Storage Analysis')
+print('=' * 80)
+file_path = Path('data/okx_ticks/202310.parquet')
+file_size = file_path.stat().st_size
+print(f'File size: {file_size / 1024 / 1024:.2f} MB')
+print(f'Total trades: {len(df):,}')
+print(f'Bytes per trade: {file_size / len(df):.1f}')
+
+# Estimate raw size
+print(f'\nColumn data types:')
+for col in df.columns:
+    print(f'  {col:15s} {df[col].dtype}')
+
+# Calculate theoretical uncompressed size
+raw_size = df.memory_usage(deep=True).sum()
+print(f'\nMemory usage (uncompressed): {raw_size / 1024 / 1024:.2f} MB')
+print(f'Compression ratio: {raw_size / file_size:.1f}x')
+
+# Test subset: Top 20 symbols
+print(f'\n' + '=' * 80)
+print('Test 1: Top 20 Symbols Only')
+print('=' * 80)
+top_symbols = df['symbol'].value_counts().head(20).index.tolist()
+subset = df[df['symbol'].isin(top_symbols)].copy()
+
+test_file = Path('data/okx_ticks/test_top20.parquet')
+subset.to_parquet(
+    test_file,
+    index=False,
+    engine='pyarrow',
+    compression='zstd',
+    compression_level=9,
+    use_dictionary=['symbol', 'side'],
+    row_group_size=1_000_000,
+)
+
+test_size = test_file.stat().st_size
+print(f'Top 20 symbols: {len(subset):,} trades ({len(subset)/len(df)*100:.1f}% of total)')
+print(f'File size: {test_size / 1024 / 1024:.2f} MB ({test_size/file_size*100:.1f}% of original)')
+print(f'Bytes per trade: {test_size / len(subset):.1f}')
+print(f'Symbols: {", ".join(top_symbols[:10])}...')
+test_file.unlink()
+
+# Test higher compression levels
+print(f'\n' + '=' * 80)
+print('Test 2: Higher Compression Levels (on top 20 symbols)')
+print('=' * 80)
+
+for level in [9, 15, 22]:
+    test_file = Path(f'data/okx_ticks/test_zstd{level}.parquet')
+
+    start = time.time()
+    subset.to_parquet(
+        test_file,
+        index=False,
+        engine='pyarrow',
+        compression='zstd',
+        compression_level=level,
+        use_dictionary=['symbol', 'side'],
+        row_group_size=1_000_000,
+    )
+    elapsed = time.time() - start
+
+    size = test_file.stat().st_size
+    print(f'zstd-{level:2d}: {size / 1024 / 1024:6.2f} MB ({size/len(subset):4.1f} bytes/trade) [{elapsed:.1f}s]')
+    test_file.unlink()
+
+# Test different compression algorithms
+print(f'\n' + '=' * 80)
+print('Test 3: Different Compression Algorithms (on top 20 symbols)')
+print('=' * 80)
+
+for codec in ['snappy', 'gzip', 'brotli', 'zstd']:
+    test_file = Path(f'data/okx_ticks/test_{codec}.parquet')
+
+    start = time.time()
+    subset.to_parquet(
+        test_file,
+        index=False,
+        engine='pyarrow',
+        compression=codec,
+        compression_level=9 if codec in ['gzip', 'brotli', 'zstd'] else None,
+        use_dictionary=['symbol', 'side'],
+        row_group_size=1_000_000,
+    )
+    elapsed = time.time() - start
+
+    size = test_file.stat().st_size
+    print(f'{codec:8s}: {size / 1024 / 1024:6.2f} MB ({size/len(subset):4.1f} bytes/trade) [{elapsed:.1f}s]')
+    test_file.unlink()
+
+print(f'\n' + '=' * 80)
+print('Recommendations')
+print('=' * 80)
+print('1. Filter to top 20-50 symbols for backtesting (saves ~65% storage)')
+print('2. Current zstd-9 is good balance (speed vs compression)')
+print('3. zstd-22 provides marginal gains (~5-10%) but much slower')
+print('4. Keep full dataset for reference, use filtered for active work')

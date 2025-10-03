@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""
+Download October 2023 tick data for liquid symbols only (≥$1M daily volume).
+
+This downloads symbols viable for funding rate arbitrage based on liquidity analysis.
+Covers 93.1% of trading volume with ~82% storage savings.
+
+Run with: uv run --active python download_oct2023_liquid.py
+"""
+
+import logging
+import sys
+import time
+from pathlib import Path
+
+# Add libs to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "libs" / "okx-price-provider" / "src"))
+
+from okx_price_provider import download_month_ticks
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
+def main():
+    """Download liquid symbols for funding rate arbitrage."""
+    print("\n" + "=" * 80)
+    print("Downloading October 2023 - Liquid Symbols (≥$1M/day)")
+    print("=" * 80 + "\n")
+
+    # Load viable symbols from analysis
+    symbols_file = Path("data/okx_ticks/viable_symbols.txt")
+
+    if not symbols_file.exists():
+        print("ERROR: viable_symbols.txt not found!")
+        print("Please run: uv run --active python analyze_liquidity.py")
+        return
+
+    viable_symbols = symbols_file.read_text().strip().split('\n')
+
+    # Target directory
+    cache_dir = Path("data/okx_ticks")
+    output_file = cache_dir / "202310_liquid.parquet"
+
+    print(f"Target file: {output_file}")
+    print(f"Market type: Spot (allspot)")
+    print(f"Symbols: {len(viable_symbols)} liquid markets (≥$1M/day volume)")
+    print(f"Coverage: 93.1% of trading volume")
+    print(f"Expected: ~20M trades, ~140 MB compressed\n")
+
+    print("Symbols to download:")
+    for i in range(0, len(viable_symbols), 10):
+        batch = viable_symbols[i:i+10]
+        print(f"  {', '.join(batch)}")
+
+    # Confirm before proceeding
+    response = input("\nContinue? [y/N]: ")
+    if response.lower() != 'y':
+        print("Aborted.")
+        return
+
+    # Start download
+    start_time = time.time()
+
+    try:
+        stats = download_month_ticks(
+            msg_type="allspot",
+            year=2023,
+            month=10,
+            output_parquet=output_file,
+            symbols_filter=viable_symbols,
+            skip_errors=True,
+        )
+
+        elapsed = time.time() - start_time
+
+        print(f"\n{'=' * 80}")
+        print("Download Complete - SUCCESS!")
+        print(f"{'=' * 80}")
+        print(f"Days succeeded:      {stats['days_succeeded']}")
+        print(f"Days failed:         {stats['days_failed']}")
+        if stats['failed_days']:
+            print(f"Failed days:         {stats['failed_days']}")
+        print(f"Total trades:        {stats['total_trades']:,}")
+        print(f"Unique symbols:      {stats['unique_symbols']}")
+        print(f"Date range:          {stats['date_range'][0]} to {stats['date_range'][1]}")
+        print(f"File size:           {stats['file_size_mb']:.2f} MB")
+        print(f"Bytes per trade:     {stats['file_size_mb'] * 1024 * 1024 / stats['total_trades']:.1f}")
+        print(f"Elapsed time:        {elapsed:.1f} seconds ({elapsed/60:.1f} minutes)")
+        print(f"{'=' * 80}\n")
+
+        # Compare to full dataset
+        full_file = cache_dir / "202310.parquet"
+        if full_file.exists():
+            full_size = full_file.stat().st_size / 1024 / 1024
+            savings = (1 - stats['file_size_mb'] / full_size) * 100
+            print(f"Comparison to full dataset:")
+            print(f"  Full:   {full_size:.0f} MB (509 symbols, 44.7M trades)")
+            print(f"  Liquid: {stats['file_size_mb']:.0f} MB ({stats['unique_symbols']} symbols, {stats['total_trades']/1e6:.1f}M trades)")
+            print(f"  Savings: {savings:.1f}%\n")
+
+        print("✓ Liquid symbols dataset ready for funding rate arbitrage")
+        print(f"✓ File location: {output_file}")
+        print(f"\nNext steps:")
+        print("1. Use this dataset for V1.7 backtester")
+        print("2. Dynamic top-5 selection from 89-symbol pool")
+        print("3. Covers 93% of volume with 82% less storage")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"\n{'=' * 80}")
+        print("Download FAILED")
+        print(f"{'=' * 80}")
+        print(f"Error: {e}")
+        print(f"Elapsed time: {elapsed:.1f} seconds")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()

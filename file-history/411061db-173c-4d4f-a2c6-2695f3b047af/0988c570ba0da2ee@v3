@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""
+Analyze how accurate funding_rate predictions are vs actual real_funding_rate.
+
+This determines if we can use predictions or must rely on rate persistence.
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+# Load funding rate data
+print("Loading funding rate data...")
+df = pd.read_parquet('data/funding_rates_202310.parquet')
+
+print(f"Loaded {len(df):,} funding rate records")
+print(f"Unique symbols: {df['symbol'].nunique()}")
+print()
+
+# Sort by symbol and timestamp
+df = df.sort_values(['symbol', 'timestamp'])
+
+# Add settlement period (round to 8-hour intervals)
+df['settlement_period'] = df['timestamp'].dt.floor('8h')
+
+print('=' * 90)
+print('Understanding the Data')
+print('=' * 90)
+print()
+print('At each timestamp T:')
+print('  funding_rate       = PREDICTION for rate that will be charged at T+8h')
+print('  real_funding_rate  = ACTUAL rate that was just charged at T')
+print('  funding_time       = Timestamp of next settlement (T+8h)')
+print()
+
+# For each symbol, align prediction with actual
+print('=' * 90)
+print('Prediction Accuracy Analysis')
+print('=' * 90)
+print()
+
+all_predictions = []
+
+for symbol in df['symbol'].unique():
+    symbol_data = df[df['symbol'] == symbol].copy()
+
+    # Sort by timestamp to get chronological order
+    symbol_data = symbol_data.sort_values('timestamp')
+
+    # For each row, the funding_rate is predicting the NEXT real_funding_rate
+    symbol_data['predicted_rate'] = symbol_data['funding_rate']
+    symbol_data['actual_rate_next'] = symbol_data['real_funding_rate'].shift(-1)
+
+    # Calculate prediction error
+    symbol_data['prediction_error'] = symbol_data['actual_rate_next'] - symbol_data['predicted_rate']
+    symbol_data['abs_prediction_error'] = symbol_data['prediction_error'].abs()
+
+    # Only keep rows where we have both prediction and actual
+    valid_predictions = symbol_data.dropna(subset=['predicted_rate', 'actual_rate_next'])
+
+    if len(valid_predictions) > 0:
+        all_predictions.append(valid_predictions)
+
+# Combine all predictions
+combined = pd.concat(all_predictions, ignore_index=True)
+
+print(f"Total prediction samples: {len(combined):,}")
+print()
+
+# Overall statistics
+print('Overall Prediction Accuracy:')
+print('-' * 90)
+print(f"Mean prediction error:     {combined['prediction_error'].mean():+.6f}%")
+print(f"Std dev of error:          {combined['prediction_error'].std():.6f}%")
+print(f"Mean absolute error (MAE): {combined['abs_prediction_error'].mean():.6f}%")
+print(f"Median absolute error:     {combined['abs_prediction_error'].median():.6f}%")
+print(f"95th percentile error:     {combined['abs_prediction_error'].quantile(0.95):.6f}%")
+print(f"99th percentile error:     {combined['abs_prediction_error'].quantile(0.99):.6f}%")
+print()
+
+# Calculate correlation
+correlation = combined[['predicted_rate', 'actual_rate_next']].corr().iloc[0, 1]
+print(f"Correlation (predicted vs actual): {correlation:.4f}")
+print()
+
+# Analyze by prediction magnitude
+print('=' * 90)
+print('Accuracy by Prediction Magnitude')
+print('=' * 90)
+print()
+
+combined['abs_predicted_rate'] = combined['predicted_rate'].abs()
+
+bins = [0, 0.0001, 0.0005, 0.001, 0.005, 1.0]
+labels = ['<0.01%', '0.01-0.05%', '0.05-0.1%', '0.1-0.5%', '>0.5%']
+combined['rate_bin'] = pd.cut(combined['abs_predicted_rate'], bins=bins, labels=labels)
+
+print(f"{'Rate Range':15} {'Samples':>10} {'Mean Error':>12} {'MAE':>12} {'Correlation':>12}")
+print('-' * 90)
+
+for label in labels:
+    subset = combined[combined['rate_bin'] == label]
+    if len(subset) > 0:
+        mean_err = subset['prediction_error'].mean()
+        mae = subset['abs_prediction_error'].mean()
+        corr = subset[['predicted_rate', 'actual_rate_next']].corr().iloc[0, 1]
+        print(f"{label:15} {len(subset):10,d} {mean_err:+11.6f}% {mae:11.6f}% {corr:11.4f}")
+
+print()
+
+# Direction accuracy (sign prediction)
+combined['predicted_sign'] = np.sign(combined['predicted_rate'])
+combined['actual_sign'] = np.sign(combined['actual_rate_next'])
+combined['sign_correct'] = (combined['predicted_sign'] == combined['actual_sign'])
+
+direction_accuracy = combined['sign_correct'].mean() * 100
+
+print('=' * 90)
+print('Direction (Sign) Prediction Accuracy')
+print('=' * 90)
+print()
+print(f"Correct sign prediction: {direction_accuracy:.1f}%")
+print(f"  (Does prediction correctly predict positive vs negative?)")
+print()
+
+# Analyze rate persistence (compare current real_funding_rate to next)
+print('=' * 90)
+print('Rate Persistence Analysis')
+print('=' * 90)
+print()
+print('If we assume rates persist (Strategy 1), how accurate is that?')
+print()
+
+combined['current_rate'] = combined['real_funding_rate']
+combined['persistence_error'] = combined['actual_rate_next'] - combined['current_rate']
+combined['abs_persistence_error'] = combined['persistence_error'].abs()
+
+print('Rate Persistence (assuming current rate continues):')
+print('-' * 90)
+print(f"Mean persistence error:     {combined['persistence_error'].mean():+.6f}%")
+print(f"MAE (persistence):          {combined['abs_persistence_error'].mean():.6f}%")
+print(f"Correlation (current vs next): {combined[['current_rate', 'actual_rate_next']].corr().iloc[0, 1]:.4f}")
+print()
+
+# Compare prediction vs persistence
+print('=' * 90)
+print('Prediction vs Persistence - Which is More Accurate?')
+print('=' * 90)
+print()
+
+mae_prediction = combined['abs_prediction_error'].mean()
+mae_persistence = combined['abs_persistence_error'].mean()
+
+improvement = (mae_persistence - mae_prediction) / mae_persistence * 100
+
+print(f"MAE using prediction:   {mae_prediction:.6f}%")
+print(f"MAE using persistence:  {mae_persistence:.6f}%")
+print(f"Prediction improvement: {improvement:+.1f}%")
+print()
+
+if improvement > 0:
+    print("✓ Predictions are MORE accurate than assuming rate persistence")
+    print(f"  Using predictions reduces error by {improvement:.1f}%")
+else:
+    print("✓ Rate persistence is MORE accurate than predictions")
+    print(f"  Persistence has {-improvement:.1f}% less error")
+
+print()
+
+# Analyze top symbols by funding rate
+print('=' * 90)
+print('Prediction Accuracy for Top Funding Rate Symbols')
+print('=' * 90)
+print()
+
+# Get symbols that frequently appear in top-5 by funding rate
+symbol_abs_rates = combined.groupby('symbol')['abs_predicted_rate'].mean().sort_values(ascending=False)
+top_symbols = symbol_abs_rates.head(20).index.tolist()
+
+print(f"{'Symbol':15} {'Avg Rate':>10} {'MAE Pred':>12} {'MAE Persist':>12} {'Better':>10}")
+print('-' * 90)
+
+for symbol in top_symbols:
+    subset = combined[combined['symbol'] == symbol]
+    avg_rate = subset['abs_predicted_rate'].mean()
+    mae_pred = subset['abs_prediction_error'].mean()
+    mae_pers = subset['abs_persistence_error'].mean()
+    better = 'Prediction' if mae_pred < mae_pers else 'Persistence'
+
+    print(f"{symbol:15} {avg_rate:9.5f}% {mae_pred:11.6f}% {mae_pers:11.6f}% {better:>10}")
+
+print()
+
+# Key findings summary
+print('=' * 90)
+print('KEY FINDINGS SUMMARY')
+print('=' * 90)
+print()
+
+print('1. PREDICTION ACCURACY:')
+print(f'   • Mean absolute error: {mae_prediction:.6f}%')
+print(f'   • Correlation with actual: {correlation:.4f}')
+print(f'   • Direction accuracy: {direction_accuracy:.1f}%')
+print()
+
+print('2. RATE PERSISTENCE:')
+print(f'   • Mean absolute error: {mae_persistence:.6f}%')
+print(f'   • Correlation (current→next): {combined[["current_rate", "actual_rate_next"]].corr().iloc[0, 1]:.4f}')
+print()
+
+print('3. WHICH TO USE?')
+if improvement > 5:
+    print(f'   ✓ Use PREDICTIONS (Strategy 3)')
+    print(f'     Predictions are {improvement:.1f}% more accurate')
+    print(f'     Accept the lookahead bias risk - predictions are quite accurate')
+elif improvement < -5:
+    print(f'   ✓ Use PERSISTENCE (Strategy 1)')
+    print(f'     Persistence is {-improvement:.1f}% more accurate')
+    print(f'     No lookahead bias, rates are relatively stable')
+else:
+    print(f'   ~ SIMILAR ACCURACY (difference: {improvement:+.1f}%)')
+    print(f'     Either strategy viable, consider other factors:')
+    print(f'     - Persistence = no lookahead bias')
+    print(f'     - Prediction = more realistic but has bias')
+print()
+
+print('4. IMPLICATIONS FOR BACKTEST:')
+if mae_prediction < 0.0002:  # Very accurate predictions
+    print('   • Predictions are highly accurate (<0.02% MAE)')
+    print('   • Strategy 3 (prediction-based) is viable')
+    print('   • Model prediction uncertainty in backtest')
+elif mae_persistence < 0.0002:  # Stable rates
+    print('   • Rates are relatively stable (<0.02% MAE)')
+    print('   • Strategy 1 (persistence) is safe and accurate')
+    print('   • No lookahead bias concerns')
+else:
+    print('   • Both predictions and persistence have material error')
+    print('   • Consider Strategy 2 (historical average)')
+    print('   • Or acknowledge uncertainty in backtest')
+
+print()
+print('=' * 90)

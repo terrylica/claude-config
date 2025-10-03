@@ -1,0 +1,787 @@
+# 📎 MQL5 Article Attachment Extraction System - Design Document
+
+**Version:** 1.0.0
+**Date:** 2025-10-01
+**Status:** Design Proposal (Pending Approval)
+
+---
+
+## 🎯 Problem Statement
+
+MQL5 articles include downloadable code files (MQL5 source, compiled binaries, notebooks, ZIPs) that are essential reference material for understanding the algorithms. Currently, the extraction system:
+
+❌ Does NOT download attached files
+❌ Does NOT extract ZIP archives
+❌ Does NOT organize code files with articles
+❌ Does NOT create references/links to attachments
+
+**Goal:** Design a robust, universal system to capture, organize, and reference all article attachments across diverse file types and structures.
+
+---
+
+## 📊 Research Findings - Attachment Patterns
+
+### **Pattern Analysis (5 Sample Articles)**
+
+#### **Article 14760 (Autoencoder - Omega J Msigwa)**
+- **ZIP Archive:** `/en/articles/download/14760.zip` (full archive)
+- **Nested ZIP:** `/en/articles/download/14760/code_6_files.zip` (689.5 KB)
+- **File Types:** `.mqh`, `.mq5`, `.ipynb`
+- **Files:**
+  - `MatrixExtend.mqh` - Matrix manipulation library
+  - `preprocessing.mqh` - Data preprocessing library
+  - `AutoEncoder Indicator.mq5` - Main indicator
+  - `Autoencoder-onnx.mqh` - ONNX model loader
+  - `autoencoders.ipynb` - Python Jupyter notebook
+
+#### **Article 15017 (Break of Structure - Allan Munene)**
+- **ZIP Archive:** `/en/articles/download/15017.zip`
+- **Individual Files:**
+  - `Break_of_Structure_jBoSc_EA.mq5` (15.11 KB) - source
+  - `Break_of_Structure_tBoSt_EA.ex5` (35.08 KB) - compiled
+- **File Types:** `.mq5` (source), `.ex5` (compiled)
+
+#### **Article 16630 (Ensemble Methods - Francis Dube)**
+- **File Types:** `.mqh`, `.mq5`
+- **Files:**
+  - `ensemble.mqh` (50.08 KB)
+  - `grnn.mqh` (6.6 KB)
+  - `mlffnn.mqh` (8.39 KB)
+  - `np.mqh` (74.16 KB)
+  - `OLS.mqh` (13.34 KB)
+  - `Ensemble_Demo.mq5` (13.03 KB)
+
+#### **Article 17737 (Market Regime Detection - Sahil Bagdi)**
+- **ZIP Archive:** `/en/articles/download/17737.zip`
+- **Files:**
+  - `MarketRegimeEnum.mqh` (0.79 KB)
+  - `CStatistics.mqh` (9.28 KB)
+  - `MarketRegimeDetector.mqh` (16.5 KB)
+  - `MarketRegimeIndicator.mq5` (5.15 KB)
+
+#### **Article 11125 (Replay System - Daniel Jose)**
+- **ZIP Archive:** `/en/articles/download/11125.zip`
+- **Large ZIP:** `Market_Replay_4vv_19.zip` (12,901.8 KB / 12.6 MB!)
+- **File Types:** Unknown (inside large ZIP)
+
+### **URL Patterns Identified**
+
+```
+Base Pattern:
+https://www.mql5.com/en/articles/download/{article_id}.zip          # Full archive
+https://www.mql5.com/en/articles/download/{article_id}/{filename}   # Individual file
+https://www.mql5.com/en/articles/download/{article_id}/{nested}.zip # Nested ZIP
+```
+
+### **File Type Categories**
+
+| Category | Extensions | Description | Importance |
+|----------|-----------|-------------|------------|
+| **MQL5 Source** | `.mq5`, `.mq4` | Expert Advisors, Indicators, Scripts | ⭐⭐⭐⭐⭐ Critical |
+| **MQL5 Headers** | `.mqh` | Libraries, Include files | ⭐⭐⭐⭐⭐ Critical |
+| **Compiled** | `.ex5`, `.ex4` | Binary executables (less useful for ML) | ⭐⭐ Reference |
+| **Notebooks** | `.ipynb` | Jupyter notebooks (Python code) | ⭐⭐⭐⭐⭐ Critical |
+| **Archives** | `.zip`, `.rar` | Nested packages | ⭐⭐⭐⭐ Important |
+| **Data** | `.csv`, `.json`, `.bin` | Training data, configs | ⭐⭐⭐⭐ Important |
+| **Docs** | `.pdf`, `.txt`, `.md` | Documentation | ⭐⭐⭐ Useful |
+
+---
+
+## 🏗️ Proposed Architecture
+
+### **Directory Structure**
+
+```
+mql5_articles/
+└── {user_id}/
+    └── article_{article_id}/
+        ├── article_{article_id}.md          # Existing
+        ├── metadata.json                    # Existing
+        ├── images_manifest.json             # Existing
+        ├── images/                          # Existing
+        │   └── *.png
+        ├── attachments_manifest.json        # NEW - Attachment metadata
+        ├── attachments/                     # NEW - All downloaded files
+        │   ├── source/                      # NEW - Source code (.mq5, .mqh)
+        │   ├── notebooks/                   # NEW - Jupyter notebooks (.ipynb)
+        │   ├── data/                        # NEW - Data files (.csv, .json)
+        │   ├── compiled/                    # NEW - Binaries (.ex5, .ex4)
+        │   ├── docs/                        # NEW - Documentation
+        │   └── archives/                    # NEW - Original ZIPs (preserved)
+        └── README.md                        # NEW - Attachment index with links
+```
+
+### **Attachments Manifest Schema (JSON)**
+
+```json
+{
+  "article_id": "14760",
+  "article_title": "Autoencoders Neural Networks...",
+  "extraction_timestamp": "2025-10-01T12:30:00Z",
+  "download_summary": {
+    "total_files": 6,
+    "total_size_bytes": 715264,
+    "categories": {
+      "source": 3,
+      "notebooks": 1,
+      "headers": 2
+    }
+  },
+  "main_archive": {
+    "url": "https://www.mql5.com/en/articles/download/14760.zip",
+    "filename": "14760_full_archive.zip",
+    "size_bytes": 689500,
+    "local_path": "attachments/archives/14760_full_archive.zip",
+    "extracted": true
+  },
+  "files": [
+    {
+      "filename": "MatrixExtend.mqh",
+      "original_url": "https://www.mql5.com/en/articles/download/14760/matrixextend.mqh",
+      "size_bytes": 12345,
+      "file_type": "mqh",
+      "category": "headers",
+      "local_path": "attachments/source/MatrixExtend.mqh",
+      "description": "Has additional functions for matrix manipulations",
+      "checksum_sha256": "abc123...",
+      "extracted_from": "14760_full_archive.zip"
+    },
+    {
+      "filename": "autoencoders.ipynb",
+      "original_url": "https://www.mql5.com/en/articles/download/14760/autoencoders.ipynb",
+      "size_bytes": 45678,
+      "file_type": "ipynb",
+      "category": "notebooks",
+      "local_path": "attachments/notebooks/autoencoders.ipynb",
+      "description": "Python Jupyter notebook for running Python code discussed",
+      "checksum_sha256": "def456...",
+      "extracted_from": "14760_full_archive.zip"
+    }
+  ],
+  "nested_archives": [
+    {
+      "filename": "code_6_files.zip",
+      "url": "https://www.mql5.com/en/articles/download/14760/code_6_files.zip",
+      "size_bytes": 689500,
+      "local_path": "attachments/archives/code_6_files.zip",
+      "extracted": true,
+      "contains_files": 6
+    }
+  ]
+}
+```
+
+### **Attachment README.md Template**
+
+```markdown
+# Article Attachments - {Article Title}
+
+**Article ID:** {article_id}
+**Author:** {author_name}
+**Source:** https://www.mql5.com/en/articles/{article_id}
+
+---
+
+## 📦 Download Summary
+
+- **Total Files:** 6
+- **Total Size:** 715.26 KB
+- **Categories:** Source (3), Notebooks (1), Headers (2)
+
+---
+
+## 📂 File Structure
+
+### Source Code (`.mq5`, `.mqh`)
+- [`MatrixExtend.mqh`](attachments/source/MatrixExtend.mqh) - Matrix manipulation library (12.3 KB)
+- [`preprocessing.mqh`](attachments/source/preprocessing.mqh) - Data preprocessing (8.7 KB)
+- [`AutoEncoder Indicator.mq5`](attachments/source/AutoEncoder%20Indicator.mq5) - Main indicator (15.2 KB)
+
+### Notebooks (`.ipynb`)
+- [`autoencoders.ipynb`](attachments/notebooks/autoencoders.ipynb) - Python code for autoencoder training (45.6 KB)
+
+### Headers (`.mqh`)
+- [`Autoencoder-onnx.mqh`](attachments/source/Autoencoder-onnx.mqh) - ONNX model loader (6.5 KB)
+
+### Archives (Original)
+- [`14760_full_archive.zip`](attachments/archives/14760_full_archive.zip) - Complete package (689.5 KB)
+
+---
+
+## 🔗 Original Downloads
+
+- [Download Full ZIP](https://www.mql5.com/en/articles/download/14760.zip)
+- [Download code_6_files.zip](https://www.mql5.com/en/articles/download/14760/code_6_files.zip)
+
+---
+
+## ⚠️ Copyright Notice
+
+All rights to these materials are reserved by MetaQuotes Ltd.
+Copying or reprinting of these materials in whole or in part is prohibited.
+```
+
+---
+
+## 🔧 Implementation Strategy
+
+### **Phase 1: Detection & Metadata Extraction**
+
+**1. HTML Parsing for Attachment Section**
+
+```python
+def extract_attachments_metadata(soup: BeautifulSoup, article_url: str) -> dict:
+    """
+    Extract attachment metadata from article HTML.
+
+    Looks for patterns:
+    - "Attached files" section
+    - "Download ZIP" links
+    - File tables with download links
+    """
+    attachments = {
+        "main_archive": None,
+        "files": [],
+        "nested_archives": []
+    }
+
+    # Pattern 1: Look for "Attached files |" header
+    attached_section = soup.find(string=re.compile(r"Attached files"))
+
+    # Pattern 2: Find main ZIP archive
+    zip_link = soup.find('a', href=re.compile(r'/en/articles/download/\d+\.zip$'))
+    if zip_link:
+        attachments["main_archive"] = {
+            "url": BASE_URL + zip_link['href'],
+            "filename": f"{article_id}_full_archive.zip"
+        }
+
+    # Pattern 3: Find individual file downloads
+    file_links = soup.find_all('a', href=re.compile(r'/en/articles/download/\d+/[^/]+$'))
+    for link in file_links:
+        file_info = {
+            "url": BASE_URL + link['href'],
+            "filename": link['href'].split('/')[-1],
+            "description": link.get('title', ''),
+            "size_text": extract_size_from_context(link)  # Parse "15.11 KB" from nearby text
+        }
+
+        # Categorize by extension
+        ext = file_info["filename"].split('.')[-1].lower()
+        if ext in ['zip', 'rar']:
+            attachments["nested_archives"].append(file_info)
+        else:
+            attachments["files"].append(file_info)
+
+    return attachments
+```
+
+**2. File Categorization Logic**
+
+```python
+FILE_CATEGORIES = {
+    "source": [".mq5", ".mq4"],
+    "headers": [".mqh"],
+    "compiled": [".ex5", ".ex4"],
+    "notebooks": [".ipynb"],
+    "data": [".csv", ".json", ".bin", ".txt"],
+    "docs": [".pdf", ".md", ".docx"],
+    "archives": [".zip", ".rar", ".7z"]
+}
+
+def categorize_file(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    for category, extensions in FILE_CATEGORIES.items():
+        if ext in extensions:
+            return category
+    return "other"
+```
+
+### **Phase 2: Download & Storage**
+
+**3. Parallel Download with Progress Tracking**
+
+```python
+async def download_attachments(attachments_meta: dict, output_dir: Path) -> dict:
+    """
+    Download all attachments with:
+    - Parallel downloads (max 3 concurrent)
+    - Progress tracking
+    - Checksum verification
+    - Retry logic (3 attempts)
+    """
+    downloaded = []
+
+    # Create category subdirectories
+    for category in FILE_CATEGORIES.keys():
+        (output_dir / "attachments" / category).mkdir(parents=True, exist_ok=True)
+
+    # Download main archive first (highest priority)
+    if attachments_meta["main_archive"]:
+        archive_path = await download_file(
+            url=attachments_meta["main_archive"]["url"],
+            output_path=output_dir / "attachments" / "archives" / attachments_meta["main_archive"]["filename"]
+        )
+        downloaded.append(archive_path)
+
+    # Download individual files in parallel
+    tasks = []
+    for file_meta in attachments_meta["files"]:
+        category = categorize_file(file_meta["filename"])
+        output_path = output_dir / "attachments" / category / file_meta["filename"]
+        tasks.append(download_file(file_meta["url"], output_path))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    return {
+        "downloaded": downloaded,
+        "failed": [r for r in results if isinstance(r, Exception)]
+    }
+```
+
+**4. ZIP Extraction with Deduplication**
+
+```python
+def extract_archives(archive_path: Path, output_dir: Path, max_depth: int = 2) -> list:
+    """
+    Recursively extract ZIP archives with:
+    - Max depth limit (prevent zip bombs)
+    - Deduplication (skip if already extracted)
+    - Size limits (skip files > 100MB)
+    - Virus scanning (optional)
+    """
+    extracted_files = []
+
+    if not zipfile.is_zipfile(archive_path):
+        return []
+
+    with zipfile.ZipFile(archive_path, 'r') as zf:
+        # Check total uncompressed size
+        total_size = sum(info.file_size for info in zf.infolist())
+        if total_size > 100 * 1024 * 1024:  # 100 MB limit
+            logger.warning(f"Archive {archive_path} exceeds 100MB, skipping extraction")
+            return []
+
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+
+            # Determine category and output path
+            category = categorize_file(info.filename)
+            safe_filename = Path(info.filename).name  # Prevent path traversal
+            output_path = output_dir / "attachments" / category / safe_filename
+
+            # Skip if already exists (deduplication)
+            if output_path.exists():
+                logger.debug(f"File {safe_filename} already exists, skipping")
+                continue
+
+            # Extract file
+            zf.extract(info, output_dir / "attachments" / category)
+            extracted_files.append(output_path)
+
+            # Recursively extract nested ZIPs (with depth limit)
+            if safe_filename.endswith('.zip') and max_depth > 0:
+                nested = extract_archives(output_path, output_dir, max_depth - 1)
+                extracted_files.extend(nested)
+
+    return extracted_files
+```
+
+### **Phase 3: Manifest Generation**
+
+**5. Build Comprehensive Manifest**
+
+```python
+def build_attachments_manifest(
+    article_id: str,
+    downloaded_files: list,
+    extracted_files: list,
+    attachments_meta: dict
+) -> dict:
+    """
+    Generate attachments_manifest.json with:
+    - File metadata (size, checksum, category)
+    - Extraction lineage (which ZIP each file came from)
+    - Download timestamps
+    - Category statistics
+    """
+    manifest = {
+        "article_id": article_id,
+        "extraction_timestamp": datetime.utcnow().isoformat(),
+        "download_summary": {
+            "total_files": len(downloaded_files) + len(extracted_files),
+            "categories": {}
+        },
+        "files": []
+    }
+
+    # Process each file
+    for file_path in downloaded_files + extracted_files:
+        category = categorize_file(file_path.name)
+
+        file_entry = {
+            "filename": file_path.name,
+            "size_bytes": file_path.stat().st_size,
+            "file_type": file_path.suffix.lstrip('.'),
+            "category": category,
+            "local_path": str(file_path.relative_to(output_dir)),
+            "checksum_sha256": hashlib.sha256(file_path.read_bytes()).hexdigest(),
+            "extracted_from": None  # Set if from ZIP
+        }
+
+        manifest["files"].append(file_entry)
+        manifest["download_summary"]["categories"][category] = \
+            manifest["download_summary"]["categories"].get(category, 0) + 1
+
+    return manifest
+```
+
+**6. Generate README.md**
+
+```python
+def generate_attachment_readme(manifest: dict, article_meta: dict) -> str:
+    """
+    Generate README.md with:
+    - Categorized file listings
+    - Relative links to local files
+    - Original download URLs
+    - Copyright notices
+    """
+    readme = f"""# Article Attachments - {article_meta['title']}
+
+**Article ID:** {manifest['article_id']}
+**Author:** {article_meta['author']}
+**Source:** https://www.mql5.com/en/articles/{manifest['article_id']}
+
+---
+
+## 📦 Download Summary
+
+- **Total Files:** {manifest['download_summary']['total_files']}
+- **Categories:** {', '.join(f"{k.title()} ({v})" for k, v in manifest['download_summary']['categories'].items())}
+
+---
+
+## 📂 File Structure
+
+"""
+
+    # Group files by category
+    for category, files in group_by_category(manifest["files"]).items():
+        readme += f"\n### {category.title()} Files\n\n"
+        for file in files:
+            readme += f"- [`{file['filename']}`]({file['local_path']}) - {format_size(file['size_bytes'])}\n"
+
+    readme += f"""
+---
+
+## ⚠️ Copyright Notice
+
+All rights to these materials are reserved by MetaQuotes Ltd.
+"""
+
+    return readme
+```
+
+---
+
+## 🛡️ Edge Cases & Safety
+
+### **1. Malicious Content Protection**
+
+```python
+SAFETY_CHECKS = {
+    "max_file_size": 100 * 1024 * 1024,  # 100 MB
+    "max_archive_size": 500 * 1024 * 1024,  # 500 MB
+    "max_zip_depth": 2,  # Prevent zip bombs
+    "blocked_extensions": [".exe", ".dll", ".bat", ".sh", ".cmd"],
+    "max_files_per_archive": 1000
+}
+
+def is_safe_to_extract(file_path: Path, info: zipfile.ZipInfo) -> bool:
+    # Check file size
+    if info.file_size > SAFETY_CHECKS["max_file_size"]:
+        return False
+
+    # Check extension
+    if any(info.filename.endswith(ext) for ext in SAFETY_CHECKS["blocked_extensions"]):
+        return False
+
+    # Check path traversal
+    if ".." in info.filename or info.filename.startswith("/"):
+        return False
+
+    return True
+```
+
+### **2. Deduplication Strategy**
+
+```python
+def deduplicate_files(file_list: list) -> list:
+    """
+    Remove duplicate files using:
+    - SHA256 checksum comparison
+    - Keep file with most descriptive name
+    - Preserve category structure
+    """
+    seen_checksums = {}
+    unique_files = []
+
+    for file_path in file_list:
+        checksum = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        if checksum in seen_checksums:
+            # Keep file with longer/more descriptive name
+            existing = seen_checksums[checksum]
+            if len(file_path.name) > len(existing.name):
+                unique_files.remove(existing)
+                unique_files.append(file_path)
+                seen_checksums[checksum] = file_path
+        else:
+            unique_files.append(file_path)
+            seen_checksums[checksum] = file_path
+
+    return unique_files
+```
+
+### **3. Error Recovery**
+
+```python
+class AttachmentExtractor:
+    def __init__(self, retry_attempts: int = 3):
+        self.retry_attempts = retry_attempts
+        self.failed_downloads = []
+
+    async def download_with_retry(self, url: str, output_path: Path) -> Optional[Path]:
+        for attempt in range(self.retry_attempts):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, follow_redirects=True)
+                    response.raise_for_status()
+
+                    output_path.write_bytes(response.content)
+                    return output_path
+
+            except Exception as e:
+                if attempt == self.retry_attempts - 1:
+                    self.failed_downloads.append({
+                        "url": url,
+                        "error": str(e),
+                        "attempts": attempt + 1
+                    })
+                    return None
+
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+
+        return None
+```
+
+---
+
+## 📋 Integration with Existing System
+
+### **Modified Extractor Class**
+
+```python
+class MQL5Extractor:
+    # ... existing code ...
+
+    async def _download_attachments(self, soup: BeautifulSoup, article_meta: dict) -> dict:
+        """
+        New method to handle attachment downloads.
+        Called after main article extraction.
+        """
+        # 1. Extract attachment metadata from HTML
+        attachments_meta = self._extract_attachments_metadata(soup, article_meta['url'])
+
+        if not attachments_meta['files'] and not attachments_meta['main_archive']:
+            logger.info(f"No attachments found for article {article_meta['article_id']}")
+            return {"attachments": False}
+
+        # 2. Download files
+        downloaded = await self._download_attachment_files(
+            attachments_meta,
+            self.output_dir / article_meta['user_id'] / f"article_{article_meta['article_id']}"
+        )
+
+        # 3. Extract ZIP archives
+        extracted = self._extract_attachment_archives(downloaded['archives'])
+
+        # 4. Deduplicate
+        all_files = self._deduplicate_files(downloaded['files'] + extracted)
+
+        # 5. Generate manifest
+        manifest = self._build_attachments_manifest(article_meta, all_files, attachments_meta)
+
+        # 6. Generate README
+        readme = self._generate_attachment_readme(manifest, article_meta)
+
+        # 7. Save manifest and README
+        manifest_path = self.output_dir / article_meta['user_id'] / f"article_{article_meta['article_id']}" / "attachments_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+
+        readme_path = self.output_dir / article_meta['user_id'] / f"article_{article_meta['article_id']}" / "attachments_README.md"
+        readme_path.write_text(readme)
+
+        return {
+            "attachments": True,
+            "total_files": len(all_files),
+            "manifest_path": str(manifest_path),
+            "readme_path": str(readme_path)
+        }
+```
+
+### **Updated Metadata Schema**
+
+```json
+{
+  "url": "https://www.mql5.com/en/articles/14760",
+  "article_id": "14760",
+  "success": true,
+  "content": { ... },
+  "attachments": {
+    "has_attachments": true,
+    "total_files": 6,
+    "total_size_bytes": 715264,
+    "categories": {
+      "source": 3,
+      "notebooks": 1,
+      "headers": 2
+    },
+    "manifest_path": "attachments_manifest.json",
+    "readme_path": "attachments_README.md"
+  }
+}
+```
+
+---
+
+## 🎯 Configuration Options
+
+### **config.yaml Extension**
+
+```yaml
+attachments:
+  enabled: true                    # Master switch
+  download_strategy: "archive_first"  # "archive_first" | "individual" | "both"
+
+  extraction:
+    extract_zips: true
+    max_zip_depth: 2
+    max_file_size_mb: 100
+    max_archive_size_mb: 500
+
+  categories:
+    download_source: true          # .mq5, .mq4
+    download_headers: true         # .mqh
+    download_compiled: false       # .ex5, .ex4 (binaries)
+    download_notebooks: true       # .ipynb
+    download_data: true            # .csv, .json
+    download_docs: true            # .pdf, .md
+
+  deduplication:
+    enabled: true
+    method: "checksum"             # "checksum" | "filename"
+
+  safety:
+    scan_for_malware: false        # Requires ClamAV
+    block_executables: true
+
+  retry:
+    max_attempts: 3
+    backoff_seconds: 2
+```
+
+---
+
+## 🚀 Rollout Plan
+
+### **Phase 1: Proof of Concept (1 article)**
+- Implement attachment detection
+- Download single article attachments
+- Generate manifest and README
+- **Test with:** Article 14760 (Autoencoder - has multiple file types)
+
+### **Phase 2: Batch Testing (5-10 articles)**
+- Test across different authors
+- Validate ZIP extraction
+- Test deduplication logic
+- **Test with:** Articles 14760, 15017, 16630, 17737, 11125
+
+### **Phase 3: Full Integration**
+- Add to batch extraction pipeline
+- Add progress tracking
+- Add checkpoint support
+- Generate summary statistics
+
+### **Phase 4: Optimization**
+- Parallel downloads (asyncio)
+- Caching (skip already downloaded)
+- Incremental updates
+
+---
+
+## 📊 Success Metrics
+
+- **Coverage:** % of articles with attachments successfully downloaded
+- **Completeness:** % of files extracted from nested ZIPs
+- **Accuracy:** % of files correctly categorized
+- **Performance:** Average download time per article
+- **Safety:** 0 malicious files extracted
+- **Deduplication:** % reduction in storage from duplicates
+
+---
+
+## ❓ Open Questions for Review
+
+1. **Storage Strategy:**
+   - Keep original ZIPs or delete after extraction?
+   - **Recommendation:** Keep in `archives/` for reproducibility
+
+2. **Compiled Files (.ex5, .ex4):**
+   - Download or skip? (Not useful for ML training, only for MT5 execution)
+   - **Recommendation:** Skip by default, make configurable
+
+3. **Large Files:**
+   - How to handle 100+ MB ZIPs? (e.g., Article 11125 has 12.6 MB ZIP)
+   - **Recommendation:** Set max 500 MB limit, warn user, make configurable
+
+4. **Nested ZIPs:**
+   - Max extraction depth? (prevent zip bombs)
+   - **Recommendation:** Max depth = 2
+
+5. **Deduplication:**
+   - Use checksums or filename matching?
+   - **Recommendation:** SHA256 checksums (most robust)
+
+6. **Parallelization:**
+   - Download attachments in parallel with images?
+   - **Recommendation:** Yes, use asyncio for concurrent downloads
+
+7. **Failure Handling:**
+   - Continue article extraction if attachments fail?
+   - **Recommendation:** Yes, log failures but don't block article
+
+---
+
+## 📝 Summary
+
+This design provides:
+
+✅ **Robust Detection:** Handles all observed attachment patterns
+✅ **Safe Extraction:** Prevents zip bombs, malware, path traversal
+✅ **Smart Organization:** Category-based directory structure
+✅ **Rich Metadata:** Comprehensive manifests with checksums
+✅ **User-Friendly:** README with direct links to files
+✅ **Configurable:** Extensive YAML options for customization
+✅ **Scalable:** Async downloads, deduplication, caching
+✅ **Resilient:** Retry logic, error recovery, checkpoints
+
+**Estimated Implementation Time:** 2-3 days
+**Lines of Code:** ~500-800 (new code)
+**Dependencies:** `zipfile` (stdlib), `httpx` (existing), `hashlib` (stdlib)
+
+---
+
+**Ready for review and feedback! 🎯**

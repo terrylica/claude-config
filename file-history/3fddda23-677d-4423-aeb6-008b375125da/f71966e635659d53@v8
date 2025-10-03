@@ -1,0 +1,67 @@
+# CLAUDE.md
+
+## Execution Pattern
+
+**Always run Python as module via Docker:**
+```bash
+docker exec ml-dev python -m <module_path>
+```
+
+## Docker Container
+
+- **Runtime**: Colima (pure CLI, no GUI) - `colima start`
+- **Container name**: `ml-dev`
+- **Working directory**: `/workspace`
+- **Install command**: `docker exec ml-dev pip install -e '.[dev]'`
+
+## Project Context
+
+- **Dockerfile fix**: `ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true` resolves Anaconda ToS requirement (July 2025)
+- **PR policy**: 1 file per PR, no workspace files (CLAUDE.md, .cursor/rules/)
+- **Templates** (orthogonal design philosophies):
+  - `ohlcv_comprehensive_sizex_v5.py` (2025-05-23): Non-linear features (Hurst, entropy, regime classification)
+  - `ohlcv_fluid-dynamics_sizex_v1.py` (2025-04-29): Vectorized pandas patterns (.rolling, .shift, np.clip)
+
+## Key Architecture Points
+
+- **`actual_ready_time`**: Framework-generated (not in CSVs), simulates data availability delay
+- **`resample_factors`**: Multi-timeframe (different intervals via OHLCV aggregation), NOT multi-period (different lookbacks)
+
+## Feature Construction Patterns (Off-the-Shelf)
+
+**Pandas methods:**
+- `.ewm()` - Exponentially weighted (MACD, adaptive indicators)
+- `.expanding()` - Walk-forward cumulative features
+- `.rank(pct=True)` - Percentile normalization (0-1)
+- `.pipe()` - Method chaining for pipelines
+- `.groupby().transform()` - Group stats → original rows
+- `.interpolate(method='time')` - Time-aware missing data
+- `.resample().interpolate()` - Upsample with interpolation
+- Named aggs: `agg(vol_mean=('volume', 'mean'))`
+
+**sklearn transformers:**
+- `PolynomialFeatures(interaction_only=True)` - Feature crosses (RSI×Volume)
+- `QuantileTransformer(output_distribution='normal')` - Outliers → Gaussian
+- `RobustScaler()` - IQR-based scaling (outlier-resistant)
+- `TimeSeriesSplit(gap=N)` - Walk-forward validation with gap
+
+**Time series decomposition:**
+- `pywt.wavedec()` - Wavelet decomposition (trend/detail separation)
+- `statsmodels.tsa.seasonal.STL` - Seasonal/trend/residual split
+- `scipy.fft` - Frequency domain features
+
+**Advanced aggregations:**
+- `statsmodels.regression.rolling.RollingOLS` - Rolling regression (beta over time)
+- `scipy.signal.fftconvolve()` - Fast convolution (moving averages)
+- `scipy.signal.find_peaks()` - Peak detection
+- `tsfresh.extract_features()` - Automated extraction (794 features)
+
+**Math utilities:**
+- `np.einsum('ij,ik->jk')` - Efficient covariance matrices
+- Broadcasting - Pairwise operations without loops
+
+**Performance reference:** See `.claude/performance-blacklist.md` (not priority)
+
+## References
+
+- Anaconda ToS: https://stackoverflow.com/questions/79702788/

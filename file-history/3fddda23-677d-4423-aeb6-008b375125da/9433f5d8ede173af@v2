@@ -1,0 +1,239 @@
+# STL Stateful Implementation
+
+**Status**: Production
+**Version**: 1.0.0
+**Date**: 2025-10-03
+
+## Summary
+
+Stateful STL decomposition for causal ML features. Replaces batch STL with fit/transform pattern that prevents temporal leakage.
+
+## Components
+
+### 1. StatefulSTLAtoms Class
+**File**: `ml_feature_set/atoms/formulas/stl_stateful.py`
+
+**Purpose**: Causal STL feature generator
+- fit(): Decompose training data, store seasonal pattern
+- transform(): Apply pattern to new data (no future data)
+
+**Dependencies**: statsmodels>=0.14.0
+
+### 2. Formula Functions
+**File**: `ml_feature_set/atoms/formulas/layer_b_baselines.py`
+
+Updated functions:
+- `_stl_trend()`: Stateful trend extraction
+- `_stl_seasonal()`: Stateful seasonal extraction
+- `_stl_resid()`: Stateful residual extraction
+
+**Cache**: Module-level `_STL_MODELS` dict
+
+### 3. Atom Specifications
+**File**: `ml_feature_set/atoms/formulas/layer_b_baselines.py`
+
+6 atoms updated:
+- `stl_trend_s7_t21`, `stl_seasonal_s7_t21`, `stl_resid_s7_t21`
+- `stl_trend_s13_t31`, `stl_seasonal_s13_t31`, `stl_resid_s13_t31`
+
+Changes:
+- `causal`: False → True
+- `status`: 'offline_only' → 'production'
+- `description`: Updated to reflect causal implementation
+
+## Service Level Objectives (SLOs)
+
+### Correctness
+- **Decomposition sum error**: < 1e-10 (numerical precision)
+  - Validated: `trend + seasonal + resid = original` within tolerance
+- **Seasonal pattern alignment**: Exact repetition across periods
+  - Validated: Time-based rolling with modulo period
+- **No temporal leakage**: Transform uses only stored patterns from fit()
+  - Validated: Shock test shows no future data usage
+
+### Availability
+- **Data length requirement**: >= 2 × period
+  - Raises ValueError if insufficient
+- **Parameter validation**: seasonal, trend must be odd, trend > seasonal
+  - Raises ValueError on invalid params
+- **Missing dependencies**: Raises ImportError if statsmodels unavailable
+  - Clear error message with install instructions
+
+### Observability
+- **Error propagation**: All exceptions raised, no silent failures
+  - No try/except fallbacks in formulas
+  - No default values on error
+- **Model caching**: Logged via module-level dict
+  - Key format: `stl_{seasonal}_{trend}`
+  - Accessible for debugging: `from layer_b_baselines import _STL_MODELS`
+
+### Maintainability
+- **Single dependency**: statsmodels (already required)
+- **No custom algorithms**: Uses statsmodels STL + numpy operations
+- **Test coverage**: 10 tests, all passing
+  - Formula execution
+  - Model caching
+  - Decomposition properties
+  - Error handling
+  - Library integration
+
+## Implementation Pattern
+
+### Training Phase
+```python
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+lib = load_library_from_formulas()
+
+# First call on training data
+train_atoms = lib.compute_all(train_df, layers=['B'])
+# → STL models fitted and cached in _STL_MODELS
+```
+
+### Production Phase
+```python
+# Subsequent calls use cached models
+test_atoms = lib.compute_all(test_df, layers=['B'])
+# → transform() uses cached models (fast)
+```
+
+### Model Persistence (Optional)
+```python
+from ml_feature_set.atoms.formulas.stl_stateful import StatefulSTLAtoms
+
+# Save fitted model
+stl = StatefulSTLAtoms(seasonal=13, trend=31)
+stl.fit(train_df)
+stl.save('models/stl_13_31.pkl')
+
+# Load in production
+stl = StatefulSTLAtoms.load('models/stl_13_31.pkl')
+features = stl.transform(new_df)
+```
+
+## Performance Characteristics
+
+### Benchmarked on 5-Minute SOL Data
+
+| Scenario | Batch STL | Stateful STL | Speedup |
+|----------|-----------|--------------|---------|
+| 10K historical + 10 new bars | 60.5ms/bar | 0.11ms/bar | 557x |
+| 50K historical + 10 new bars | 305.8ms/bar | 0.10ms/bar | 3,005x |
+| 100K historical + 10 new bars | 616.9ms/bar | 0.14ms/bar | 4,395x |
+| 200K historical + 10 new bars | 1,223ms/bar | 0.11ms/bar | 10,972x |
+
+**Fit time**: Scales linearly with data size (one-time cost)
+**Transform time**: O(1) constant (0.1ms regardless of history size)
+
+### Resource Usage
+- **Memory**: Stores seasonal pattern (period × 8 bytes per model)
+  - Example: period=13 → 104 bytes per model
+  - 6 atoms × 2 configs = 12 models → ~1.2KB total
+- **CPU**: Single statsmodels STL call on fit(), numpy ops on transform()
+
+## Migration from Batch STL
+
+### Before (Non-Causal)
+```python
+# OLD: Batch processing on full dataset
+def _stl_trend(df, params):
+    stl = STL(df['close'], period=seasonal, seasonal=seasonal, trend=trend)
+    return stl.fit().trend  # Uses future data
+```
+
+### After (Causal)
+```python
+# NEW: Stateful with caching
+def _stl_trend(df, params):
+    model_key = f"stl_{seasonal}_{trend}"
+    if model_key not in _STL_MODELS:
+        model = StatefulSTLAtoms(seasonal, trend)
+        model.fit(df)
+        _STL_MODELS[model_key] = model
+    return _STL_MODELS[model_key].transform(df)['stl_trend']
+```
+
+### Breaking Changes
+**None** - Backward compatible at API level
+- Same function signatures
+- Same atom names
+- Same return types (pd.Series)
+
+### Behavioral Changes
+- **Output values**: Different from batch STL (uses causal trend estimation)
+- **Error handling**: Strict (raises instead of returning NaN)
+- **First call**: Slower (fits model), subsequent calls faster
+
+## Validation
+
+### Test Suite
+**File**: `tests/test_stl_stateful_integration.py`
+
+10 tests covering:
+1. Formula execution without errors
+2. Model caching behavior
+3. Decomposition sum property
+4. Missing params error handling
+5. Insufficient data error handling
+6. Invalid params error handling
+7. Multiple config caching
+8. Seasonal pattern consistency
+9. Library integration
+10. Atom metadata (causal=True, status='production')
+
+**Result**: 10/10 passing
+
+### Validation Criteria
+- ✅ Decomposition reconstructs original (error < 1e-10)
+- ✅ Seasonal pattern repeats (correlation > 0.9)
+- ✅ Models cached correctly (same object on reuse)
+- ✅ Errors propagate (no silent failures)
+- ✅ Library integration works (6 atoms produced)
+- ✅ Atoms marked production-safe (causal=True, status='production')
+
+## Operational Considerations
+
+### Monitoring
+- **Cache size**: `len(_STL_MODELS)` - expect 2-4 models per session
+- **Fit operations**: Log count to detect unexpected refitting
+- **Transform errors**: Should be rare (only on invalid data)
+
+### Failure Modes
+1. **Insufficient data**: Raises ValueError
+   - Mitigation: Ensure >= 2×period rows before computing
+2. **Missing statsmodels**: Raises ImportError
+   - Mitigation: Verify dependency installed
+3. **Invalid params**: Raises ValueError
+   - Mitigation: Validate seasonal, trend (odd, trend > seasonal)
+
+### Refit Strategy
+**Default**: No refitting (models cached indefinitely)
+
+**Optional refit patterns**:
+1. Periodic: Clear `_STL_MODELS` every N bars
+2. Regime change: Refit on detected distribution shift
+3. Daily: Clear cache at session start
+
+**Example**: Periodic refit every 288 bars (24 hours for 5-min bars)
+```python
+if bar_count % 288 == 0:
+    _STL_MODELS.clear()
+```
+
+## References
+
+### Implementation
+- `/tmp/stateful_stl_production.py` → `ml_feature_set/atoms/formulas/stl_stateful.py`
+- Performance tests: `/tmp/test_production_performance_quick.py`
+- Validation tests: `tests/test_stl_stateful_integration.py`
+
+### Documentation
+- Research: `/tmp/STL_CAUSAL_IMPLEMENTATION_RESEARCH.md`
+- Validation: `/tmp/CAUSAL_STL_VALIDATION_REPORT.md`
+- Recommendation: `/tmp/FINAL_OPTION2_RECOMMENDATION.md`
+
+### Dependencies
+- statsmodels>=0.14.0 (STL decomposition)
+- numpy (array operations)
+- pandas (time series handling)
+- pickle (model persistence)

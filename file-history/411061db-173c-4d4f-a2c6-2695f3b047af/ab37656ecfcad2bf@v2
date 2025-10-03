@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""
+Download October 2023 tick data for top trading symbols only.
+
+This downloads a filtered dataset with only high-volume symbols,
+reducing storage by ~65% while keeping the most important data.
+
+Run with: uv run --active python download_oct2023_filtered.py
+"""
+
+import logging
+import sys
+import time
+from pathlib import Path
+
+# Add libs to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "libs" / "okx-price-provider" / "src"))
+
+from okx_price_provider import download_month_ticks
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+# Top symbols by volume (from analysis)
+# These account for majority of trading activity
+TOP_SYMBOLS = [
+    # Major cryptocurrencies
+    "BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BTC-USDC", "ETH-USDC",
+
+    # High-volume altcoins
+    "BCH-USDT", "APT-USDT", "LINK-USDT", "MATIC-USDT", "DOT-USDT",
+
+    # DeFi tokens
+    "UNI-USDT", "AAVE-USDT", "CRV-USDT", "LDO-USDT",
+
+    # Layer 1/Layer 2
+    "AVAX-USDT", "ATOM-USDT", "FIL-USDT", "NEAR-USDT", "ARB-USDT",
+
+    # Meme coins (high volatility)
+    "DOGE-USDT", "SHIB-USDT", "PEPE-USDT",
+
+    # Gaming/Metaverse (trending)
+    "GALA-USDT", "SAND-USDT", "MANA-USDT", "IMX-USDT",
+
+    # Additional high-volume
+    "LTC-USDT", "ETC-USDT", "XLM-USDT", "TRX-USDT",
+]
+
+
+def main():
+    """Download filtered October 2023 tick data."""
+    print("\n" + "=" * 80)
+    print("Downloading October 2023 Tick Data - Filtered Symbols")
+    print("=" * 80 + "\n")
+
+    # Target directory
+    cache_dir = Path("data/okx_ticks")
+    output_file = cache_dir / "202310_filtered.parquet"
+
+    print(f"Target file: {output_file}")
+    print(f"Market type: Spot (allspot)")
+    print(f"Symbols: {len(TOP_SYMBOLS)} high-volume markets")
+    print(f"Expected: ~15-20M trades, ~250-300 MB compressed\n")
+
+    print("Symbols to download:")
+    for i, sym in enumerate(TOP_SYMBOLS, 1):
+        print(f"  {i:2d}. {sym}")
+
+    # Confirm before proceeding
+    response = input("\nContinue? [y/N]: ")
+    if response.lower() != 'y':
+        print("Aborted.")
+        return
+
+    # Start download
+    start_time = time.time()
+
+    try:
+        stats = download_month_ticks(
+            msg_type="allspot",
+            year=2023,
+            month=10,
+            output_parquet=output_file,
+            symbols_filter=TOP_SYMBOLS,  # Filter to our list
+            skip_errors=True,
+        )
+
+        elapsed = time.time() - start_time
+
+        print(f"\n{'=' * 80}")
+        print("Download Complete - SUCCESS!")
+        print(f"{'=' * 80}")
+        print(f"Days succeeded:      {stats['days_succeeded']}")
+        print(f"Days failed:         {stats['days_failed']}")
+        if stats['failed_days']:
+            print(f"Failed days:         {stats['failed_days']}")
+        print(f"Total trades:        {stats['total_trades']:,}")
+        print(f"Unique symbols:      {stats['unique_symbols']}")
+        print(f"Date range:          {stats['date_range'][0]} to {stats['date_range'][1]}")
+        print(f"File size:           {stats['file_size_mb']:.2f} MB")
+        print(f"Elapsed time:        {elapsed:.1f} seconds ({elapsed/60:.1f} minutes)")
+        print(f"{'=' * 80}\n")
+
+        # Compare to full dataset
+        full_file = cache_dir / "202310.parquet"
+        if full_file.exists():
+            full_size = full_file.stat().st_size / 1024 / 1024
+            savings = (1 - stats['file_size_mb'] / full_size) * 100
+            print(f"Comparison to full dataset:")
+            print(f"  Full:     {full_size:.2f} MB (509 symbols)")
+            print(f"  Filtered: {stats['file_size_mb']:.2f} MB ({stats['unique_symbols']} symbols)")
+            print(f"  Savings:  {savings:.1f}%\n")
+
+        print("✓ Filtered October 2023 dataset ready")
+        print(f"✓ File location: {output_file}")
+        print(f"\nNext steps:")
+        print("1. Use this filtered dataset for V1.7 backtester")
+        print("2. Much faster loading and lower memory usage")
+        print("3. Keep full dataset archived for reference")
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"\n{'=' * 80}")
+        print("Download FAILED")
+        print(f"{'=' * 80}")
+        print(f"Error: {e}")
+        print(f"Elapsed time: {elapsed:.1f} seconds")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()

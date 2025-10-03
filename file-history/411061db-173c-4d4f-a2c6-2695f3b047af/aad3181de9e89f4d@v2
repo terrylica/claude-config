@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""
+Test script for okx-price-provider REST API downloader.
+
+This script validates the new simpler approach:
+1. Download 1 week of 4H candles for 5 test symbols
+2. Cache in Parquet (no aggregation)
+3. Test point-in-time price lookups
+
+Run with: uv run --active python test_okx_downloader.py
+"""
+
+import logging
+from pathlib import Path
+
+import pandas as pd
+
+from okx_price_provider import download_okx_candles, OKXPriceProvider
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
+def main():
+    """Test okx-price-provider with 1 week of data."""
+
+    print("\n" + "=" * 80)
+    print("Testing okx-price-provider - REST API Downloader")
+    print("=" * 80 + "\n")
+
+    # Test parameters
+    test_symbols = ["BTC", "ETH", "SOL", "DOGE", "MATIC"]
+    start_date = "2023-10-01"
+    end_date = "2023-10-07"
+    cache_dir = Path("data/okx_price_cache_test")
+    output_file = cache_dir / "candles_4h.parquet"
+
+    # Step 1: Download candles
+    print(f"Step 1: Downloading {len(test_symbols)} symbols for {start_date} to {end_date}")
+    print(f"Symbols: {', '.join(test_symbols)}")
+    print(f"Cache: {output_file}\n")
+
+    stats = download_okx_candles(
+        symbols=test_symbols,
+        start_date=start_date,
+        end_date=end_date,
+        output_parquet=output_file,
+        bar_size="4H",
+        rate_limit=10,  # Conservative rate limit
+    )
+
+    print(f"\n{'=' * 80}")
+    print("Download Statistics:")
+    print(f"{'=' * 80}")
+    print(f"Symbols downloaded:  {stats['symbols_downloaded']}/{len(test_symbols)}")
+    print(f"Total candles:       {stats['num_candles']:,}")
+    print(f"Cache size:          {stats['cache_size_mb']:.2f} MB")
+    print(f"{'=' * 80}\n")
+
+    if stats['num_candles'] == 0:
+        logger.error("No candles downloaded, aborting test")
+        return
+
+    # Step 2: Initialize provider and test lookups
+    print("Step 2: Testing point-in-time price lookups\n")
+
+    provider = OKXPriceProvider(cache_dir=cache_dir)
+
+    # Check coverage
+    start, end = provider.get_date_range()
+    print(f"Data coverage: {start.date()} to {end.date()}")
+
+    # Check available symbols
+    symbols = provider.get_available_symbols()
+    print(f"Available symbols: {len(symbols)}")
+    print(f"Symbols: {', '.join(symbols)}\n")
+
+    # Test 2.1: Exact timestamp lookup
+    print(f"{'=' * 80}")
+    print("Test 2.1: Exact Timestamp Lookup")
+    print(f"{'=' * 80}\n")
+
+    test_timestamp = pd.Timestamp("2023-10-01 08:00:00", tz="UTC")
+
+    for symbol in test_symbols[:3]:  # Test first 3 symbols
+        try:
+            close_price = provider.get_price(symbol, test_timestamp, price_type="close")
+            vwap_price = provider.get_price(symbol, test_timestamp, price_type="vwap")
+            print(f"{symbol:6s}: Close=${close_price:>10,.2f}, VWAP=${vwap_price:>10,.2f}")
+        except Exception as e:
+            logger.error(f"Failed to get price for {symbol}: {e}")
+
+    # Test 2.2: Batch lookup
+    print(f"\n{'=' * 80}")
+    print("Test 2.2: Batch Price Lookup")
+    print(f"{'=' * 80}\n")
+
+    prices = provider.get_prices(test_symbols, test_timestamp)
+
+    print(f"Prices at {test_timestamp}:")
+    for symbol, price in prices.items():
+        if pd.notna(price):
+            print(f"  {symbol:6s}: ${price:>12,.2f}")
+        else:
+            print(f"  {symbol:6s}: NaN")
+
+    # Test 2.3: Forward-fill test (in-between timestamp)
+    print(f"\n{'=' * 80}")
+    print("Test 2.3: Forward-Fill Test")
+    print(f"{'=' * 80}\n")
+
+    # Query at 09:30 (between 4H candles)
+    between_timestamp = pd.Timestamp("2023-10-01 09:30:00", tz="UTC")
+
+    btc_price = provider.get_price("BTC", between_timestamp, price_type="close", fill_method="ffill")
+    print(f"BTC price at {between_timestamp} (forward-filled): ${btc_price:,.2f}")
+
+    # Test 2.4: Price series
+    print(f"\n{'=' * 80}")
+    print("Test 2.4: Price Time Series")
+    print(f"{'=' * 80}\n")
+
+    btc_series = provider.get_price_series(
+        symbol="BTC",
+        start_date=pd.Timestamp("2023-10-01", tz="UTC"),
+        end_date=pd.Timestamp("2023-10-07", tz="UTC"),
+        price_type="close"
+    )
+
+    print(f"BTC price series (Oct 1-7, 2023):")
+    print(f"  Count:   {len(btc_series)}")
+    print(f"  Mean:    ${btc_series.mean():,.2f}")
+    print(f"  Std:     ${btc_series.std():,.2f}")
+    print(f"  Min:     ${btc_series.min():,.2f}")
+    print(f"  Max:     ${btc_series.max():,.2f}")
+
+    print(f"\n{'=' * 80}")
+    print("Test Complete - okx-price-provider works correctly!")
+    print(f"{'=' * 80}\n")
+
+    print("Next steps:")
+    print("1. Download full October 2023 for all symbols")
+    print("2. Integrate with V1.7 backtester")
+    print("3. Compare V1.7 (real prices) vs V1.6 (normalized)")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,129 @@
+name: Enforce Production Code Only
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-whitelist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce production code whitelist
+        run: |
+          set -e
+
+          echo "🔒 WHITELIST ENFORCEMENT: Only production code can merge to main"
+          echo "=================================================================="
+
+          # Get all files changed in this PR
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "✅ No files changed in PR"
+            exit 0
+          fi
+
+          echo "📄 Files in this PR:"
+          echo "$CHANGED_FILES" | sed 's/^/  - /'
+          echo ""
+
+          # Define whitelist patterns (ONLY these are allowed)
+          WHITELIST_PATTERNS=(
+            # Python source code
+            '^ml_feature_set/.*\.py$'
+            '^tests/.*\.py$'
+
+            # Project configuration
+            '^pyproject\.toml$'
+            '^ruff\.toml$'
+            '^\.gitignore$'
+            '^\.gitattributes$'
+
+            # Docker/DevContainer
+            '^\.devcontainer/Dockerfile$'
+            '^\.devcontainer/devcontainer\.json$'
+
+            # CI/CD
+            '^\.github/workflows/.*\.ya?ml$'
+            '^\.github/dependabot\.yml$'
+
+            # Public documentation
+            '^README\.md$'
+            '^migration\.md$'
+            '^LICENSE$'
+            '^docs/.*\.md$'
+
+            # Sample data
+            '^ml_feature_set/sample_data/.*\.(csv|parquet)$'
+
+            # Package metadata (if needed)
+            '^MANIFEST\.in$'
+            '^setup\.py$'
+          )
+
+          # Check each changed file against whitelist
+          BLOCKED_FILES=()
+
+          while IFS= read -r file; do
+            matched=false
+
+            # Check if file matches any whitelist pattern
+            for pattern in "${WHITELIST_PATTERNS[@]}"; do
+              if echo "$file" | grep -qE "$pattern"; then
+                matched=true
+                break
+              fi
+            done
+
+            # If no match found, file is BLOCKED
+            if [ "$matched" = false ]; then
+              BLOCKED_FILES+=("$file")
+            fi
+          done <<< "$CHANGED_FILES"
+
+          # Report results
+          if [ ${#BLOCKED_FILES[@]} -eq 0 ]; then
+            echo "✅ SUCCESS: All files match production code whitelist"
+            echo ""
+            echo "All changed files are allowed to merge to main."
+            exit 0
+          else
+            echo "❌ FAILURE: Non-production files detected in PR"
+            echo ""
+            echo "The following files are NOT in the production code whitelist:"
+            printf '  ❌ %s\n' "${BLOCKED_FILES[@]}"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔒 WHITELIST POLICY: Only production code merges to main"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "✅ ALLOWED file types:"
+            echo "  • Python code:       ml_feature_set/**/*.py, tests/**/*.py"
+            echo "  • Config files:      pyproject.toml, ruff.toml, .gitignore"
+            echo "  • Docker:            .devcontainer/Dockerfile, devcontainer.json"
+            echo "  • CI/CD:             .github/workflows/*.yml"
+            echo "  • Public docs:       README.md, migration.md, docs/**/*.md"
+            echo "  • Sample data:       ml_feature_set/sample_data/**/*.csv"
+            echo ""
+            echo "❌ BLOCKED (everything else):"
+            echo "  • CLAUDE.md          (AI assistant instructions - personal)"
+            echo "  • .cursor/           (IDE configuration - personal)"
+            echo "  • .vscode/           (IDE configuration - personal)"
+            echo "  • .claude/           (Local workspace - personal)"
+            echo "  • *.ipynb            (Notebooks - exploration only)"
+            echo "  • *.local.*          (Local files - not for production)"
+            echo "  • Any other files    (Default deny policy)"
+            echo ""
+            echo "💡 To merge these files:"
+            echo "  1. Remove them from this PR, OR"
+            echo "  2. If they ARE production code, update the whitelist in:"
+            echo "     .github/workflows/enforce-production-only.yml"
+            echo ""
+            exit 1
+          fi

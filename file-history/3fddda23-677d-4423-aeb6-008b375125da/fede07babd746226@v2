@@ -1,0 +1,293 @@
+"""
+Correlation-based multicollinearity filtering (Round 5)
+
+Iterative correlation filtering:
+1. Calculate correlation matrix
+2. Find pairs with |r| > threshold
+3. Remove feature with higher average |r|
+4. Repeat until no pairs exceed threshold
+
+SLOs:
+- Correctness: Correlation calculation error < 1e-10 (pandas precision)
+- Availability: >= 2 features for correlation (raises ValueError)
+- Observability: Log every removal with correlation value
+- Maintainability: pandas.DataFrame.corr() only (out-of-box)
+
+Usage:
+    cd /workspace
+    python -m experiments.orthogonality_filtering_20251003.run_correlation_analysis
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+import numpy as np
+import yaml
+
+
+def load_config() -> dict:
+    """Load experiment configuration"""
+    config_path = Path(__file__).parent / "config.yaml"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def load_atoms(atoms_csv: Path) -> pd.DataFrame:
+    """
+    Load full atom dataset
+
+    Args:
+        atoms_csv: Path to atoms_full.csv
+
+    Returns:
+        DataFrame with 89 atom columns
+
+    Raises:
+        FileNotFoundError: If atoms_full.csv not found
+    """
+    if not atoms_csv.exists():
+        raise FileNotFoundError(
+            f"Atom dataset not found: {atoms_csv}\n"
+            f"Run compute_atoms.py first"
+        )
+
+    df = pd.read_csv(atoms_csv, index_col=0, parse_dates=True)
+    print(f"Loaded {len(df)} rows × {len(df.columns)} atom columns")
+
+    return df
+
+
+def find_high_correlation_pairs(
+    corr_matrix: pd.DataFrame,
+    threshold: float
+) -> list[tuple[str, str, float]]:
+    """
+    Find feature pairs with |r| > threshold
+
+    Args:
+        corr_matrix: Correlation matrix (n_features × n_features)
+        threshold: Correlation threshold
+
+    Returns:
+        List of (feature1, feature2, correlation) tuples
+
+    Note:
+        Only upper triangle (avoid duplicates and self-correlation)
+    """
+    pairs = []
+
+    for i in range(len(corr_matrix.columns)):
+        for j in range(i + 1, len(corr_matrix.columns)):
+            feature1 = corr_matrix.columns[i]
+            feature2 = corr_matrix.columns[j]
+            corr = corr_matrix.iloc[i, j]
+
+            if abs(corr) > threshold:
+                pairs.append((feature1, feature2, corr))
+
+    return pairs
+
+
+def select_feature_to_remove(
+    X: pd.DataFrame,
+    pairs: list[tuple[str, str, float]]
+) -> tuple[str, float]:
+    """
+    Select feature with highest average |r| to remove
+
+    Args:
+        X: Feature matrix
+        pairs: List of high-correlation pairs
+
+    Returns:
+        (feature_name, avg_correlation)
+    """
+    # Calculate average |r| for each feature
+    feature_corr_sum = {}
+
+    for feature1, feature2, corr in pairs:
+        if feature1 not in feature_corr_sum:
+            feature_corr_sum[feature1] = []
+        if feature2 not in feature_corr_sum:
+            feature_corr_sum[feature2] = []
+
+        feature_corr_sum[feature1].append(abs(corr))
+        feature_corr_sum[feature2].append(abs(corr))
+
+    # Find feature with highest average |r|
+    feature_avg_corr = {
+        feature: np.mean(corrs)
+        for feature, corrs in feature_corr_sum.items()
+    }
+
+    remove_feature = max(feature_avg_corr, key=feature_avg_corr.get)
+    avg_corr = feature_avg_corr[remove_feature]
+
+    return remove_feature, avg_corr
+
+
+def filter_correlation_iterative(
+    atoms_df: pd.DataFrame,
+    threshold: float,
+    removal_log: list
+) -> pd.DataFrame:
+    """
+    Iteratively remove features with |r| > threshold
+
+    Args:
+        atoms_df: Full atom dataset
+        threshold: Correlation threshold
+        removal_log: List to append removal records
+
+    Returns:
+        Filtered DataFrame with all pairwise |r| ≤ threshold
+
+    Raises:
+        ValueError: If < 2 features (SLO: availability)
+    """
+    X = atoms_df.copy()
+    iteration = 0
+
+    print(f"\nCorrelation threshold: {threshold}")
+    print(f"Initial features: {len(X.columns)}")
+
+    while True:
+        iteration += 1
+
+        # SLO: Availability
+        if len(X.columns) < 2:
+            raise ValueError(
+                f"Insufficient features: {len(X.columns)} < 2 "
+                f"(SLO: availability)"
+            )
+
+        # Calculate correlation matrix (out-of-box pandas)
+        corr_matrix = X.corr()
+
+        # Find high-correlation pairs
+        pairs = find_high_correlation_pairs(corr_matrix, threshold)
+
+        # Check if done
+        if len(pairs) == 0:
+            print(f"\n✓ Converged after {iteration - 1} removals")
+            print(f"  Final features: {len(X.columns)}")
+            print(f"  Max pairwise |r|: {corr_matrix.abs().values[np.triu_indices_from(corr_matrix.values, k=1)].max():.4f}")
+            break
+
+        # Select feature to remove
+        remove_feature, avg_corr = select_feature_to_remove(X, pairs)
+
+        print(f"  Iteration {iteration}: Remove '{remove_feature}' (avg |r|={avg_corr:.4f}, {len(pairs)} pairs)")
+
+        removal_log.append({
+            'threshold': threshold,
+            'iteration': iteration,
+            'feature': remove_feature,
+            'avg_correlation': avg_corr,
+            'high_corr_pairs': len(pairs)
+        })
+
+        X = X.drop(columns=[remove_feature])
+
+    return X
+
+
+def run_correlation_round(
+    atoms_df: pd.DataFrame,
+    threshold: float,
+    output_dir: Path,
+    metrics_dir: Path
+) -> tuple[list, pd.DataFrame]:
+    """
+    Run single correlation filtering round
+
+    Args:
+        atoms_df: Full atom dataset
+        threshold: Correlation threshold
+        output_dir: Directory for feature lists
+        metrics_dir: Directory for removal logs
+
+    Returns:
+        (removal_log, filtered_df)
+    """
+    print("=" * 80)
+    print(f"Correlation Round: Threshold = {threshold}")
+    print("=" * 80)
+
+    removal_log = []
+
+    # Filter
+    filtered_df = filter_correlation_iterative(atoms_df, threshold, removal_log)
+
+    # Save feature list
+    feature_list_path = output_dir / f"features_corr_{threshold}.txt"
+    with open(feature_list_path, 'w') as f:
+        for feature in filtered_df.columns:
+            f.write(f"{feature}\n")
+
+    print(f"\n✓ Saved feature list: {feature_list_path}")
+    print(f"  Features retained: {len(filtered_df.columns)}")
+
+    return removal_log, filtered_df
+
+
+def save_removal_log(removal_log: list, output_path: Path):
+    """
+    Save correlation removal log to CSV
+
+    Args:
+        removal_log: List of removal records
+        output_path: Output CSV path
+    """
+    log_df = pd.DataFrame(removal_log)
+    log_df.to_csv(output_path, index=False)
+
+    print(f"\n✓ Saved removal log: {output_path}")
+    print(f"  Total removals: {len(log_df)}")
+
+
+def main():
+    """Execute correlation filtering rounds"""
+    print("=" * 80)
+    print("Orthogonality Filtering Experiment: Correlation Analysis")
+    print("=" * 80)
+
+    # Load configuration
+    config = load_config()
+    corr_thresholds = config['correlation_thresholds']
+
+    print(f"\nCorrelation thresholds: {corr_thresholds}")
+
+    # Load atom dataset
+    atoms_csv = Path(__file__).parent / config['output']['raw_dir'] / 'atoms_full.csv'
+    atoms_df = load_atoms(atoms_csv)
+
+    # Output directories
+    output_dir = Path(__file__).parent / config['output']['raw_dir']
+    metrics_dir = Path(__file__).parent / config['output']['metrics_dir']
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    # Run all correlation rounds
+    all_removal_logs = []
+
+    for threshold in corr_thresholds:
+        removal_log, filtered_df = run_correlation_round(
+            atoms_df,
+            threshold,
+            output_dir,
+            metrics_dir
+        )
+        all_removal_logs.extend(removal_log)
+
+    # Save combined removal log
+    combined_log_path = metrics_dir / 'corr_removal_log_all.csv'
+    save_removal_log(all_removal_logs, combined_log_path)
+
+    print("\n" + "=" * 80)
+    print("Correlation analysis complete")
+    print("=" * 80)
+
+
+if __name__ == '__main__':
+    main()

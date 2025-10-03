@@ -1,0 +1,562 @@
+#!/usr/bin/env python3
+"""
+Temporal Validation Utilities - SOTA Patterns for Time Series ML
+================================================================
+
+This module provides state-of-the-art temporal validation patterns that prevent
+data leakage and ensure robust out-of-distribution (OOD) performance.
+
+🔒 LEAKAGE PREVENTION PROTOCOL
+------------------------------
+1. **Split-First, Label-Second**:
+   ❌ compute_all_labels → split → train  (LEAKAGE!)
+   ✅ split → label(train) w/ train-only → label(test) w/ test-only → train
+
+2. **Boundary Rule**:
+   - Train [t0,t1]: labels may use ≤ t1; fit sees ≤ t1
+   - Test  (t1,t2]: labels may use ≤ t2; prepare/score sees ≤ t1; no access > t1
+   - No cross-window contamination
+
+3. **Future Usage**:
+   ✅ future→LABELS within split (e.g., y[t]=x[t+1])
+   ❌ future→FEATURES (e.g., X[t]=x[t+1])
+
+4. **Labeling Across Splits**:
+   ❌ compute labels before split
+   ✅ compute labels per split
+
+5. **Triple-Barrier / Meta-Labeling**:
+   ✅ allowed per split using its own future only
+
+🔁 WALK-FORWARD VALIDATION
+--------------------------
+For train=[t0,t1], test=(t1,t2]: fit → freeze → score → roll
+
+⚙️ TUNING
+---------
+Nested CV inside current train window (inner loop); test untouched
+
+📚 SOTA LIBRARIES USED
+---------------------
+- sklearn.model_selection.TimeSeriesSplit (consistent temporal CV)
+- sklearn.pipeline.Pipeline (prevents fit/transform leakage)
+- sktime (specialized time series CV utilities)
+- MLflow (experiment tracking and model registry)
+
+Author: ML Feature Experiments Team
+Date: 2025-10-01
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Dict, List, Tuple, Optional, Callable, Any, Union
+from dataclasses import dataclass
+from pathlib import Path
+import warnings
+
+# Core SOTA libraries
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import Pipeline
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# Optional advanced libraries
+try:
+    from sktime.forecasting.model_selection import (
+        temporal_train_test_split,
+        SlidingWindowSplitter,
+        ExpandingWindowSplitter
+    )
+    SKTIME_AVAILABLE = True
+except ImportError:
+    SKTIME_AVAILABLE = False
+    warnings.warn("sktime not available - advanced CV splitters disabled")
+
+try:
+    import mlflow
+    import mlflow.sklearn
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    warnings.warn("MLflow not available - experiment tracking disabled")
+
+
+@dataclass
+class TemporalCVConfig:
+    """Configuration for temporal cross-validation"""
+    n_splits: int = 5
+    test_size: int = 10
+    gap: int = 1  # Gap between train and test to prevent leakage
+    max_train_size: Optional[int] = None  # For expanding window CV
+
+
+class TemporalSafePipeline:
+    """
+    Factory for creating temporal-safe scikit-learn pipelines
+
+    Example:
+        >>> from sklearn.linear_model import Ridge
+        >>> pipeline = TemporalSafePipeline.create_feature_pipeline(
+        ...     scaler=StandardScaler(),
+        ...     feature_transformer=PCA(n_components=3),
+        ...     model=Ridge()
+        ... )
+        >>> # Pipeline automatically prevents leakage in CV
+        >>> cv = TimeSeriesSplit(n_splits=5)
+        >>> scores = cross_val_score(pipeline, X, y, cv=cv)
+    """
+
+    @staticmethod
+    def create_feature_pipeline(
+        scaler: Optional[TransformerMixin] = None,
+        feature_transformer: Optional[TransformerMixin] = None,
+        model: Optional[BaseEstimator] = None
+    ) -> Pipeline:
+        """
+        Create a temporal-safe pipeline
+
+        ✅ Pipeline ensures:
+        - Scaler fits on train, transforms test
+        - Feature transformer fits on train, transforms test
+        - Model fits on train, predicts on test
+        - No information leakage across CV folds
+        """
+        steps = []
+
+        if scaler is not None:
+            steps.append(('scaler', scaler))
+
+        if feature_transformer is not None:
+            steps.append(('feature_transformer', feature_transformer))
+
+        if model is not None:
+            steps.append(('model', model))
+
+        return Pipeline(steps)
+
+
+class TemporalFeatureGenerator(BaseEstimator, TransformerMixin):
+    """
+    ✅ TEMPORAL-SAFE: Custom feature generator for use in Pipeline
+
+    This transformer can be used in a Pipeline to ensure that all feature
+    engineering respects temporal boundaries.
+
+    Example:
+        >>> generator = TemporalFeatureGenerator(
+        ...     feature_func=lambda X: pd.DataFrame({
+        ...         'mean': X.mean(axis=1),
+        ...         'std': X.std(axis=1)
+        ...     })
+        ... )
+        >>> pipeline = Pipeline([
+        ...     ('features', generator),
+        ...     ('scaler', StandardScaler()),
+        ...     ('model', Ridge())
+        ... ])
+    """
+
+    def __init__(self, feature_func: Callable[[pd.DataFrame], pd.DataFrame]):
+        """
+        Args:
+            feature_func: Function that takes DataFrame and returns features
+                         Must NOT use future information
+        """
+        self.feature_func = feature_func
+
+    def fit(self, X, y=None):
+        """Fit does nothing - stateless feature generation"""
+        return self
+
+    def transform(self, X):
+        """Apply feature function to X"""
+        return self.feature_func(X)
+
+
+class WalkForwardValidator:
+    """
+    ✅ SOTA Walk-Forward Validation with Temporal Safety
+
+    Implements true walk-forward validation:
+    1. Train on [t0, t1]
+    2. Freeze model
+    3. Test on (t1 + gap, t2]
+    4. Roll window forward
+    5. Repeat
+
+    Example:
+        >>> validator = WalkForwardValidator(
+        ...     cv_config=TemporalCVConfig(n_splits=5, test_size=10, gap=1)
+        ... )
+        >>> results = validator.validate(
+        ...     pipeline=pipeline,
+        ...     X=X_train,
+        ...     y=y_train
+        ... )
+    """
+
+    def __init__(self, cv_config: TemporalCVConfig):
+        self.config = cv_config
+        self.tscv = TimeSeriesSplit(
+            n_splits=cv_config.n_splits,
+            test_size=cv_config.test_size,
+            gap=cv_config.gap,
+            max_train_size=cv_config.max_train_size
+        )
+
+    def validate(
+        self,
+        pipeline: Pipeline,
+        X: Union[np.ndarray, pd.DataFrame],
+        y: Union[np.ndarray, pd.Series],
+        metrics: Optional[List[Callable]] = None
+    ) -> Dict[str, List[float]]:
+        """
+        Run walk-forward validation
+
+        Args:
+            pipeline: Scikit-learn pipeline (temporal-safe)
+            X: Features (must be temporally ordered)
+            y: Target (must be temporally ordered)
+            metrics: List of metric functions (default: [MAE, RMSE, R2])
+
+        Returns:
+            Dictionary of metric names to scores across folds
+        """
+        if metrics is None:
+            metrics = [
+                ('mae', mean_absolute_error),
+                ('rmse', lambda y_true, y_pred: np.sqrt(mean_squared_error(y_true, y_pred))),
+                ('r2', r2_score)
+            ]
+
+        results = {name: [] for name, _ in metrics}
+        fold_indices = []
+
+        for fold_idx, (train_idx, test_idx) in enumerate(self.tscv.split(X)):
+            # ✅ TEMPORAL-SAFE: Train/test split respects time
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
+
+            # ✅ Pipeline handles fit/transform correctly
+            pipeline.fit(X_train, y_train)
+            y_pred = pipeline.predict(X_test)
+
+            # Calculate metrics
+            for metric_name, metric_func in metrics:
+                score = metric_func(y_test, y_pred)
+                results[metric_name].append(score)
+
+            fold_indices.append({
+                'fold': fold_idx,
+                'train_start': train_idx[0],
+                'train_end': train_idx[-1],
+                'test_start': test_idx[0],
+                'test_end': test_idx[-1],
+                'gap': test_idx[0] - train_idx[-1] - 1
+            })
+
+        results['fold_indices'] = fold_indices
+        return results
+
+    def validate_with_expanding_window(
+        self,
+        pipeline: Pipeline,
+        X: Union[np.ndarray, pd.DataFrame],
+        y: Union[np.ndarray, pd.Series],
+        min_train_size: int = 50,
+        test_size: int = 10,
+        gap: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Expanding window validation (growing training set)
+
+        ✅ TEMPORAL-SAFE: Training window grows but never includes test future
+        """
+        results = {'mae': [], 'rmse': [], 'r2': [], 'train_sizes': []}
+
+        max_idx = len(X)
+        train_end = min_train_size
+
+        while train_end + gap + test_size <= max_idx:
+            train_idx = np.arange(0, train_end)
+            test_idx = np.arange(train_end + gap, min(train_end + gap + test_size, max_idx))
+
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
+
+            # ✅ Fit on expanding train, test on future
+            pipeline.fit(X_train, y_train)
+            y_pred = pipeline.predict(X_test)
+
+            results['mae'].append(mean_absolute_error(y_test, y_pred))
+            results['rmse'].append(np.sqrt(mean_squared_error(y_test, y_pred)))
+            results['r2'].append(r2_score(y_test, y_pred))
+            results['train_sizes'].append(len(train_idx))
+
+            # Roll forward
+            train_end += test_size
+
+        return results
+
+
+class MLflowTemporalExperiment:
+    """
+    ✅ SOTA MLflow Integration for Temporal Experiments
+
+    Tracks experiments with temporal metadata to ensure reproducibility
+
+    Example:
+        >>> experiment = MLflowTemporalExperiment(
+        ...     experiment_name="microstructure_features",
+        ...     tracking_uri="file:./mlruns"
+        ... )
+        >>> with experiment.start_run(run_name="pca_features"):
+        ...     experiment.log_temporal_cv_results(validator_results)
+        ...     experiment.log_pipeline(pipeline)
+    """
+
+    def __init__(self, experiment_name: str, tracking_uri: Optional[str] = None):
+        if not MLFLOW_AVAILABLE:
+            raise ImportError("MLflow not available. Install with: pip install mlflow")
+
+        self.experiment_name = experiment_name
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+
+        # Create or get experiment
+        try:
+            self.experiment_id = mlflow.create_experiment(experiment_name)
+        except Exception:
+            self.experiment_id = mlflow.get_experiment_by_name(experiment_name).experiment_id
+
+    def start_run(self, run_name: Optional[str] = None):
+        """Start MLflow run with temporal context"""
+        return mlflow.start_run(
+            experiment_id=self.experiment_id,
+            run_name=run_name
+        )
+
+    def log_temporal_cv_results(
+        self,
+        results: Dict[str, List[float]],
+        cv_config: TemporalCVConfig
+    ):
+        """Log temporal CV results with metadata"""
+        # Log CV config
+        mlflow.log_param("cv_n_splits", cv_config.n_splits)
+        mlflow.log_param("cv_test_size", cv_config.test_size)
+        mlflow.log_param("cv_gap", cv_config.gap)
+        mlflow.log_param("cv_type", "TimeSeriesSplit")
+
+        # Log metrics
+        for metric_name, scores in results.items():
+            if metric_name == 'fold_indices':
+                continue
+            mlflow.log_metric(f"{metric_name}_mean", np.mean(scores))
+            mlflow.log_metric(f"{metric_name}_std", np.std(scores))
+            mlflow.log_metric(f"{metric_name}_min", np.min(scores))
+            mlflow.log_metric(f"{metric_name}_max", np.max(scores))
+
+    def log_pipeline(self, pipeline: Pipeline, artifact_path: str = "pipeline"):
+        """Log sklearn pipeline as artifact"""
+        mlflow.sklearn.log_model(pipeline, artifact_path)
+
+    def log_temporal_metadata(
+        self,
+        train_start: str,
+        train_end: str,
+        test_start: str,
+        test_end: str
+    ):
+        """Log temporal boundaries for reproducibility"""
+        mlflow.log_param("train_start", train_start)
+        mlflow.log_param("train_end", train_end)
+        mlflow.log_param("test_start", test_start)
+        mlflow.log_param("test_end", test_end)
+
+
+class TemporalLabelGenerator:
+    """
+    ✅ TEMPORAL-SAFE: Label generation that respects temporal boundaries
+
+    Example:
+        >>> generator = TemporalLabelGenerator()
+        >>> # Generate labels AFTER split
+        >>> y_train = generator.generate_return_labels(X_train, horizon=1)
+        >>> y_test = generator.generate_return_labels(X_test, horizon=1)
+    """
+
+    @staticmethod
+    def generate_return_labels(
+        prices: Union[np.ndarray, pd.Series],
+        horizon: int = 1,
+        log_returns: bool = False
+    ) -> Union[np.ndarray, pd.Series]:
+        """
+        Generate return labels with proper temporal alignment
+
+        ✅ TEMPORAL-SAFE: Uses future within same split only
+        ❌ NEVER call before split - always call separately for train/test
+
+        Args:
+            prices: Price series (from train OR test, never both)
+            horizon: Number of periods ahead for return calculation
+            log_returns: Use log returns instead of simple returns
+
+        Returns:
+            Return labels (will be shorter by horizon)
+        """
+        if isinstance(prices, pd.Series):
+            future_prices = prices.shift(-horizon)
+            if log_returns:
+                returns = np.log(future_prices / prices)
+            else:
+                returns = (future_prices - prices) / prices
+            return returns.iloc[:-horizon]  # Drop last NaN values
+        else:
+            future_prices = np.roll(prices, -horizon)
+            if log_returns:
+                returns = np.log(future_prices / prices)
+            else:
+                returns = (future_prices - prices) / prices
+            return returns[:-horizon]  # Drop last NaN values
+
+    @staticmethod
+    def generate_triple_barrier_labels(
+        prices: Union[np.ndarray, pd.Series],
+        upper_barrier: float = 0.02,
+        lower_barrier: float = -0.02,
+        max_horizon: int = 10
+    ) -> Union[np.ndarray, pd.Series]:
+        """
+        ✅ TEMPORAL-SAFE: Triple-barrier labels per split
+
+        ❌ NEVER call before split - always call separately for train/test
+
+        Args:
+            prices: Price series (from train OR test, never both)
+            upper_barrier: Upper profit target (e.g., 2%)
+            lower_barrier: Lower stop loss (e.g., -2%)
+            max_horizon: Maximum holding period
+
+        Returns:
+            Labels: 1 (hit upper), -1 (hit lower), 0 (timeout)
+        """
+        labels = np.zeros(len(prices) - max_horizon)
+
+        for i in range(len(labels)):
+            future_prices = prices[i+1:i+max_horizon+1]
+            returns = (future_prices - prices[i]) / prices[i]
+
+            # Find first barrier hit
+            upper_hit = np.where(returns >= upper_barrier)[0]
+            lower_hit = np.where(returns <= lower_barrier)[0]
+
+            if len(upper_hit) > 0 and (len(lower_hit) == 0 or upper_hit[0] < lower_hit[0]):
+                labels[i] = 1  # Hit upper first
+            elif len(lower_hit) > 0:
+                labels[i] = -1  # Hit lower first
+            else:
+                labels[i] = 0  # Timeout
+
+        return labels
+
+
+# ============================================================================
+# DEMO: Complete Temporal-Safe Workflow
+# ============================================================================
+
+def demo_temporal_safe_workflow():
+    """
+    Demonstrates complete temporal-safe ML workflow
+
+    ✅ Shows correct split → label → fit → validate pattern
+    """
+    print("=" * 80)
+    print("🔒 TEMPORAL-SAFE ML WORKFLOW DEMO")
+    print("=" * 80)
+
+    # Generate synthetic time series data
+    np.random.seed(42)
+    n_samples = 200
+    X = np.cumsum(np.random.randn(n_samples, 5), axis=0)  # 5 features
+    prices = 100 + np.cumsum(np.random.randn(n_samples) * 0.5)
+
+    print(f"📊 Generated {n_samples} samples with 5 features")
+
+    # ✅ STEP 1: Split first (temporal train/test split)
+    split_point = int(0.8 * n_samples)
+    X_train, X_test = X[:split_point], X[split_point:]
+    prices_train, prices_test = prices[:split_point], prices[split_point:]
+
+    print(f"✅ Split: Train={len(X_train)}, Test={len(X_test)}")
+
+    # ✅ STEP 2: Label second (using only respective split data)
+    label_gen = TemporalLabelGenerator()
+    y_train = label_gen.generate_return_labels(prices_train, horizon=1)
+    y_test = label_gen.generate_return_labels(prices_test, horizon=1)
+
+    # Align features with labels (drop last sample due to horizon)
+    X_train = X_train[:len(y_train)]
+    X_test = X_test[:len(y_test)]
+
+    print(f"✅ Labels: Train={len(y_train)}, Test={len(y_test)}")
+
+    # ✅ STEP 3: Create temporal-safe pipeline
+    pipeline = TemporalSafePipeline.create_feature_pipeline(
+        scaler=StandardScaler(),
+        feature_transformer=PCA(n_components=3),
+        model=None  # We'll add model separately for CV
+    )
+
+    from sklearn.linear_model import Ridge
+    full_pipeline = Pipeline([
+        *pipeline.steps,
+        ('model', Ridge())
+    ])
+
+    print("✅ Created temporal-safe pipeline with StandardScaler → PCA → Ridge")
+
+    # ✅ STEP 4: Walk-forward validation
+    cv_config = TemporalCVConfig(n_splits=5, test_size=10, gap=1)
+    validator = WalkForwardValidator(cv_config)
+
+    print("\n🔄 Running walk-forward validation...")
+    results = validator.validate(full_pipeline, X_train, y_train)
+
+    print("\n📊 Validation Results:")
+    for metric, scores in results.items():
+        if metric != 'fold_indices':
+            print(f"   {metric.upper()}: {np.mean(scores):.4f} ± {np.std(scores):.4f}")
+
+    # ✅ STEP 5: Final test on held-out data
+    full_pipeline.fit(X_train, y_train)
+    y_pred_test = full_pipeline.predict(X_test)
+    test_mae = mean_absolute_error(y_test, y_pred_test)
+
+    print(f"\n🎯 Final Test MAE: {test_mae:.4f}")
+
+    # ✅ STEP 6: MLflow tracking (optional)
+    if MLFLOW_AVAILABLE:
+        print("\n📝 Logging to MLflow...")
+        experiment = MLflowTemporalExperiment(
+            experiment_name="temporal_safe_demo",
+            tracking_uri="file:./mlruns"
+        )
+
+        with experiment.start_run(run_name="demo_run"):
+            experiment.log_temporal_cv_results(results, cv_config)
+            experiment.log_pipeline(full_pipeline)
+            mlflow.log_metric("test_mae", test_mae)
+            print("   ✅ Logged to MLflow")
+
+    print("\n" + "=" * 80)
+    print("✅ DEMO COMPLETE - All temporal boundaries respected")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    demo_temporal_safe_workflow()

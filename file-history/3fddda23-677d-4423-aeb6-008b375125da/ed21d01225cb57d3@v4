@@ -1,0 +1,609 @@
+"""
+Layer B: Trend/Volatility Baseline Features
+
+This module implements baseline trend/vol atoms using:
+- statsmodels: STL decomposition, rolling stats
+- arch: GARCH volatility, realized measures
+- mlforecast: Lags, rolling aggregations, EWM
+
+Lookback: 5-250 bars (depends on indicator period)
+Orthogonalization: Regress on Layer A (OLS residuals)
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, List
+from ml_feature_set.atoms.library import AtomSpec
+import warnings
+warnings.filterwarnings('ignore')  # Suppress statsmodels/arch warnings
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _safe_compute(func, *args, **kwargs):
+    """Execute function with try/except, return NaN on failure"""
+    try:
+        return func(*args, **kwargs)
+    except Exception:
+        return np.nan
+
+
+# =============================================================================
+# Price/Returns Lags & Derived
+# =============================================================================
+
+def _returns(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Simple returns (pct_change)"""
+    return df['close'].pct_change()
+
+
+def _returns_lag(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Lagged returns"""
+    lag = params.get('lag', 1)
+    returns = df['close'].pct_change()
+    return returns.shift(lag)
+
+
+def _close_lag(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Lagged close price"""
+    lag = params.get('lag', 1)
+    return df['close'].shift(lag)
+
+
+def _volume_lag(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Lagged volume"""
+    lag = params.get('lag', 1)
+    return df['volume'].shift(lag)
+
+
+# =============================================================================
+# Rolling Statistics (pandas-based, fast)
+# =============================================================================
+
+def _rolling_mean(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling mean"""
+    window = params.get('window', 20)
+    col = params.get('col', 'close')
+    return df[col].rolling(window).mean()
+
+
+def _rolling_std(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling standard deviation"""
+    window = params.get('window', 20)
+    col = params.get('col', 'close')
+    return df[col].rolling(window).std()
+
+
+def _rolling_min(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling minimum"""
+    window = params.get('window', 20)
+    col = params.get('col', 'close')
+    return df[col].rolling(window).min()
+
+
+def _rolling_max(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling maximum"""
+    window = params.get('window', 20)
+    col = params.get('col', 'close')
+    return df[col].rolling(window).max()
+
+
+def _rolling_median(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling median"""
+    window = params.get('window', 20)
+    col = params.get('col', 'close')
+    return df[col].rolling(window).median()
+
+
+def _rolling_skew(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling skewness"""
+    window = params.get('window', 20)
+    returns = df['close'].pct_change()
+    return returns.rolling(window).skew()
+
+
+def _rolling_kurt(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling kurtosis"""
+    window = params.get('window', 20)
+    returns = df['close'].pct_change()
+    return returns.rolling(window).kurt()
+
+
+# =============================================================================
+# Expanding Statistics
+# =============================================================================
+
+def _expanding_mean(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Expanding mean (walk-forward cumulative)"""
+    return df['close'].expanding().mean()
+
+
+def _expanding_std(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Expanding standard deviation"""
+    return df['close'].expanding().std()
+
+
+def _expanding_min(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Expanding minimum"""
+    return df['close'].expanding().min()
+
+
+def _expanding_max(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Expanding maximum"""
+    return df['close'].expanding().max()
+
+
+# =============================================================================
+# EWM (Exponentially Weighted)
+# =============================================================================
+
+def _ewm_mean(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Exponentially weighted mean"""
+    span = params.get('span', 20)
+    col = params.get('col', 'close')
+    return df[col].ewm(span=span).mean()
+
+
+def _ewm_std(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Exponentially weighted standard deviation"""
+    span = params.get('span', 20)
+    col = params.get('col', 'close')
+    return df[col].ewm(span=span).std()
+
+
+# =============================================================================
+# Derived Features (% from MA, Z-score)
+# =============================================================================
+
+def _pct_from_ma(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Percent deviation from moving average"""
+    window = params.get('window', 20)
+    ma = df['close'].rolling(window).mean()
+    return (df['close'] - ma) / ma
+
+
+def _z_score(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Rolling z-score (standardized price)"""
+    window = params.get('window', 20)
+    ma = df['close'].rolling(window).mean()
+    std = df['close'].rolling(window).std()
+    return (df['close'] - ma) / std.replace(0, np.nan)  # Avoid division by zero
+
+
+# =============================================================================
+# STL Decomposition (statsmodels)
+# =============================================================================
+
+def _stl_trend(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """STL decomposition: trend component"""
+    try:
+        from statsmodels.tsa.seasonal import STL
+    except ImportError:
+        raise ImportError("statsmodels required: pip install statsmodels")
+
+    seasonal = params.get('seasonal', 7)
+    trend = params.get('trend', 21)
+
+    try:
+        # Ensure proper frequency is set on the index
+        close_series = df['close'].copy()
+        if close_series.index.freq is None:
+            close_series.index.freq = pd.infer_freq(close_series.index)
+
+        stl = STL(close_series, seasonal=seasonal, trend=trend, period=seasonal)
+        result = stl.fit()
+        return pd.Series(result.trend, index=df.index)
+    except Exception as e:
+        # STL can fail on short/unstable data
+        import logging
+        logging.warning(f"STL decomposition failed: {str(e)}")
+        return pd.Series(np.full(len(df), np.nan), index=df.index)
+
+
+def _stl_seasonal(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """STL decomposition: seasonal component"""
+    try:
+        from statsmodels.tsa.seasonal import STL
+    except ImportError:
+        raise ImportError("statsmodels required: pip install statsmodels")
+
+    seasonal = params.get('seasonal', 7)
+    trend = params.get('trend', 21)
+
+    try:
+        # Ensure proper frequency is set on the index
+        close_series = df['close'].copy()
+        if close_series.index.freq is None:
+            close_series.index.freq = pd.infer_freq(close_series.index)
+
+        stl = STL(close_series, seasonal=seasonal, trend=trend, period=seasonal)
+        result = stl.fit()
+        return pd.Series(result.seasonal, index=df.index)
+    except Exception as e:
+        import logging
+        logging.warning(f"STL decomposition failed: {str(e)}")
+        return pd.Series(np.full(len(df), np.nan), index=df.index)
+
+
+def _stl_resid(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """STL decomposition: residual component"""
+    try:
+        from statsmodels.tsa.seasonal import STL
+    except ImportError:
+        raise ImportError("statsmodels required: pip install statsmodels")
+
+    seasonal = params.get('seasonal', 7)
+    trend = params.get('trend', 21)
+
+    try:
+        # Ensure proper frequency is set on the index
+        close_series = df['close'].copy()
+        if close_series.index.freq is None:
+            close_series.index.freq = pd.infer_freq(close_series.index)
+
+        stl = STL(close_series, seasonal=seasonal, trend=trend, period=seasonal)
+        result = stl.fit()
+        return pd.Series(result.resid, index=df.index)
+    except Exception as e:
+        import logging
+        logging.warning(f"STL decomposition failed: {str(e)}")
+        return pd.Series(np.full(len(df), np.nan), index=df.index)
+
+
+# =============================================================================
+# Realized Volatility (arch-inspired, pandas-only for speed)
+# =============================================================================
+
+def _realized_vol(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Realized volatility (sum of squared returns)"""
+    window = params.get('window', 20)
+    returns = df['close'].pct_change()
+    return np.sqrt((returns ** 2).rolling(window).sum())
+
+
+def _parkinson_vol(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Parkinson volatility estimator (high-low range-based)"""
+    window = params.get('window', 20)
+    # Parkinson formula: sqrt((1/(4*ln(2))) * mean(ln(H/L)^2))
+    hl_ratio = np.log(df['high'] / df['low'])
+    return np.sqrt((hl_ratio ** 2).rolling(window).mean() / (4 * np.log(2)))
+
+
+# =============================================================================
+# Autocorrelation Features
+# =============================================================================
+
+def _returns_acf_lag_1(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    """Autocorrelation of returns at lag 1 (rolling window)"""
+    window = params.get('window', 50)
+    returns = df['close'].pct_change()
+
+    def acf_lag1(x):
+        if len(x) < 2:
+            return np.nan
+        return np.corrcoef(x[:-1], x[1:])[0, 1] if len(x) > 1 else np.nan
+
+    return returns.rolling(window).apply(acf_lag1, raw=True)
+
+
+# =============================================================================
+# Atom Specifications
+# =============================================================================
+
+def get_atoms() -> List[AtomSpec]:
+    """
+    Get all Layer B (baseline) atoms
+
+    Returns:
+        List of AtomSpec objects for trend/volatility baseline features
+    """
+    atoms = []
+
+    # === Returns & Lags ===
+    atoms.append(AtomSpec(
+        name='returns',
+        layer='B',
+        library='pandas',
+        formula=_returns,
+        lookback=1,
+        dependencies=[],
+        status='production',
+        description='Simple returns (pct_change)'
+    ))
+
+    for lag in [1, 2, 3, 5, 10, 20]:
+        atoms.append(AtomSpec(
+            name=f'returns_lag_{lag}',
+            layer='B',
+            library='pandas',
+            formula=_returns_lag,
+            lookback=lag + 1,
+            dependencies=[],
+            status='production',
+            description=f'Returns lagged {lag} periods',
+            params={'lag': lag}
+        ))
+
+    for lag in [1, 2, 3, 5, 10]:
+        atoms.append(AtomSpec(
+            name=f'close_lag_{lag}',
+            layer='B',
+            library='pandas',
+            formula=_close_lag,
+            lookback=lag,
+            dependencies=[],
+            status='production',
+            description=f'Close price lagged {lag} periods',
+            params={'lag': lag}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'volume_lag_{lag}',
+            layer='B',
+            library='pandas',
+            formula=_volume_lag,
+            lookback=lag,
+            dependencies=[],
+            status='production',
+            description=f'Volume lagged {lag} periods',
+            params={'lag': lag}
+        ))
+
+    # === Rolling Statistics (close) ===
+    for window in [5, 10, 20, 50, 100]:
+        atoms.append(AtomSpec(
+            name=f'rolling_mean_{window}',
+            layer='B',
+            library='pandas',
+            formula=_rolling_mean,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling mean (window={window})',
+            params={'window': window, 'col': 'close'}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'rolling_std_{window}',
+            layer='B',
+            library='pandas',
+            formula=_rolling_std,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling std (window={window})',
+            params={'window': window, 'col': 'close'}
+        ))
+
+    for window in [20, 50, 100]:
+        atoms.append(AtomSpec(
+            name=f'rolling_min_{window}',
+            layer='B',
+            library='pandas',
+            formula=_rolling_min,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling min (window={window})',
+            params={'window': window, 'col': 'close'}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'rolling_max_{window}',
+            layer='B',
+            library='pandas',
+            formula=_rolling_max,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling max (window={window})',
+            params={'window': window, 'col': 'close'}
+        ))
+
+    for window in [20, 50]:
+        atoms.append(AtomSpec(
+            name=f'rolling_skew_{window}',
+            layer='B',
+            library='pandas',
+            formula=_rolling_skew,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling skewness (window={window})',
+            params={'window': window}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'rolling_kurt_{window}',
+            layer='B',
+            library='pandas',
+            formula=_rolling_kurt,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling kurtosis (window={window})',
+            params={'window': window}
+        ))
+
+    # === Expanding Statistics ===
+    atoms.extend([
+        AtomSpec(
+            name='expanding_mean',
+            layer='B',
+            library='pandas',
+            formula=_expanding_mean,
+            lookback=1,
+            dependencies=[],
+            status='production',
+            description='Expanding mean (walk-forward cumulative)'
+        ),
+        AtomSpec(
+            name='expanding_std',
+            layer='B',
+            library='pandas',
+            formula=_expanding_std,
+            lookback=2,
+            dependencies=[],
+            status='production',
+            description='Expanding standard deviation'
+        ),
+        AtomSpec(
+            name='expanding_min',
+            layer='B',
+            library='pandas',
+            formula=_expanding_min,
+            lookback=1,
+            dependencies=[],
+            status='production',
+            description='Expanding minimum'
+        ),
+        AtomSpec(
+            name='expanding_max',
+            layer='B',
+            library='pandas',
+            formula=_expanding_max,
+            lookback=1,
+            dependencies=[],
+            status='production',
+            description='Expanding maximum'
+        ),
+    ])
+
+    # === EWM ===
+    for span in [5, 10, 20, 50]:
+        atoms.append(AtomSpec(
+            name=f'ewm_mean_{span}',
+            layer='B',
+            library='pandas',
+            formula=_ewm_mean,
+            lookback=span,
+            dependencies=[],
+            status='production',
+            description=f'EWM mean (span={span})',
+            params={'span': span, 'col': 'close'}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'ewm_std_{span}',
+            layer='B',
+            library='pandas',
+            formula=_ewm_std,
+            lookback=span,
+            dependencies=[],
+            status='production',
+            description=f'EWM std (span={span})',
+            params={'span': span, 'col': 'close'}
+        ))
+
+    # === Derived Features ===
+    for window in [10, 20, 50]:
+        atoms.append(AtomSpec(
+            name=f'pct_from_ma_{window}',
+            layer='B',
+            library='pandas',
+            formula=_pct_from_ma,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'% deviation from MA-{window}',
+            params={'window': window}
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'z_score_{window}',
+            layer='B',
+            library='pandas',
+            formula=_z_score,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Rolling z-score (window={window})',
+            params={'window': window}
+        ))
+
+    # === STL Decomposition ===
+    # WARNING: STL is NON-CAUSAL (uses future data for LOESS smoothing)
+    # Use only for offline analysis, NOT online prediction
+    for seasonal, trend in [(7, 21), (13, 31)]:  # seasonal and trend must both be odd, trend > seasonal
+        atoms.append(AtomSpec(
+            name=f'stl_trend_s{seasonal}_t{trend}',
+            layer='B',
+            library='statsmodels',
+            formula=_stl_trend,
+            lookback=max(seasonal, trend) + 10,
+            dependencies=['statsmodels'],
+            status='offline_only',  # NON-CAUSAL: Uses future data for smoothing
+            description=f'STL trend (seasonal={seasonal}, trend={trend}) - NON-CAUSAL (offline only)',
+            params={'seasonal': seasonal, 'trend': trend},
+            causal=False  # CRITICAL: STL uses future data for LOESS smoothing
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'stl_seasonal_s{seasonal}_t{trend}',
+            layer='B',
+            library='statsmodels',
+            formula=_stl_seasonal,
+            lookback=max(seasonal, trend) + 10,
+            dependencies=['statsmodels'],
+            status='offline_only',  # NON-CAUSAL: Uses future data for smoothing
+            description=f'STL seasonal (seasonal={seasonal}, trend={trend}) - NON-CAUSAL (offline only)',
+            params={'seasonal': seasonal, 'trend': trend},
+            causal=False  # CRITICAL: STL uses future data for LOESS smoothing
+        ))
+
+        atoms.append(AtomSpec(
+            name=f'stl_resid_s{seasonal}_t{trend}',
+            layer='B',
+            library='statsmodels',
+            formula=_stl_resid,
+            lookback=max(seasonal, trend) + 10,
+            dependencies=['statsmodels'],
+            status='offline_only',  # NON-CAUSAL: Uses future data for smoothing
+            description=f'STL residual (seasonal={seasonal}, trend={trend}) - NON-CAUSAL (offline only)',
+            params={'seasonal': seasonal, 'trend': trend},
+            causal=False  # CRITICAL: STL uses future data for LOESS smoothing
+        ))
+
+    # === Realized Volatility ===
+    for window in [10, 20, 50]:
+        atoms.append(AtomSpec(
+            name=f'realized_vol_{window}',
+            layer='B',
+            library='pandas',
+            formula=_realized_vol,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Realized volatility (window={window})',
+            params={'window': window}
+        ))
+
+    for window in [10, 20]:
+        atoms.append(AtomSpec(
+            name=f'parkinson_vol_{window}',
+            layer='B',
+            library='pandas',
+            formula=_parkinson_vol,
+            lookback=window,
+            dependencies=[],
+            status='production',
+            description=f'Parkinson volatility (window={window})',
+            params={'window': window}
+        ))
+
+    # === Autocorrelation ===
+    atoms.append(AtomSpec(
+        name='returns_acf_lag_1',
+        layer='B',
+        library='pandas',
+        formula=_returns_acf_lag_1,
+        lookback=50,
+        dependencies=[],
+        status='production',
+        description='Returns autocorrelation at lag 1 (rolling window=50)',
+        params={'window': 50}
+    ))
+
+    return atoms

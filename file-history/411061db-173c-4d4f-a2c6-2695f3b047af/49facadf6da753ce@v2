@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""
+Analyze symbol liquidity to determine viable candidates for funding rate arbitrage.
+"""
+
+import pandas as pd
+from pathlib import Path
+
+# Load full dataset
+print("Loading full dataset...")
+df = pd.read_parquet('data/okx_ticks/202310.parquet')
+
+# Calculate volume statistics per symbol
+print("Calculating volume statistics...")
+symbol_stats = df.groupby('symbol').agg({
+    'trade_value': 'sum',
+    'size': 'sum',
+    'timestamp': 'count'
+}).rename(columns={'timestamp': 'num_trades'})
+
+symbol_stats['avg_daily_volume'] = symbol_stats['trade_value'] / 31  # October has 31 days
+symbol_stats['avg_trade_size'] = symbol_stats['trade_value'] / symbol_stats['num_trades']
+
+# Sort by daily volume
+symbol_stats = symbol_stats.sort_values('avg_daily_volume', ascending=False)
+
+print('\n' + '=' * 90)
+print('Symbol Statistics (Top 100 by daily volume):')
+print('=' * 90)
+print(f'{"Rank":>4} {"Symbol":15} {"Daily Volume":>15} {"Total Trades":>12} {"Avg Trade $":>12}')
+print('-' * 90)
+
+for i, (symbol, row) in enumerate(symbol_stats.head(100).iterrows(), 1):
+    daily_vol = row['avg_daily_volume']
+    num_trades = int(row['num_trades'])
+    avg_trade = row['avg_trade_size']
+    print(f'{i:4d} {symbol:15s} ${daily_vol:13,.0f} {num_trades:12,d} ${avg_trade:11,.2f}')
+
+# Find reasonable cutoffs
+print(f'\n{"=" * 90}')
+print('Recommended Cutoffs (by minimum daily volume):')
+print('=' * 90)
+
+cutoff_results = []
+for threshold in [10_000_000, 5_000_000, 1_000_000, 500_000, 100_000]:
+    filtered = symbol_stats[symbol_stats['avg_daily_volume'] >= threshold]
+    count = len(filtered)
+    total_volume = filtered['trade_value'].sum()
+    pct_volume = total_volume / symbol_stats['trade_value'].sum() * 100
+    pct_trades = filtered['num_trades'].sum() / symbol_stats['num_trades'].sum() * 100
+
+    cutoff_results.append({
+        'threshold': threshold,
+        'symbols': count,
+        'pct_volume': pct_volume,
+        'pct_trades': pct_trades,
+    })
+
+    print(f'≥${threshold:>9,}/day: {count:3d} symbols ({pct_volume:5.1f}% vol, {pct_trades:5.1f}% trades)')
+
+# Recommendations
+print(f'\n{"=" * 90}')
+print('Recommendations for Funding Rate Arbitrage:')
+print('=' * 90)
+
+# Find sweet spot: 80-90% of volume with minimal symbols
+for result in cutoff_results:
+    if 85 <= result['pct_volume'] <= 95:
+        threshold = result['threshold']
+        count = result['symbols']
+        print(f'\n✓ RECOMMENDED: Download top {count} symbols (≥${threshold:,}/day volume)')
+        print(f'  • Covers {result["pct_volume"]:.1f}% of trading volume')
+        print(f'  • Covers {result["pct_trades"]:.1f}% of all trades')
+        print(f'  • Provides large pool for dynamic selection')
+        print(f'  • Estimated file size: ~{count / 509 * 801:.0f} MB (vs 801 MB for all)')
+
+        # Show which symbols would be included
+        viable_symbols = symbol_stats[symbol_stats['avg_daily_volume'] >= threshold].index.tolist()
+        print(f'\n  Included symbols:')
+        for i in range(0, min(len(viable_symbols), 50), 10):
+            batch = viable_symbols[i:i+10]
+            print(f'    {", ".join(batch)}')
+        if len(viable_symbols) > 50:
+            print(f'    ... and {len(viable_symbols) - 50} more')
+
+        # Save to file
+        output_file = Path('data/okx_ticks/viable_symbols.txt')
+        output_file.write_text('\n'.join(viable_symbols))
+        print(f'\n  Saved symbol list to: {output_file}')
+
+        break
+
+print(f'\n{"=" * 90}')
+print('Key Insight:')
+print('=' * 90)
+print('For dynamic top-5 selection every 4-8 hours, you need a LARGE candidate pool.')
+print('Downloading 100-150 most liquid symbols gives you:')
+print('  • Sufficient diversity for funding rate opportunities')
+print('  • Realistic execution (these symbols have liquidity)')
+print('  • ~70-80% storage savings vs downloading all 509 symbols')
+print('=' * 90)

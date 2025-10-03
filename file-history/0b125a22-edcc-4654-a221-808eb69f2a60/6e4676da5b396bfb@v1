@@ -1,0 +1,443 @@
+# Range Bar Construction from Dukascopy Tick Data
+**Design Document** | Ultra-concise implementation strategy
+
+---
+
+## Core Challenge: Data Structure Mismatch
+
+### Binance aggTrades (Current)
+```rust
+struct AggTrade {
+    price: FixedPoint,         // Single price per trade
+    volume: FixedPoint,        // Actual quantity traded
+    is_buyer_maker: bool,      // Direction indicator
+    timestamp: i64,            // Microseconds
+}
+```
+**Semantic:** Actual executed trades with real volume
+
+### Dukascopy Ticks (New)
+```rust
+struct DukascopyTick {
+    ask: f64,                  // TWO prices (not one!)
+    bid: f64,                  
+    ask_volume: f32,           // Available liquidity (not traded)
+    bid_volume: f32,
+    timestamp: i64,            // Milliseconds
+}
+```
+**Semantic:** Market maker quotes with available liquidity
+
+---
+
+## Solution: Mid-Price Synthetic Trade
+
+### Conversion Strategy
+
+**Transform Dukascopy tick → Synthetic aggTrade:**
+
+```rust
+fn tick_to_synthetic_trade(tick: &DukascopyTick, id: i64) -> AggTrade {
+    // 1. Calculate mid-price (market consensus price)
+    let mid_price = (tick.ask + tick.bid) / 2.0;
+    
+    // 2. Aggregate liquidity (NOT traded volume)
+    let total_liquidity = tick.ask_volume + tick.bid_volume;
+    
+    // 3. Infer direction from spread asymmetry
+    let is_buyer_maker = tick.bid_volume > tick.ask_volume;
+    
+    AggTrade {
+        agg_trade_id: id,
+        price: FixedPoint::from_f64(mid_price),
+        volume: FixedPoint::from_f64(total_liquidity),
+        first_trade_id: id,
+        last_trade_id: id,
+        timestamp: tick.timestamp * 1000,  // ms → μs
+        is_buyer_maker,
+        is_best_match: None,  // N/A for Dukascopy
+    }
+}
+```
+
+**Why mid-price?**
+- Standard in academic finance (bid-ask midpoint)
+- Represents true market equilibrium
+- Used in all major indices (S&P 500, NASDAQ, etc.)
+- Avoids bias toward bid or ask side
+
+---
+
+## Algorithm Preservation
+
+### Current Rangebar Logic (Unchanged!)
+```rust
+// From processor.rs
+if bar_state.bar.is_breach(
+    trade.price,                    // ← Was aggTrade.price
+    bar_state.upper_threshold,      //    Now: mid-price from tick
+    bar_state.lower_threshold,
+) {
+    // Close bar, start new one
+}
+```
+
+**No changes needed to core algorithm!**
+
+The rangebar algorithm is price-movement based:
+- Compare each "trade" price to bar's OPEN
+- Close when price moves ±threshold from OPEN
+- Works identically with synthetic mid-price trades
+
+---
+
+## Volume Semantics: Critical Distinction
+
+### aggTrades Volume
+```
+volume = sum(actual_quantity_traded)
+Example: 1.5 BTC actually changed hands
+```
+**Interpretation:** Executed transaction volume
+
+### Dukascopy Volume
+```
+volume = bid_volume + ask_volume (available liquidity)
+Example: 2.3 lots available at bid + 1.8 lots at ask = 4.1
+```
+**Interpretation:** Order book depth snapshot
+
+### Handling Strategy
+
+**Option 1: Use liquidity as volume (Forex)**
+```rust
+// For non-zero volume ticks (Forex trades)
+let volume = tick.bid_volume + tick.ask_volume;
+```
+
+**Option 2: Use tick count as volume (Crypto)**
+```rust
+// For zero-volume ticks (quote updates)
+let volume = 1.0;  // Each tick = 1 unit of "activity"
+```
+
+**Option 3: Dual tracking (Recommended)**
+```rust
+struct DukascopyRangeBar {
+    // Standard OHLCV fields
+    volume: FixedPoint,           // Total liquidity seen
+    
+    // Dukascopy-specific
+    tick_count: u32,              // Number of quote updates
+    avg_spread: FixedPoint,       // Mean(ask - bid)
+    avg_bid_liquidity: FixedPoint,
+    avg_ask_liquidity: FixedPoint,
+}
+```
+
+---
+
+## Filtering Strategy
+
+### Zero-Volume Ticks
+
+**Empirical findings:**
+- **Forex:** Non-zero volume = significant quotes/trades
+- **Crypto:** ALL ticks have zero volume (quote updates only)
+
+**Implementation:**
+```rust
+fn should_process_tick(tick: &DukascopyTick, instrument_type: InstrumentType) -> bool {
+    match instrument_type {
+        InstrumentType::Forex => {
+            // Filter zero-volume quote refreshes for Forex
+            tick.bid_volume > 0.0 || tick.ask_volume > 0.0
+        }
+        InstrumentType::Crypto => {
+            // Use all ticks for Crypto (they're all zero-volume)
+            true
+        }
+    }
+}
+```
+
+---
+
+## Streaming Implementation
+
+### Adapter Pattern
+
+```rust
+pub struct DukascopyRangeBarBuilder {
+    processor: RangeBarProcessor,
+    tick_counter: i64,
+    instrument_type: InstrumentType,
+}
+
+impl DukascopyRangeBarBuilder {
+    pub fn process_tick(&mut self, tick: &DukascopyTick) -> Option<RangeBar> {
+        // 1. Filter if needed
+        if !should_process_tick(tick, self.instrument_type) {
+            return None;
+        }
+        
+        // 2. Convert to synthetic trade
+        let synthetic_trade = tick_to_synthetic_trade(tick, self.tick_counter);
+        self.tick_counter += 1;
+        
+        // 3. Use existing processor (ZERO changes to core algorithm!)
+        self.processor.process_single_trade(synthetic_trade).ok()?
+    }
+}
+```
+
+**Key insight:** Adapter pattern preserves 100% of existing rangebar logic!
+
+---
+
+## Spread Dynamics Tracking
+
+### Additional Microstructure (Beyond aggTrades)
+
+Dukascopy data enables spread analysis:
+
+```rust
+impl RangeBar {
+    /// Update spread statistics (Dukascopy-specific)
+    fn update_spread_stats(&mut self, tick: &DukascopyTick) {
+        let spread = tick.ask - tick.bid;
+        
+        // Track spread dynamics during bar
+        self.avg_spread = moving_average(self.avg_spread, spread);
+        self.min_spread = self.min_spread.min(spread);
+        self.max_spread = self.max_spread.max(spread);
+        
+        // Track liquidity asymmetry
+        self.avg_bid_liquidity = moving_average(
+            self.avg_bid_liquidity, 
+            tick.bid_volume
+        );
+        self.avg_ask_liquidity = moving_average(
+            self.avg_ask_liquidity, 
+            tick.ask_volume
+        );
+    }
+}
+```
+
+**Advantage over aggTrades:** Capture bid-ask spread information unavailable in trade data.
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Core Conversion (Minimal)
+```
+src/data/dukascopy/
+├── mod.rs
+├── tick.rs              # DukascopyTick struct
+├── conversion.rs        # tick_to_synthetic_trade()
+└── builder.rs           # DukascopyRangeBarBuilder adapter
+```
+
+**Dependencies:**
+- Use existing `RangeBarProcessor` (zero changes)
+- Convert tick → AggTrade → existing pipeline
+
+### Phase 2: Enhanced Microstructure (Optional)
+```
+src/data/dukascopy/
+└── enhanced_bar.rs      # Spread tracking, liquidity metrics
+```
+
+**Extends RangeBar with:**
+- Spread statistics (avg, min, max)
+- Liquidity asymmetry metrics
+- Order book dynamics
+
+### Phase 3: Performance Optimization (Future)
+```
+src/data/dukascopy/
+└── direct_processor.rs  # Skip AggTrade conversion overhead
+```
+
+**Optimization:**
+- Process mid-price directly (avoid struct conversion)
+- Zero-copy tick parsing
+- SIMD for bulk operations
+
+---
+
+## Validation Strategy
+
+### Cross-Verification Tests
+
+**Test 1: Price Movement Consistency**
+```rust
+// Given same price movements, should produce same bars
+let dukascopy_bars = process_dukascopy_ticks(ticks);
+let synthetic_aggTrades = ticks_to_synthetic_trades(ticks);
+let aggtrade_bars = process_agg_trades(synthetic_aggTrades);
+
+// Range bar boundaries should match (OHLC times)
+assert_eq!(dukascopy_bars.len(), aggtrade_bars.len());
+for (d_bar, a_bar) in dukascopy_bars.iter().zip(aggtrade_bars) {
+    assert_eq!(d_bar.open_time, a_bar.open_time);
+    assert_eq!(d_bar.close_time, a_bar.close_time);
+    assert_approx_eq!(d_bar.open, a_bar.open);  // Mid-price
+}
+```
+
+**Test 2: Threshold Breach Logic**
+```rust
+// Ensure breach detection works correctly with mid-price
+let threshold_bps = 25;
+let builder = DukascopyRangeBarBuilder::new(threshold_bps);
+
+// Create ticks that breach +25 bps from open
+let mut bars = vec![];
+for tick in synthetic_breach_sequence() {
+    if let Some(bar) = builder.process_tick(tick) {
+        bars.push(bar);
+    }
+}
+
+assert_eq!(bars.len(), 1);  // Should close exactly one bar
+assert!(bars[0].is_breach_valid(threshold_bps));
+```
+
+**Test 3: Volume Semantics**
+```rust
+// Verify volume aggregation matches semantic expectation
+let forex_ticks = load_forex_eurusd();
+let crypto_ticks = load_crypto_btcusd();
+
+let forex_bars = process_forex(forex_ticks);
+let crypto_bars = process_crypto(crypto_ticks);
+
+// Forex should sum liquidity
+assert!(forex_bars[0].volume > FixedPoint(0));
+
+// Crypto should use tick count
+assert_eq!(crypto_bars[0].tick_count, expected_tick_count);
+```
+
+---
+
+## Key Decisions Summary
+
+| Aspect | Decision | Rationale |
+|--------|----------|-----------|
+| Price | Mid-price `(bid+ask)/2` | Academic standard, unbiased |
+| Volume | Forex: sum liquidity<br>Crypto: tick count | Semantic match per instrument |
+| Direction | `bid_vol > ask_vol` | Infer from liquidity asymmetry |
+| Filtering | Forex: non-zero only<br>Crypto: all ticks | Empirical tick semantics |
+| Algorithm | **Zero changes** | Adapter pattern preserves logic |
+| Structure | Adapter wrapping existing processor | Minimal implementation, maximal reuse |
+
+---
+
+## Performance Expectations
+
+### Throughput Estimates
+
+**Per-hour processing (single-threaded):**
+```
+Download:        ~50ms  (20KB compressed)
+Decompress:      ~10ms  (LZMA to 100KB)
+Parse ticks:     ~1ms   (5,000 ticks × 20 bytes)
+Convert to mid:  ~0.5ms (arithmetic only)
+Rangebar proc:   ~1ms   (existing algorithm)
+────────────────────────
+Total:           ~63ms per hour
+```
+
+**Parallelization (10 hours):**
+```
+Sequential:  10 hours × 63ms = 630ms
+Parallel:    max(downloads) ≈ 100ms  (10x speedup)
+```
+
+**Memory footprint:**
+```
+Input:  100KB/hour (decompressed ticks)
+Output: ~32 bytes/bar × ~10 bars = 320 bytes
+Ratio:  312:1 compression via range bars
+```
+
+---
+
+## Implementation Checklist
+
+**Conversion Layer:**
+- [ ] `DukascopyTick` struct (bid, ask, volumes, timestamp)
+- [ ] `tick_to_synthetic_trade()` with mid-price calculation
+- [ ] Decimal factor lookup (100000/1000/10 by instrument)
+- [ ] Timestamp conversion (ms → μs)
+
+**Builder Pattern:**
+- [ ] `DukascopyRangeBarBuilder` wrapping `RangeBarProcessor`
+- [ ] `process_tick()` method (filter → convert → process)
+- [ ] Tick counter for synthetic trade IDs
+- [ ] Instrument type configuration
+
+**Filtering:**
+- [ ] Zero-volume filtering for Forex
+- [ ] Pass-through for Crypto (all ticks)
+- [ ] Configurable filter strategies
+
+**Enhanced Tracking (Optional):**
+- [ ] Spread statistics (avg, min, max)
+- [ ] Liquidity metrics (bid/ask asymmetry)
+- [ ] Quote update frequency
+
+**Validation:**
+- [ ] Unit tests: mid-price calculation
+- [ ] Integration tests: threshold breach detection
+- [ ] End-to-end: EURUSD ticks → range bars
+- [ ] Performance benchmark: 10 hours in <200ms
+
+---
+
+## Example Usage
+
+```rust
+use rangebar::data::dukascopy::{DukascopyTick, DukascopyRangeBarBuilder};
+use rangebar::InstrumentType;
+
+// Initialize builder
+let threshold_bps = 25;  // 0.25% range bars
+let mut builder = DukascopyRangeBarBuilder::new(
+    threshold_bps,
+    InstrumentType::Forex,  // Filter zero-volume ticks
+);
+
+// Stream processing
+for tick in tick_stream {
+    // Automatically handles:
+    // - Filtering
+    // - Mid-price calculation
+    // - Conversion to synthetic trade
+    // - Range bar construction
+    if let Some(completed_bar) = builder.process_tick(&tick) {
+        println!("Bar closed: {:?}", completed_bar);
+    }
+}
+
+// Get incomplete bar at end
+if let Some(partial_bar) = builder.get_incomplete_bar() {
+    println!("Partial bar: {:?}", partial_bar);
+}
+```
+
+---
+
+## Conclusion
+
+**Core Insight:** Dukascopy ticks are fundamentally different from aggTrades (quotes vs trades), but the **rangebar algorithm is price-movement based** and works identically with mid-price as synthetic trade price.
+
+**Implementation Strategy:** Adapter pattern preserves 100% of existing rangebar logic while handling data structure conversion at the boundary.
+
+**Result:** Same range bar semantics (±threshold price movement), different volume semantics (liquidity vs trades), enhanced microstructure (spread tracking).
+
+**Estimated Effort:** 4-8 hours implementation, 2-4 hours validation/testing.
