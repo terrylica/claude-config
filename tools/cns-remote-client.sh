@@ -153,21 +153,32 @@ EOF
 )
     
     log "Sending notification: $title - $message"
-    
-    # Try SSH tunnel first (primary method per agent consensus)
+
+    # Dual notification architecture: SSH tunnel + Pushover
+    local tunnel_success=false
+    local pushover_success=false
+
+    # Send via SSH tunnel (for local macOS audio)
     if send_via_tunnel "$message" "$json_payload"; then
         log "✅ Notification sent via SSH tunnel"
-        return 0
+        tunnel_success=true
+    else
+        log "⚠️  SSH tunnel failed"
     fi
-    
-    log "⚠️  SSH tunnel failed, trying fallback services"
-    
-    # Try external service fallback
+
+    # Send via Pushover (always, for mobile notifications)
     if send_via_fallback "$message"; then
-        log "✅ Notification sent via fallback service"
+        log "✅ Notification sent via Pushover"
+        pushover_success=true
+    else
+        log "⚠️  Pushover failed"
+    fi
+
+    # Success if either method worked
+    if [[ "$tunnel_success" == "true" || "$pushover_success" == "true" ]]; then
         return 0
     fi
-    
+
     log "❌ All notification methods failed"
     return 1
 }
