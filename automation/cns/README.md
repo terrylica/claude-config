@@ -1,29 +1,41 @@
 # CNS (Conversation Notification System)
 
-Audio completion notification for Claude Code responses (clipboard currently disabled).
+Audio and Pushover notifications for Claude Code responses with session metadata (clipboard disabled).
 
 ## Architecture Overview
 
-CNS provides audio notifications when Claude Code completes responses, with configurable clipboard functionality.
+CNS provides dual-output notifications when Claude Code completes responses: local audio (afplay + say) and remote Pushover notifications with rich context metadata.
 
-### Current System (CNS Architecture)
-- **Main Script**: `conversation_handler.sh` (207 lines) - Clipboard processing and coordination
-- **Configuration**: `config/cns_config.json` - System settings (clipboard disabled)  
-- **Entry Point**: `cns_hook_entry.sh` - Async hook entry point
-- **CNS Notification**: `cns_notification_hook.sh` - Audio notification with folder name text-to-speech
+### Current System (CNS v2.0.0)
+- **Main Script**: `conversation_handler.sh` (262 lines) - Audio + Pushover notification processing
+- **Configuration**: `config/cns_config.json` - System settings + Pushover credentials (git-based)
+- **Entry Point**: `cns_hook_entry.sh` - Routes local/remote environments
+- **Local Audio**: `cns_notification_hook.sh` - Audio playback with folder name text-to-speech
+- **Remote Client**: `tools/cns-remote-client.sh` - SSH remote notification client
 
 ## Functionality
 
 ### ✅ Active Features
-- **Audio Notification**: Audio file playback with configurable volume when Claude finishes responding
+- **Dual Notifications**: Local audio (macOS) + Pushover (cross-platform)
+- **Session Metadata**: username@hostname, folder, session ID, hook event
+- **Git-based Credentials**: Pushover credentials in cns_config.json (team-shared, zero-setup deployment)
 - **Text-to-Speech**: Folder name announcement with tmux context detection
-- **Volume Control**: Configurable notification volume (affects only CNS audio, not system volume)
-- **Async Processing**: Fire-and-forget background processing for session performance
+- **Volume Control**: Configurable notification volume (local audio only)
+- **Async Processing**: Fire-and-forget background processing (<10ms hook execution)
+- **Cross-platform**: macOS (audio + Pushover), Linux (Pushover only)
+
+### 📱 Pushover Notification Format
+```
+Title: CNS: terryli@Terrys-MacBook-Pro
+Message:
+  📁 ml-feature-set
+  ✅ Analysis complete (first 200 chars of response)
+
+  🆔 b31bc615 | Stop
+```
 
 ### ❌ Currently Disabled Features
-- **Clipboard Tracking**: Currently disabled (`clipboard_enabled: false` in config)
-- **Command Detection**: Preserved but not active due to disabled clipboard
-- **Combined Format**: Not active due to disabled clipboard
+- **Clipboard Tracking**: Disabled (`clipboard_enabled: false` in config)
 
 ## Configuration
 
@@ -31,22 +43,7 @@ CNS provides audio notifications when Claude Code completes responses, with conf
 
 ```json
 {
-  "note": "CNS (Conversation Notification System) - clipboard and notification only",
-  "command_detection": {
-    "enabled": true,
-    "hash_commands": {
-      "description": "Commands starting with # (e.g., # APCF:)",
-      "clipboard_mode": "first_line_only"
-    },
-    "slash_commands": {
-      "description": "Commands starting with / (e.g., /apcf)",
-      "clipboard_mode": "command_name_only"
-    },
-    "natural_language": {
-      "description": "Regular user prompts",
-      "clipboard_mode": "full_text"
-    }
-  },
+  "note": "CNS (Conversation Notification System) - audio and Pushover notifications",
   "features": {
     "enable_clipboard_debug": true,
     "enable_cns_notification": true
@@ -54,9 +51,21 @@ CNS provides audio notifications when Claude Code completes responses, with conf
   "audio": {
     "notification_volume": 0.3,
     "volume_note": "Volume level for notification audio (0.0 = silent, 1.0 = full volume)"
+  },
+  "pushover": {
+    "note": "Shared team credentials - safe for private company repo with trusted coworkers",
+    "user_key": "your_pushover_user_key",
+    "app_token": "your_pushover_app_token",
+    "default_device": "iphone_13_mini",
+    "default_sound": "toy_story"
   }
 }
 ```
+
+### Credential Priority
+1. **CNS config** (`.claude/automation/cns/config/cns_config.json`) - Primary, git-based
+2. **Local override** (`~/.pushover_config`) - Optional, not in git
+3. **macOS Keychain** - Legacy fallback
 
 ## Command Detection
 
@@ -113,6 +122,50 @@ mkdir -p "$HOME/.claude/media"
 cp /path/to/your/notification.mp3 "$HOME/.claude/media/toy-story-notification.mp3"
 ```
 
+## Session Metadata
+
+CNS extracts and displays rich metadata from Claude Code hooks:
+
+### Claude Code Native Fields
+- `session_id` - Unique session UUID
+- `hook_event_name` - Event type (Stop, SessionEnd, etc.)
+- `cwd` - Current working directory
+- `transcript_path` - Path to conversation JSONL
+- `permission_mode` - Permission level
+
+### Derived Context
+- `username` - `$USER` or `whoami`
+- `hostname` - `hostname -s` (short hostname)
+- `folder_name` - `basename` of cwd
+- `session_short` - First 8 characters of session_id
+
+## Deployment
+
+### Git-based Workflow
+```bash
+# On any machine (macOS or Linux)
+cd ~/.claude && git pull
+
+# CNS automatically works - no credential setup needed!
+# Pushover credentials are in cns_config.json (git-based)
+```
+
+### Tools
+
+**Diagnostic**: `cns-diagnose`
+- Check CNS system health
+- Verify Pushover credentials
+- Test connectivity
+- Show recent activity
+
+**Remote Setup** (deprecated): `cns-setup-remote-pushover.sh`
+- Deploy credentials to remote servers
+- Superseded by git-based credentials
+
+**SSH Tunnel** (optional): `cns-tunnel-listener.sh`
+- Receive remote notifications via SSH tunnel
+- Alternative to Pushover for local-only setup
+
 ## Integration
 
 ### Claude Code Hooks
@@ -125,10 +178,6 @@ cp /path/to/your/notification.mp3 "$HOME/.claude/media/toy-story-notification.mp
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/automation/cns/cns_notification_hook.sh"
-          },
-          {
-            "type": "command", 
             "command": "$HOME/.claude/automation/cns/cns_hook_entry.sh"
           }
         ]
@@ -139,7 +188,10 @@ cp /path/to/your/notification.mp3 "$HOME/.claude/media/toy-story-notification.mp
 ```
 
 ### Environment Variables
-- `CLAUDE_CNS_CLIPBOARD=1` - Override clipboard functionality (set by cns_hook_entry.sh)
+- `CNS_SESSION_ID` - Exported session ID for remote client
+- `CNS_HOOK_EVENT` - Exported hook event name
+- `CNS_CWD` - Exported working directory
+- `CLAUDE_CNS_CLIPBOARD` - Override clipboard functionality
 
 ## Audio Configuration
 

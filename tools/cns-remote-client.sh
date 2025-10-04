@@ -64,33 +64,63 @@ send_via_tunnel() {
 # Send notification via external service fallback
 send_via_fallback() {
     local message="$1"
-    
-    # Check if Pushover is configured
-    if [[ -f ~/.pushover_config ]]; then
-        source ~/.pushover_config
-        if [[ -n "${PUSHOVER_TOKEN:-}" && -n "${PUSHOVER_USER:-}" ]]; then
-            curl -s --connect-timeout "$TIMEOUT" \
-                 -F "token=$PUSHOVER_TOKEN" \
-                 -F "user=$PUSHOVER_USER" \
-                 -F "message=$message" \
-                 -F "title=CNS Remote Alert" \
-                 https://api.pushover.net/1/messages.json >/dev/null 2>&1
-            return $?
-        fi
+
+    # Gather context information (portable across Linux/macOS)
+    local username="${USER:-$(whoami 2>/dev/null || echo 'unknown')}"
+    local current_dir="$(pwd 2>/dev/null || echo '/unknown')"
+    local folder_name="$(basename "$current_dir" 2>/dev/null || echo 'unknown')"
+    local hostname_short="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo 'unknown')"
+
+    # Create rich notification title with context
+    local notification_title="CNS: ${username}@${hostname_short}"
+
+    # Create rich message with folder context
+    local notification_message="📁 ${folder_name}
+${message}"
+
+    # Load Pushover credentials (priority order):
+    # 1. CNS config (shared in git) - preferred
+    # 2. ~/.pushover_config (local override)
+    # 3. macOS Keychain (fallback)
+
+    local PUSHOVER_USER=""
+    local PUSHOVER_TOKEN=""
+
+    # Try CNS config first (works everywhere after git pull)
+    CNS_CONFIG="$HOME/.claude/automation/cns/config/cns_config.json"
+    if [[ -f "$CNS_CONFIG" ]]; then
+        PUSHOVER_USER=$(jq -r '.pushover.user_key // empty' "$CNS_CONFIG" 2>/dev/null)
+        PUSHOVER_TOKEN=$(jq -r '.pushover.app_token // empty' "$CNS_CONFIG" 2>/dev/null)
     fi
-    
+
+    # Fallback to local config if CNS config didn't have credentials
+    if [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && [[ -f ~/.pushover_config ]]; then
+        source ~/.pushover_config
+    fi
+
+    # Send via Pushover if we have credentials
+    if [[ -n "${PUSHOVER_TOKEN:-}" && -n "${PUSHOVER_USER:-}" ]]; then
+        curl -s --connect-timeout "$TIMEOUT" \
+             -F "token=$PUSHOVER_TOKEN" \
+             -F "user=$PUSHOVER_USER" \
+             -F "message=$notification_message" \
+             -F "title=$notification_title" \
+             https://api.pushover.net/1/messages.json >/dev/null 2>&1
+        return $?
+    fi
+
     # Check if ntfy is configured
     if [[ -f ~/.ntfy_config ]]; then
         source ~/.ntfy_config
         if [[ -n "${NTFY_TOPIC:-}" ]]; then
             curl -s --connect-timeout "$TIMEOUT" \
-                 -H "Title: CNS Remote Alert" \
-                 -d "$message" \
+                 -H "Title: $notification_title" \
+                 -d "$notification_message" \
                  "https://ntfy.sh/$NTFY_TOPIC" >/dev/null 2>&1
             return $?
         fi
     fi
-    
+
     return 1
 }
 
@@ -146,7 +176,24 @@ EOF
 cns_hook_entry() {
     local user_prompt="${1:-}"
     local claude_response="${2:-}"
-    
+    local hook_json="${3:-}"
+
+    # Extract Claude Code metadata if available (from stdin or environment)
+    local session_id="${CNS_SESSION_ID:-unknown}"
+    local hook_event="${CNS_HOOK_EVENT:-unknown}"
+    local session_short=""
+
+    # If we have hook JSON data, parse it
+    if [[ -n "$hook_json" ]]; then
+        session_id=$(echo "$hook_json" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
+        hook_event=$(echo "$hook_json" | jq -r '.hook_event_name // "unknown"' 2>/dev/null || echo "unknown")
+    fi
+
+    # Create short session ID (first 8 chars)
+    if [[ "$session_id" != "unknown" ]]; then
+        session_short=$(echo "$session_id" | cut -d'-' -f1)
+    fi
+
     # Use Claude response as primary message, fallback to prompt
     local message="$claude_response"
     if [[ -z "$message" && -n "$user_prompt" ]]; then
@@ -155,7 +202,7 @@ cns_hook_entry() {
         # Generate consistent folder announcement matching local macOS behavior
         local working_dir=$(pwd 2>/dev/null || echo "unknown")
         local folder_name=$(basename "$working_dir" 2>/dev/null || echo "directory")
-        
+
         # Format directory name for proper TTS pronunciation (match local behavior)
         if [[ "$folder_name" == .* ]]; then
             message="dot ${folder_name:1}"
@@ -163,12 +210,19 @@ cns_hook_entry() {
             message="$folder_name"
         fi
     fi
-    
+
+    # Add session metadata to message if available
+    if [[ -n "$session_short" ]]; then
+        message="${message}
+
+🆔 ${session_short} | ${hook_event}"
+    fi
+
     # Fire-and-forget execution in background to maintain <10ms hook time
     {
-        send_notification "$message" "CNS Remote" 
+        send_notification "$message" "CNS Remote"
     } &
-    
+
     # Exit immediately for hook performance
     return 0
 }

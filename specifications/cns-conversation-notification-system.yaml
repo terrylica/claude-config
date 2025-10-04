@@ -1,52 +1,101 @@
 ---
 # CNS (Conversation Notification System) Specification
-# Purpose: Audio notification with context engineering support (clipboard currently disabled)
+# Purpose: Audio and Pushover notifications with session metadata
 
 metadata:
   name: "CNS (Conversation Notification System)"
-  purpose: "Audio notification with context engineering support (clipboard currently disabled)"
+  purpose: "Audio and Pushover notifications with session metadata (clipboard disabled)"
   status: "active"
-  architecture: "simplified"
+  architecture: "dual-output (local audio + Pushover API)"
+  version: "2.0.0"
 
 core_files:
   configuration:
     path: ".claude/automation/cns/config/cns_config.json"
-    description: "notification and volume settings, clipboard disabled"
-  
+    description: "notification settings, volume, Pushover credentials (git-based)"
+
   main_script:
     path: ".claude/automation/cns/conversation_handler.sh"
-    description: "206 lines, audio processing"
-  
+    description: "262 lines, audio + Pushover notification processing"
+
   entry_point:
     path: ".claude/automation/cns/cns_hook_entry.sh"
-    description: "hook system integration"
-  
+    description: "hook system integration, routes local/remote environments"
+
   notification_hook:
     path: ".claude/automation/cns/cns_notification_hook.sh"
-    description: "audio notification with configurable volume + folder name announcement"
-  
-  manual_utility:
-    path: "~/.local/bin/cns-notify"
-    description: "available globally via ~/.local/bin"
-  
+    description: "local audio notification with folder name announcement"
+
+  remote_client:
+    path: ".claude/tools/cns-remote-client.sh"
+    description: "remote SSH notification client with Pushover fallback"
+
+  deployment_tools:
+    pushover_setup:
+      path: ".claude/tools/cns-setup-remote-pushover.sh"
+      description: "deploy Pushover credentials to remote servers (deprecated with git-based credentials)"
+    tunnel_listener:
+      path: ".claude/tools/cns-tunnel-listener.sh"
+      description: "SSH tunnel listener for remote notifications (optional)"
+    diagnostic:
+      path: "~/.local/bin/cns-diagnose"
+      description: "system diagnostic and health check"
+
   debug_logs:
     path: "/tmp/claude_cns_debug.log"
     description: "structured logging"
 
+pushover_integration:
+  credential_storage:
+    primary: ".claude/automation/cns/config/cns_config.json (git-based, team-shared)"
+    fallback_local: "~/.pushover_config (local override)"
+    fallback_macos: "macOS Keychain (legacy)"
+
+  credential_priority:
+    description: "CNS config → ~/.pushover_config → keychain"
+    rationale: "Git-based config enables zero-setup deployment after git pull"
+
+  notification_format:
+    title: "CNS: {username}@{hostname}"
+    message: |
+      📁 {folder_name}
+      {claude_response_preview}
+
+      🆔 {session_id_short} | {hook_event}
+
+  session_metadata:
+    claude_code_native_fields:
+      session_id: "UUID from Claude Code hook JSON"
+      hook_event_name: "Stop, SessionEnd, etc."
+      cwd: "current working directory"
+      transcript_path: "path to conversation JSONL"
+      permission_mode: "permission level"
+
+    derived_fields:
+      username: "$USER or whoami"
+      hostname: "hostname -s"
+      folder_name: "basename of cwd"
+      session_short: "first 8 chars of session_id"
+
+  deployment_model:
+    description: "Git-based credentials for team deployment"
+    workflow: "git pull → immediate functionality (no credential setup needed)"
+    security_context: "Private company repo, small trusted team"
+
 critical_principles:
   asynchronous_hook_architecture:
     description: "All CNS hooks MUST use fire-and-forget pattern to prevent session delays"
-    
+
     patterns:
       fire_and_forget: "{ actual_work } &"
       description: "spawn background and exit immediately"
-    
+
     requirements:
       no_timeouts: "Remove timeout values from settings.json for true async hooks"
       testing: "Hook execution must be < 10ms (script exit time, not work completion)"
-    
+
     anti_patterns:
       description: "Never wait for clipboard processing, audio playback, or file operations"
-    
+
     enforcement:
       description: "Any hook causing session ending delays must be refactored to async pattern"

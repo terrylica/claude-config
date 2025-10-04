@@ -217,6 +217,42 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         # Trigger audio notification with working directory context
         echo "$(date): Triggering notification hook with cwd: $cwd" >> /tmp/claude_cns_debug.log
         echo "$input_data" | "$HOME/.claude/automation/cns/cns_notification_hook.sh" &
+
+        # Also send Pushover notification with rich metadata
+        {
+            # Load Pushover credentials from CNS config
+            CNS_CONFIG="$HOME/.claude/automation/cns/config/cns_config.json"
+            if [[ -f "$CNS_CONFIG" ]]; then
+                PUSHOVER_USER=$(jq -r '.pushover.user_key // empty' "$CNS_CONFIG" 2>/dev/null)
+                PUSHOVER_TOKEN=$(jq -r '.pushover.app_token // empty' "$CNS_CONFIG" 2>/dev/null)
+
+                if [[ -n "$PUSHOVER_USER" && -n "$PUSHOVER_TOKEN" ]]; then
+                    # Gather context
+                    username="${USER:-$(whoami)}"
+                    hostname_short="$(hostname -s 2>/dev/null || hostname)"
+                    folder_name="$(basename "$cwd" 2>/dev/null || echo 'unknown')"
+                    session_short="$(echo "$session_id" | cut -d'-' -f1)"
+
+                    # Build rich notification
+                    title="CNS: ${username}@${hostname_short}"
+                    message="📁 ${folder_name}
+${last_response:0:200}
+
+🆔 ${session_short} | ${hook_event}"
+
+                    # Send to Pushover
+                    curl -s --connect-timeout 2 \
+                         -F "token=$PUSHOVER_TOKEN" \
+                         -F "user=$PUSHOVER_USER" \
+                         -F "message=$message" \
+                         -F "title=$title" \
+                         -F "sound=toy_story" \
+                         https://api.pushover.net/1/messages.json >/dev/null 2>&1
+
+                    echo "$(date): Pushover notification sent" >> /tmp/claude_cns_debug.log
+                fi
+            fi
+        } &
     else
         echo "No valid response found after $max_attempts attempts" >> /tmp/claude_cns_debug.log
     fi
