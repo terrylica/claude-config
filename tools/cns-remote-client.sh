@@ -85,12 +85,14 @@ ${message}"
 
     local PUSHOVER_USER=""
     local PUSHOVER_TOKEN=""
+    local PUSHOVER_SOUND="toy_story"  # Default sound
 
     # Try CNS config first (works everywhere after git pull)
     CNS_CONFIG="$HOME/.claude/automation/cns/config/cns_config.json"
     if [[ -f "$CNS_CONFIG" ]]; then
         PUSHOVER_USER=$(jq -r '.pushover.user_key // empty' "$CNS_CONFIG" 2>/dev/null)
         PUSHOVER_TOKEN=$(jq -r '.pushover.app_token // empty' "$CNS_CONFIG" 2>/dev/null)
+        PUSHOVER_SOUND=$(jq -r '.pushover.default_sound // "toy_story"' "$CNS_CONFIG" 2>/dev/null)
     fi
 
     # Fallback to local config if CNS config didn't have credentials
@@ -105,6 +107,7 @@ ${message}"
              -F "user=$PUSHOVER_USER" \
              -F "message=$notification_message" \
              -F "title=$notification_title" \
+             -F "sound=$PUSHOVER_SOUND" \
              https://api.pushover.net/1/messages.json >/dev/null 2>&1
         return $?
     fi
