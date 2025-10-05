@@ -286,6 +286,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Standardize Python build toolchain with uv and hatchling - Add hatchling as build backend to Python stack - Expand avoid list: pip, conda, setuptools, poetry - Document talipp pattern for O(1) incremental indicators - Update agent session state and file history
 
+- Consolidate documentation and add git-cliff comprehensive workflow Streamline CLAUDE.md by moving verbose git-cliff workflow to dedicated docs, update all README files for consistency, and enhance git-cliff documentation with missing features (pyproject.toml support, 125K GitHub limit handling, workflow conflict detection). Changes: - CLAUDE.md: Make git-cliff section concise with pointer to full docs, add noti monitoring section - README.md: Transform from tools directory content to proper workspace overview - automation/cns/README.md: Update CNS version v2.0.0 → v2.4.0 - docs/README.md: Add git-cliff release automation reference - tools/README.md: Add git-cliff section and restructure content - tools/git-cliff/README.md: Add comprehensive features (AI workspace analysis, language-agnostic version detection, 125K limit handling, conflict detection) - settings.json: Enable alwaysThinkingEnabled
+
 
 ### 📝 Other Changes
 
@@ -416,6 +418,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Version 2.2.0 → 2.3.0
 
 - Version 2.3.0 → 2.4.0
+
+- Version 2.4.0 → 2.5.0
 
 
 ### 🧰 Maintenance
