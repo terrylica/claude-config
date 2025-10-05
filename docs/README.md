@@ -67,6 +67,11 @@ Project reports and analysis documentation:
 - **Documentation**: [GFM Checker Documentation](../tools/gfm-link-checker/docs/README.md)
 - **Command**: `gfm-check`
 
+### Release Automation
+- **git-cliff**: `tools/git-cliff/`
+- **Documentation**: [git-cliff README](../tools/git-cliff/README.md)
+- **Features**: Commitizen + git-cliff integration, language-agnostic version detection, 125K GitHub limit handling
+
 ### System & Productivity Tools
 - **CNS Notification System**: `automation/cns/`
 - **Documentation**: [CNS Documentation](../automation/cns/README.md)

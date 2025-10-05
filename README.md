@@ -1,25 +1,39 @@
-# Tools Directory
+# Claude Code Global Configuration
 
-**Purpose**: Standalone utilities and development tools
+**Purpose**: Centralized Claude Code workspace configuration and automation infrastructure
 
-## Contents
-- `gfm-link-checker/` - GitHub Flavored Markdown link validation tool
-  - Python-based link integrity checker
-  - UV project with validation
-  - Command-line interface for local workspaces
+## 📚 Documentation
 
-- `sage-aliases/` - SAGE development productivity tool
-  - Alias system for dual-environment development
-  - Universal access commands: `gpu-ws`, `sage-dev`, `sage-status`, `sage-sync`
-  - GPU workstation integration and infrastructure monitoring
-  - Sync tool with error handling and debugging
+**Complete documentation**: [`docs/README.md`](docs/README.md)
 
-## Features
-- Standalone utility tools
-- Development aids and helpers
-- Project-specific tooling
+## Quick Start
 
-## Claude Code Official Status
-❌ **USER DIRECTORY** - Safe to customize and modify
+```bash
+# Team setup (2 minutes)
+git clone <repo-url> ~/.claude
+cd ~/.claude
+./install-all-tools
+```
 
-This directory contains user-developed tools and utilities that are independent of Claude Code's core functionality.
+## Structure
+
+- **`docs/`** - Complete documentation hub
+- **`tools/`** - Standalone utilities (GFM checker, git-cliff, SAGE tools)
+- **`automation/`** - CNS notification system, hooks
+- **`commands/`** - Slash command extensions
+- **`agents/`** - AI agent configurations
+- **`specifications/`** - YAML specs for custom extensions
+
+## Key Components
+
+| Tool | Command | Documentation |
+|------|---------|---------------|
+| CNS Notifications | `cns-notify` | [`automation/cns/README.md`](automation/cns/README.md) |
+| GFM Link Checker | `gfm-check` | [`tools/gfm-link-checker/docs/README.md`](tools/gfm-link-checker/docs/README.md) |
+| git-cliff Release | (see docs) | [`tools/git-cliff/README.md`](tools/git-cliff/README.md) |
+| SAGE Tools | `sage-dev` | [`tools/sage-aliases/docs/README.md`](tools/sage-aliases/docs/README.md) |
+| Tmux Sessions | `tmux-session` | [`tmux/docs/README.md`](tmux/docs/README.md) |
+
+## Global Instructions
+
+**User memory**: [`CLAUDE.md`](CLAUDE.md) - Global instructions for all Claude Code sessions

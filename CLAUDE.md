@@ -66,48 +66,15 @@
 **Specification**: [`.claude/specifications/pypi-publishing-methods.yaml`](.claude/specifications/pypi-publishing-methods.yaml)
 
 ### git-cliff Release Automation
+**Full Workflow**: See [`~/.claude/tools/git-cliff/README.md`](tools/git-cliff/README.md)
 **Templates**: `~/.claude/tools/git-cliff/templates/` (cliff.toml, cliff-release-notes.toml, cz.toml.template)
+**Features**: Commitizen + git-cliff, language-agnostic version detection, 125K GitHub limit handling, automated workflow conflict detection
 
-**AI Agent Workflow** (zero-config, Commitizen + git-cliff integration):
-```bash
-# Prerequisites: cargo, uvx, gh CLI
-# Pre-flight: auto-install git-cliff, initialize configs from templates
-
-command -v git-cliff >/dev/null || cargo install git-cliff
-[ ! -f cliff.toml ] && cp ~/.claude/tools/git-cliff/templates/cliff.toml .
-[ ! -f cliff-release-notes.toml ] && cp ~/.claude/tools/git-cliff/templates/cliff-release-notes.toml .
-[ ! -f .cz.toml ] && cp ~/.claude/tools/git-cliff/templates/cz.toml.template .cz.toml
-
-# 1) Commit: synthesize conventional commit from staged diff (AI-driven)
-uvx --from commitizen cz check --message "$MSG"
-git commit -m "$MSG"
-
-# 2) Version bump + changelog (git-cliff replaces commitizen changelog)
-uvx --from commitizen cz bump --yes
-git-cliff --config cliff.toml --output CHANGELOG.md
-git-cliff --config cliff-release-notes.toml --latest --output RELEASE_NOTES.md
-git add CHANGELOG.md RELEASE_NOTES.md && git commit --amend --no-edit
-
-# 3) Publish commits and tag
-git push --follow-tags
-
-# 4) Surface CI and monitor
-gh run view --web
-
-# 5) GitHub Release (auto-generated from git-cliff)
-TAG="v$(grep '^version = ' .cz.toml | cut -d'"' -f2)"
-gh release create "$TAG" --verify-tag --title "$(basename $(pwd)) $TAG" -F RELEASE_NOTES.md
-
-# 6) Telemetry: milestone commit SHA and tag, surface all URLs
-echo "📦 Release: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/releases/tag/$TAG"
-echo "🔗 CI Run: $(gh run list --limit 1 --json url --jq '.[0].url')"
-echo "📝 Commit: $(git rev-parse HEAD)"
-```
-
-**Notes**:
-- Commitizen handles SemVer validation and version bumping
-- git-cliff generates CHANGELOG.md (detailed) and RELEASE_NOTES.md (user-facing)
-- Use Git LFS for large binaries if needed
+### Process Monitoring (noti)
+**Config**: `~/.config/noti/noti.yaml` (Pushover: apitoken/userkey from keychain, priority=1, sound=vibe20sec)
+**Wrapper**: `~/.local/bin/noti-monitor <PID>` (auto-injects Pushover credentials)
+**Usage**: `nohup noti-monitor <PID> > /tmp/noti.log 2>&1 &`
+**Doc**: [`~/.claude/tools/noti/README.md`](tools/noti/README.md)
 
 ## Credential Management & Security
 

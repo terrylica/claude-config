@@ -6,7 +6,7 @@ Audio and Pushover notifications for Claude Code responses with session metadata
 
 CNS provides dual-output notifications when Claude Code completes responses: local audio (afplay + say) and remote Pushover notifications with rich context metadata.
 
-### Current System (CNS v2.0.0)
+### Current System (CNS v2.4.0)
 - **Main Script**: `conversation_handler.sh` (262 lines) - Audio + Pushover notification processing
 - **Configuration**: `config/cns_config.json` - System settings + Pushover credentials (git-based)
 - **Entry Point**: `cns_hook_entry.sh` - Routes local/remote environments
