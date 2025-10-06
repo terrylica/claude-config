@@ -1,24 +1,20 @@
 
-## 2.4.0 - 2025-10-04
-
-
-### ✨ New Features
-
-- Add configurable Pushover notification sound Read sound parameter from CNS config pushover.default_sound, defaulting to 'toy_story' if not specified. Enables consistent notification sounds across both local and remote environments.
-
+## 2.6.0 - 2025-10-06
 
 
 ### 📝 Other Changes
 
-- Version 2.2.0 → 2.3.0
-
 - Version 2.3.0 → 2.4.0
 
+- Version 2.4.0 → 2.5.0
+
+- Version 2.5.0 → 2.6.0
+
 
 
 ---
-**Full Changelog**: https://github.com/Eon-Labs/rangebar/compare/v2.3.0...v2.4.0
+**Full Changelog**: https://github.com/Eon-Labs/rangebar/compare/v2.4.0...v2.6.0
 
 
 ---
-*Full changelog: [CHANGELOG.md](https://github.com/Eon-Labs/claude-config/blob/v2.4.0/CHANGELOG.md)*
+*Full changelog: [CHANGELOG.md](https://github.com/Eon-Labs/claude-config/blob/v2.6.0/CHANGELOG.md)*
