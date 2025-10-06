@@ -288,6 +288,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Consolidate documentation and add git-cliff comprehensive workflow Streamline CLAUDE.md by moving verbose git-cliff workflow to dedicated docs, update all README files for consistency, and enhance git-cliff documentation with missing features (pyproject.toml support, 125K GitHub limit handling, workflow conflict detection). Changes: - CLAUDE.md: Make git-cliff section concise with pointer to full docs, add noti monitoring section - README.md: Transform from tools directory content to proper workspace overview - automation/cns/README.md: Update CNS version v2.0.0 → v2.4.0 - docs/README.md: Add git-cliff release automation reference - tools/README.md: Add git-cliff section and restructure content - tools/git-cliff/README.md: Add comprehensive features (AI workspace analysis, language-agnostic version detection, 125K limit handling, conflict detection) - settings.json: Enable alwaysThinkingEnabled
 
+- **pushover**: Add emergency priority specification and implementation Add complete emergency priority documentation including: - Priority levels with retry/expire requirements - Working curl implementation example - State tracking pattern to prevent duplicates - Update RELEASE_NOTES_SHORT.md for v2.4.0
+
 
 ### 📝 Other Changes
 
@@ -421,6 +423,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Version 2.4.0 → 2.5.0
 
+- Version 2.5.0 → 2.6.0
+
 
 ### 🧰 Maintenance
 
@@ -457,4 +461,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update session artifacts and documentation - Add Parquet storage preference to toolchain standards - Update agent session state and file history - Clean up IDE lock files and release notes artifacts
 
 - Clean up session artifacts and IDE lock files - Remove IDE lock files (4 files) - Remove old sessions directory and legacy export - Update agent session state
+
+- Disable always thinking mode Disable alwaysThinkingEnabled in Claude Code settings to optimize response time and reduce unnecessary processing overhead.
 
