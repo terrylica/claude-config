@@ -81,3 +81,9 @@
 **Credential Management**: Doppler CLI (`doppler run -- <command>`) for zero-config credential injection
 **Specification**: [`.claude/specifications/doppler-integration.yaml`](.claude/specifications/doppler-integration.yaml)
 
+### Pushover Credentials
+**Storage**: Doppler (project: `claude-config`, config: `dev`)
+**Usage**: `doppler run -- <command>` to inject credentials as environment variables
+- `PUSHOVER_TOKEN` - Pushover API application token
+- `PUSHOVER_USER` - Pushover user key
+
