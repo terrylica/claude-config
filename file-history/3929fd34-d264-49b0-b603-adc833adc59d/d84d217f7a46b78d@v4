@@ -1,0 +1,348 @@
+---
+# Robust Background Execution Specification
+# Version: 1.0.0
+# Created: 2025-10-05
+# Purpose: Prevent hung processes and unbuffered output in long-running experiments
+
+metadata:
+  problem: background processes appear running but produce no output (hung or buffered)
+  failure_modes:
+    - python_stdout_buffering: print() statements buffered until process exit
+    - missing_progress_logging: long computations with no incremental updates
+    - silent_errors: exceptions caught but not logged
+    - process_hung: infinite loop or deadlock without detection
+  requirements:
+    - lightweight: no external daemons or complex monitoring
+    - robust: works across python/bash/docker environments
+    - verifiable: can detect hung processes within minutes
+    - out_of_box: stdlib and common unix tools only
+
+solution_stack:
+  layer_1_unbuffered_output:
+    method: force line-buffered or unbuffered output at process start
+    implementations:
+      python_command_line:
+        flag: python3 -u script.py
+        effect: sets PYTHONUNBUFFERED=1, disables stdout/stderr buffering
+        pros: [single flag, no code changes needed]
+        cons: [must remember flag, not enforced in code]
+      python_code_level:
+        pattern: |
+          import sys
+          sys.stdout.reconfigure(line_buffering=True)
+          sys.stderr.reconfigure(line_buffering=True)
+        location: top of main script, before any imports
+        effect: ensures buffering disabled even if -u forgotten
+        pros: [self-documenting, enforced at code level]
+        cons: [requires code change]
+      print_statement_level:
+        pattern: print(..., flush=True)
+        effect: forces immediate flush per statement
+        pros: [granular control, works with -u or without]
+        cons: [must add to every print, easy to forget]
+      recommended: python_command_line + code_level (defense in depth)
+
+  layer_2_progress_heartbeat:
+    method: emit periodic progress signals independent of computation
+    pattern: |
+      import time
+      from datetime import datetime
+
+      last_heartbeat = time.time()
+      HEARTBEAT_INTERVAL = 60  # seconds
+
+      for i in range(n_iterations):
+          # ... computation ...
+
+          if time.time() - last_heartbeat > HEARTBEAT_INTERVAL:
+              print(f"[HEARTBEAT] {datetime.now().isoformat()} Iteration {i}/{n_iterations} ({100*i/n_iterations:.1f}%)", flush=True)
+              last_heartbeat = time.time()
+    characteristics:
+      - frequency: 30-60 seconds (frequent enough to detect hung, not spammy)
+      - format: [HEARTBEAT] timestamp + progress metric
+      - independent: not tied to completion of sub-tasks
+      - monotonic: includes iteration counter or percentage
+    benefits:
+      - detects hung processes (no heartbeat = hung)
+      - provides progress estimation
+      - timestamps for performance analysis
+      - grep-able pattern for monitoring
+
+  layer_3_watchdog_monitoring:
+    method: external process monitors log file staleness
+    lightweight_implementation:
+      script: |
+        #!/bin/bash
+        # watchdog.sh <pid> <logfile> <max_stale_seconds>
+        PID=$1
+        LOGFILE=$2
+        MAX_STALE=${3:-300}  # default 5 minutes
+
+        while ps -p $PID > /dev/null 2>&1; do
+            if [ -f "$LOGFILE" ]; then
+                # Check file age in seconds (macOS compatible)
+                AGE=$(( $(date +%s) - $(stat -f %m "$LOGFILE") ))
+                if [ $AGE -gt $MAX_STALE ]; then
+                    echo "ERROR: Process $PID appears hung (log stale for ${AGE}s)" >&2
+                    echo "Last log update: $(stat -f "%Sm" "$LOGFILE")" >&2
+                    kill -9 $PID
+                    exit 1
+                fi
+            fi
+            sleep 30
+        done
+      usage: nohup ./watchdog.sh 12345 experiment.log 300 > watchdog.log 2>&1 &
+      pros: [simple bash, no dependencies, kills hung processes]
+      cons: [separate process to manage, false positives if computation is legitimately slow]
+
+  layer_4_timeout_enforcement:
+    method: hard timeout on entire process
+    implementations:
+      timeout_command:
+        usage: timeout 1h python3 -u script.py
+        effect: SIGTERM after 1h, SIGKILL after grace period
+        pros: [built-in, simple, no code changes]
+        cons: [macOS timeout differs from GNU, may need `brew install coreutils`]
+      python_signal:
+        pattern: |
+          import signal
+
+          def timeout_handler(signum, frame):
+              raise TimeoutError(f"Process exceeded {TIMEOUT_SECONDS}s timeout")
+
+          signal.signal(signal.SIGALRM, timeout_handler)
+          signal.alarm(TIMEOUT_SECONDS)
+
+          try:
+              # ... long running code ...
+          finally:
+              signal.alarm(0)  # cancel alarm
+        pros: [precise control, custom cleanup]
+        cons: [requires code changes, SIGALRM not available on all platforms]
+      recommended: timeout command for simple cases, signal for complex cleanup
+
+  layer_5_structured_logging:
+    method: machine-parseable log format for automated monitoring
+    pattern: |
+      import json
+      from datetime import datetime
+
+      def log_event(event_type, data, level="INFO"):
+          event = {
+              "timestamp": datetime.now().isoformat(),
+              "level": level,
+              "type": event_type,
+              "data": data
+          }
+          print(json.dumps(event), flush=True)
+
+      # Usage
+      log_event("experiment_start", {"n_samples": 100000, "n_features": 50})
+      log_event("progress", {"iteration": 1000, "total": 10000, "pct": 10.0})
+      log_event("experiment_complete", {"mean_accuracy": 0.515, "std": 0.011})
+    benefits:
+      - jq parseable for automation
+      - easy to extract metrics
+      - structured vs grepping text
+      - timestamps for all events
+    monitoring_example: |
+      # Check last heartbeat timestamp
+      tail -1000 experiment.log | jq -r 'select(.type=="progress") | .timestamp' | tail -1
+
+      # Extract final accuracy
+      jq -r 'select(.type=="experiment_complete") | .data.mean_accuracy' experiment.log
+
+recommended_template:
+  minimal_robust_pattern: |
+    #!/usr/bin/env python3
+    import sys
+    import time
+    from datetime import datetime
+
+    # LAYER 1: Unbuffered output (defense in depth)
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+
+    # LAYER 2: Heartbeat pattern
+    def log_progress(msg):
+        print(f"[{datetime.now().isoformat()}] {msg}", flush=True)
+
+    log_progress("START: Experiment beginning")
+
+    last_heartbeat = time.time()
+    HEARTBEAT_INTERVAL = 60
+
+    for i in range(n_iterations):
+        # ... computation ...
+
+        # Heartbeat every 60s
+        if time.time() - last_heartbeat > HEARTBEAT_INTERVAL:
+            log_progress(f"PROGRESS: {i}/{n_iterations} ({100*i/n_iterations:.1f}%)")
+            last_heartbeat = time.time()
+
+    log_progress("COMPLETE: Experiment finished")
+
+  execution_pattern: |
+    # LAYER 1: Unbuffered python
+    # LAYER 4: Timeout enforcement
+    timeout 2h python3 -u script.py > output.log 2>&1 &
+    PID=$!
+
+    # LAYER 3: Watchdog (optional, if critical)
+    # nohup ./watchdog.sh $PID output.log 300 > watchdog.log 2>&1 &
+
+    echo "Started PID $PID"
+
+ai_agent_prompt_template: |
+  When implementing long-running experiments or background processes:
+
+  1. **Unbuffered Output (MANDATORY)**
+     - Use: `uv run python -u script.py` (preferred) or `python3 -u script.py`
+     - Add to script: `sys.stdout.reconfigure(line_buffering=True)`
+     - Use: `print(..., flush=True)` for critical progress messages
+     - Note: uv already unbuffered with flush=True, but -u is defense in depth
+
+  2. **Progress Heartbeat (MANDATORY for >5min runtime)**
+     - Emit progress every 30-60 seconds
+     - Format: `[TIMESTAMP] PROGRESS: iteration/total (pct%)`
+     - Independent of computation completion
+     - Example:
+       ```python
+       last_heartbeat = time.time()
+       for i in range(n_iterations):
+           if time.time() - last_heartbeat > 60:
+               print(f"[{datetime.now().isoformat()}] PROGRESS: {i}/{n_iterations}", flush=True)
+               last_heartbeat = time.time()
+       ```
+
+  3. **Timeout Enforcement (RECOMMENDED)**
+     - Use: `timeout <duration> python3 -u script.py`
+     - Set realistic timeout (2-3x expected runtime)
+     - Ensures hung processes killed automatically
+
+  4. **Error Handling (MANDATORY)**
+     - No silent error handling: all exceptions must propagate or log with traceback
+     - Log before raising: `print(f"ERROR: {e}", flush=True); raise`
+     - No bare `except:` without logging
+
+  5. **Verification Pattern**
+     - Before starting: add `print("START", flush=True)`
+     - After starting: `sleep 10 && tail logfile` to verify output appears
+     - If no output in 1-2 minutes for expected long computation: investigate immediately
+
+  ANTI-PATTERNS (DO NOT DO):
+  - ❌ `python script.py > output.log 2>&1 &` (missing -u, use uv run python -u)
+  - ❌ `uv run python script.py` (missing -u for defense in depth)
+  - ❌ Long loops with no progress logging
+  - ❌ `try: ... except: pass` (silent error swallowing)
+  - ❌ Assuming output appears (always verify within 1-2 min)
+
+verification_checklist:
+  before_execution:
+    - command_uses_python_u: verify -u flag present
+    - script_has_stdout_reconfigure: check sys.stdout.reconfigure() at top
+    - progress_logging_implemented: verify heartbeat pattern in loops
+    - timeout_set: confirm timeout command wraps execution
+
+  after_execution_1min:
+    - log_file_exists: ls -lh output.log
+    - log_has_content: wc -l output.log (should be > 0)
+    - start_message_present: grep "START" output.log
+    - heartbeat_timestamp_recent: check last heartbeat < 2min old
+
+  during_execution_periodic:
+    - process_still_running: ps -p $PID
+    - log_file_growing: stat -f "%m %z" output.log (check mtime and size)
+    - heartbeat_frequency: grep PROGRESS output.log | tail -5 (verify 30-60s intervals)
+    - cpu_usage_reasonable: ps -p $PID -o %cpu (not 0%, not >1000% sustained)
+
+troubleshooting:
+  symptom_no_output_after_1min:
+    likely_causes: [python buffering, missing -u flag, silent error]
+    actions:
+      - kill process
+      - add -u flag and sys.stdout.reconfigure()
+      - add print("START", flush=True) at beginning
+      - restart and verify within 30s
+
+  symptom_output_stops_mid_execution:
+    likely_causes: [process hung, infinite loop, deadlock, exception caught silently]
+    actions:
+      - check ps -p $PID (if dead, check exit code)
+      - check last log timestamp vs current time
+      - if >5min stale: kill -9 $PID
+      - add heartbeat logging before restart
+
+  symptom_high_cpu_no_output:
+    likely_causes: [computation running but no logging, tight loop without heartbeat]
+    actions:
+      - verify computation is progressing (not hung in infinite loop)
+      - add heartbeat to loop
+      - consider if timeout is appropriate
+
+  symptom_process_completes_but_no_results:
+    likely_causes: [silent exception, logic error, file write failure]
+    actions:
+      - check for ERROR/FATAL in logs
+      - verify error handling propagates exceptions
+      - add logging before file writes
+      - check exit code ($?)
+
+production_checklist:
+  code_requirements:
+    - unbuffered_output_enforced: sys.stdout.reconfigure(line_buffering=True)
+    - progress_heartbeat_implemented: print every 30-60s in loops >5min
+    - error_handling_explicit: no silent exception catching
+    - start_end_markers: clear START/COMPLETE messages
+
+  execution_requirements:
+    - python_u_flag: always use -u
+    - timeout_set: realistic timeout on process
+    - output_redirection: > logfile 2>&1 for combined stdout/stderr
+    - background_safe: nohup or disown if terminal may close
+
+  monitoring_requirements:
+    - log_file_path_known: documented in experiment plan
+    - heartbeat_pattern_grep: [HEARTBEAT] or PROGRESS: prefix
+    - verification_within_2min: check output appears quickly
+    - staleness_detection: automated or manual checks during run
+
+examples:
+  minimal_safe_execution:
+    command: |
+      timeout 2h uv run python -u experiments/my_experiment/run.py > experiments/my_experiment/output.log 2>&1 &
+      PID=$!
+      echo "Started PID $PID"
+      sleep 10
+      tail experiments/my_experiment/output.log
+      # Verify "START" message appears
+
+  with_watchdog:
+    command: |
+      python3 -u script.py > output.log 2>&1 &
+      PID=$!
+      nohup ./watchdog.sh $PID output.log 300 > watchdog.log 2>&1 &
+      echo "Started PID $PID with watchdog"
+
+  with_automation:
+    command: |
+      nohup python3 -u script.py > output.log 2>&1 &
+      PID=$!
+      nohup python3 -u post_execution.py --pid $PID > automation.log 2>&1 &
+      echo "Started PID $PID with automation"
+
+references:
+  python_buffering: https://docs.python.org/3/using/cmdline.html#envvar-PYTHONUNBUFFERED
+  timeout_command: https://www.gnu.org/software/coreutils/manual/html_node/timeout-invocation.html
+  signal_alarm: https://docs.python.org/3/library/signal.html#signal.alarm
+
+versioning:
+  semver: 1.0.0
+  changelog:
+    - version: 1.0.0
+      date: 2025-10-05
+      changes:
+        - init: created robust background execution specification
+        - defined: 5-layer defense in depth (unbuffered, heartbeat, watchdog, timeout, structured logging)
+        - provided: AI agent prompt template
+        - included: verification checklist and troubleshooting guide

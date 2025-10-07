@@ -1,0 +1,481 @@
+#!/usr/bin/env python3
+"""
+HMM Regime Detection - 1-Hour Timeframe
+Experiment ID: hmm_regime_20251006_1h
+Objective: Test if 1-hour timeframe breaks 51.5% ceiling observed on 5-minute data
+
+Error Handling: Raise and propagate, no fallbacks/defaults/retries/silent handling
+Dependencies: Out-of-box sklearn, hmmlearn, pandas, numpy only
+"""
+
+import sys
+import json
+import warnings
+import time
+import gc
+import psutil
+from pathlib import Path
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
+from hmmlearn.hmm import GaussianHMM
+
+# FIX 1: Unbuffered output (MANDATORY)
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+warnings.filterwarnings('ignore')
+
+# Experiment config
+EXPERIMENT_DIR = Path("experiments/hmm_regime_20251006_1h")
+RESULTS_DIR = EXPERIMENT_DIR / "results"
+RESULTS_DIR.mkdir(exist_ok=True)
+
+DATA_PATH = Path("ml_feature_set/sample_data/resampled_binance_SOL-1h.csv")
+RANDOM_STATE = 42
+N_FOLDS = 20
+HMM_N_STATES = 3
+
+# Optimization parameters (same as 5m - larger dataset supports same windows)
+HMM_WINDOW_SIZE = 2000  # Same as 5m
+HMM_STRIDE = 10  # Same as 5m
+HMM_N_ITER = 25  # Same as 5m
+
+
+def validate_hmm_convergence(hmm_model, window_idx):
+    """Validate HMM convergence - raise if failed (SLO: correctness)"""
+    if not hmm_model.monitor_.converged:
+        raise RuntimeError(
+            f"HMM did not converge in window {window_idx} after {hmm_model.monitor_.iter} iterations"
+        )
+
+
+def validate_transition_matrix(hmm_model, window_idx):
+    """Validate transition matrix validity - raise if invalid (SLO: correctness)"""
+    row_sums = hmm_model.transmat_.sum(axis=1)
+    if not np.allclose(row_sums, 1.0, rtol=1e-5):
+        raise ValueError(
+            f"Invalid transition matrix in window {window_idx}: row sums = {row_sums} (expected all 1.0)"
+        )
+
+    # Check for zero rows (state collapse)
+    if np.any(row_sums == 0):
+        raise ValueError(f"Transition matrix has zero rows in window {window_idx} - state collapse detected")
+
+
+def validate_state_representation(states, n_components, window_idx):
+    """Validate all states are represented - raise if missing (SLO: correctness)"""
+    unique_states = np.unique(states)
+    if len(unique_states) < n_components:
+        raise ValueError(
+            f"Only {len(unique_states)}/{n_components} states represented in window {window_idx}: {unique_states}"
+        )
+
+
+def generate_base_features(df):
+    """Generate 26 base OHLCV features"""
+    print("Generating base features...")
+
+    # Price lags
+    for lag in [1, 5, 10, 20]:
+        df[f'close_lag_{lag}'] = df['close'].shift(lag)
+        df[f'volume_lag_{lag}'] = df['volume'].shift(lag)
+
+    # Rolling statistics
+    for window in [10, 20, 50]:
+        df[f'rolling_mean_{window}'] = df['close'].rolling(window).mean()
+        df[f'rolling_std_{window}'] = df['close'].rolling(window).std()
+        df[f'rolling_min_{window}'] = df['close'].rolling(window).min()
+        df[f'rolling_max_{window}'] = df['close'].rolling(window).max()
+
+    # Volume ratios
+    df['volume_ratio_ma10'] = df['volume'] / df['volume'].rolling(10).mean()
+    df['volume_ratio_ma20'] = df['volume'] / df['volume'].rolling(20).mean()
+
+    # Returns
+    df['return_1'] = df['close'].pct_change(1)
+    df['return_5'] = df['close'].pct_change(5)
+    df['return_20'] = df['close'].pct_change(20)
+
+    return df
+
+
+def generate_hmm_features(df):
+    """
+    Generate HMM regime features using FIXED implementation
+
+    Key fixes vs previous crash:
+    1. StandardScaler for feature normalization
+    2. KMeans initialization vs random
+    3. Spherical covariance vs diagonal
+    4. min_covar regularization
+    5. Explicit validation checks
+    """
+    print("Generating HMM regime features (FIXED implementation)...")
+
+    # Feature columns for HMM training (price and volatility proxies)
+    feature_cols = [
+        'close_lag_1', 'close_lag_5', 'close_lag_10', 'close_lag_20',
+        'rolling_std_10', 'rolling_std_20', 'rolling_std_50',
+        'volume_lag_1', 'volume_lag_5'
+    ]
+
+    # Ensure no NaN in feature columns
+    X_hmm = df[feature_cols].values
+
+    # MEMORY FIX 2: Preallocate arrays instead of DataFrame columns (avoid .loc overhead)
+    n_samples = len(df)
+    hmm_state_array = np.full(n_samples, np.nan)
+    hmm_state_prob_max_array = np.full(n_samples, np.nan)
+    hmm_state_prob_ratio_array = np.full(n_samples, np.nan)
+
+    # Rolling window HMM training (with stride optimization)
+    max_window_start = n_samples - HMM_WINDOW_SIZE
+    window_indices = list(range(0, max_window_start + 1, HMM_STRIDE))
+    n_windows = len(window_indices)
+
+    print(f"  Total samples: {n_samples:,}", flush=True)
+    print(f"  Window size: {HMM_WINDOW_SIZE:,}", flush=True)
+    print(f"  Stride: {HMM_STRIDE}", flush=True)
+    print(f"  Number of windows (strided): {n_windows:,}", flush=True)
+    print(f"  Coverage: Every {HMM_STRIDE}th window", flush=True)
+
+    convergence_failures = 0
+    start_time = time.time()
+    last_heartbeat = start_time
+    process = psutil.Process()
+
+    # FIX 2: Progress heartbeat with ETA + MEMORY FIX 4: Memory monitoring
+    for idx, i in enumerate(window_indices):
+        # Progress heartbeat every 500 windows or 60 seconds (whichever comes first)
+        if idx % 500 == 0 or (time.time() - last_heartbeat) >= 60:
+            elapsed = time.time() - start_time
+            mem_mb = process.memory_info().rss / 1024 / 1024
+            if idx > 0:
+                time_per_window = elapsed / idx
+                remaining_windows = n_windows - idx
+                eta_sec = remaining_windows * time_per_window
+                eta_min = eta_sec / 60
+                pct = 100 * idx / n_windows
+                print(f"[{datetime.now().isoformat()}] HMM Progress: {idx:,}/{n_windows:,} ({pct:.1f}%) | Memory: {mem_mb:.0f} MB | ETA: {eta_min:.0f}min", flush=True)
+            else:
+                print(f"[{datetime.now().isoformat()}] HMM Progress: 0/{n_windows:,} (0.0%) | Memory: {mem_mb:.0f} MB | Starting...", flush=True)
+            last_heartbeat = time.time()
+
+        # Extract window
+        X_window = X_hmm[i:i+HMM_WINDOW_SIZE]
+
+        # STEP 1: Scale features (CRITICAL FIX)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_window)
+
+        # STEP 2: KMeans initialization (CRITICAL FIX)
+        kmeans = KMeans(n_clusters=HMM_N_STATES, random_state=RANDOM_STATE, n_init=10)
+        initial_labels = kmeans.fit_predict(X_scaled)
+
+        # STEP 3: Manual HMM initialization (CRITICAL FIX)
+        hmm_model = GaussianHMM(
+            n_components=HMM_N_STATES,
+            covariance_type='spherical',  # Changed from 'diag'
+            n_iter=HMM_N_ITER,  # Optimized from 50 to 25
+            tol=1e-2,
+            min_covar=1e-3,  # Regularization
+            init_params='',  # Manual init only
+            random_state=RANDOM_STATE,
+            verbose=False
+        )
+
+        # Initialize parameters from KMeans
+        hmm_model.means_ = kmeans.cluster_centers_
+        hmm_model.covars_ = np.array([
+            np.var(X_scaled[initial_labels == k]) + 1e-3
+            for k in range(HMM_N_STATES)
+        ])
+        hmm_model.startprob_ = np.array([
+            (initial_labels == k).sum() / len(initial_labels)
+            for k in range(HMM_N_STATES)
+        ])
+        hmm_model.transmat_ = np.ones((HMM_N_STATES, HMM_N_STATES)) / HMM_N_STATES
+
+        # STEP 4: Fit HMM
+        try:
+            hmm_model.fit(X_scaled)
+        except Exception as e:
+            # SLO: Availability - propagate errors, no silent handling
+            raise RuntimeError(f"HMM fit failed in window {i}: {type(e).__name__}: {e}") from e
+
+        # STEP 5: Validate (SLO: Correctness)
+        validate_hmm_convergence(hmm_model, i)
+        validate_transition_matrix(hmm_model, i)
+
+        # Predict for current bar (last bar in window)
+        X_current = X_scaled[-1:, :]
+        state = hmm_model.predict(X_current)[0]
+        state_probs = hmm_model.predict_proba(X_current)[0]
+
+        # Validate state representation
+        validate_state_representation(hmm_model.predict(X_scaled), HMM_N_STATES, i)
+
+        # MEMORY FIX 2: Store regime features in preallocated arrays (fast, no DataFrame overhead)
+        current_idx = i + HMM_WINDOW_SIZE - 1
+        hmm_state_array[current_idx] = state
+        hmm_state_prob_max_array[current_idx] = state_probs.max()
+
+        # Ratio of max prob to second max prob
+        sorted_probs = np.sort(state_probs)[::-1]
+        prob_ratio = sorted_probs[0] / (sorted_probs[1] + 1e-10)
+        hmm_state_prob_ratio_array[current_idx] = prob_ratio
+
+        if not hmm_model.monitor_.converged:
+            convergence_failures += 1
+
+        # MEMORY FIX 1: Explicit cleanup after each window (prevent accumulation)
+        del X_window, X_scaled, scaler, kmeans, initial_labels, hmm_model, X_current, state, state_probs, sorted_probs, prob_ratio
+
+        # MEMORY FIX 1: Force garbage collection every 100 windows
+        if idx % 100 == 0 and idx > 0:
+            gc.collect()
+
+    print(f"  Completed: {n_windows:,} windows")
+    print(f"  Convergence failures: {convergence_failures} ({100*convergence_failures/n_windows:.2f}%)")
+
+    # MEMORY FIX 2: Assign preallocated arrays to DataFrame once (single operation vs 11,475)
+    print("  Assigning HMM features to DataFrame...", flush=True)
+    df['hmm_state'] = hmm_state_array
+    df['hmm_state_prob_max'] = hmm_state_prob_max_array
+    df['hmm_state_prob_ratio'] = hmm_state_prob_ratio_array
+
+    # One-hot encode regime states
+    for state in range(HMM_N_STATES):
+        df[f'hmm_state_{state}'] = (df['hmm_state'] == state).astype(int)
+
+    return df
+
+
+def run_experiment():
+    """Execute HMM regime detection experiment with fixed implementation"""
+    # FIX 1: START marker for immediate verification
+    print(f"[{datetime.now().isoformat()}] START: Experiment beginning", flush=True)
+    print("=" * 80, flush=True)
+    print("HMM REGIME DETECTION - 1-HOUR TIMEFRAME", flush=True)
+    print("=" * 80, flush=True)
+    print(f"Experiment ID: hmm_regime_20251006_1h", flush=True)
+    print(f"Started: {datetime.now().isoformat()}", flush=True)
+    print(flush=True)
+
+    # Load data
+    print(f"Loading data from {DATA_PATH}...")
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"Data file not found: {DATA_PATH}")
+
+    df = pd.read_csv(DATA_PATH, parse_dates=['date'])
+    print(f"  Loaded {len(df):,} samples")
+    print(f"  Date range: {df['date'].min()} to {df['date'].max()}")
+    print()
+
+    # Generate base features
+    df = generate_base_features(df)
+
+    # Drop NaN rows from base features BEFORE HMM generation
+    # (HMM requires clean data for KMeans initialization)
+    base_features_for_check = [
+        'close_lag_1', 'close_lag_5', 'close_lag_10', 'close_lag_20',
+        'volume_lag_1', 'volume_lag_5', 'volume_lag_10', 'volume_lag_20',
+        'rolling_mean_10', 'rolling_mean_20', 'rolling_mean_50',
+        'rolling_std_10', 'rolling_std_20', 'rolling_std_50',
+        'rolling_min_10', 'rolling_min_20', 'rolling_min_50',
+        'rolling_max_10', 'rolling_max_20', 'rolling_max_50',
+        'volume_ratio_ma10', 'volume_ratio_ma20',
+        'return_1', 'return_5', 'return_20'
+    ]
+
+    df_before_hmm = df.dropna(subset=base_features_for_check)
+    print(f"Data after base features dropna: {len(df_before_hmm):,} samples")
+    print()
+
+    # Generate HMM features on clean data
+    df_with_hmm = generate_hmm_features(df_before_hmm)
+
+    # Create target (H=20 bars ahead directional prediction)
+    df_with_hmm['target'] = (df_with_hmm['close'].shift(-20) > df_with_hmm['close']).astype(int)
+
+    # Drop NaN rows from HMM features and target
+    df_clean = df_with_hmm.dropna()
+    print(f"Data after final dropna: {len(df_clean):,} samples")
+    print(f"Class distribution: {df_clean['target'].value_counts().to_dict()}")
+    print()
+
+    # Feature columns
+    base_features = [
+        'close_lag_1', 'close_lag_5', 'close_lag_10', 'close_lag_20',
+        'volume_lag_1', 'volume_lag_5', 'volume_lag_10', 'volume_lag_20',
+        'rolling_mean_10', 'rolling_mean_20', 'rolling_mean_50',
+        'rolling_std_10', 'rolling_std_20', 'rolling_std_50',
+        'rolling_min_10', 'rolling_min_20', 'rolling_min_50',
+        'rolling_max_10', 'rolling_max_20', 'rolling_max_50',
+        'volume_ratio_ma10', 'volume_ratio_ma20',
+        'return_1', 'return_5', 'return_20'
+    ]
+
+    hmm_features = [
+        'hmm_state_0', 'hmm_state_1', 'hmm_state_2',
+        'hmm_state_prob_max', 'hmm_state_prob_ratio'
+    ]
+
+    all_features = base_features + hmm_features
+
+    X = df_clean[all_features].values
+    y = df_clean['target'].values
+
+    print(f"Feature matrix shape: {X.shape}")
+    print(f"Base features: {len(base_features)}")
+    print(f"HMM features: {len(hmm_features)}")
+    print()
+
+    # Cross-validation
+    print(f"Running {N_FOLDS}-fold TimeSeriesSplit cross-validation...")
+    tscv = TimeSeriesSplit(n_splits=N_FOLDS)
+
+    fold_results = []
+    all_predictions = []
+    all_actuals = []
+
+    for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X)):
+        print(f"\nFold {fold_idx + 1}/{N_FOLDS}")
+        print(f"  Train: {len(train_idx):,} samples")
+        print(f"  Test:  {len(test_idx):,} samples")
+
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        # Train model
+        model = LogisticRegression(
+            penalty='l2',
+            solver='lbfgs',
+            max_iter=1000,
+            class_weight='balanced',
+            random_state=RANDOM_STATE
+        )
+
+        try:
+            model.fit(X_train, y_train)
+        except Exception as e:
+            # SLO: Availability - propagate errors
+            raise RuntimeError(f"Model training failed in fold {fold_idx + 1}: {type(e).__name__}: {e}") from e
+
+        # Predict
+        y_pred = model.predict(X_test)
+
+        # Metrics
+        accuracy = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+
+        print(f"  Accuracy:  {accuracy:.4f}")
+        print(f"  Precision: {precision:.4f}")
+        print(f"  Recall:    {recall:.4f}")
+
+        fold_results.append({
+            'fold': fold_idx + 1,
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'n_train': len(train_idx),
+            'n_test': len(test_idx)
+        })
+
+        all_predictions.extend(y_pred)
+        all_actuals.extend(y_test)
+
+    # Summary statistics
+    accuracies = [r['accuracy'] for r in fold_results]
+    mean_acc = np.mean(accuracies)
+    std_acc = np.std(accuracies)
+
+    print("\n" + "=" * 80)
+    print("RESULTS SUMMARY")
+    print("=" * 80)
+    print(f"Mean Accuracy: {mean_acc:.4f} ± {std_acc:.4f}")
+    print(f"Min Accuracy:  {min(accuracies):.4f}")
+    print(f"Max Accuracy:  {max(accuracies):.4f}")
+    print()
+
+    # Baseline comparison (SLO: Correctness)
+    baseline_mean = 0.515
+    baseline_std = 0.011
+
+    print("Baseline Comparison:")
+    print(f"  Baseline (5m):  {baseline_mean:.4f} ± {baseline_std:.4f}")
+    print(f"  1h Timeframe: {mean_acc:.4f} ± {std_acc:.4f}")
+    print(f"  Difference: {mean_acc - baseline_mean:+.4f}")
+
+    if abs(mean_acc - baseline_mean) <= 0.02:
+        print("  Verdict: 51.5% ceiling CONFIRMED (within 2%)")
+    elif mean_acc > baseline_mean + 0.02:
+        print("  Verdict: Ceiling BROKEN - 1h timeframe effective")
+    else:
+        print("  Verdict: Performance DEGRADED vs baseline")
+    print()
+
+    # Confusion matrix
+    cm = confusion_matrix(all_actuals, all_predictions)
+    print("Overall Confusion Matrix:")
+    print(cm)
+    print()
+
+    # Save results (SLO: Observability)
+    results = {
+        'experiment_id': 'hmm_regime_20251006_1h',
+        'timeframe': '1h',
+        'completed_at': datetime.now().isoformat(),
+        'n_samples': int(len(df_clean)),
+        'n_features': int(len(all_features)),
+        'n_folds': int(N_FOLDS),
+        'mean_accuracy': float(mean_acc),
+        'std_accuracy': float(std_acc),
+        'min_accuracy': float(min(accuracies)),
+        'max_accuracy': float(max(accuracies)),
+        'baseline_mean': float(baseline_mean),
+        'baseline_std': float(baseline_std),
+        'difference': float(mean_acc - baseline_mean),
+        'fold_results': fold_results,
+        'confusion_matrix': cm.tolist(),
+        'ceiling_confirmed': bool(abs(mean_acc - baseline_mean) <= 0.02)
+    }
+
+    results_file = RESULTS_DIR / "results.json"
+    with open(results_file, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"Results saved to {results_file}")
+
+    # Save predictions
+    predictions_df = pd.DataFrame({
+        'actual': all_actuals,
+        'predicted': all_predictions
+    })
+    predictions_file = RESULTS_DIR / "predictions.csv"
+    predictions_df.to_csv(predictions_file, index=False)
+    print(f"Predictions saved to {predictions_file}")
+
+    print("\n" + "=" * 80)
+    print("EXPERIMENT COMPLETE")
+    print("=" * 80)
+
+    return results
+
+
+if __name__ == '__main__':
+    try:
+        results = run_experiment()
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n✗ FATAL ERROR: {type(e).__name__}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

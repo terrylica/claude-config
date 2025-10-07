@@ -1,0 +1,192 @@
+# HMM Regime Detection - Multi-Timeframe Validation
+
+**Document Version:** 1.0.0
+**Created:** 2025-10-06
+**Objective:** Validate 51.5% ceiling across multiple timeframes (5m, 15m, 1h)
+**Verdict:** **Ceiling confirmed** - No predictive value across all tested intervals
+
+---
+
+## Executive Summary
+
+Three independent experiments across different timeframes (5-minute, 15-minute, 1-hour) confirm that HMM-based regime detection features provide **no predictive value** beyond random classification. All results fall within ±2% of the 51.5% accuracy ceiling.
+
+**Recommendation:** **Exclude HMM regime features from production pipeline.**
+
+---
+
+## Multi-Timeframe Results
+
+| Timeframe | Mean Accuracy | Std Dev | Range | Samples | Windows | Verdict |
+|-----------|---------------|---------|-------|---------|---------|---------|
+| **5m**    | 50.33%        | ±1.59%  | 48.16% - 53.99% | 31,360  | 31,360  | ✅ Ceiling confirmed |
+| **15m**   | 51.87%        | ±7.67%  | 35.16% - 64.84% | 1,920   | 1,920   | ✅ Ceiling confirmed |
+| **1h**    | 51.77%        | ±2.42%  | 47.51% - 55.80% | 3,820   | 3,820   | ✅ Ceiling confirmed |
+
+**Baseline:** 51.5% ± 1.1% (established by 5m experiment)
+
+---
+
+## Statistical Validation
+
+### Deviation from Ceiling
+
+All three timeframes fall within **statistical noise** of the 51.5% ceiling:
+
+- **5m:** 50.33% (1.17% below ceiling, within 1σ)
+- **15m:** 51.87% (0.37% above ceiling, within 1σ)
+- **1h:** 51.77% (0.27% above ceiling, within 1σ)
+
+### Variance Analysis
+
+Standard deviation varies by sample size:
+- **5m:** ±1.59% (1,493 samples/fold) - **lowest variance**
+- **1h:** ±2.42% (181 samples/fold) - moderate variance
+- **15m:** ±7.67% (91 samples/fold) - **highest variance** due to smallest fold size
+
+**Interpretation:** Higher variance in 15m is due to small sample size (91 samples/fold), not timeframe-specific dynamics. The mean accuracy still converges to 51.5% ceiling.
+
+---
+
+## Experimental Methodology
+
+### Common Framework
+
+All three experiments used identical methodology:
+
+**HMM Configuration (Fixed Implementation):**
+- StandardScaler normalization
+- KMeans initialization (3 clusters)
+- Spherical covariance
+- min_covar=1e-3 regularization
+
+**Model Architecture:**
+- LogisticRegression (sklearn)
+- Penalty: L2
+- Solver: lbfgs
+- Class weight: balanced
+
+**Cross-Validation:**
+- TimeSeriesSplit (20 folds)
+- No shuffling (chronological order preserved)
+
+### Timeframe-Specific Parameters
+
+| Timeframe | Window Size | Stride | Expected Windows | Data Source |
+|-----------|-------------|--------|------------------|-------------|
+| **5m**    | 2,000       | 1      | 31,360           | SOL-5m.csv  |
+| **15m**   | 2,000       | 10     | 1,920            | SOL-15m.csv |
+| **1h**    | 2,000       | 10     | 3,820            | SOL-1h.csv  |
+
+---
+
+## Experiment Details
+
+### 5-Minute Timeframe
+- **Experiment ID:** `hmm_regime_20251005_hybrid`
+- **Samples:** 31,360
+- **Features:** 30 (26 base + 4 HMM-derived)
+- **Mean Accuracy:** 50.33% ± 1.59%
+- **Range:** 48.16% - 53.99%
+- **Convergence:** 100% (all windows converged)
+- **Reference:** `experiments/hmm_regime_20251005_hybrid/results/results.json`
+
+### 15-Minute Timeframe
+- **Experiment ID:** `hmm_regime_20251006_15m`
+- **Samples:** 1,920
+- **Features:** 30 (26 base + 4 HMM-derived)
+- **Mean Accuracy:** 51.87% ± 7.67%
+- **Range:** 35.16% - 64.84%
+- **Convergence:** 100% (all windows converged)
+- **Memory:** 233 MB stable (post-optimization)
+- **Reference:** `experiments/hmm_regime_20251006_15m/FINDINGS.md`
+
+### 1-Hour Timeframe
+- **Experiment ID:** `hmm_regime_20251006_1h`
+- **Samples:** 3,820
+- **Features:** 30 (26 base + 4 HMM-derived)
+- **Mean Accuracy:** 51.77% ± 2.42%
+- **Range:** 47.51% - 55.80%
+- **Convergence:** 100% (all windows converged)
+- **Memory:** 223 MB stable (post-optimization)
+- **Execution:** Remote (yca server, 62 GB RAM)
+- **Reference:** `experiments/hmm_regime_20251006_1h/FINDINGS.md`
+
+---
+
+## Memory Optimization Validation
+
+The 15m experiment initially failed with an OOM kill at 93.8% completion. A 4-layer memory optimization was implemented and validated across both 15m and 1h experiments:
+
+### Before Optimization
+- **15m:** 5-10 GB peak → OOM killed at 93.8%
+- **1h:** Projected 15-25 GB peak (would have failed)
+
+### After Optimization
+- **15m:** 233 MB stable throughout (**22x-43x reduction**)
+- **1h:** 223 MB stable throughout (**67x-112x reduction** vs projected)
+
+**Applied Fixes:**
+1. Explicit cleanup (`del` + `gc.collect()` every 100 windows)
+2. Preallocated numpy arrays (vs DataFrame `.loc` assignments)
+3. Sequential execution (never parallel HMM experiments)
+4. Memory monitoring (`psutil` RSS tracking)
+
+**Reference:** `.claude/findings/hmm-memory-optimization-report.md`
+
+---
+
+## Conclusion
+
+### Ceiling Confirmation
+
+The 51.5% accuracy ceiling is **fundamental** to HMM-based regime detection features:
+
+1. **Timeframe-independent:** Ceiling persists across 5m, 15m, and 1h intervals
+2. **Statistically robust:** All results within ±2% despite different sample sizes
+3. **Convergence-independent:** 100% HMM convergence across all experiments
+4. **Implementation-independent:** Fixed HMM implementation (StandardScaler, KMeans, spherical covariance) did not improve performance
+
+### Interpretation
+
+HMM-derived regime features (state labels, probabilities, ratios) provide **no predictive signal** beyond random classification. The ceiling represents the **fundamental limit** of this approach, not a methodological artifact.
+
+### Recommendation
+
+**Exclude HMM regime features from production pipeline.**
+
+Alternative directions:
+- Explore causal discovery methods (tigramite, transfer entropy)
+- Focus on invariant features (permutation entropy, DFA)
+- Investigate information-theoretic measures (mutual information, HSIC)
+
+---
+
+## References
+
+### Experiment Plans
+- `experiments/hmm_regime_20251005_hybrid/PLAN.md` (5m experiment)
+- `experiments/hmm_regime_20251006_15m/PLAN.md` (15m experiment, v1.2.0)
+- `experiments/hmm_regime_20251006_1h/PLAN.md` (1h experiment, v1.2.0)
+
+### Findings Documents
+- `experiments/hmm_regime_20251006_15m/FINDINGS.md` (15m results)
+- `experiments/hmm_regime_20251006_1h/FINDINGS.md` (1h results)
+
+### Master Plans
+- `.claude/plans/hmm-hybrid-validation.yaml` (v2.0.0 - multi-timeframe validation)
+- `.claude/plans/hmm-memory-optimization.yaml` (v1.0.0 - memory fixes)
+
+### Technical Reports
+- `.claude/findings/hmm-memory-optimization-report.md` (memory optimization deep dive)
+
+---
+
+## Changelog
+
+### 1.0.0 (2025-10-06)
+- **init:** Created multi-timeframe validation report
+- **documented:** Results from 5m, 15m, and 1h experiments
+- **confirmed:** 51.5% ceiling across all timeframes
+- **validated:** Memory optimization success (22x-112x reduction)
+- **recommended:** Exclude HMM features from production

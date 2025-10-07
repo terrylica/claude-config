@@ -1,0 +1,110 @@
+#!/bin/bash
+# CNS Diagnostic Tool - Check CNS configuration and connectivity
+
+set -euo pipefail
+
+echo "🔍 CNS System Diagnostic"
+echo "========================"
+echo ""
+
+# Check local environment
+echo "📍 Local Environment (macOS):"
+echo "  Hostname: $(hostname)"
+echo "  User: $USER"
+echo "  SSH Session: ${SSH_CLIENT:+YES (Unexpected!)}"
+echo "  SSH Session: ${SSH_CLIENT:-NO (Expected)}"
+echo ""
+
+# Check CNS files
+echo "📁 CNS Files:"
+for file in \
+    "$HOME/.claude/automation/cns/cns_hook_entry.sh" \
+    "$HOME/.claude/automation/cns/conversation_handler.sh" \
+    "$HOME/.claude/automation/cns/cns_notification_hook.sh" \
+    "$HOME/.claude/automation/cns/config/cns_config.json" \
+    "$HOME/.claude/tools/cns-remote-client.sh" \
+    "$HOME/.claude/tools/notifications/pushover-notify"; do
+    if [[ -f "$file" ]]; then
+        echo "  ✅ $file"
+    else
+        echo "  ❌ $file (MISSING)"
+    fi
+done
+echo ""
+
+# Check Pushover credentials
+echo "🔐 Pushover Credentials (macOS Keychain):"
+if security find-generic-password -s "pushover-user-key" -a "terryli" -w &>/dev/null; then
+    echo "  ✅ pushover-user-key"
+else
+    echo "  ❌ pushover-user-key (MISSING)"
+fi
+
+if security find-generic-password -s "pushover-app-token" -a "terryli" -w &>/dev/null; then
+    echo "  ✅ pushover-app-token"
+else
+    echo "  ❌ pushover-app-token (MISSING)"
+fi
+echo ""
+
+# Check for SSH tunnel listener
+echo "🚇 SSH Tunnel Listener:"
+if lsof -i :4000 >/dev/null 2>&1; then
+    echo "  ✅ Port 4000 is LISTENING"
+    lsof -i :4000 | grep LISTEN
+else
+    echo "  ❌ Port 4000 is NOT listening"
+    echo "     Run: cns-tunnel-listener.sh &"
+fi
+echo ""
+
+# Check remote connectivity
+echo "🌐 Remote SSH Servers:"
+for remote in ssh-yca; do
+    echo "  Testing: $remote"
+    if ssh -o ConnectTimeout=2 "$remote" "echo '  ✅ Connected: $remote'" 2>/dev/null; then
+        # Check if remote has CNS client
+        if ssh "$remote" "test -x ~/.claude/tools/cns-remote-client.sh" 2>/dev/null; then
+            echo "     ✅ CNS remote client installed"
+        else
+            echo "     ❌ CNS remote client NOT installed"
+        fi
+
+        # Check if remote has Pushover config
+        if ssh "$remote" "test -f ~/.pushover_config" 2>/dev/null; then
+            echo "     ✅ Pushover configured on remote"
+        else
+            echo "     ❌ Pushover NOT configured on remote"
+            echo "        Run: cns-setup-remote-pushover.sh $remote"
+        fi
+    else
+        echo "  ❌ Cannot connect to $remote"
+    fi
+done
+echo ""
+
+# Check recent CNS activity
+echo "📋 Recent CNS Activity (last 10 lines):"
+if [[ -f /tmp/claude_cns_debug.log ]]; then
+    tail -10 /tmp/claude_cns_debug.log | sed 's/^/  /'
+else
+    echo "  (No debug log found)"
+fi
+echo ""
+
+# Recommendations
+echo "💡 Recommendations:"
+echo ""
+echo "If SSH remote notifications are failing:"
+echo ""
+echo "  OPTION 1 (EASIEST): Configure Pushover on remote"
+echo "    $ cns-setup-remote-pushover.sh ssh-yca"
+echo ""
+echo "  OPTION 2: Start SSH tunnel listener"
+echo "    $ cns-tunnel-listener.sh &"
+echo "    Then set up reverse SSH tunnel from ssh-yca:"
+echo "    $ ssh -R 4000:localhost:4000 ssh-yca"
+echo ""
+echo "  TEST: Send notification from remote"
+echo "    $ ssh ssh-yca '~/.claude/tools/cns-remote-client.sh --test'"
+echo ""

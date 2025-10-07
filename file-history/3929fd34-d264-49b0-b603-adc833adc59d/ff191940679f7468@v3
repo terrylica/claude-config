@@ -1,0 +1,285 @@
+# Root Cause Analysis: macOS Memory Exhaustion
+
+**Incident:** Multi-timeframe HMM experiments caused macOS to run out of memory
+**Date:** 2025-10-06T09:51-09:54 (approx)
+**System:** 36 GB RAM (38,654,705,664 bytes)
+
+---
+
+## Incident Timeline
+
+1. **09:51:43** - 15m experiment started (PID 29108)
+   - Dataset: 10,595 samples
+   - HMM windows: 1,920 windows × 1,000 samples each
+   - Progress: 0% → 93.8% over ~2.5 minutes
+
+2. **~09:54** - 15m experiment killed at 93.8% complete
+   - Last heartbeat: 1,800/1,920 windows
+   - Results directory empty (no results.json saved)
+   - Process terminated before completion
+
+3. **Status** - 1h experiment never started
+   - Created files but not executed
+   - Would have used: 3,825 windows × 2,000 samples each
+
+---
+
+## Root Cause Analysis
+
+### Primary Cause: Memory Accumulation Pattern
+
+**HMM Memory Profile Per Window:**
+
+Each HMM window fit allocates:
+- Input data: `window_size × n_features × 8 bytes` (float64)
+- Scaled data (StandardScaler): Same size as input
+- KMeans clustering: `window_size × n_features × 8 bytes` (copy)
+- HMM internal matrices:
+  - Transition matrix: `n_states² × 8 bytes` (3×3 = 72 bytes)
+  - Means: `n_states × n_features × 8 bytes` (3×9×8 = 216 bytes)
+  - Covariances: `n_states × 8 bytes` (spherical)
+  - Forward/backward probabilities: `window_size × n_states × 8 bytes`
+
+**15m Experiment:**
+- Window size: 1,000 samples
+- Features: 9 (for HMM input)
+- Per-window memory: ~1,000 × 9 × 8 × 4 (data + scaled + kmeans + HMM) = ~288 KB base
+- Forward/backward: 1,000 × 3 × 8 = 24 KB
+- **Total per window: ~312 KB**
+
+**Theoretical Total for 1,920 windows:**
+- If held in memory: 1,920 × 312 KB = 599 MB (manageable)
+
+**ISSUE: Memory NOT Released Between Windows**
+
+### Secondary Cause: Python Memory Management
+
+**Problem:** Python's garbage collector may not release memory immediately:
+
+```python
+for idx, i in enumerate(window_indices):  # 1,920 iterations
+    X_window = X_hmm[i:i+HMM_WINDOW_SIZE]  # New allocation
+    scaler = StandardScaler()              # New object
+    X_scaled = scaler.fit_transform(X_window)  # New allocation
+    kmeans = KMeans(...)                   # New object
+    initial_labels = kmeans.fit_predict(X_scaled)  # New allocation
+    hmm_model = GaussianHMM(...)           # New object
+    hmm_model.fit(X_scaled)                # Large internal allocations
+    # No explicit cleanup
+```
+
+**Memory Leak Pattern:**
+1. Each iteration creates new objects
+2. Old objects not explicitly deleted
+3. Garbage collection may lag behind allocation rate
+4. Memory accumulates over 1,920 iterations
+5. At 93.8% (1,800 windows), accumulated memory exceeds threshold
+
+### Tertiary Cause: DataFrame Assignment Overhead
+
+**Problem:** Storing results back to DataFrame:
+
+```python
+df.loc[df.index[current_idx], 'hmm_state'] = state
+df.loc[df.index[current_idx], 'hmm_state_prob_max'] = state_probs.max()
+df.loc[df.index[current_idx], 'hmm_state_prob_ratio'] = prob_ratio
+```
+
+**Each `.loc` assignment:**
+- Triggers DataFrame indexing (memory copy)
+- May trigger DataFrame reindexing (memory allocation)
+- Over 1,920 windows × 3 assignments = 5,760 operations
+- Accumulates memory fragmentation
+
+---
+
+## Memory Requirements Estimation
+
+### 15m Experiment (Actual - OOM Killed)
+- Base DataFrame: 10,595 rows × ~40 columns × 8 bytes = ~3.2 MB
+- HMM processing: 1,920 windows × 312 KB = 599 MB theoretical
+- **Actual peak (estimated):** 5-10 GB due to accumulation
+
+### 1h Experiment (Not Started - Would Have Failed)
+- Base DataFrame: 40,244 rows × ~40 columns × 8 bytes = ~12 MB
+- HMM processing: 3,825 windows × 624 KB = 2.4 GB theoretical
+- **Projected peak:** 15-25 GB due to accumulation
+
+### Parallel Execution Risk
+If both ran simultaneously:
+- 15m: 5-10 GB
+- 1h: 15-25 GB
+- **Combined: 20-35 GB** (would exceed 36 GB with system overhead)
+
+---
+
+## Evidence
+
+### Log Analysis
+- 15m experiment: Stopped at 93.8% without error message
+- No Python traceback (indicates OS-level kill, not Python exception)
+- Process terminated abruptly (no "EXPERIMENT COMPLETE" message)
+
+### Memory Pattern
+- Linear progress up to 93.8%
+- No slowdown or warnings before termination
+- Consistent window processing time (~70ms per window)
+- Sudden termination suggests OOM killer intervention
+
+### macOS Behavior
+- macOS terminates processes when system memory pressure is critical
+- Kills largest memory consumer first
+- No warning or graceful shutdown (SIGKILL, not SIGTERM)
+
+---
+
+## Fixes
+
+### Fix 1: Explicit Memory Cleanup (MANDATORY)
+
+**Before:**
+```python
+for idx, i in enumerate(window_indices):
+    X_window = X_hmm[i:i+HMM_WINDOW_SIZE]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_window)
+    kmeans = KMeans(...)
+    hmm_model = GaussianHMM(...)
+    hmm_model.fit(X_scaled)
+```
+
+**After:**
+```python
+import gc
+
+for idx, i in enumerate(window_indices):
+    X_window = X_hmm[i:i+HMM_WINDOW_SIZE]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_window)
+    kmeans = KMeans(...)
+    hmm_model = GaussianHMM(...)
+    hmm_model.fit(X_scaled)
+
+    # Explicit cleanup
+    del X_window, X_scaled, scaler, kmeans, hmm_model
+
+    # Force garbage collection every 100 windows
+    if idx % 100 == 0:
+        gc.collect()
+```
+
+### Fix 2: Preallocate Result Arrays (Avoid DataFrame Assignment)
+
+**Before:**
+```python
+df['hmm_state'] = np.nan
+for idx, i in enumerate(window_indices):
+    df.loc[df.index[current_idx], 'hmm_state'] = state  # Expensive!
+```
+
+**After:**
+```python
+hmm_state_array = np.full(len(df), np.nan)
+hmm_prob_max_array = np.full(len(df), np.nan)
+hmm_prob_ratio_array = np.full(len(df), np.nan)
+
+for idx, i in enumerate(window_indices):
+    current_idx = i + HMM_WINDOW_SIZE - 1
+    hmm_state_array[current_idx] = state  # Fast array assignment
+    hmm_prob_max_array[current_idx] = state_probs.max()
+    hmm_prob_ratio_array[current_idx] = prob_ratio
+
+# Assign once at the end
+df['hmm_state'] = hmm_state_array
+df['hmm_state_prob_max'] = hmm_prob_max_array
+df['hmm_state_prob_ratio'] = hmm_prob_ratio_array
+```
+
+### Fix 3: Sequential Execution (NOT Parallel)
+
+**Before:**
+```bash
+# 15m experiment started
+timeout 1h uv run ... 15m/run_experiment.py &
+
+# 1h experiment about to start (WRONG - would compound memory usage)
+timeout 1h uv run ... 1h/run_experiment.py &
+```
+
+**After:**
+```bash
+# 15m first, wait for completion
+timeout 1h uv run ... 15m/run_experiment.py
+# Wait for exit
+
+# 1h second, after 15m completes
+timeout 1h uv run ... 1h/run_experiment.py
+```
+
+### Fix 4: Reduce HMM Window Size (If Fixes 1-3 Insufficient)
+
+**Current (15m):**
+- Window: 1,000 samples
+- Stride: 5
+
+**Alternative (if still OOM):**
+- Window: 500 samples (2x reduction)
+- Stride: 10 (keep coverage similar)
+- Memory: 50% reduction per window
+
+---
+
+## Recommendations
+
+### Immediate Actions
+
+1. **Apply Fix 1 + Fix 2** to all experiment scripts
+   - Add explicit `del` statements after each window
+   - Add `gc.collect()` every 100 windows
+   - Preallocate numpy arrays instead of DataFrame assignments
+
+2. **Run experiments sequentially** (not parallel)
+   - 15m → complete → 1h → complete
+   - Never run multiple HMM experiments simultaneously
+
+3. **Add memory monitoring** to progress heartbeat:
+   ```python
+   import psutil
+   process = psutil.Process()
+   mem_mb = process.memory_info().rss / 1024 / 1024
+   print(f"[...] Progress: {idx}/{n_windows} | Memory: {mem_mb:.0f} MB | ETA: {eta_min:.0f}min")
+   ```
+
+### Long-Term Solutions
+
+1. **Batch processing with checkpoints:**
+   - Process HMM windows in batches of 100
+   - Save intermediate results to disk
+   - Clear memory between batches
+
+2. **Streaming computation:**
+   - Process one window at a time
+   - Write results to disk immediately
+   - Never hold >100 windows in memory
+
+3. **Lower-memory alternatives:**
+   - Reduce HMM n_iter from 25 to 15
+   - Use smaller window sizes (500 vs 1000/2000)
+   - Use diagonal covariance (less memory than spherical)
+
+---
+
+## Conclusion
+
+**Root Cause:** Memory accumulation over 1,920 HMM window iterations due to:
+1. No explicit cleanup of large objects (scaler, kmeans, hmm_model)
+2. Inefficient DataFrame assignments (5,760 operations)
+3. Python GC not keeping pace with allocation rate
+
+**Impact:** 15m experiment OOM killed at 93.8%, 1h experiment never started
+
+**Fix:** Apply explicit memory cleanup + preallocated arrays + sequential execution
+
+**Estimated Fix Impact:**
+- Memory usage: 5-10 GB → 1-2 GB per experiment
+- Safe to run sequentially without OOM risk

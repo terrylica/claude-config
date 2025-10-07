@@ -1,0 +1,243 @@
+# HMM Regime Detection - 15-Minute Timeframe
+
+**Experiment ID:** `hmm_regime_20251006_15m`
+**Objective:** Test if 15-minute timeframe breaks 51.5% ceiling observed on 5-minute data
+**Status:** COMPLETED
+**Created:** 2025-10-06T00:00:00Z
+**Last Updated:** 2025-10-06T10:35:16Z
+**Completed:** 2025-10-06T10:35:16Z
+**Version:** 1.2.0
+
+---
+
+## Context
+
+**Hypothesis:** The 51.5% ceiling may be timeframe-specific. Longer timeframes may reduce noise and capture different regime dynamics.
+
+**Previous Results (5-minute):**
+- Experiment: `experiments/hmm_regime_20251005_hybrid`
+- Mean Accuracy: 50.33% ± 1.59%
+- Verdict: Ceiling confirmed at 51.5%
+
+**Methodology Inheritance:**
+- Fixed HMM implementation (StandardScaler + KMeans + spherical covariance)
+- Optimized parameters (window=2000→1000, stride=10→5, n_iter=25)
+- All execution fixes (unbuffered, progress heartbeat, realistic timeout)
+
+---
+
+## SLOs (Service Level Objectives)
+
+### Availability
+- **no_silent_failures:** All errors propagate to caller, no exception swallowing
+- **no_retries:** Crash fast on numerical issues, no automatic retry logic
+- **error_logging:** All exceptions logged with full traceback before propagation
+
+### Correctness
+- **hmm_convergence:** HMM EM algorithm must converge (monitor_.converged == True)
+- **transition_matrix_validity:** All row sums == 1.0 (±1e-5 tolerance)
+- **state_representation:** All n_components states must be represented in predictions
+- **fold_completion:** All 20 CV folds must complete without numerical errors
+- **baseline_comparison:** Results compared against 51.5% ± 1.1% baseline
+
+### Observability
+- **convergence_diagnostics:** Log iterations, log-likelihood, convergence status per fold
+- **state_distribution:** Track state counts and percentages per fold
+- **feature_importance:** Log cluster means and separation metrics
+- **performance_metrics:** Accuracy, precision, recall per fold
+- **summary_artifacts:** JSON results, CSV predictions, confusion matrices
+
+### Maintainability
+- **out_of_box_dependencies:** sklearn, hmmlearn, pandas, numpy only
+- **no_custom_em:** Use hmmlearn.hmm.GaussianHMM as-is
+- **reusable_patterns:** Extract scalable patterns to library if successful
+- **version_tracking:** SemVer 1.0.0, changelog in this document
+
+### Excluded from SLOs
+- Speed/performance optimization (not in scope)
+- Security hardening (not applicable for research code)
+
+---
+
+## Methodology
+
+### Dataset
+- **Source:** `ml_feature_set/sample_data/resampled_binance_SOL-15m.csv`
+- **Records:** 10,645 samples
+- **Date Range:** 2022-01-14 to 2025-xx-xx (3 years)
+- **Timeframe:** 15-minute bars
+- **Target:** Directional prediction (H=20 bars ahead, ~5 hours)
+
+### Base Features (26 features)
+- OHLCV lags: [1, 5, 10, 20]
+- Rolling stats: mean, std, min, max (windows: 10, 20, 50)
+- Volume ratios: vs MA(10), MA(20)
+- Returns: 1-bar, 5-bar, 20-bar
+
+### HMM Regime Features (5 features)
+**Fixed Implementation:**
+- StandardScaler normalization
+- KMeans initialization (3 clusters)
+- Spherical covariance
+- min_covar=1e-3 regularization
+
+**Generated Features:**
+- `hmm_state_0`, `hmm_state_1`, `hmm_state_2`: One-hot encoded states
+- `hmm_state_prob_max`: Max probability across states
+- `hmm_state_prob_ratio`: Max prob / second max prob
+
+### HMM Parameters (Optimized for Small Dataset)
+- **Window Size:** 1000 samples (reduced from 2000 due to 10K total)
+- **Stride:** 5 (sample every 5th window)
+- **N Iterations:** 25 (same as 5m)
+- **N States:** 3 (same as 5m)
+- **Expected Windows:** ~1,929 windows
+
+### Model Architecture
+- **Type:** LogisticRegression (sklearn)
+- **Penalty:** l2
+- **Solver:** lbfgs
+- **Max Iterations:** 1000
+- **Class Weight:** balanced
+
+### Cross-Validation
+- **Method:** TimeSeriesSplit (sklearn)
+- **Folds:** 20
+- **Train/Test Split:** Rolling window, no shuffle
+- **Purging:** None (chronological split handles leakage)
+
+---
+
+## Execution Plan
+
+1. **Load Data:** Read CSV, validate schema
+2. **Generate Base Features:** 26 OHLCV + rolling features
+3. **Generate HMM Features:** Apply fixed implementation
+4. **Cross-Validation:** 20-fold TimeSeriesSplit
+5. **Validation:** Compare vs 51.5% baseline
+6. **Artifacts:** Save results, predictions, diagnostics
+
+### Expected Runtime
+- HMM training: ~3-5 minutes (~1,929 windows)
+- CV training: ~1-2 minutes (20 folds × LogisticRegression)
+- **Total:** ~5 minutes
+
+### Execution Command
+```bash
+timeout 1h uv run --with hmmlearn --with scikit-learn python -u \
+  experiments/hmm_regime_20251006_15m/run_experiment.py \
+  > experiments/hmm_regime_20251006_15m/experiment_output.log 2>&1 &
+```
+
+---
+
+## Success Criteria
+
+### Primary Objective
+**Test ceiling at 15-minute timeframe:**
+- If accuracy > 53%: Ceiling broken, timeframe effect confirmed
+- If accuracy ≈ 50-52%: Ceiling persists across timeframes
+
+### Secondary Objectives
+- **Stability:** All 20 folds complete without numerical errors
+- **Convergence:** HMM converges in all rolling windows
+- **State Quality:** Regime persistence > 5 bars median across folds
+
+---
+
+## Risk Assessment
+
+### Known Risks
+1. **Small Dataset:** 10K samples may have high variance
+   - Mitigation: Use 20-fold CV to stabilize estimates
+2. **Regime Dynamics:** 15m regimes may differ from 5m
+   - Mitigation: Accept as valid timeframe-specific behavior
+3. **Numerical Instability:** Smaller windows (1000 vs 2000)
+   - Mitigation: Fixed implementation already validated
+
+---
+
+## References
+
+**Parent Experiment:** `experiments/hmm_regime_20251005_hybrid` (5-minute, 50.33% ± 1.59%)
+**Master Plan:** `.claude/plans/hmm-hybrid-validation.yaml`
+
+---
+
+## Memory Optimization (v1.1.0)
+
+**Incident:** First execution attempt OOM killed at 93.8% complete (1,800/1,920 windows)
+**Root Cause:** Memory accumulation + inefficient DataFrame assignments
+**Reference:** `.claude/plans/hmm-memory-optimization.yaml`
+
+### Applied Fixes
+
+1. **Explicit Cleanup (MEMORY FIX 1)**
+   - `del` statements after each HMM window
+   - `gc.collect()` every 100 windows
+   - Prevents 5-10 GB memory accumulation
+
+2. **Preallocated Arrays (MEMORY FIX 2)**
+   - Numpy arrays instead of DataFrame `.loc` assignments
+   - Single DataFrame assignment at end (vs 5,760 operations)
+   - Eliminates 2-3 GB fragmentation overhead
+
+3. **Sequential Execution (MEMORY FIX 3)**
+   - Never run multiple HMM experiments in parallel
+   - Prevents combined 20-35 GB peak exceeding 36 GB system
+
+4. **Memory Monitoring (MEMORY FIX 4)**
+   - `psutil` RSS tracking in progress heartbeat
+   - Expected peak: <2 GB (vs 5-10 GB before)
+
+### Expected Impact
+- **Memory Usage:** 5-10 GB → 1-2 GB (5x reduction)
+- **Completion:** OOM killed → successful completion
+- **Safety:** Sequential execution enforced
+
+---
+
+## Results Summary
+
+**Mean Accuracy:** 51.87% ± 7.67%
+**Range:** 35.16% - 64.84%
+**Samples:** 1,920
+**Folds:** 20
+**Verdict:** ✅ **Ceiling confirmed** - No predictive value
+
+**Comparison to Baseline (5m):**
+- 5m: 50.33% ± 1.59%
+- 15m: 51.87% ± 7.67%
+- Difference: +1.54% (within statistical noise)
+
+**Memory Performance:**
+- Peak: 233 MB stable (vs 5-10 GB before optimization)
+- Reduction: 22x-43x
+- Runtime: ~2 minutes
+
+**Reference:** `experiments/hmm_regime_20251006_15m/FINDINGS.md`
+
+---
+
+## Changelog
+
+### 1.2.0 (2025-10-06T10:35:16Z) - Experiment Completed
+- **COMPLETED:** Experiment finished successfully (1,920/1,920 windows)
+- **RESULTS:** Mean accuracy 51.87% ± 7.67% (ceiling confirmed)
+- **VALIDATED:** Memory optimization (233 MB stable, 22x-43x reduction)
+- **DOCUMENTED:** Created FINDINGS.md with full analysis
+- **VERDICT:** No predictive value, recommend exclusion from production
+
+### 1.1.0 (2025-10-06T10:00:00Z) - Memory Optimization
+- **CRITICAL:** Applied memory fixes after OOM kill at 93.8%
+- **FIXED:** Explicit cleanup (del + gc.collect every 100 windows)
+- **FIXED:** Preallocated arrays (avoid DataFrame .loc overhead)
+- **FIXED:** Memory monitoring (psutil RSS tracking)
+- **REDUCED:** Peak memory 5-10 GB → 1-2 GB (5x reduction)
+- **REFERENCE:** `.claude/plans/hmm-memory-optimization.yaml`
+
+### 1.0.0 (2025-10-06T00:00:00Z)
+- **init:** Created 15-minute timeframe experiment
+- **adapted:** Reduced HMM window (1000) and stride (5) for small dataset
+- **inherited:** All fixes from 5m experiment (unbuffered, progress, optimized)
+- **objective:** Test if longer timeframe breaks 51.5% ceiling

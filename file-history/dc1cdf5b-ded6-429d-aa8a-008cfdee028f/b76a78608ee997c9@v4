@@ -1,0 +1,86 @@
+#!/bin/bash
+# Pushover Notification Sender
+# Usage: pushover-notify <title> <message> [device] [sound] [--with-context]
+
+if [[ $# -lt 2 ]]; then
+    echo "Usage: pushover-notify <title> <message> [device] [sound] [--with-context]"
+    echo "Example: pushover-notify 'Build Complete' 'System ready'"
+    echo "Example: pushover-notify 'Task Done' 'Ready!' 'iphone_13_mini' 'toy_story'"
+    echo "Example: pushover-notify 'CNS' 'Completed' '' '' --with-context"
+    echo ""
+    echo "Options:"
+    echo "  --with-context    Add username@hostname and folder to notification"
+    exit 1
+fi
+
+TITLE="$1"
+MESSAGE="$2"
+DEVICE="${3:-iphone_13_mini}"
+SOUND="${4:-toy_story}"
+WITH_CONTEXT="${5:-}"
+
+# Add context if requested
+if [[ "$WITH_CONTEXT" == "--with-context" || "$SOUND" == "--with-context" || "$DEVICE" == "--with-context" ]]; then
+    USERNAME="${USER:-$(whoami 2>/dev/null || echo 'unknown')}"
+    HOSTNAME_SHORT="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo 'unknown')"
+    CURRENT_DIR="$(pwd 2>/dev/null || echo '/unknown')"
+    FOLDER_NAME="$(basename "$CURRENT_DIR" 2>/dev/null || echo 'unknown')"
+
+    # Enrich title with user@host
+    TITLE="CNS: ${USERNAME}@${HOSTNAME_SHORT}"
+
+    # Enrich message with folder
+    MESSAGE="📁 ${FOLDER_NAME}
+${MESSAGE}"
+
+    # Reset device/sound if they were --with-context
+    [[ "$DEVICE" == "--with-context" ]] && DEVICE="iphone_13_mini"
+    [[ "$SOUND" == "--with-context" ]] && SOUND="toy_story"
+fi
+
+# Retrieve credentials (priority order):
+# 1. CNS config (shared in git) - preferred
+# 2. macOS Keychain - fallback
+
+USER_KEY=""
+APP_TOKEN=""
+
+# Try CNS config first
+CNS_CONFIG="$HOME/.claude/automation/cns/config/cns_config.json"
+if [[ -f "$CNS_CONFIG" ]]; then
+    USER_KEY=$(jq -r '.pushover.user_key // empty' "$CNS_CONFIG" 2>/dev/null)
+    APP_TOKEN=$(jq -r '.pushover.app_token // empty' "$CNS_CONFIG" 2>/dev/null)
+fi
+
+# Fallback to keychain if CNS config didn't have credentials
+if [[ -z "$USER_KEY" || -z "$APP_TOKEN" ]]; then
+    USER_KEY=$(security find-generic-password -s "pushover-user-key" -a "terryli" -w 2>/dev/null)
+    APP_TOKEN=$(security find-generic-password -s "pushover-app-token" -a "terryli" -w 2>/dev/null)
+fi
+
+if [[ -z "$USER_KEY" ]]; then
+    echo "❌ User key not found in CNS config or keychain"
+    echo "Add to: $CNS_CONFIG (pushover.user_key)"
+    echo "Or run: pushover-setup"
+    exit 1
+fi
+
+if [[ -z "$APP_TOKEN" ]]; then
+    echo "❌ Application token not found in CNS config or keychain"
+    echo "Add to: $CNS_CONFIG (pushover.app_token)"
+    echo "Or run: pushover-setup <your-app-token>"
+    echo "Get token from: https://pushover.net/apps/build"
+    exit 1
+fi
+
+# Send notification
+curl -s \
+  --form-string "token=$APP_TOKEN" \
+  --form-string "user=$USER_KEY" \
+  --form-string "device=$DEVICE" \
+  --form-string "title=$TITLE" \
+  --form-string "message=$MESSAGE" \
+  --form-string "sound=$SOUND" \
+  https://api.pushover.net/1/messages.json
+
+echo # Add newline after curl response

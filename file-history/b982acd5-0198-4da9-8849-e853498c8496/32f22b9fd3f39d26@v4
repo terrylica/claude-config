@@ -1,0 +1,312 @@
+---
+# HMM Post-Execution Automation Plan
+# Version: 1.0.0
+# Created: 2025-10-05T17:40:00Z
+# Status: active
+# Context: Automate result processing and documentation after experiment completion
+
+metadata:
+  parent_plan: .claude/plans/hmm-hybrid-validation.yaml
+  experiment_id: hmm_regime_20251005_hybrid
+  experiment_pid: 38924
+  automation_pid: 51306
+  trigger: experiment_completion
+  automation_type: sequential_pipeline
+  automation_started: 2025-10-05T17:40:32Z
+  automation_log: experiments/hmm_regime_20251005_hybrid/automation_output.log
+  automation_status: monitoring_active
+  experiment_runtime: 12m_37s
+  notification_config:
+    service: pushover
+    priority: 2  # emergency
+    sound: vibe20sec
+    delivery_confirmed: pending
+
+slos:
+  availability:
+    - no_silent_failures: all errors propagate with full traceback
+    - process_monitoring: poll experiment PID until exit
+    - notification_delivery: Pushover notification on completion (success or failure)
+  correctness:
+    - result_validation: verify results.json schema before processing
+    - ceiling_comparison: validate against 51.5% ± 1.1% baseline
+    - findings_completeness: all required sections in FINDINGS.md
+    - plan_update_atomicity: single write operation for plan updates
+  observability:
+    - execution_log: timestamp all automation steps
+    - error_context: capture experiment exit code and final log state
+    - artifact_tracking: list all created/updated files
+  maintainability:
+    - out_of_box_tools: jq, python stdlib, bash only
+    - reusable_templates: FINDINGS.md template for future experiments
+    - version_control: SemVer for plan updates
+
+excluded_from_slos:
+  - speed: automation can take minutes, not optimized
+  - performance: single-threaded sequential execution acceptable
+  - security: local execution, no auth/encryption required
+
+pipeline:
+  step_1_wait_for_completion:
+    objective: monitor experiment process until exit
+    method: poll PID with ps command
+    poll_interval: 30_seconds
+    timeout: 3600_seconds  # 1 hour max
+    outputs:
+      - exit_code: from ps or process status
+      - completion_timestamp: ISO 8601 format
+    error_handling:
+      - if timeout: raise TimeoutError with last log lines
+      - if pid_not_found_initially: raise ProcessNotFoundError
+
+  step_2_validate_results:
+    objective: verify experiment produced valid results
+    dependencies: [step_1_wait_for_completion]
+    validation_checks:
+      - file_exists: experiments/hmm_regime_20251005_hybrid/results/results.json
+      - json_valid: parse without errors
+      - schema_required_fields:
+          - experiment_id
+          - completed_at
+          - mean_accuracy
+          - std_accuracy
+          - baseline_mean
+          - baseline_std
+          - ceiling_confirmed
+          - fold_results
+      - fold_count: len(fold_results) == 20
+    outputs:
+      - results_dict: parsed JSON object
+      - validation_status: passed|failed
+    error_handling:
+      - if file_missing: raise FileNotFoundError with expected path
+      - if json_invalid: raise JSONDecodeError with file content
+      - if schema_incomplete: raise ValueError with missing fields
+
+  step_3_create_findings:
+    objective: generate FINDINGS.md with analysis and recommendations
+    dependencies: [step_2_validate_results]
+    template: .claude/templates/experiment_findings.md.template
+    sections:
+      - metadata:
+          - experiment_id
+          - status: completed|failed
+          - completion_timestamp
+          - runtime_duration
+      - executive_summary:
+          - mean_accuracy ± std_accuracy
+          - baseline_comparison
+          - ceiling_status: confirmed|broken|degraded
+          - verdict: 1-2 sentence conclusion
+      - methodology:
+          - dataset_info
+          - feature_count: base + HMM
+          - model_architecture
+          - cv_strategy
+      - results_detailed:
+          - fold_by_fold_table
+          - confusion_matrix
+          - best_fold_analysis
+          - worst_fold_analysis
+      - ceiling_validation:
+          - hypothesis: 51.5% is fundamental limit
+          - evidence: comparison across 7 experiments
+          - conclusion: confirmed|rejected with statistical test
+      - technical_analysis:
+          - hmm_convergence_rate
+          - regime_quality_metrics
+          - state_distribution_stability
+      - findings:
+          - key_insights: bulleted list
+          - failure_modes: if any errors occurred
+          - success_factors: what worked vs previous attempt
+      - recommendations:
+          - immediate_actions
+          - pivot_options: if ceiling confirmed
+          - future_experiments: if ceiling broken
+      - references:
+          - related_experiments
+          - superseded_plans
+          - research_artifacts
+    outputs:
+      - findings_file: experiments/hmm_regime_20251005_hybrid/FINDINGS.md
+    error_handling:
+      - if template_missing: use inline template (fallback acceptable for docs)
+      - if write_fails: raise IOError with filesystem details
+
+  step_4_update_plans:
+    objective: mark plans as completed with final results
+    dependencies: [step_3_create_findings]
+    updates:
+      - file: .claude/plans/hmm-hybrid-validation.yaml
+        changes:
+          - execution_log.phase_3_full_rerun.status: completed
+          - execution_log.phase_3_full_rerun.completed_at: <timestamp>
+          - execution_log.phase_3_full_rerun.exit_code: <code>
+          - execution_log.phase_3_full_rerun.mean_accuracy: <value>
+          - execution_log.phase_3_full_rerun.ceiling_confirmed: <bool>
+          - execution_log.phase_3_full_rerun.results_file: <path>
+          - execution_log.phase_3_full_rerun.findings_file: <path>
+      - file: experiments/hmm_regime_20251005_hybrid/PLAN.md
+        changes:
+          - status: COMPLETED
+          - last_updated: <timestamp>
+          - results_section: append summary with mean_accuracy
+    outputs:
+      - updated_files: list of modified paths
+    error_handling:
+      - if file_locked: raise PermissionError
+      - if parse_fails: raise YAMLError with validation details
+
+  step_5_send_notification:
+    objective: deliver Pushover notification with results
+    dependencies: [step_4_update_plans]
+    notification_spec:
+      service: pushover
+      priority: 2  # emergency
+      sound: vibe20sec
+      title: HMM Hybrid Experiment Complete
+      message_template: |
+        Status: {status}
+        Accuracy: {mean_accuracy:.4f} ± {std_accuracy:.4f}
+        Baseline: {baseline_mean:.4f} ± {baseline_std:.4f}
+        Ceiling: {ceiling_verdict}
+        Runtime: {runtime_minutes:.1f} min
+      retry: 60  # retry after 60s if emergency priority
+      expire: 3600  # expire after 1 hour
+    error_handling:
+      - if notification_fails: log error but do not raise (non-critical)
+      - if credentials_missing: log warning, skip notification
+
+execution_script:
+  location: experiments/hmm_regime_20251005_hybrid/post_execution_automation.py
+  interpreter: uv run --active python
+  cli_interface:
+    - --pid <experiment_pid>: monitor this process
+    - --results <path>: path to results.json
+    - --output <dir>: output directory for artifacts
+    - --dry-run: validate without writing files
+  dependencies:
+    - python>=3.12
+    - stdlib: json, sys, subprocess, pathlib, datetime
+    - external: jq (for JSON processing in bash)
+  exit_codes:
+    - 0: success, all steps completed
+    - 1: experiment_failed
+    - 2: validation_failed
+    - 3: automation_error
+
+findings_template:
+  inline_fallback: |
+    # {experiment_name} - Findings
+
+    **Experiment ID:** `{experiment_id}`
+    **Status:** {status}
+    **Completed:** {completed_at}
+    **Runtime:** {runtime}
+
+    ---
+
+    ## Executive Summary
+
+    **Result:** {mean_accuracy:.4f} ± {std_accuracy:.4f}
+    **Baseline:** {baseline_mean:.4f} ± {baseline_std:.4f}
+    **Difference:** {difference:+.4f}
+    **Ceiling Status:** {ceiling_status}
+
+    **Verdict:** {verdict}
+
+    ---
+
+    ## Methodology
+
+    - **Dataset:** {dataset_info}
+    - **Features:** {n_features} ({base_features} base + {hmm_features} HMM)
+    - **Model:** {model_type}
+    - **CV Strategy:** {cv_strategy}
+
+    ---
+
+    ## Results (Detailed)
+
+    ### Fold-by-Fold Performance
+
+    {fold_table}
+
+    ### Confusion Matrix
+
+    {confusion_matrix}
+
+    ---
+
+    ## Ceiling Validation
+
+    **Hypothesis:** 51.5% is the fundamental limit for 5-min directional prediction (H=20)
+
+    **Evidence:**
+    {evidence_table}
+
+    **Statistical Test:**
+    - Observed: {mean_accuracy:.4f} ± {std_accuracy:.4f}
+    - Expected: {baseline_mean:.4f} ± {baseline_std:.4f}
+    - Within 2%: {within_threshold}
+
+    **Conclusion:** {ceiling_conclusion}
+
+    ---
+
+    ## Technical Analysis
+
+    ### HMM Implementation
+    - **Convergence Rate:** {hmm_convergence_pct}%
+    - **State Stability:** {state_persistence} bars median
+    - **Cluster Separation:** {cluster_separation}
+
+    ### Fix Validation
+    - **Previous Failure:** {previous_failure_mode}
+    - **Applied Fix:** {fix_summary}
+    - **Result:** {fix_result}
+
+    ---
+
+    ## Findings
+
+    ### Key Insights
+    {insights_bullets}
+
+    ### Success Factors
+    {success_bullets}
+
+    ### Limitations
+    {limitations_bullets}
+
+    ---
+
+    ## Recommendations
+
+    {recommendations}
+
+    ---
+
+    ## References
+
+    - **Related Experiments:** {related_experiments}
+    - **Superseded Plans:** {superseded_plans}
+    - **Research Artifacts:** {research_artifacts}
+
+versioning:
+  semver: 1.0.0
+  changelog:
+    - version: 1.0.0
+      date: 2025-10-05
+      changes:
+        - init: created post-execution automation plan
+        - defined: 5-step sequential pipeline
+        - specified: SLOs (availability, correctness, observability, maintainability)
+        - excluded: speed/performance/security from SLOs
+        - templated: FINDINGS.md structure with inline fallback
+
+references:
+  parent: .claude/plans/hmm-hybrid-validation.yaml
+  experiment: experiments/hmm_regime_20251005_hybrid/PLAN.md
+  supersedes: null

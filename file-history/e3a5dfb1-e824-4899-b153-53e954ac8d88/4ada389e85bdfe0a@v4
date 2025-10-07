@@ -1,0 +1,146 @@
+Include /Users/terryli/.colima/ssh_config
+
+# SSH Config with ZeroTier Failover
+# Match directives must come BEFORE Host directives they modify
+
+# ZeroTier failover for tca host when local IP unreachable
+# Using timeout command for faster failover detection
+Match host tca exec "! timeout 1 nc -z 192.168.0.87 22 2>/dev/null"
+    HostName 172.25.253.142
+    User tca
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_zerotier_np
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+    ConnectTimeout 3
+    ForwardAgent yes
+    TCPKeepAlive yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 6
+    ControlMaster auto
+    ControlPath ~/.ssh/control-%r@%h:%p
+    ControlPersist 600
+
+# Primary tca host configuration (local IP)
+Host tca
+    HostName 192.168.0.87
+    User tca
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_eonlabs
+    IdentitiesOnly yes
+    ConnectTimeout 5
+
+# GitHub configurations
+Host github.com github.com-eonlabs
+    User git
+    IdentityFile ~/.ssh/id_ed25519_eonlabs
+    IdentitiesOnly yes
+
+# Eon-Labs: match any cwd containing "/eon/" OR "ml-"
+Match host github.com exec "echo $PWD | grep -q -E '(/eon/|ml-)'"
+    IdentityFile ~/.ssh/id_ed25519_eonlabs
+
+# Tainora: any cwd with "/scripts"
+Match host github.com exec "echo $PWD | grep -q '/scripts'"
+    IdentityFile ~/.ssh/id_ed25519_tainora
+
+# 459ecs: any cwd with "/459ecs"
+Match host github.com exec "echo $PWD | grep -q '/459ecs'"
+    IdentityFile ~/.ssh/id_ed25519_459ecs
+
+# Direct ZeroTier host (alternative for IDE connections)
+Host tca-zt
+    HostName 172.25.253.142
+    User tca
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_zerotier_np
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+    ConnectTimeout 5
+    ForwardAgent yes
+    TCPKeepAlive yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 6
+
+# LittleBlack workstation (kab user)
+Host littleblack
+    HostName 172.25.236.1
+    User kab
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_zerotier_np
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+    ConnectTimeout 5
+    ForwardAgent yes
+    TCPKeepAlive yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 6
+
+# Alternative alias for LittleBlack (CNS Remote Alert System)
+Host kab
+    HostName 172.25.236.1
+    User yca
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_zerotier_np
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+    ConnectTimeout 5
+    ForwardAgent yes
+    TCPKeepAlive yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    # CNS Remote Alert System - SSH Tunnel Configuration
+    ControlMaster auto
+    ControlPath ~/.ssh/controlmasters/%r@%h:%p
+    ControlPersist 10m
+    RemoteForward 4000 127.0.0.1:5050
+
+# YCA user on LittleBlack workstation
+Host yca
+    HostName 172.25.236.1
+    User yca
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519_zerotier_np
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+    ConnectTimeout 5
+    ForwardAgent yes
+    TCPKeepAlive yes
+    # Forward TERM for Ghostty terminfo support
+    SendEnv TERM
+    # CNS Remote Alert System - Enhanced SSH Tunnel Configuration
+    ServerAliveInterval 30
+    ServerAliveCountMax 10
+    ControlMaster auto
+    ControlPath ~/.ssh/controlmasters/%r@%h:%p
+    ControlPersist 24h
+    RemoteForward 4000 127.0.0.1:5050
+    ExitOnForwardFailure yes
+    # Additional persistence settings for CNS reliability
+    GatewayPorts no
+    Compression yes
+
+# Global default settings for all hosts
+# These settings prevent disconnections due to server inactivity timeouts
+Host *
+    # Send keep-alive packets every 60 seconds
+    ServerAliveInterval 60
+    # Disconnect after 3 failed keep-alive attempts (3 minutes total)
+    ServerAliveCountMax 3
+    # Enable TCP-level keep-alive packets
+    TCPKeepAlive yes
+    # Reuse existing connections when possible
+    ControlMaster auto
+    ControlPath ~/.ssh/control-%r@%h:%p
+    # Keep control connection open for 10 minutes after last session closes
+    ControlPersist 600
+    # Set reasonable connection timeout
+    ConnectTimeout 10
+    # Compress data for better performance over slow connections
+    Compression yes
+
