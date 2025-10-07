@@ -1,0 +1,183 @@
+# VIF Feasibility Test - Complete
+
+**Date**: 2025-10-03
+**Status**: ✅ Complete - VIF Validated as Feasible
+**Branch**: feat/ood-robust/EL-1009
+
+## Objective
+
+Validate VIF computational feasibility on 48 features before committing to Phase 5 implementation.
+
+**Context**: VIF on 85 features timed out (>120s); needed validation before full Phase 5 plan.
+
+## Execution Summary
+
+### Test Environment
+- **Location**: `/tmp/vif_feasibility_test/` (isolated, no workspace pollution)
+- **Dataset**: `experiments/orthogonality_filtering_20251003/results/raw/atoms_full.csv`
+- **Features**: 48 features from `features_corr_0.9.txt` (pruning manifest output)
+- **Samples**: 9,901 rows (SOL 5-min, 2022-10-03 to 2022-11-07)
+
+### Tests Executed
+
+**Test 1**: Single VIF baseline → 0.031s ✅
+**Test 2**: Full VIF matrix (48 features) → 1.1s ✅
+**Test 3**: Iterative VIF removal (threshold ≤ 5.0) → 9.7s ✅
+**Test 4**: Correlation filter (threshold ≤ 0.85) → 0.26s ✅
+
+## Key Findings
+
+### VIF is Feasible (Primary Method)
+
+| Metric | Value | Threshold | Status |
+|--------|-------|-----------|--------|
+| Full VIF time | 1.1s | < 300s (5 min) | ✅ VERY FAST |
+| Iterative VIF time | 9.7s | < 600s (10 min) | ✅ VERY FAST |
+| Features removed | 11 | N/A | 48 → 37 |
+| Convergence | Yes | Required | ✅ Max VIF = 3.79 |
+
+### Why 85 Features Failed
+
+**Root cause**: Extreme multicollinearity (r=1.0 perfect correlation pairs)
+
+**Evidence**:
+- `hour_of_day_sin` ↔ `fourier_daily_sin_1` (r=1.0)
+- `day_of_week_sin` ↔ `fourier_weekly_sin_1` (r=1.0)
+- `rolling_mean_*` ↔ `ewm_mean_*` (r>0.99)
+- `stl_trend_*` ↔ `ewm_mean_*` (r>0.99)
+
+**Impact**: R²=1.0 → VIF=1/(1-R²) → VIF=∞ → numerical instability → timeout
+
+**Solution**: Pruning manifest removed r>0.95 pairs → 48 features → VIF now stable
+
+### Comparison: VIF vs Correlation Filter
+
+| Aspect | VIF | Correlation Filter |
+|--------|-----|-------------------|
+| **Time** | 9.7s | 0.26s (37x faster) |
+| **Features removed** | 11 | 10 |
+| **Features remaining** | 37 | 38 |
+| **Rigor** | Multivariate (conditional) | Bivariate (pairwise) |
+| **Framework compliance** | ✅ Specified in CLAUDE.md | Alternative |
+| **Recommendation** | ✅ Use as primary | Backup (not needed) |
+
+### Removed Features Differ by Method
+
+**VIF removes** (high conditional redundancy):
+- `rolling_max_100` (VIF=571)
+- `expanding_max` (VIF=277)
+- `stl_resid_s13_t31`, `stl_resid_s7_t21` (residuals)
+
+**Correlation removes** (high pairwise correlation):
+- Volatility features: `parkinson_vol_*`, `ewm_std_*`
+- Price position: `z_score_50`, `pct_from_ma_50`
+
+**Interpretation**: VIF captures multivariate dependencies that correlation misses
+
+## Decision
+
+**✅ PROCEED WITH VIF AS SPECIFIED IN NEXT_STEPS.MD**
+
+**Rationale**:
+1. VIF is fast (9.7s << 10 min threshold)
+2. VIF is more rigorous (accounts for conditional independence)
+3. VIF matches framework specification (CLAUDE.md lines 283-286)
+4. No changes needed to Phase 5 plan
+
+**Pipeline validated**:
+```
+89 atoms (all)
+  ↓ pruning manifest
+48 features (r ≤ 0.90)
+  ↓ VIF filtering (9.7s)
+37 features (VIF ≤ 5.0)
+  ↓ IPSS stability selection
+20-30 features (final)
+```
+
+## Files Created
+
+**Test specification**:
+- `experiments/vif_feasibility_test_20251003/README.md` - Test plan with SLOs
+
+**Test scripts** (/tmp, not committed):
+- `test_vif_48_features.py` - VIF tests (Test 1-3)
+- `test_correlation_filter.py` - Correlation test (Test 4)
+
+**Results documentation**:
+- `experiments/vif_feasibility_test_20251003/FINDINGS.md` - Detailed results
+- `experiments/vif_feasibility_test_20251003/TEST_COMPLETE.md` - This file
+
+**Updated documentation**:
+- `NEXT_STEPS.md` - Added VIF validation section (lines 55-65)
+
+## SLO Compliance
+
+**Correctness**: ✅
+- Out-of-box implementations only (statsmodels, pandas)
+- No custom VIF or correlation algorithms
+- Numerical precision: No errors, convergence achieved
+
+**Availability**: ✅
+- All tests completed within thresholds
+- VIF: 9.7s << 600s (10 min)
+- Correlation: 0.26s << 30s
+
+**Observability**: ✅
+- All times, VIF values, iterations logged
+- Errors propagated (JSON serialization issue noted, doesn't affect results)
+- No silent failures
+
+**Maintainability**: ✅
+- Test scripts isolated in /tmp
+- Out-of-box implementations (statsmodels VIF, pandas corr)
+- Results documented in experiment folder
+
+## Learnings
+
+### 1. Pruning Manifest Effectiveness
+
+Pruning manifest (correlation r>0.95) removed multicollinearity bottleneck:
+- 85 features (timeout) → 48 features (9.7s)
+- Validates two-stage approach: Correlation pre-filter + VIF refinement
+
+### 2. VIF Scaling
+
+VIF time scales with:
+- Number of features (O(n²))
+- **Multicollinearity level** (high r → numerical instability)
+
+48 features with moderate multicollinearity → fast (9.7s)
+85 features with extreme multicollinearity → timeout (>120s)
+
+### 3. Method Divergence
+
+VIF and correlation remove different features:
+- Overlap: 6 features (parkinson_vol, ewm_std, z_score_20)
+- VIF-only: 5 features (rolling_max_100, expanding_max, stl_resid)
+- Correlation-only: 4 features (z_score_50, pct_from_ma_50)
+
+Confirms VIF captures multivariate relationships beyond pairwise correlation.
+
+## Next Actions
+
+1. ✅ VIF feasibility validated (this document)
+2. ✅ NEXT_STEPS.md updated with validation
+3. **TODO**: Proceed to Phase 5 implementation
+   - Define MAE/MFE quality target variable
+   - Implement embargoed CV splitter
+   - Run VIF + IPSS pipeline
+   - Generate 20-30 final features
+
+## Cross-References
+
+**Related experiments**:
+- `experiments/orthogonality_filtering_20251003/` - Source of 48 features
+- `experiments/phase5_ipss_mae_mfe_20251003/` - Next (to be created)
+
+**Framework documentation**:
+- `CLAUDE.md` (lines 283-286) - VIF specification
+- `NEXT_STEPS.md` (lines 55-92) - Phase 5 with VIF validation
+- `.claude/feature-pruning-manifest.md` - 37 pruned, 48 kept features
+
+**Supersedes**: Original concern about VIF timeout (now resolved)

@@ -1,0 +1,253 @@
+# Platt Scaling Calibration - Failure Analysis
+
+**Date:** 2025-10-05
+**Model:** research/ml_ood/experiments/run1/final_model.pt
+**Remediation Attempted:** Platt scaling (per-class logistic regression)
+
+---
+
+## Executive Summary
+
+**Status:** ✗ FAILED (Platt scaling cannot resolve conformal coverage SLO violation)
+
+Platt scaling improved ECE slightly (0.0462 → 0.0345) but conformal coverage remains catastrophically low (60% vs 90% target, gap 30% >> 5% tolerance). Prediction sets still always size 1, indicating persistent extreme overconfidence.
+
+**Critical Finding:** Post-hoc calibration methods (temperature scaling and Platt scaling) cannot fix this overconfidence problem. Model requires retraining with regularization techniques (label smoothing, focal loss, mixup).
+
+---
+
+## Experimental Setup
+
+### Data Splits (Stratified)
+```
+Platt fitting:         52,602 samples (30%)
+Conformal calibration: 61,370 samples (35%)
+Coverage evaluation:   61,370 samples (35%)
+```
+
+### Class Distribution
+```
+Class 0: 87,338 samples (49.8%)
+Class 1: 0 samples (0.0%)  ← MISSING CLASS
+Class 2: 88,004 samples (50.2%)
+```
+
+**Critical Finding:** Class 1 ("sideways" direction) has zero samples in entire dataset. Model trained for 3-class output but data only contains 2 classes.
+
+### Platt Scaling Configuration
+```
+Method:     Per-class logistic regression (one-vs-rest)
+Library:    sklearn.linear_model.LogisticRegression
+Penalty:    None (standard Platt scaling)
+Solver:     lbfgs
+Max Iter:   1000
+```
+
+---
+
+## Results
+
+### Platt Scaling Parameters
+```
+Class 0: A=3.2357, B=-1.2558 (n=26,201 samples)
+Class 1: A=1.0000, B=0.0000  (n=0 samples, identity scaling)
+Class 2: A=3.3981, B=-1.3206 (n=26,401 samples)
+```
+
+### ECE Calibration
+```
+Baseline ECE:     0.0462
+Calibrated ECE:   0.0345
+ECE Improvement:  0.0117  (25% reduction)
+```
+
+### Conformal Coverage
+```
+Empirical Coverage:  60.0%
+Target Coverage:     90.0%
+Coverage Gap:        30.0%  ← VIOLATION (> 5% tolerance)
+Avg Set Size:        1.00
+Median Set Size:     1.0
+Quantile Threshold:  0.6613
+```
+
+**SLO Violation:** Coverage gap 30.0% > 5% tolerance even after Platt scaling
+
+---
+
+## Root Cause Analysis
+
+### Why Platt Scaling Failed
+
+1. **Limited Expressiveness**: Platt scaling learns 2 parameters per class (A, B). This is more flexible than temperature scaling (single T), but still assumes a simple monotonic transformation.
+
+2. **Prediction Set Size = 1 Persists**: Platt scaling improved ECE but did not reduce overconfidence enough to produce larger prediction sets. Model still predicts with near-100% confidence.
+
+3. **ECE Improvement ≠ Conformal Coverage**: Platt scaling reduced ECE by 25% (0.0462 → 0.0345), but conformal coverage improved only slightly (57.3% → 60.0%). This confirms ECE and conformal coverage measure fundamentally different aspects of calibration.
+
+4. **Overconfidence Too Severe**: Post-hoc calibration can only do so much. The model's learned representations are inherently overconfident, requiring architectural or training-time interventions.
+
+### Technical Explanation
+
+Platt scaling maps logits to calibrated probabilities via per-class sigmoid:
+```
+P(y=c|x) = σ(A_c · logit_c + B_c)
+```
+
+For class 0: A=3.24, B=-1.26
+This means: P(y=0|x) = σ(3.24 · logit_0 - 1.26)
+
+The large positive A (3.24, 3.40) indicates the model needed significant amplification of logits to calibrate probabilities. However, even this transformation could not reduce overconfidence enough for conformal prediction.
+
+**Concrete Example:**
+- Model logit_0 = 1.0
+- Platt scaled: σ(3.24 · 1.0 - 1.26) = σ(1.98) ≈ 0.88
+- Model logit_0 = 2.0
+- Platt scaled: σ(3.24 · 2.0 - 1.26) = σ(5.22) ≈ 0.995
+
+Even with Platt scaling, high logits (2.0) still produce near-100% probabilities (0.995), resulting in prediction sets of size 1.
+
+### Comparison with Temperature Scaling
+
+| Method | Parameters | ECE Baseline | ECE Calibrated | Coverage | Gap |
+|--------|------------|--------------|----------------|----------|-----|
+| Temperature | 1 (T) | 0.0442 | 0.0443 | 57.3% | 32.7% |
+| Platt | 6 (A, B per class) | 0.0462 | 0.0345 | 60.0% | 30.0% |
+
+**Analysis:**
+- Platt scaling has 6x more parameters (6 vs 1) and better ECE
+- But conformal coverage improved only marginally (57.3% → 60.0%)
+- Both methods leave prediction set size at 1.00
+- **Conclusion:** Post-hoc calibration insufficient, need training-time intervention
+
+---
+
+## Missing Class Analysis
+
+**Critical Finding:** Class 1 has zero samples in the dataset.
+
+**Implications:**
+1. Model trained for 3-class classification (up/sideways/down)
+2. Actual data only contains 2 classes (up/down)
+3. Model never learned meaningful representation for "sideways" class
+4. Class 1 predictions likely rare or absent
+
+**Handling:**
+- Used identity scaling (A=1, B=0) for class 1 (no calibration)
+- This is equivalent to leaving class 1 logits unchanged
+- Does not affect calibration quality since class 1 rarely predicted
+
+**Recommendation:** Investigate why class 1 is missing:
+- Data generation bug?
+- Labeling thresholds too aggressive (all movements classified as up/down)?
+- Feature engineering issue?
+
+---
+
+## Lessons Learned
+
+1. **Post-hoc Calibration Limitations**: Neither temperature scaling (1 parameter) nor Platt scaling (2 per class) can fix severe overconfidence. Model requires training-time regularization.
+
+2. **ECE Insufficient for Conformal Prediction**: ECE measures binned calibration but does not guarantee conformal coverage. A model can have low ECE but catastrophic conformal failure.
+
+3. **Prediction Set Size Diagnostic**: Set size = 1.00 always indicates extreme overconfidence that post-hoc methods cannot fix. This is a reliable signal that retraining is required.
+
+4. **Class Imbalance Detection**: Stratified splitting revealed missing class 1. Sequential splitting would have hidden this issue. Always verify class distribution before calibration.
+
+5. **Parameter Count ≠ Calibration Quality**: Platt scaling has 6x more parameters than temperature scaling but only marginally better conformal coverage. The overconfidence problem is in the model's learned features, not the calibration layer.
+
+---
+
+## Next Steps
+
+### Immediate Action Required
+
+**calibrate-003: Label Smoothing + Retraining** (4-8 hours estimated)
+
+Post-hoc calibration has failed. Must retrain model with label smoothing:
+
+```python
+# Label smoothing: smooth targets before cross-entropy loss
+def label_smoothing_loss(logits, targets, alpha=0.1, n_classes=3):
+    # Smooth targets: (1-α)·one_hot(y) + α/K
+    one_hot = F.one_hot(targets, n_classes).float()
+    smooth_targets = (1.0 - alpha) * one_hot + alpha / n_classes
+    log_probs = F.log_softmax(logits, dim=1)
+    loss = -(smooth_targets * log_probs).sum(dim=1).mean()
+    return loss
+```
+
+**Parameters:**
+- α = 0.1 (standard starting point)
+- K = 3 (number of classes)
+- Prevents model from predicting with 100% confidence
+- Forces softer decision boundaries
+
+**Expected Outcome:**
+- Lower ECE (< 0.10 target)
+- Conformal coverage 85-95% (within 5% tolerance)
+- Prediction set size > 1.0 (model less confident)
+
+### Alternative Approaches (If Label Smoothing Fails)
+
+1. **Focal Loss** (4-8 hours)
+   - Loss: `L = -(1-p_t)^γ log(p_t)`
+   - Downweights easy examples, focuses on hard examples
+   - Reduces overconfidence on easy samples
+
+2. **Mixup Data Augmentation** (8-12 hours)
+   - Interpolate training examples: `x̃ = λx_i + (1-λ)x_j`
+   - Smooths decision boundaries
+   - Improves calibration and generalization
+
+3. **Ensemble Methods** (16-24 hours)
+   - Train 5-10 models with different initializations
+   - Average predictions for uncertainty quantification
+   - Most reliable but computationally expensive
+
+---
+
+## References
+
+- Platt "Probabilistic Outputs for Support Vector Machines" (1999)
+- Guo et al. "On Calibration of Modern Neural Networks" (ICML 2017)
+- Szegedy et al. "Rethinking the Inception Architecture" (CVPR 2016) - Label smoothing
+- Lin et al. "Focal Loss for Dense Object Detection" (ICCV 2017)
+- Zhang et al. "mixup: Beyond Empirical Risk Minimization" (ICLR 2018)
+- Vovk et al. "Algorithmic Learning in a Random World" (2005) - Conformal prediction
+
+---
+
+## Technical Notes
+
+### Comparison: Temperature vs Platt vs Label Smoothing
+
+| Aspect | Temperature | Platt | Label Smoothing |
+|--------|-------------|-------|-----------------|
+| Timing | Post-hoc | Post-hoc | Training-time |
+| Parameters | 1 (T) | 2K (A, B per class) | 1 (α) |
+| Retraining | No | No | Yes (50 epochs ≈ 3h) |
+| Expressiveness | Low | Medium | High |
+| Best For | Uniform miscalibration | Per-class miscalibration | Severe overconfidence |
+| Fixes Features | No | No | Yes |
+
+**Verdict:** Label smoothing required for this level of overconfidence.
+
+### Why Post-hoc Methods Failed
+
+Post-hoc calibration applies a transformation to logits:
+```
+f_calibrated(x) = g(f_model(x))
+```
+
+Where g is:
+- Temperature: `logits / T`
+- Platt: `σ(A · logit + B)`
+
+But if `f_model(x)` produces maximally confident logits (e.g., [10.0, -5.0, -5.0]), then:
+- Even with T=10: `[1.0, -0.5, -0.5]` → softmax ≈ [0.62, 0.19, 0.19] (still confident)
+- Even with Platt: sigmoid still near 1 for extreme logits
+
+**Root Cause:** Model's learned features produce extreme logits. Post-hoc methods can only transform these logits, not change the underlying representations.
+
+**Solution:** Training-time regularization (label smoothing, focal loss, mixup) prevents extreme logits from forming in the first place.

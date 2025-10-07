@@ -1,0 +1,76 @@
+#!/bin/bash
+# Download remaining SWAP months with optimal concurrency (c=13)
+# Based on: CLAUDE.md concurrency findings (2025-10-03)
+# Remaining: 2023-08 (incomplete), 2023-09 to 2023-12, 2024-01 to 2024-12
+
+set -e  # Fail-fast
+
+CONCURRENCY=13
+WORK_DIR="/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis"
+
+echo "=================================="
+echo "SWAP Download: Remaining Months (c=$CONCURRENCY)"
+echo "=================================="
+echo "Months: 2023-08 (redo), 2023-09-12, 2024-01-12"
+echo "Estimated time: ~15-20 minutes"
+echo ""
+
+cd "$WORK_DIR"
+
+# Build list of remaining months
+MONTHS=()
+
+# 2023-08: Incomplete (only 242MB, needs redo)
+MONTHS+=("2023 8")
+
+# 2023-09 through 2023-12
+for m in {9..12}; do
+    MONTHS+=("2023 $m")
+done
+
+# 2024-01 through 2024-12
+for m in {1..12}; do
+    MONTHS+=("2024 $m")
+done
+
+echo "Total months to download: ${#MONTHS[@]}"
+echo ""
+
+# Download function
+download() {
+    local year=$1
+    local month=$2
+    echo "[$(date +%H:%M:%S)] Downloading $year-$(printf "%02d" $month)..."
+
+    if uv run --active python scripts/download_month.py $year $month \
+        --ticks --market-type swap --data-dir data/ 2>&1 | \
+        grep -E "(✓ Saved|ERROR)"; then
+        return 0
+    else
+        echo "ERROR: Failed $year-$(printf "%02d" $month)"
+        return 1
+    fi
+}
+
+export -f download
+
+# Parallel execution
+START=$(date +%s)
+
+printf '%s\n' "${MONTHS[@]}" | xargs -P $CONCURRENCY -n 2 bash -c 'download "$@"' _
+
+END=$(date +%s)
+ELAPSED=$(( (END - START) / 60 ))
+
+echo ""
+echo "=================================="
+echo "Download Complete"
+echo "=================================="
+echo "Time: ${ELAPSED} minutes"
+echo ""
+
+# Verify
+echo "Downloaded files:"
+ls -lh data/raw_ticks_swap/2023/*.parquet data/raw_ticks_swap/2024/*.parquet 2>/dev/null | wc -l
+echo ""
+du -sh data/raw_ticks_swap/

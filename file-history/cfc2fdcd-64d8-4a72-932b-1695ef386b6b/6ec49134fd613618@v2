@@ -1,0 +1,272 @@
+"""Conformal prediction for OOD-robust uncertainty quantification."""
+
+from typing import Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+
+class ConformalCalibrator:
+    """Conformal prediction calibration for distribution-free guarantees.
+
+    Provides prediction sets with guaranteed coverage on OOD data.
+
+    References:
+        - Vovk et al. (2005): Algorithmic Learning in a Random World
+        - Angelopoulos & Bates (2022): Gentle Introduction to Conformal Prediction
+    """
+
+    def __init__(self, alpha: float = 0.1):
+        """Initialize conformal calibrator.
+
+        Args:
+            alpha: Miscoverage rate (default: 0.1 for 90% coverage)
+        """
+        self.alpha = alpha
+        self.quantile = None
+        self.calibration_scores = None
+
+    def calibrate(
+        self,
+        model: nn.Module,
+        calibration_loader: torch.utils.data.DataLoader,
+        device: torch.device,
+    ) -> float:
+        """Calibrate on held-out calibration set.
+
+        Args:
+            model: Trained model
+            calibration_loader: DataLoader for calibration set
+            device: Device to run on
+
+        Returns:
+            Calibrated quantile threshold
+        """
+        model.eval()
+
+        scores = []
+
+        with torch.no_grad():
+            for batch in calibration_loader:
+                sequences = batch["features"].to(device)
+                targets = batch["target"].to(device)
+
+                # Get predictions
+                outputs = model(sequences)
+                probs = torch.softmax(outputs["direction_logits"], dim=-1)
+
+                # Compute conformity scores (1 - prob of true class)
+                true_class_probs = probs[torch.arange(len(targets)), targets]
+                conformity_scores = 1 - true_class_probs
+
+                scores.append(conformity_scores.cpu().numpy())
+
+        # Concatenate all scores
+        self.calibration_scores = np.concatenate(scores)
+
+        # Compute quantile
+        n = len(self.calibration_scores)
+        q_level = np.ceil((n + 1) * (1 - self.alpha)) / n
+        self.quantile = np.quantile(self.calibration_scores, q_level)
+
+        coverage = (self.calibration_scores <= self.quantile).mean()
+
+        print(f"Conformal Calibration:")
+        print(f"  Target coverage: {1 - self.alpha:.1%}")
+        print(f"  Calibration coverage: {coverage:.1%}")
+        print(f"  Quantile threshold: {self.quantile:.4f}")
+        print(f"  Calibration samples: {n:,}")
+
+        return self.quantile
+
+    def predict_set(
+        self,
+        probabilities: torch.Tensor,
+        return_sizes: bool = False,
+    ) -> torch.Tensor:
+        """Construct prediction sets with guaranteed coverage.
+
+        Args:
+            probabilities: (batch, n_classes) predicted probabilities
+            return_sizes: Whether to return set sizes
+
+        Returns:
+            (batch, n_classes) binary mask of prediction set
+            Or tuple of (mask, sizes) if return_sizes=True
+        """
+        if self.quantile is None:
+            raise ValueError("Must call calibrate() before predict_set()")
+
+        # Sort probabilities descending
+        sorted_probs, sorted_indices = torch.sort(probabilities, descending=True, dim=-1)
+
+        # Compute cumulative probabilities
+        cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
+
+        # Include classes until cumsum exceeds (1 - quantile)
+        threshold = 1 - self.quantile
+        include_mask = cumsum_probs <= threshold
+
+        # Ensure at least the top class is included
+        include_mask[:, 0] = True
+
+        # Create prediction set mask in original order
+        batch_size, n_classes = probabilities.shape
+        prediction_sets = torch.zeros_like(probabilities, dtype=torch.bool)
+
+        for i in range(batch_size):
+            selected_indices = sorted_indices[i][include_mask[i]]
+            prediction_sets[i, selected_indices] = True
+
+        if return_sizes:
+            set_sizes = prediction_sets.sum(dim=-1)
+            return prediction_sets, set_sizes
+
+        return prediction_sets
+
+    def evaluate_coverage(
+        self,
+        model: nn.Module,
+        test_loader: torch.utils.data.DataLoader,
+        device: torch.device,
+    ) -> dict[str, float]:
+        """Evaluate coverage on test set.
+
+        Args:
+            model: Calibrated model
+            test_loader: Test data loader
+            device: Device to run on
+
+        Returns:
+            Dictionary with coverage metrics
+        """
+        model.eval()
+
+        total_samples = 0
+        covered_samples = 0
+        set_sizes = []
+
+        with torch.no_grad():
+            for batch in test_loader:
+                sequences = batch["features"].to(device)
+                targets = batch["target"].to(device)
+
+                # Get predictions
+                outputs = model(sequences)
+                probs = torch.softmax(outputs["direction_logits"], dim=-1)
+
+                # Construct prediction sets
+                pred_sets, sizes = self.predict_set(probs, return_sizes=True)
+
+                # Check coverage (true class in prediction set)
+                covered = pred_sets[torch.arange(len(targets)), targets]
+                covered_samples += covered.sum().item()
+                total_samples += len(targets)
+                set_sizes.extend(sizes.cpu().numpy())
+
+        coverage = covered_samples / total_samples
+        avg_set_size = np.mean(set_sizes)
+        median_set_size = np.median(set_sizes)
+
+        metrics = {
+            "coverage": coverage,
+            "avg_set_size": avg_set_size,
+            "median_set_size": median_set_size,
+            "target_coverage": 1 - self.alpha,
+            "coverage_gap": coverage - (1 - self.alpha),
+        }
+
+        print(f"\nConformal Prediction Evaluation:")
+        print(f"  Target coverage: {metrics['target_coverage']:.1%}")
+        print(f"  Empirical coverage: {metrics['coverage']:.1%}")
+        print(f"  Coverage gap: {metrics['coverage_gap']:+.1%}")
+        print(f"  Avg prediction set size: {avg_set_size:.2f}")
+        print(f"  Median prediction set size: {median_set_size:.1f}")
+
+        return metrics
+
+    def evaluate_conditional_coverage(
+        self,
+        model: nn.Module,
+        test_loader: torch.utils.data.DataLoader,
+        device: torch.device,
+    ) -> dict[int, float]:
+        """Evaluate coverage conditional on regime.
+
+        Args:
+            model: Calibrated model
+            test_loader: Test data loader with regime labels
+            device: Device to run on
+
+        Returns:
+            Dict mapping regime_id → coverage
+        """
+        model.eval()
+
+        regime_stats = {}  # regime_id → (covered, total)
+
+        with torch.no_grad():
+            for batch in test_loader:
+                sequences = batch["features"].to(device)
+                targets = batch["target"].to(device)
+                regimes = batch["regime"][:, 0]  # Volatility regime
+
+                # Get predictions
+                outputs = model(sequences)
+                probs = torch.softmax(outputs["direction_logits"], dim=-1)
+
+                # Construct prediction sets
+                pred_sets = self.predict_set(probs)
+
+                # Check coverage per regime
+                covered = pred_sets[torch.arange(len(targets)), targets]
+
+                for regime_id in regimes.unique():
+                    mask = regimes == regime_id
+                    regime_covered = covered[mask].sum().item()
+                    regime_total = mask.sum().item()
+
+                    if regime_id.item() not in regime_stats:
+                        regime_stats[regime_id.item()] = [0, 0]
+
+                    regime_stats[regime_id.item()][0] += regime_covered
+                    regime_stats[regime_id.item()][1] += regime_total
+
+        # Compute coverage per regime
+        regime_coverage = {
+            regime_id: covered / total
+            for regime_id, (covered, total) in regime_stats.items()
+        }
+
+        print(f"\nConditional Coverage by Volatility Regime:")
+        for regime_id in sorted(regime_coverage.keys()):
+            coverage = regime_coverage[regime_id]
+            n_samples = regime_stats[regime_id][1]
+            print(f"  Regime {regime_id}: {coverage:.1%} (n={n_samples:,})")
+
+        return regime_coverage
+
+    def save(self, path: str) -> None:
+        """Save calibration parameters.
+
+        Args:
+            path: Path to save to
+        """
+        np.savez(
+            path,
+            quantile=self.quantile,
+            alpha=self.alpha,
+            calibration_scores=self.calibration_scores,
+        )
+
+    def load(self, path: str) -> None:
+        """Load calibration parameters.
+
+        Args:
+            path: Path to load from
+        """
+        data = np.load(path)
+        self.quantile = data["quantile"].item()
+        self.alpha = data["alpha"].item()
+        self.calibration_scores = data["calibration_scores"]

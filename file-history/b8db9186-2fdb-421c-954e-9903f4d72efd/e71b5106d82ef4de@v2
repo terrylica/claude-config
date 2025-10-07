@@ -1,0 +1,394 @@
+# v1.10 Production Deployment Specification
+
+**Version:** 1.0.0
+**Status:** In Progress
+**Created:** 2025-10-03
+**Supersedes:** /tmp/option_b_implementation/ (design artifacts)
+
+---
+
+## Service Level Objectives
+
+### Correctness SLO
+**Target:** Market P&L variance > 0 AND basis_std_dev > 0 for all backtest runs
+**Metric:** `market_pnl.std() > 0` AND `basis_entry_bps.std() > 0`
+**Violation:** Zero variance detected (indicates synthetic calculation leak)
+**Validation:** Compare v1.9 vs v1.10 results for same period
+
+### Availability SLO
+**Target:** >= 99% of settlement periods have both SPOT and PERP price data
+**Metric:** `(periods_with_data / total_periods) >= 0.99`
+**Violation:** >1% missing PERP data OR missing SPOT data
+**Error Handling:** Raise ValueError on missing data (no fallbacks)
+
+### Observability SLO
+**Target:** All new columns populated for 100% of executed trades
+**Metric:** `basis_entry_bps.notna().all()` AND `perp_entry_price.notna().all()`
+**Violation:** Missing basis metrics OR missing perp prices in output
+**Validation:** Schema check on output parquet
+
+### Maintainability SLO
+**Target:** All changes documented with version control references
+**Metric:** Code changes linked to V2_REAL_PERP_SPEC.md
+**Violation:** Undocumented calculation changes
+**Tracking:** Git commits reference specification sections
+
+---
+
+## Phase 1: SWAP Data Download
+
+**Objective:** Download perpetual (SWAP) market data for 21 months (2023-01 to 2024-12)
+
+### Download Script Preparation
+
+**Use existing infrastructure:** `scripts/download_month.py` with modifications
+
+**Modified script location:** `/tmp/option_b_implementation/download_month_swap.py`
+
+**Key modifications:**
+```python
+# Line 106: Change msg_type from "allspot" to "allswap"
+download_month_ticks(
+    msg_type="allswap",  # CHANGED from "allspot"
+    year=year,
+    month=month,
+    output_parquet=output_file
+)
+
+# Output directory: data/raw_ticks_swap/{year}/{month}.parquet
+```
+
+### Execution Plan
+
+**Storage Requirements:**
+- Raw SWAP ticks: ~32 GB (21 months × 1.5 GB avg)
+- Aggregated 1-min bars: ~7 GB (21 months × 340 MB avg)
+- Total: ~39 GB additional storage
+
+**Download Command:**
+```bash
+# For each month from 2023-01 to 2024-12
+for year in 2023 2024; do
+  for month in {1..12}; do
+    # 2023: all 12 months, 2024: all 12 months
+    [ $year -eq 2024 ] && [ $month -gt 12 ] && break
+
+    uv run --active python scripts/download_month.py $year $month \
+      --ticks --market-type swap --data-dir data/
+  done
+done
+```
+
+**Estimated Time:** 2-3 hours (depends on network speed)
+
+**Error Handling:**
+```python
+# In download script
+if download_failed:
+    raise RuntimeError(f"SWAP download failed for {year}-{month:02d}")
+# No retry logic - fail fast
+```
+
+---
+
+## Phase 2: SWAP Data Aggregation
+
+**Objective:** Convert raw SWAP ticks to 1-min OHLCV bars
+
+### Aggregation Script
+
+**Use existing:** `scripts/aggregate_month.py` (works with SWAP data as-is)
+
+**Execution Command:**
+```bash
+# Aggregate each month
+for year in 2023 2024; do
+  for month in {1..12}; do
+    [ $year -eq 2024 ] && [ $month -gt 12 ] && break
+
+    uv run --active python scripts/aggregate_month.py $year $month \
+      --data-dir data/ \
+      --input-dir raw_ticks_swap \
+      --output-dir 1min_bars_swap
+  done
+done
+```
+
+**Estimated Time:** 30-45 minutes
+
+**Validation:**
+```bash
+# Verify all months aggregated
+for year in 2023 2024; do
+  ls -lh data/1min_bars_swap/$year/ | wc -l
+  # Expected: 12 files per year
+done
+
+# Verify SWAP symbols present
+python -c "
+import pandas as pd
+df = pd.read_parquet('data/1min_bars_swap/2023/01.parquet')
+swap_syms = [s for s in df['symbol'].unique() if '-SWAP' in s]
+assert len(swap_syms) > 0, 'No SWAP symbols found'
+print(f'✓ {len(swap_syms)} SWAP symbols verified')
+"
+```
+
+---
+
+## Phase 3: Full Backtest Execution
+
+**Objective:** Run v1.10 for 32 months with real perpetual prices
+
+### Backtest Command
+
+```bash
+# Run v1.10 for full period
+uv run --active python v1.10-modular.py \
+  --start 2023-01-01 \
+  --end 2025-08-31 \
+  --capital 1000000 \
+  2>&1 | tee backtest_v1.10_full.log
+```
+
+**Expected Output:** `results/v1.10-modular-20230101-20250831.parquet`
+
+**Estimated Time:** 5-10 minutes
+
+### Validation Criteria
+
+**SLO Checks:**
+```python
+import pandas as pd
+
+# Load results
+df = pd.read_parquet('results/v1.10-modular-20230101-20250831.parquet')
+
+# SLO 1: Correctness
+market_pnl = df['total_spot_pnl'] + df['total_perp_pnl']
+assert market_pnl.std() > 0, "VIOLATION: Market P&L variance = 0 (synthetic)"
+print(f"✓ Market P&L std dev: ${market_pnl.std():.2f}")
+
+# SLO 2: Availability
+total_periods = len(df)
+assert total_periods >= 0.99 * 4434, "VIOLATION: <99% data coverage"
+print(f"✓ Data availability: {total_periods}/4434 periods ({total_periods/4434*100:.1f}%)")
+
+# SLO 3: Observability
+required_cols = ['perp_entry_price', 'perp_exit_price', 'basis_entry_bps', 'basis_exit_bps', 'basis_pnl']
+for col in required_cols:
+    assert col in df.columns, f"VIOLATION: Missing column {col}"
+    assert df[col].notna().all(), f"VIOLATION: Null values in {col}"
+print(f"✓ All basis metrics populated")
+
+# No synthetic calculation check
+for idx, row in df.iterrows():
+    if abs(row['total_perp_pnl'] + row['total_spot_pnl']) < 1e-10:
+        raise ValueError(f"VIOLATION: Synthetic calculation at period {idx}")
+```
+
+---
+
+## Phase 4: Results Comparison
+
+**Objective:** Quantify difference between v1.9 (synthetic) and v1.10 (real)
+
+### Comparison Metrics
+
+**Load both results:**
+```python
+v19 = pd.read_parquet('results/v1.9-modular-20230101-20250831.parquet')
+v110 = pd.read_parquet('results/v1.10-modular-20230101-20250831.parquet')
+
+# Align by settlement_time
+merged = v19.merge(v110, on='settlement_time', suffixes=('_v19', '_v110'))
+```
+
+**Key Comparisons:**
+
+1. **Market P&L Distribution:**
+```python
+print("Market P&L Statistics:")
+print(f"v1.9:  mean=${(v19['total_spot_pnl'] + v19['total_perp_pnl']).mean():.2f}, "
+      f"std=${(v19['total_spot_pnl'] + v19['total_perp_pnl']).std():.2f}")
+print(f"v1.10: mean=${(v110['total_spot_pnl'] + v110['total_perp_pnl']).mean():.2f}, "
+      f"std=${(v110['total_spot_pnl'] + v110['total_perp_pnl']).std():.2f}")
+```
+
+2. **Total Return Difference:**
+```python
+v19_return = (v19['capital'].iloc[-1] - v19['capital'].iloc[0]) / v19['capital'].iloc[0] * 100
+v110_return = (v110['capital'].iloc[-1] - v110['capital'].iloc[0]) / v110['capital'].iloc[0] * 100
+
+print(f"v1.9 Total Return:  {v19_return:.2f}%")
+print(f"v1.10 Total Return: {v110_return:.2f}%")
+print(f"Difference:         {v110_return - v19_return:.2f} pp")
+```
+
+3. **Basis Risk Quantification:**
+```python
+# v1.10 only (v1.9 doesn't have basis metrics)
+print(f"Basis entry (avg): {v110['basis_entry_bps'].mean():.2f} bps")
+print(f"Basis exit (avg):  {v110['basis_exit_bps'].mean():.2f} bps")
+print(f"Basis volatility:  {v110['basis_entry_bps'].std():.2f} bps")
+```
+
+**Expected Results:**
+- v1.9: Market P&L std dev = $0 (synthetic)
+- v1.10: Market P&L std dev = $500-$2,000 (real)
+- APY difference: -0.5 to -2.0 pp (v1.10 lower due to basis risk)
+
+---
+
+## Phase 5: Documentation Update
+
+**Objective:** Update investigation findings with production results
+
+### Files to Update
+
+1. **INVESTIGATION_FINDINGS.md**
+```markdown
+## Phase 2: Production Deployment (COMPLETE)
+
+**Status:** ✅ COMPLETE
+**Date:** 2025-10-03
+**Implementation:** v1.10-modular.py
+
+### Results Summary
+- v1.9 (synthetic): +X.XX% (32 months)
+- v1.10 (real): +X.XX% (32 months)
+- Basis risk impact: -X.XX pp
+- Market P&L std dev: $X,XXX (v1.10) vs $0 (v1.9)
+```
+
+2. **INVESTIGATION_PLAN.md**
+```markdown
+### Phase 2: Delta-Neutral Calculation Validation
+**Status:** ✅ COMPLETE (Option B implemented)
+**Resolution:** Real perpetual data integrated via v1.10
+**Results:** See INVESTIGATION_FINDINGS.md Phase 2
+```
+
+3. **V2_REAL_PERP_SPEC.md**
+```markdown
+## Production Validation Results
+
+**Date:** 2025-10-03
+**Dataset:** 32 months (2023-01-01 to 2025-08-31)
+**Capital:** $1,000,000
+
+### SLO Compliance
+- Correctness: ✅ PASS (market_pnl std = $X,XXX)
+- Availability: ✅ PASS (X,XXX/4,434 periods = XX.X%)
+- Observability: ✅ PASS (all basis metrics populated)
+- Maintainability: ✅ PASS (v1.9 → v1.10 drop-in replacement)
+```
+
+---
+
+## Rollback Plan
+
+**Trigger:** SLO violation detected during validation
+
+**Rollback Steps:**
+1. Identify violation type (correctness, availability, observability)
+2. Revert to v1.9 for production use
+3. Debug v1.10 issue in isolation
+4. Re-test with single month before full deployment
+
+**v1.9 remains available:** No changes to existing files
+
+---
+
+## Storage Cleanup (Post-Validation)
+
+**After successful v1.10 validation:**
+
+```bash
+# Keep one month of raw SWAP ticks as reference
+mkdir -p data/raw_ticks_swap_reference
+cp data/raw_ticks_swap/2024/01.parquet data/raw_ticks_swap_reference/
+
+# Verify aggregated bars exist
+ls -lh data/1min_bars_swap/*/*.parquet | wc -l
+# Expected: 21 files (2023: 12, 2024: 9)
+
+# Delete remaining raw SWAP ticks (saves ~30 GB)
+rm -rf data/raw_ticks_swap/
+
+# Document deletion
+echo "$(date): Deleted raw SWAP ticks after validation" >> STORAGE_CLEANUP.log
+```
+
+---
+
+## Execution Checklist
+
+### Pre-Deployment
+- [x] v1.10-modular.py created with dual price providers
+- [x] Small-scale test passed (Jan 2024)
+- [x] SLOs defined (correctness, availability, observability, maintainability)
+- [x] Production deployment plan saved to workspace
+- [x] scripts/download_month.py updated with --market-type parameter
+- [x] scripts/download_swap_21months.sh created for batch download
+
+### Phase 1: Download (In Progress)
+**Started:** 2025-10-03 12:56 UTC
+**Status:** Running in background (bash_id: 389137)
+**Log:** `swap_download_phase1.log`
+**Script:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/download_swap_21months.sh`
+
+- [ ] Download SWAP data for 2023 (12 months) - **IN PROGRESS**
+- [ ] Download SWAP data for 2024 (12 months) - PENDING
+- [ ] Verify file sizes match expectations (~1.5 GB per month)
+- [ ] Validate SWAP symbols present in raw ticks
+
+### Phase 2: Aggregation
+- [ ] Aggregate 2023 SWAP data to 1-min bars
+- [ ] Aggregate 2024 SWAP data to 1-min bars
+- [ ] Verify compression ratio (~12x)
+- [ ] Validate SWAP symbols present in bars
+
+### Phase 3: Backtest
+- [ ] Run v1.10 for full 32-month period
+- [ ] Validate SLO compliance (correctness, availability, observability)
+- [ ] Compare with v1.9 results
+
+### Phase 4: Documentation
+- [ ] Update INVESTIGATION_FINDINGS.md with results
+- [ ] Update INVESTIGATION_PLAN.md status
+- [ ] Document basis risk quantification
+- [ ] Archive /tmp/option_b_implementation/ artifacts
+
+### Phase 5: Cleanup
+- [ ] Keep reference month of raw SWAP ticks
+- [ ] Delete remaining raw SWAP ticks (~30 GB savings)
+- [ ] Document storage cleanup
+
+---
+
+## Version History
+
+### v1.0.0 (2025-10-03)
+- Initial production deployment specification
+- SLOs: correctness, availability, observability, maintainability
+- Error handling: fail-fast, no fallbacks
+- 5-phase deployment plan
+- Rollback plan defined
+
+---
+
+## References
+
+**Specifications:**
+- V2_REAL_PERP_SPEC.md (implementation spec)
+- INVESTIGATION_PLAN.md (investigation framework)
+- INVESTIGATION_FINDINGS.md (root cause analysis)
+
+**Implementation:**
+- v1.10-modular.py (real perpetual prices)
+- v1.9-modular.py (synthetic baseline)
+
+**Test Artifacts:**
+- /tmp/swap_test/TEST_RESULTS.txt (infrastructure validation)
+- /tmp/option_b_implementation/ (design artifacts)

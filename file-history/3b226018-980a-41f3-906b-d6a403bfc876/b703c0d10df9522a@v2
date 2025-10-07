@@ -1,0 +1,169 @@
+# Phase 5 Implementation Status
+
+**Date**: 2025-10-03
+**Status**: Core components implemented, IPSS and execution remaining
+**Branch**: feat/ood-robust/EL-1009
+
+## Implemented ✅
+
+### 1. Comprehensive Specification
+**File**: `experiments/phase5_mae_mfe_ipss_20251003/README.md` (342 lines)
+
+**Content**:
+- Full MAE/MFE quality formulation (reward/risk ratio, higher = better)
+- Pipeline stages (targets → pruning → VIF → IPSS)
+- SLO definitions (correctness, availability, observability, maintainability)
+- Edge case handling (flat market, perfect trade, no opportunity)
+- Data specifications (9,881 usable samples after H=20 horizon)
+
+### 2. MAE/MFE Quality Target Calculator
+**File**: `experiments/phase5_mae_mfe_ipss_20251003/compute_targets.py`
+
+**Implementation**:
+- Calculate long_quality = MFE_long / MAE_long
+- Calculate short_quality = MFE_short / MAE_short
+- Determine best_direction (long if long_quality > short_quality)
+- Edge case handling (np.nan for flat markets, clip to 100.0 for perfect trades)
+- Validation: >= 80% coverage, log distribution statistics
+
+**Parameters**:
+- Horizon H = 20 bars (100 minutes for 5-min data)
+- Max quality = 100.0 (clip for perfect trades)
+- Entry = close[t], window = [t+1:t+H+1] (lookahead-free)
+
+### 3. Pruning Manifest Application
+**File**: `experiments/phase5_mae_mfe_ipss_20251003/apply_pruning_manifest.py`
+
+**Implementation**:
+- Load `.claude/feature-pruning-manifest.md` (YAML frontmatter)
+- Filter 89 atoms → 48 kept features
+- Verify no pruned features present
+- Log missing features, pruned features removed
+
+### 4. VIF Filtering
+**File**: `experiments/phase5_mae_mfe_ipss_20251003/run_vif_filter.py`
+
+**Implementation**:
+- Iterative VIF removal (threshold ≤ 5.0)
+- statsmodels VIF (out-of-box, no custom implementation)
+- Log each removal (feature name, VIF value)
+- Raise on non-convergence (max 50 iterations)
+
+**Validated**: 48 features → 37 features in 9.7s (vif_feasibility_test_20251003)
+
+---
+
+## Remaining TODO
+
+### 5. Embargoed Time Series CV
+**File**: `ml_feature_set/validation/time_series_cv.py` (to be created)
+
+**Implementation outline**:
+```python
+class EmbargoedTimeSeriesSplit:
+    def __init__(self, n_splits=5, test_size=0.2, embargo=20):
+        # embargo = horizon (20 bars) to prevent target lookahead
+
+    def split(self, X, y=None, groups=None):
+        # Train: [0...train_end]
+        # Gap: [train_end+1...train_end+embargo]
+        # Val: [train_end+embargo+1...test_end]
+```
+
+### 6. IPSS Stability Selection
+**File**: `experiments/phase5_mae_mfe_ipss_20251003/run_ipss.py` (to be created)
+
+**Simplified approach**:
+- Use embargoed CV (no arch bootstrap for simplicity)
+- RandomForestRegressor multi-output [long_quality, short_quality]
+- Permutation importance per fold
+- Selection frequency threshold ≥ 0.70
+- Output: 37 → 20-30 features
+
+### 7. Report Generator
+**File**: `experiments/phase5_mae_mfe_ipss_20251003/generate_report.py` (to be created)
+
+**Content**:
+- Pipeline summary (89 → 48 → 37 → 20-30)
+- Quality distribution statistics
+- VIF removal log
+- IPSS selection frequencies
+- Final feature list
+
+### 8. Execution & Validation
+**Commands**:
+```bash
+docker exec ml-dev python -m experiments.phase5_mae_mfe_ipss_20251003.compute_targets
+docker exec ml-dev python -m experiments.phase5_mae_mfe_ipss_20251003.apply_pruning_manifest
+docker exec ml-dev python -m experiments.phase5_mae_mfe_ipss_20251003.run_vif_filter
+docker exec ml-dev python -m experiments.phase5_mae_mfe_ipss_20251003.run_ipss
+docker exec ml-dev python -m experiments.phase5_mae_mfe_ipss_20251003.generate_report
+```
+
+---
+
+## Target Variable Formulation
+
+### MAE/MFE Quality (Reward/Risk Ratio)
+
+**Long position**:
+```
+MFE_long = max(high[t+1:t+H+1]) - close[t]  # Max profit
+MAE_long = close[t] - min(low[t+1:t+H+1])   # Max drawdown
+long_quality = MFE_long / MAE_long           # Higher = better
+```
+
+**Short position** (symmetric):
+```
+MFE_short = close[t] - min(low[t+1:t+H+1])  # Max profit
+MAE_short = max(high[t+1:t+H+1]) - close[t] # Max drawdown
+short_quality = MFE_short / MAE_short        # Higher = better
+```
+
+**Best direction**: long if long_quality > short_quality, else short
+
+**Quality interpretation**:
+- quality = 2.0 → MFE is 2x MAE (good trade, $100 profit for $50 max drawdown)
+- quality = 0.5 → MFE is 0.5x MAE (bad trade, $50 profit for $100 max drawdown)
+- quality = 100.0 → Perfect trade (MAE=0, no drawdown)
+
+---
+
+## SLO Summary
+
+**Correctness**:
+- Out-of-box: pandas, statsmodels VIF, sklearn RandomForest
+- Lookahead-free: Window starts at t+1
+- Edge cases: np.nan for flat, clip to 100 for perfect
+
+**Availability**:
+- >= 80% valid quality samples
+- >= 100 samples after horizon truncation
+- VIF convergence within 50 iterations
+
+**Observability**:
+- Log quality distribution (min, max, mean, median, percentiles)
+- Log VIF removals (feature name, VIF value)
+- Log IPSS selection frequencies
+
+**Maintainability**:
+- No custom MAE/MFE, VIF, or IPSS algorithms
+- Standard patterns (embargoed CV, iterative VIF)
+- Modular scripts (one stage per script)
+
+---
+
+## Cross-References
+
+**Framework**:
+- `CLAUDE.md` (lines 264-296) - Phase 2 specification
+- `NEXT_STEPS.md` (lines 20-92) - Phase 5 tasks
+
+**Related**:
+- `experiments/orthogonality_filtering_20251003/` - Pruning manifest source
+- `experiments/vif_feasibility_test_20251003/` - VIF validation
+- `.claude/feature-pruning-manifest.md` - 48 kept features
+- `.claude/vif-validation-20251003.md` - VIF 9.7s validation
+
+**Full implementation**: `experiments/phase5_mae_mfe_ipss_20251003/` (gitignored)
+**Implementation guide**: `experiments/phase5_mae_mfe_ipss_20251003/TODO.md`

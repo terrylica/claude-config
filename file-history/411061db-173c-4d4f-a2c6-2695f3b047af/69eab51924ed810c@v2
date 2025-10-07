@@ -1,0 +1,95 @@
+#!/bin/bash
+# Quick parallel vs sequential test with 2 months
+# Tests if parallelization actually helps
+
+set -e
+
+TEST_DIR="/tmp/parallel_test"
+WORK_DIR="/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis"
+
+echo "=================================="
+echo "Quick Parallel Download Test"
+echo "=================================="
+echo "Test: 2024-01 and 2024-02 (not yet downloaded)"
+echo ""
+
+# Test 1: Sequential (baseline)
+echo "=== Test 1: Sequential (2 months) ==="
+rm -rf "$TEST_DIR/sequential"
+mkdir -p "$TEST_DIR/sequential"
+
+START_SEQ=$(date +%s)
+
+cd "$WORK_DIR"
+for month in 1 2; do
+    echo "[$(date +%H:%M:%S)] Downloading 2024-$(printf "%02d" $month)..."
+    uv run --active python scripts/download_month.py 2024 $month \
+        --ticks --market-type swap --data-dir "$TEST_DIR/sequential" \
+        2>&1 | grep -E "(✓ Saved|ERROR)"
+done
+
+END_SEQ=$(date +%s)
+ELAPSED_SEQ=$((END_SEQ - START_SEQ))
+
+echo "Sequential time: ${ELAPSED_SEQ}s"
+SEQ_SIZE=$(du -sm "$TEST_DIR/sequential/raw_ticks_swap" | cut -f1)
+echo "Downloaded: ${SEQ_SIZE}MB"
+echo ""
+
+# Test 2: Parallel (2 jobs)
+echo "=== Test 2: Parallel (2 jobs, 2 months) ==="
+rm -rf "$TEST_DIR/parallel"
+mkdir -p "$TEST_DIR/parallel"
+
+START_PAR=$(date +%s)
+
+cd "$WORK_DIR"
+
+# Download both months in parallel using background jobs
+uv run --active python scripts/download_month.py 2024 1 \
+    --ticks --market-type swap --data-dir "$TEST_DIR/parallel" \
+    2>&1 | grep -E "(✓ Saved|ERROR)" &
+PID1=$!
+
+uv run --active python scripts/download_month.py 2024 2 \
+    --ticks --market-type swap --data-dir "$TEST_DIR/parallel" \
+    2>&1 | grep -E "(✓ Saved|ERROR)" &
+PID2=$!
+
+# Wait for both to complete
+wait $PID1
+wait $PID2
+
+END_PAR=$(date +%s)
+ELAPSED_PAR=$((END_PAR - START_PAR))
+
+echo "Parallel time: ${ELAPSED_PAR}s"
+PAR_SIZE=$(du -sm "$TEST_DIR/parallel/raw_ticks_swap" | cut -f1)
+echo "Downloaded: ${PAR_SIZE}MB"
+echo ""
+
+# Calculate speedup
+SPEEDUP=$(echo "scale=2; $ELAPSED_SEQ / $ELAPSED_PAR" | bc)
+
+echo "=================================="
+echo "RESULTS"
+echo "=================================="
+echo "Sequential:  ${ELAPSED_SEQ}s"
+echo "Parallel (2): ${ELAPSED_PAR}s"
+echo "Speedup:     ${SPEEDUP}x"
+echo ""
+
+if (( $(echo "$SPEEDUP > 1.3" | bc -l) )); then
+    echo "✓ PARALLELIZATION BENEFICIAL (>1.3x speedup)"
+    echo "  Recommendation: Kill sequential download, switch to parallel"
+    echo "  Estimated time savings: ~$(echo "scale=0; (14 * $ELAPSED_SEQ / 2) / 60 - (14 * $ELAPSED_PAR / 2) / 60" | bc) minutes for remaining 14 months"
+elif (( $(echo "$SPEEDUP > 1.1" | bc -l) )); then
+    echo "⚠ MARGINAL BENEFIT (1.1-1.3x speedup)"
+    echo "  Recommendation: Continue sequential (not worth interrupting)"
+else
+    echo "✗ NO BENEFIT (<1.1x speedup)"
+    echo "  Recommendation: Continue sequential download"
+fi
+
+# Cleanup
+rm -rf "$TEST_DIR"

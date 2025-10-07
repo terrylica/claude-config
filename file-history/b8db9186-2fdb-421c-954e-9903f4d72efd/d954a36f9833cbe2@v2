@@ -1,0 +1,274 @@
+# Integration Guide: portfolio-capital-manager
+
+**For: Victor CBO Analysis V1.7 (Dollar-Based Backtester)**
+
+## Overview
+
+This library solves the **capital allocation realism problem** by:
+
+✅ Tracking actual dollar amounts (not normalized equity)
+✅ Explicitly managing locked vs available capital
+✅ Enforcing position size constraints
+✅ Supporting sequential deployment strategies
+
+## Installation
+
+### In victor-cbo-analysis project
+
+```bash
+cd /Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis
+uv pip install --python .venv/bin/python -e ../libs/portfolio-capital-manager
+```
+
+### Or add to pyproject.toml
+
+```toml
+dependencies = [
+    # ... existing deps
+    "portfolio-capital-manager @ file:///{}/libs/portfolio-capital-manager".format(
+        Path(__file__).parent.parent.parent
+    ),
+]
+```
+
+## Quick Migration from V1.6 to V1.7
+
+### Before (V1.6 - Normalized)
+
+```python
+# V1.6: Scale-invariant, unrealistic
+equity = 1.0
+weights = {'BTC': 0.30, 'ETH': 0.25}  # What does this mean in dollars?
+
+# Later...
+equity = 1.25  # After profit - but still abstract
+```
+
+**Problem:** Works identically for $10k, $1M, or $100M capital.
+
+### After (V1.7 - Dollar-Based)
+
+```python
+from portfolio_capital_manager import PortfolioState, DollarAllocator, PositionConstraints
+
+# V1.7: Explicit dollar tracking
+portfolio = PortfolioState(initial_capital=100_000)  # Real dollars
+
+# Configure realistic constraints
+constraints = PositionConstraints.for_funding_arb(
+    capital=100_000,
+    top_k=5,
+    max_pct_per_position=0.50
+)
+
+allocator = DollarAllocator(constraints=constraints)
+
+# Allocate with real capital checks
+weights = {'BTC': 0.30, 'ETH': 0.25}
+prices = {'BTC': 45000, 'ETH': 2500}
+
+allocations = allocator.allocate(weights, portfolio, prices)
+# Returns: {'BTC': 30000, 'ETH': 25000}  ← Actual dollars
+
+# Execute positions (locks capital)
+for symbol, usd_amount in allocations.items():
+    quantity = usd_amount / prices[symbol]
+    portfolio.open_position(symbol, quantity, prices[symbol], 'long')
+
+print(f"Available cash: ${portfolio.get_available_cash():,.2f}")
+# Available cash: $45,000.00  ← Can't use this for new positions
+```
+
+## Integration Pattern for V1.7 Backtester
+
+### Step 1: Initialize Portfolio
+
+```python
+def run_backtest(initial_capital: float = 100_000):
+    \"\"\"Run backtest with dollar-based capital tracking.\"\"\"
+
+    # Initialize portfolio with actual capital
+    portfolio = PortfolioState(initial_capital=initial_capital)
+
+    # Set position constraints based on capital size
+    constraints = PositionConstraints.for_funding_arb(
+        capital=initial_capital,
+        top_k=5,
+        max_pct_per_position=0.50
+    )
+
+    allocator = DollarAllocator(constraints=constraints)
+
+    # Track results
+    equity_curve = []
+
+    return portfolio, allocator, constraints
+```
+
+### Step 2: Rebalancing Logic
+
+```python
+def rebalance_portfolio(
+    portfolio: PortfolioState,
+    allocator: DollarAllocator,
+    target_weights: dict,
+    prices: dict,
+    timestamp: pd.Timestamp
+):
+    \"\"\"Rebalance portfolio at each funding interval.\"\"\"
+
+    # Close existing positions (free up capital)
+    for symbol in list(portfolio.positions.keys()):
+        pnl = portfolio.close_position(symbol, prices[symbol])
+
+    # Calculate new allocations using AVAILABLE cash
+    total_value = portfolio.get_total_value(prices)
+    allocations = allocator.allocate(target_weights, portfolio, prices)
+
+    # Open new positions (lock capital)
+    for symbol, dollar_amount in allocations.items():
+        if dollar_amount >= constraints.min_position_usd:
+            quantity = dollar_amount / prices[symbol]
+            portfolio.open_position(symbol, quantity, prices[symbol], 'long')
+
+    # Record equity
+    return portfolio.get_total_value(prices)
+```
+
+### Step 3: Cost Application
+
+```python
+def apply_costs(
+    portfolio: PortfolioState,
+    prices: dict,
+    hours: float = 8
+):
+    \"\"\"Apply borrow costs, fees, slippage.\"\"\"
+
+    total_borrow_cost = 0.0
+    total_fees = 0.0
+
+    for symbol, position in portfolio.positions.items():
+        # Borrow costs
+        notional = position.get_current_value(prices[symbol])
+        borrow_apr = get_borrow_apr(symbol)
+        hourly_cost = notional * (borrow_apr / 365 / 24) * hours
+        total_borrow_cost += hourly_cost
+
+        # Fees (already applied during execution)
+        # Slippage (already applied during execution)
+
+    # Deduct costs from cash
+    portfolio.cash -= (total_borrow_cost + total_fees)
+
+    return total_borrow_cost, total_fees
+```
+
+## Realistic Capital Constraints
+
+### For Different Capital Scales
+
+| Capital | Max Position | Min Position | Realistic? |
+|---------|--------------|--------------|------------|
+| $10k    | $5k (50%)    | $100         | ✅ Yes     |
+| $50k    | $25k (50%)   | $500         | ✅ Yes     |
+| $100k   | $50k (50%)   | $1k          | ✅ Yes     |
+| $500k   | $250k (50%)  | $5k          | ⚠️ Borderline |
+| $1M+    | $500k (cap)  | $10k         | ❌ Need multi-exchange |
+
+### Creating Constraints
+
+```python
+# Conservative (for $100k account)
+constraints = PositionConstraints.conservative(capital=100_000)
+# Max: $20k per position, Min: $2k
+
+# Funding arb optimized (for $100k account)
+constraints = PositionConstraints.for_funding_arb(
+    capital=100_000,
+    top_k=5,
+    max_pct_per_position=0.50
+)
+# Max: $50k per position, Min: $5k
+
+# Aggressive (for experienced traders)
+constraints = PositionConstraints.aggressive(capital=100_000)
+# Max: $50k per position, Min: $1k
+```
+
+## Sequential Deployment Example
+
+```python
+def sequential_deployment(
+    total_capital: float = 100_000,
+    weeks: int = 4
+):
+    \"\"\"Simulate gradual capital deployment.\"\"\"
+
+    weekly_amount = total_capital / weeks
+    deployed_portfolios = []
+
+    for week in range(1, weeks + 1):
+        deployed_capital = weekly_amount * week
+
+        # Create portfolio for this week's deployed capital
+        portfolio = PortfolioState(initial_capital=deployed_capital)
+
+        # Adjust constraints based on deployed amount
+        constraints = PositionConstraints.for_funding_arb(
+            capital=deployed_capital,
+            top_k=5
+        )
+
+        allocator = DollarAllocator(constraints=constraints)
+
+        # ... run backtest for this week
+        deployed_portfolios.append(portfolio)
+
+    return deployed_portfolios
+```
+
+## Benefits Over Normalized Approach
+
+| Feature | V1.6 (Normalized) | V1.7 (Dollar-Based) |
+|---------|-------------------|---------------------|
+| **Capital tracking** | Abstract (equity=1.0) | Explicit ($100,000) |
+| **Position sizes** | Percentages | Actual dollars |
+| **Liquidity constraints** | ❌ None | ✅ Min/max USD |
+| **Locked capital** | ❌ Not tracked | ✅ Explicit |
+| **Sequential deployment** | ❌ Can't model | ✅ Built-in |
+| **Scale realism** | ❌ Scale-invariant | ✅ Scale-aware |
+| **Production ready** | ❌ Need rewrite | ✅ Drop-in |
+
+## Testing
+
+```bash
+# Run unit tests
+cd /Users/terryli/eon/funding-rate-arbitrage/libs/portfolio-capital-manager
+pytest tests/ -v
+
+# Run examples
+python examples/basic_usage.py
+```
+
+## Next Steps for V1.7 Integration
+
+1. ✅ **Library created** - `portfolio-capital-manager` installed
+2. ⏭️ **Create V1.7 backtester** - Copy V1.6, replace equity tracking with PortfolioState
+3. ⏭️ **Add dollar constraints** - Use PositionConstraints.for_funding_arb()
+4. ⏭️ **Compare results** - V1.6 vs V1.7 (should be similar for $100k capital)
+5. ⏭️ **Test scalability** - Run V1.7 with $10k, $100k, $1M to see realistic differences
+
+## Support
+
+For issues or questions:
+- Check README.md for API documentation
+- Review examples/ for usage patterns
+- Run tests/ for verification
+
+---
+
+**Status:** ✅ Production-ready, reusable across all future projects
+
+The library is now available at:
+`/Users/terryli/eon/funding-rate-arbitrage/libs/portfolio-capital-manager`

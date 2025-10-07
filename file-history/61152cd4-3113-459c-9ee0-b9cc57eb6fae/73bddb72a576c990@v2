@@ -1,0 +1,335 @@
+# Temporal Flow Analysis - Victor's Backtester
+
+**Auditor:** Terry Li
+**Date:** September 30, 2025
+**Verdict:** ⚠️ **LOOK-AHEAD BIAS CONFIRMED**
+
+---
+
+## 🔍 Code Flow Analysis
+
+### **Step 1: Data Collection** (`pull_funding_arb_hist.py`)
+
+**API Call (Line 121):**
+```python
+data = okx_get("/public/funding-rate-history", params)
+```
+
+**What the API returns:**
+```json
+{
+  "fundingTime": "1722816000000",      // When funding SETTLED (e.g., 2024-08-05 00:00 UTC)
+  "fundingRate": "0.000065",           // Rate that WAS APPLIED during [T-8h, T]
+  "method": "current_period"
+}
+```
+
+**Data Processing (Line 166):**
+```python
+df["funding_time"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+# Creates: funding_time = settlement timestamp (e.g., 2024-08-05 00:00 UTC)
+```
+
+**Output CSV columns:**
+- `symbol`
+- `ts` (milliseconds)
+- `funding_time` (settlement datetime)
+- `fundingRate` (settled rate for period that just ended)
+- `arb_apy`
+
+✅ **Data collection is correct** - using historical settled rates
+
+---
+
+### **Step 2: Resampling** (`funding_arb_strat_1.py` Line 173)
+
+```python
+snap = df.set_index("funding_time") \
+         .groupby("symbol")["fundingRate"] \
+         .resample("8H").last() \
+         .dropna().reset_index()
+```
+
+**What this does:**
+- Groups funding events into 8-hour buckets
+- Takes the **last** rate in each bucket
+- Aligns snapshots to 00:00, 08:00, 16:00 UTC
+
+**Example snapshot at 08:00 UTC:**
+```
+funding_time        symbol    fundingRate
+2024-08-05 08:00    BTC       0.000045
+2024-08-05 08:00    ETH       0.000032
+2024-08-05 08:00    SOL       0.000078
+```
+
+These are rates that **settled at 08:00** (for period 00:00-08:00)
+
+✅ **Resampling logic is correct** - aligning to settlement times
+
+---
+
+### **Step 3: Portfolio Selection** (`funding_arb_strat_1.py` Lines 183-188)
+
+```python
+for i, t in enumerate(times, 1):
+    g = snap[snap["funding_time"] == t]           # Get rates at time T
+    rates = g.set_index("symbol")["fundingRate"]
+
+    target = capped_topk_weights_minmax(rates, k=TOP_K, ...)  # Select top-5
+```
+
+**At time T = 2024-08-05 08:00 UTC:**
+- Gets rates that settled AT 08:00
+- Selects top-5 symbols based on these rates
+
+**The rates used:**
+- BTC: 0.000045 (settled at 08:00 for period 00:00-08:00)
+- ETH: 0.000032 (settled at 08:00 for period 00:00-08:00)
+- SOL: 0.000078 (settled at 08:00 for period 00:00-08:00)
+
+❌ **TEMPORAL ISSUE:** These rates are for a period that JUST ENDED
+
+---
+
+### **Step 4: Return Application** (`funding_arb_strat_1.py` Lines 221-223)
+
+```python
+gross = portfolio_gross_factor(new_w, rates)  # Use rates at T
+net = gross * fee_factor
+equity *= net  # Apply returns
+```
+
+**`portfolio_gross_factor` (Line 138):**
+```python
+def portfolio_gross_factor(weights: dict, rates: pd.Series) -> float:
+    return sum(weights.get(s, 0.0) * (1.0 + abs(float(rates.get(s, 0.0)))))
+```
+
+**This calculates:**
+- For each symbol: `weight × (1 + |fundingRate|)`
+- Sum across portfolio
+- Represents the return from **capturing that funding rate**
+
+❌ **CRITICAL TEMPORAL ERROR:** Applying returns from rates that already settled
+
+---
+
+## 🚨 **The Look-Ahead Bias**
+
+### **Timeline of Events (08:00 UTC Settlement)**
+
+```
+Period:  00:00 ────────────────► 08:00 ────────────────► 16:00
+                8-hour window          Next 8-hour window
+
+         ┌─────────────────────┐
+         │ Funding accrues     │
+         │ Rate unknown until  │
+         │ 08:00 settlement    │
+         └─────────────────────┘
+                               ▼
+                          [Settlement]
+                          Rate = 0.000045
+                          (for period that ended)
+                               ▼
+                        ┌──────────────┐
+                        │ Next period  │
+                        │ 08:00-16:00  │
+                        │ Rate unknown │
+                        └──────────────┘
+```
+
+### **What Victor's Code Does:**
+
+```
+Time: 08:00 UTC
+├─ Get rate: 0.000045 (just settled for 00:00-08:00 period)
+├─ Select: Top-5 symbols including BTC (based on this rate)
+└─ Apply return: equity *= (1 + 0.000045)
+              ↑
+              This is WRONG! This rate is for a period that ended.
+              You can't earn this rate anymore.
+```
+
+### **What Should Happen:**
+
+**Option A: Predictive Strategy (Realistic)**
+```
+Time: 08:00 UTC
+├─ Get PREVIOUS rate: 0.000038 (settled at 00:00 for previous period)
+├─ Predict NEXT rate: ~0.000040 (using premium-index, like next_funding_rate.py does)
+├─ Select: Top-5 symbols based on predicted rates
+└─ Apply return: equity *= (1 + next_period_rate)  // Will know at 16:00
+```
+
+**Option B: Momentum Strategy (Simpler)**
+```
+Time: 08:00 UTC
+├─ Get PREVIOUS rate: 0.000038 (settled at 00:00)
+├─ Assume persistence: Next rate ≈ 0.000038
+├─ Select: Top-5 symbols based on T-1 rates
+└─ Apply return: Use ACTUAL rate that settles at 16:00
+```
+
+---
+
+## 📊 **Proof of Look-Ahead Bias**
+
+### **Victor's Temporal Flow**
+
+| Time | Event | Victor's Action | Rate Used | Problem |
+|------|-------|-----------------|-----------|---------|
+| 00:00 | Settlement | - | - | - |
+| 00:01-07:59 | Period accrues | Holding previous portfolio | - | - |
+| 08:00 | Settlement | **Get rate 0.000045** | 0.000045 | Rate is for period 00:00-08:00 |
+| 08:00 | Selection | **Select top-5 using 0.000045** | 0.000045 | Using rate from period that ended |
+| 08:00 | Return | **Apply return: 1 + 0.000045** | 0.000045 | ❌ **Can't earn this anymore!** |
+| 08:01-15:59 | Next period | Holding new portfolio | ??? | Unknown rate for 08:00-16:00 |
+| 16:00 | Settlement | Get next rate | 0.000052 | This is what you actually earn |
+
+### **The Error:**
+
+Victor's code applies the return from the **08:00 settlement** (rate for 00:00-08:00)
+But by 08:00, that period is OVER - you can't capture that rate.
+
+The rate you'll actually earn is for the **08:00-16:00 period**, which won't be known until 16:00.
+
+---
+
+## 🔬 **Evidence from Code**
+
+### **Lines 183-223: The Smoking Gun**
+
+```python
+for i, t in enumerate(times, 1):
+    # t = 2024-08-05 08:00:00
+
+    g = snap[snap["funding_time"] == t]  # ← Rates that settled AT 08:00
+    rates = g.set_index("symbol")["fundingRate"]  # ← For period 00:00-08:00
+
+    target = capped_topk_weights_minmax(rates, ...)  # ← Select using 00:00-08:00 rates
+
+    # ... rebalancing logic ...
+
+    gross = portfolio_gross_factor(new_w, rates)  # ← Apply 00:00-08:00 returns
+    equity *= gross  # ← Earn the rate from a period that ended
+                     # ❌ WRONG: Should earn rate from NEXT period (08:00-16:00)
+```
+
+### **What the Rate Represents**
+
+From `portfolio_gross_factor` (line 138):
+```python
+return sum(weight * (1.0 + abs(rate)) for each symbol)
+```
+
+- `rate = 0.000045` means: "You earned 0.0045% during the 8-hour period"
+- But this is for the **00:00-08:00 period**
+- At 08:00, that period is OVER
+
+---
+
+## ✅ **Corrected Temporal Flow**
+
+### **Option 1: Use T-1 Rates (Momentum Assumption)**
+
+```python
+for i, t in enumerate(times, 1):
+    if i == 0:
+        continue  # Skip first period (no T-1)
+
+    # Get PREVIOUS rates (from T-1)
+    t_prev = times[i-1]
+    g_prev = snap[snap["funding_time"] == t_prev]
+    rates_prev = g_prev.set_index("symbol")["fundingRate"]
+
+    # Select portfolio using T-1 rates
+    target = capped_topk_weights_minmax(rates_prev, ...)
+
+    # Get CURRENT rates (at T) to apply actual returns
+    g_curr = snap[snap["funding_time"] == t]
+    rates_curr = g_curr.set_index("symbol")["fundingRate"]
+
+    # Apply returns using CURRENT rates (what actually happened)
+    gross = portfolio_gross_factor(new_w, rates_curr)
+    equity *= gross
+```
+
+**Timeline:**
+```
+00:00 settlement → rate_0 known
+08:00 settlement → rate_1 known, select using rate_0, earn rate_1 ✓
+16:00 settlement → rate_2 known, select using rate_1, earn rate_2 ✓
+```
+
+### **Option 2: Use Premium-Index Prediction (More Realistic)**
+
+This is what `next_funding_rate.py` does - estimate the next rate using current premium-index data.
+
+---
+
+## 📈 **Expected Impact on Backtest Results**
+
+### **Victor's Results (with look-ahead bias):**
+- APY: 7,708%
+- Sharpe: 19.48
+- Mechanism: Perfect selection - always picks symbols that HAD high rates
+
+### **Expected Results (corrected):**
+- APY: ??? (likely much lower)
+- Sharpe: ??? (likely much lower)
+- Depends on: Funding rate persistence (correlation between rate[t-1] and rate[t])
+
+### **Key Question:**
+How correlated are consecutive funding rates?
+- High correlation (>0.5) → Momentum strategy works, results still good
+- Low correlation (<0.2) → Random walk, strategy has no edge
+
+---
+
+## 🎯 **Next Validation Steps**
+
+1. ✅ **Confirmed:** Victor uses OKX API `/public/funding-rate-history`
+2. ✅ **Confirmed:** `fundingTime` = settlement timestamp (backward-looking)
+3. ✅ **Confirmed:** Victor's code has look-ahead bias (uses same-period rates)
+
+**Next logical validations:**
+
+### **A. Measure Funding Rate Persistence**
+```python
+# Calculate lag-1 autocorrelation
+df['rate_lag1'] = df.groupby('symbol')['fundingRate'].shift(1)
+correlation = df[['fundingRate', 'rate_lag1']].corr()
+```
+
+**If correlation > 0.3:** Momentum strategy viable, results may still be decent
+**If correlation < 0.1:** No persistence, current results are purely from look-ahead bias
+
+### **B. Rebuild Backtest with T-1 Lag**
+```python
+# Force use of previous period rates for selection
+# Apply current period rates for returns
+# Compare to Victor's 7,708% APY
+```
+
+**Large difference → Confirms look-ahead bias severity**
+
+### **C. Validate Against Live Trading**
+- If Victor is live trading this, compare actual vs. backtest performance
+- Expect significant degradation if look-ahead bias exists
+
+---
+
+## 📋 **Summary**
+
+| Aspect | Status | Finding |
+|--------|--------|---------|
+| **Data Source** | ✅ Verified | OKX API `/public/funding-rate-history` |
+| **Data Integrity** | ✅ Correct | `fundingTime` = settlement timestamp |
+| **Resampling Logic** | ✅ Correct | 8-hour alignment to settlements |
+| **Selection Logic** | ❌ **BIASED** | Uses same-period rates (look-ahead) |
+| **Return Application** | ❌ **BIASED** | Applies returns from ended period |
+| **Overall Verdict** | ⚠️ **INVALID** | Backtest has look-ahead bias |
+
+**Recommended Action:** Rebuild backtest with T-1 lag enforcement before production deployment.

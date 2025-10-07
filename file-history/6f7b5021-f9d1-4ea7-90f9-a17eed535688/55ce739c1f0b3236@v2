@@ -1,0 +1,198 @@
+openapi: 3.1.0
+info:
+  title: Pushover Integration Specification
+  description: Pushover notification service integration with CNS (Conversation Notification System)
+  version: 2.0.0
+
+components:
+  schemas:
+    PushoverAPI:
+      type: object
+      description: Pushover API configuration and endpoints
+      properties:
+        base_url:
+          type: string
+          example: "https://pushover.net/api"
+        documentation:
+          type: string
+          example: "https://pushover.net/api"
+        message_endpoint:
+          type: string
+          example: "https://api.pushover.net/1/messages.json"
+
+    PushoverCredentials:
+      type: object
+      description: Multi-source credential storage with priority fallback
+      properties:
+        git_based_config:
+          type: object
+          description: "Primary: CNS config (git-based, team-shared)"
+          properties:
+            path:
+              type: string
+              example: ".claude/automation/cns/config/cns_config.json"
+            fields:
+              type: object
+              properties:
+                user_key:
+                  type: string
+                  description: "pushover.user_key"
+                app_token:
+                  type: string
+                  description: "pushover.app_token"
+                default_device:
+                  type: string
+                  example: "iphone_13_mini"
+                default_sound:
+                  type: string
+                  example: "toy_story"
+        local_config:
+          type: object
+          description: "Fallback: Local override (not in git)"
+          properties:
+            path:
+              type: string
+              example: "~/.pushover_config"
+            format:
+              type: string
+              example: |
+                PUSHOVER_USER="user_key_here"
+                PUSHOVER_TOKEN="app_token_here"
+        keychain:
+          type: object
+          description: "Legacy: macOS Keychain storage"
+          properties:
+            user_key:
+              type: string
+              example: "pushover-user-key"
+            app_token:
+              type: string
+              example: "pushover-app-token"
+            account:
+              type: string
+              example: "terryli"
+        priority_order:
+          type: array
+          items:
+            type: string
+          example: ["git_based_config", "local_config", "keychain"]
+
+    PushoverSounds:
+      type: object
+      description: Available notification sounds for Pushover
+      properties:
+        available_sounds:
+          type: array
+          items:
+            type: string
+          example:
+            - "toy_story"
+            - "dune"
+            - "bike"
+            - "siren"
+            - "cosmic"
+            - "alien"
+            - "vibrate"
+            - "none"
+        default_sound:
+          type: string
+          example: "toy_story"
+
+    PushoverPriorities:
+      type: object
+      description: Priority levels and requirements
+      properties:
+        levels:
+          type: object
+          properties:
+            emergency:
+              type: object
+              description: "Priority 2 - REQUIRES retry and expire"
+              properties:
+                priority: { type: integer, example: 2 }
+                retry: { type: integer, minimum: 30, example: 30, description: "Min 30s between retries" }
+                expire: { type: integer, maximum: 10800, example: 3600, description: "Max 3hrs (10800s)" }
+            normal: { type: integer, example: 0 }
+            high: { type: integer, example: 1 }
+
+    WorkingImplementation:
+      type: object
+      description: Verified curl pattern for emergency notifications
+      properties:
+        bash_example:
+          type: string
+          example: |
+            curl -s https://api.pushover.net/1/messages.json \
+              --form-string "token=$APP_TOKEN" \
+              --form-string "user=$USER_KEY" \
+              --form-string "device=$DEVICE" \
+              --form-string "sound=dune" \
+              --form-string "priority=2" \
+              --form-string "retry=30" \
+              --form-string "expire=3600" \
+              --form-string "title=$TITLE" \
+              --form-string "message=$MESSAGE"
+        state_tracking:
+          type: string
+          description: "Use /tmp state files to prevent duplicate alerts"
+          example: "echo 'alert_type' >> /tmp/alerts_sent.txt"
+
+    PushoverIntegration:
+      type: object
+      description: Complete Pushover integration configuration
+      properties:
+        api:
+          $ref: '#/components/schemas/PushoverAPI'
+        credentials:
+          $ref: '#/components/schemas/PushoverCredentials'
+        sounds:
+          $ref: '#/components/schemas/PushoverSounds'
+        priorities:
+          $ref: '#/components/schemas/PushoverPriorities'
+        implementation:
+          $ref: '#/components/schemas/WorkingImplementation'
+
+    CNSIntegration:
+      type: object
+      description: CNS (Conversation Notification System) integration details
+      properties:
+        automatic_notifications:
+          type: boolean
+          description: "Automatic Pushover notifications when Claude Code completes responses"
+          example: true
+        notification_components:
+          type: object
+          properties:
+            local_audio:
+              type: string
+              description: "afplay + say (macOS folder announcement)"
+            pushover_api:
+              type: string
+              description: "Remote notifications with rich metadata"
+        session_metadata:
+          type: object
+          properties:
+            title_format:
+              type: string
+              example: "CNS: {username}@{hostname}"
+            message_format:
+              type: string
+              example: |
+                📁 {folder}
+                {response_preview}
+
+                🆔 {session_id} | {event}
+        deployment_workflow:
+          type: object
+          properties:
+            step1:
+              type: string
+              description: "git pull (credentials included in cns_config.json)"
+            step2:
+              type: string
+              description: "CNS hooks automatically send Pushover notifications"
+            security_context:
+              type: string
+              example: "Private company repo, small trusted team"
+
+paths: {}

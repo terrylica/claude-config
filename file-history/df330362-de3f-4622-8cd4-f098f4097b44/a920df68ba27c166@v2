@@ -1,0 +1,283 @@
+"""OOD-specific evaluation metrics."""
+
+from typing import Dict, List, Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+from sklearn.metrics import (
+    accuracy_score,
+    precision_recall_fscore_support,
+    confusion_matrix,
+    roc_auc_score,
+)
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+
+class OODMetrics:
+    """Comprehensive metrics for OOD robustness evaluation."""
+
+    @staticmethod
+    @torch.no_grad()
+    def compute_all_metrics(
+        model: nn.Module,
+        loader: DataLoader,
+        device: torch.device,
+        regime_conditional: bool = True,
+    ) -> Dict[str, float]:
+        """Compute comprehensive evaluation metrics.
+
+        Args:
+            model: Model to evaluate
+            loader: Data loader
+            device: Device to run on
+            regime_conditional: Compute regime-conditional metrics
+
+        Returns:
+            Dictionary of all metrics
+        """
+        model.eval()
+
+        all_predictions = []
+        all_targets = []
+        all_probabilities = []
+        all_regimes = []
+        all_anomaly_scores = []
+
+        # Collect predictions
+        for batch in tqdm(loader, desc="Computing metrics"):
+            sequences = batch["features"].to(device)
+            targets = batch["target"]
+            regimes = batch["regime"][:, 0]  # Volatility regime
+            original_features = sequences[:, -1, :].to(device)
+
+            # Forward pass
+            outputs = model(sequences)
+
+            # Get predictions
+            probs = torch.softmax(outputs["direction_logits"], dim=-1)
+            preds = torch.argmax(probs, dim=-1)
+
+            # Anomaly scores
+            recon_error = torch.mean(
+                (outputs["reconstructed"] - original_features) ** 2,
+                dim=-1,
+            )
+
+            all_predictions.append(preds.cpu())
+            all_targets.append(targets)
+            all_probabilities.append(probs.cpu())
+            all_regimes.append(regimes)
+            all_anomaly_scores.append(recon_error.cpu())
+
+        # Concatenate
+        predictions = torch.cat(all_predictions).numpy()
+        targets = torch.cat(all_targets).numpy()
+        probabilities = torch.cat(all_probabilities).numpy()
+        regimes = torch.cat(all_regimes).numpy()
+        anomaly_scores = torch.cat(all_anomaly_scores).numpy()
+
+        # Compute metrics
+        metrics = {}
+
+        # 1. Overall performance
+        metrics["accuracy"] = accuracy_score(targets, predictions)
+
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            targets,
+            predictions,
+            average="weighted",
+            zero_division=0,
+        )
+        metrics["precision"] = precision
+        metrics["recall"] = recall
+        metrics["f1"] = f1
+
+        # 2. Per-class metrics
+        for class_id in range(3):
+            class_mask = targets == class_id
+            if class_mask.sum() > 0:
+                class_acc = (predictions[class_mask] == class_id).mean()
+                metrics[f"class_{class_id}_accuracy"] = class_acc
+
+        # 3. Calibration (Expected Calibration Error)
+        ece = OODMetrics.compute_ece(probabilities, targets, n_bins=10)
+        metrics["ece"] = ece
+
+        # 4. Anomaly detection metrics
+        metrics["anomaly_mean"] = anomaly_scores.mean()
+        metrics["anomaly_std"] = anomaly_scores.std()
+        metrics["anomaly_q95"] = np.percentile(anomaly_scores, 95)
+
+        # 5. Regime-conditional metrics
+        if regime_conditional:
+            regime_metrics = OODMetrics.compute_regime_metrics(
+                predictions, targets, regimes
+            )
+            metrics.update(regime_metrics)
+
+        return metrics
+
+    @staticmethod
+    def compute_ece(
+        probabilities: np.ndarray,
+        targets: np.ndarray,
+        n_bins: int = 10,
+    ) -> float:
+        """Compute Expected Calibration Error.
+
+        Args:
+            probabilities: (n_samples, n_classes) predicted probabilities
+            targets: (n_samples,) true labels
+            n_bins: Number of confidence bins
+
+        Returns:
+            ECE value (lower is better)
+        """
+        # Get predicted class and confidence
+        confidences = probabilities.max(axis=1)
+        predictions = probabilities.argmax(axis=1)
+        accuracies = (predictions == targets).astype(float)
+
+        # Bin by confidence
+        bin_boundaries = np.linspace(0, 1, n_bins + 1)
+        ece = 0.0
+
+        for i in range(n_bins):
+            # Find samples in this bin
+            in_bin = (confidences >= bin_boundaries[i]) & (confidences < bin_boundaries[i + 1])
+
+            if in_bin.sum() > 0:
+                bin_accuracy = accuracies[in_bin].mean()
+                bin_confidence = confidences[in_bin].mean()
+                bin_weight = in_bin.sum() / len(targets)
+
+                ece += bin_weight * abs(bin_accuracy - bin_confidence)
+
+        return ece
+
+    @staticmethod
+    def compute_regime_metrics(
+        predictions: np.ndarray,
+        targets: np.ndarray,
+        regimes: np.ndarray,
+    ) -> Dict[str, float]:
+        """Compute metrics conditional on regime.
+
+        Args:
+            predictions: Predicted labels
+            targets: True labels
+            regimes: Regime labels
+
+        Returns:
+            Dict with regime-conditional metrics
+        """
+        metrics = {}
+
+        for regime_id in np.unique(regimes):
+            mask = regimes == regime_id
+            if mask.sum() > 0:
+                regime_acc = accuracy_score(targets[mask], predictions[mask])
+                metrics[f"regime_{regime_id}_accuracy"] = regime_acc
+                metrics[f"regime_{regime_id}_count"] = mask.sum()
+
+        # Compute regime diversity (std of per-regime accuracy)
+        regime_accs = [
+            metrics[f"regime_{r}_accuracy"]
+            for r in np.unique(regimes)
+        ]
+        metrics["regime_accuracy_std"] = np.std(regime_accs)
+
+        return metrics
+
+    @staticmethod
+    def print_metrics(metrics: Dict[str, float], title: str = "Evaluation Metrics"):
+        """Pretty print metrics.
+
+        Args:
+            metrics: Dictionary of metrics
+            title: Title for the report
+        """
+        print(f"\n{'='*60}")
+        print(f"{title:^60}")
+        print(f"{'='*60}")
+
+        # Overall metrics
+        print("\nOverall Performance:")
+        for key in ["accuracy", "precision", "recall", "f1", "ece"]:
+            if key in metrics:
+                value = metrics[key]
+                if key == "ece":
+                    print(f"  {key.upper()}: {value:.4f}")
+                else:
+                    print(f"  {key.capitalize()}: {value:.1%}")
+
+        # Per-class metrics
+        print("\nPer-Class Accuracy:")
+        for class_id in range(3):
+            key = f"class_{class_id}_accuracy"
+            if key in metrics:
+                class_names = ["Down", "Sideways", "Up"]
+                print(f"  {class_names[class_id]:>8s}: {metrics[key]:.1%}")
+
+        # Anomaly metrics
+        print("\nAnomaly Detection:")
+        if "anomaly_mean" in metrics:
+            print(f"  Mean: {metrics['anomaly_mean']:.4f}")
+            print(f"  Std: {metrics['anomaly_std']:.4f}")
+            print(f"  95th percentile: {metrics['anomaly_q95']:.4f}")
+
+        # Regime metrics
+        regime_keys = [k for k in metrics.keys() if k.startswith("regime_") and k.endswith("_accuracy")]
+        if regime_keys:
+            print("\nRegime-Conditional Accuracy:")
+            for key in sorted(regime_keys):
+                regime_id = key.split("_")[1]
+                count_key = f"regime_{regime_id}_count"
+                count = metrics.get(count_key, 0)
+                print(f"  Regime {regime_id}: {metrics[key]:.1%} (n={count:,})")
+
+            if "regime_accuracy_std" in metrics:
+                print(f"\n  Regime diversity (std): {metrics['regime_accuracy_std']:.4f}")
+
+        print(f"{'='*60}\n")
+
+    @staticmethod
+    def compute_confusion_matrix(
+        predictions: np.ndarray,
+        targets: np.ndarray,
+    ) -> np.ndarray:
+        """Compute confusion matrix.
+
+        Args:
+            predictions: Predicted labels
+            targets: True labels
+
+        Returns:
+            Confusion matrix
+        """
+        return confusion_matrix(targets, predictions)
+
+    @staticmethod
+    def print_confusion_matrix(cm: np.ndarray):
+        """Pretty print confusion matrix.
+
+        Args:
+            cm: Confusion matrix
+        """
+        class_names = ["Down", "Sideways", "Up"]
+
+        print("\nConfusion Matrix:")
+        print("                 Predicted")
+        print("           ", "  ".join(f"{name:>8s}" for name in class_names))
+
+        for i, name in enumerate(class_names):
+            print(f"Actual {name:>8s}:", "  ".join(f"{cm[i, j]:>8d}" for j in range(3)))
+
+        # Compute per-class accuracy from confusion matrix
+        print("\nPer-class accuracy:")
+        for i, name in enumerate(class_names):
+            if cm[i].sum() > 0:
+                acc = cm[i, i] / cm[i].sum()
+                print(f"  {name:>8s}: {acc:.1%}")

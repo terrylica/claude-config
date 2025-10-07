@@ -1,0 +1,483 @@
+"""Temperature scaling calibration for conformal prediction.
+
+Implements post-hoc calibration via temperature scaling to resolve
+model overconfidence and achieve conformal coverage guarantees.
+
+Reference:
+    Guo et al. "On Calibration of Modern Neural Networks" (ICML 2017)
+
+Usage:
+    uv run --active python -m research.ml_ood.calibrate_temperature \
+        --checkpoint research/ml_ood/experiments/run1/final_model.pt \
+        --data output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv \
+        --output research/ml_ood/experiments/run1
+"""
+
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, Tuple
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from scipy.optimize import minimize_scalar
+from torch.utils.data import DataLoader, Subset
+
+from research.ml_ood.data import RangeBarDataset, FixedPointConverter, create_splits
+from research.ml_ood.models import OODRobustRangeBarModel
+from research.ml_ood.training import ConformalCalibrator
+from research.ml_ood.evaluation import OODMetrics
+
+
+class TemperatureScaledModel(nn.Module):
+    """Wrapper that applies temperature scaling to model logits.
+
+    Temperature scaling learns a single scalar parameter T that divides
+    the logits before softmax, reducing overconfidence when T > 1.
+
+    Args:
+        model: Base model to wrap
+        temperature: Temperature parameter (default 1.0 = no scaling)
+    """
+
+    def __init__(self, model: nn.Module, temperature: float = 1.0):
+        super().__init__()
+        self.model = model
+        self.temperature = nn.Parameter(torch.ones(1) * temperature)
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Forward pass with temperature-scaled logits.
+
+        Args:
+            x: Input tensor
+
+        Returns:
+            Dictionary with temperature-scaled direction_logits
+        """
+        outputs = self.model(x)
+
+        # Apply temperature scaling to direction logits
+        outputs['direction_logits'] = outputs['direction_logits'] / self.temperature
+
+        return outputs
+
+    def set_temperature(self, temperature: float):
+        """Set temperature parameter.
+
+        Args:
+            temperature: New temperature value
+
+        Raises:
+            ValueError: If temperature <= 0
+        """
+        if temperature <= 0:
+            raise ValueError(f"Temperature must be positive, got {temperature}")
+
+        self.temperature.data = torch.ones(1) * temperature
+
+
+def find_optimal_temperature(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+) -> Tuple[float, Dict[str, float]]:
+    """Find optimal temperature via NLL minimization on validation set.
+
+    Uses scipy.optimize.minimize_scalar (Brent's method) to find temperature
+    that minimizes negative log-likelihood on validation data.
+
+    Args:
+        model: Model to calibrate
+        val_loader: Validation data loader
+        device: Device to run on
+
+    Returns:
+        Tuple of (optimal_temperature, optimization_metrics)
+
+    Raises:
+        RuntimeError: If optimization fails to converge
+    """
+    print("\n" + "="*60)
+    print("Temperature Optimization")
+    print("="*60)
+
+    # Collect validation logits and targets
+    print("\nCollecting validation predictions...")
+    all_logits = []
+    all_targets = []
+
+    model.eval()
+    with torch.no_grad():
+        for batch in val_loader:
+            sequences = batch["features"].to(device)
+            targets = batch["target"]
+
+            outputs = model(sequences)
+            all_logits.append(outputs["direction_logits"].cpu())
+            all_targets.append(targets)
+
+    logits = torch.cat(all_logits)
+    targets = torch.cat(all_targets)
+
+    print(f"Validation samples: {len(targets):,}")
+
+    # Define ECE objective (for calibration)
+    def ece_objective(temperature: float) -> float:
+        """Expected Calibration Error as function of temperature.
+
+        Minimizing ECE directly optimizes for calibration, which is
+        what we need for conformal prediction coverage.
+
+        Args:
+            temperature: Temperature parameter
+
+        Returns:
+            ECE value
+        """
+        scaled_logits = logits / temperature
+        probs = F.softmax(scaled_logits, dim=1).numpy()
+        ece = OODMetrics.compute_ece(probs, targets.numpy(), n_bins=10)
+        return ece
+
+    # Also compute NLL for reporting
+    def nll_objective(temperature: float) -> float:
+        """Negative log-likelihood as function of temperature."""
+        scaled_logits = logits / temperature
+        log_probs = F.log_softmax(scaled_logits, dim=1)
+        nll = F.nll_loss(log_probs, targets).item()
+        return nll
+
+    # Optimize temperature using Brent's method (scipy)
+    # IMPORTANT: Constrain T >= 1.0 to only allow reducing confidence (not increasing it)
+    # T < 1 would sharpen distributions (increase confidence), worsening the overconfidence problem
+    # OBJECTIVE: Minimize ECE (not NLL) for better calibration
+    print("\nOptimizing temperature parameter...")
+    print("Method: Brent's method (scipy.optimize.minimize_scalar)")
+    print("Objective: Expected Calibration Error (ECE)")
+    print("Search bounds: [1.0, 10.0]  (T>=1 to reduce overconfidence)")
+
+    result = minimize_scalar(
+        ece_objective,
+        bounds=(1.0, 10.0),
+        method='bounded',
+        options={'xatol': 1e-3},
+    )
+
+    if not result.success:
+        raise RuntimeError(f"Temperature optimization failed: {result.message}")
+
+    optimal_temp = result.x
+    optimal_nll = result.fun
+
+    # Compute baseline NLL (T=1)
+    baseline_nll = nll_objective(1.0)
+
+    # Compute ECE before/after
+    def compute_ece_at_temp(temperature: float) -> float:
+        """Compute ECE at given temperature."""
+        scaled_logits = logits / temperature
+        probs = F.softmax(scaled_logits, dim=1).numpy()
+        return OODMetrics.compute_ece(probs, targets.numpy(), n_bins=10)
+
+    baseline_ece = compute_ece_at_temp(1.0)
+    calibrated_ece = compute_ece_at_temp(optimal_temp)
+
+    metrics = {
+        'optimal_temperature': optimal_temp,
+        'optimal_nll': optimal_nll,
+        'baseline_nll': baseline_nll,
+        'nll_improvement': baseline_nll - optimal_nll,
+        'baseline_ece': baseline_ece,
+        'calibrated_ece': calibrated_ece,
+        'ece_improvement': baseline_ece - calibrated_ece,
+        'optimization_iterations': result.nit,
+        'optimization_success': result.success,
+    }
+
+    print(f"\nOptimization Results:")
+    print(f"  Optimal Temperature: {optimal_temp:.4f}")
+    print(f"  Baseline NLL (T=1):  {baseline_nll:.4f}")
+    print(f"  Optimized NLL:       {optimal_nll:.4f}")
+    print(f"  NLL Improvement:     {metrics['nll_improvement']:.4f}")
+    print(f"  Baseline ECE:        {baseline_ece:.4f}")
+    print(f"  Calibrated ECE:      {calibrated_ece:.4f}")
+    print(f"  ECE Improvement:     {metrics['ece_improvement']:.4f}")
+    print(f"  Iterations:          {result.nit}")
+
+    return optimal_temp, metrics
+
+
+def evaluate_temperature_scaling(
+    base_model: nn.Module,
+    temperature: float,
+    calib_loader: DataLoader,
+    test_loader: DataLoader,
+    device: torch.device,
+) -> Dict[str, float]:
+    """Evaluate conformal coverage with temperature scaling.
+
+    Args:
+        base_model: Base model (uncalibrated)
+        temperature: Temperature parameter
+        calib_loader: Calibration loader for conformal quantile
+        test_loader: Test loader for coverage evaluation
+        device: Device to run on
+
+    Returns:
+        Dictionary of evaluation metrics
+
+    Raises:
+        RuntimeError: If coverage gap > 5% tolerance (SLO violation)
+    """
+    print("\n" + "="*60)
+    print(f"Conformal Evaluation (T={temperature:.4f})")
+    print("="*60)
+
+    # Wrap model with temperature scaling
+    scaled_model = TemperatureScaledModel(base_model, temperature=temperature)
+    scaled_model = scaled_model.to(device)
+    scaled_model.eval()
+
+    # Conformal calibration
+    calibrator = ConformalCalibrator(alpha=0.1)
+
+    print(f"\nCalibrating conformal predictor...")
+    print(f"  Calibration samples: {len(calib_loader.dataset):,}")
+    print(f"  Target coverage: 90.0%")
+
+    quantile = calibrator.calibrate(scaled_model, calib_loader, device)
+
+    print(f"  Computed quantile: {quantile:.4f}")
+
+    # Evaluate coverage
+    print(f"\nEvaluating coverage on test set...")
+    print(f"  Test samples: {len(test_loader.dataset):,}")
+
+    coverage_metrics = calibrator.evaluate_coverage(scaled_model, test_loader, device)
+
+    empirical_coverage = coverage_metrics['coverage']
+    target_coverage = 0.9
+    coverage_gap = abs(empirical_coverage - target_coverage)
+
+    print(f"\nResults:")
+    print(f"  Empirical Coverage: {empirical_coverage*100:.1f}%")
+    print(f"  Target Coverage:    {target_coverage*100:.1f}%")
+    print(f"  Coverage Gap:       {coverage_gap*100:.1f}%")
+    print(f"  Avg Set Size:       {coverage_metrics['avg_set_size']:.2f}")
+    print(f"  Median Set Size:    {coverage_metrics['median_set_size']:.1f}")
+
+    # SLO validation
+    if coverage_gap > 0.05:
+        raise RuntimeError(
+            f"SLO violation: coverage gap {coverage_gap*100:.1f}% > 5% tolerance "
+            f"even after temperature scaling (T={temperature:.4f})"
+        )
+
+    print(f"\n✓ SLO: coverage gap {coverage_gap*100:.1f}% < 5% tolerance")
+
+    # Add temperature to metrics
+    coverage_metrics['temperature'] = temperature
+    coverage_metrics['coverage_gap_pct'] = coverage_gap * 100
+
+    return coverage_metrics
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Temperature scaling calibration for conformal prediction"
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        required=True,
+        help="Path to model checkpoint",
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        default="output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv",
+        help="Path to range bar CSV",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output directory for calibrated model and results",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=256,
+        help="Batch size",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Device (auto/cpu/cuda/mps)",
+    )
+    parser.add_argument(
+        "--val-split",
+        type=float,
+        default=0.3,
+        help="Fraction of test data to use for temperature optimization",
+    )
+
+    args = parser.parse_args()
+
+    # Device selection
+    if args.device == "auto":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+
+    print(f"Using device: {device}")
+
+    # Load checkpoint
+    print(f"\nLoading checkpoint: {args.checkpoint}")
+    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+
+    if 'model_state_dict' not in checkpoint:
+        raise RuntimeError("Checkpoint missing 'model_state_dict' key")
+
+    if 'train_stats' not in checkpoint:
+        raise RuntimeError("Checkpoint missing 'train_stats' key")
+
+    # Load model
+    print("Loading model...")
+    base_model = OODRobustRangeBarModel()
+    base_model.load_state_dict(checkpoint['model_state_dict'])
+    base_model = base_model.to(device)
+    base_model.eval()
+
+    print(f"Model parameters: {sum(p.numel() for p in base_model.parameters()):,}")
+
+    # Load data
+    print(f"\nLoading data: {args.data}")
+    df = FixedPointConverter.load_csv(Path(args.data))
+    df = FixedPointConverter.compute_features(df)
+
+    train_df, val_df, test_df = create_splits(df)
+
+    print(f"Data splits:")
+    print(f"  Train: {len(train_df)} bars")
+    print(f"  Val:   {len(val_df)} bars")
+    print(f"  Test:  {len(test_df)} bars")
+
+    # Create dataset
+    print("\nCreating dataset...")
+    full_dataset = RangeBarDataset(
+        csv_path=Path(args.data),
+        sequence_len=64,
+        detect_regimes=True,
+    )
+
+    # Apply training normalization
+    full_dataset.normalize_features(checkpoint['train_stats'])
+
+    # Split test set into: val (for temp optimization), calib (for conformal), test (for evaluation)
+    # Use last N samples as "test set" from original data
+    # Split this into: val (30%), calib (35%), test (35%)
+
+    total_test_size = len(full_dataset)
+    val_size = int(total_test_size * args.val_split)
+    calib_size = int(total_test_size * 0.35)
+    test_size = total_test_size - val_size - calib_size
+
+    # Create indices
+    all_indices = list(range(total_test_size))
+    val_indices = all_indices[:val_size]
+    calib_indices = all_indices[val_size:val_size + calib_size]
+    test_indices = all_indices[val_size + calib_size:]
+
+    print(f"\nData splits for calibration:")
+    print(f"  Temperature optimization: {len(val_indices):,} samples")
+    print(f"  Conformal calibration:    {len(calib_indices):,} samples")
+    print(f"  Coverage evaluation:      {len(test_indices):,} samples")
+
+    # Create data loaders
+    val_dataset = Subset(full_dataset, val_indices)
+    calib_dataset = Subset(full_dataset, calib_indices)
+    test_dataset = Subset(full_dataset, test_indices)
+
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    calib_loader = DataLoader(calib_dataset, batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+
+    # Step 1: Find optimal temperature
+    optimal_temp, temp_metrics = find_optimal_temperature(
+        base_model,
+        val_loader,
+        device,
+    )
+
+    # Step 2: Evaluate conformal coverage with temperature scaling
+    coverage_metrics = evaluate_temperature_scaling(
+        base_model,
+        optimal_temp,
+        calib_loader,
+        test_loader,
+        device,
+    )
+
+    # Combine metrics
+    all_results = {
+        'temperature_optimization': temp_metrics,
+        'conformal_coverage': coverage_metrics,
+    }
+
+    # Save results
+    if args.output:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save temperature-scaled model
+        calibrated_checkpoint = {
+            'model_state_dict': base_model.state_dict(),
+            'train_stats': checkpoint['train_stats'],
+            'config': checkpoint.get('config', {}),
+            'temperature': optimal_temp,
+            'calibration_metrics': all_results,
+        }
+
+        model_file = output_dir / "final_model_calibrated.pt"
+        torch.save(calibrated_checkpoint, model_file)
+        print(f"\n✓ Saved calibrated model: {model_file}")
+
+        # Save metrics
+        results_file = output_dir / "temperature_calibration_results.json"
+        with open(results_file, 'w') as f:
+            # Convert numpy/torch types to python types
+            def convert(obj):
+                if hasattr(obj, 'item'):
+                    return obj.item()
+                elif isinstance(obj, dict):
+                    return {k: convert(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert(v) for v in obj]
+                return obj
+
+            json.dump(convert(all_results), f, indent=2)
+
+        print(f"✓ Saved calibration results: {results_file}")
+
+    # Summary
+    print("\n" + "="*60)
+    print("TEMPERATURE CALIBRATION COMPLETE")
+    print("="*60)
+    print(f"\nOptimal Temperature: {optimal_temp:.4f}")
+    print(f"ECE Improvement:     {temp_metrics['baseline_ece']:.4f} → {temp_metrics['calibrated_ece']:.4f}")
+    print(f"Conformal Coverage:  {coverage_metrics['coverage']*100:.1f}%")
+    print(f"Coverage Gap:        {coverage_metrics['coverage_gap_pct']:.1f}%")
+    print(f"\n✓ All SLOs met")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,728 @@
+---
+# OOD-Robust ML Pipeline - Implementation Plan
+# Branch: research/ood-robustness-2025
+# Status: Post-hoc calibration failed, retraining with label smoothing required
+# Last Updated: 2025-10-05
+
+metadata:
+  version: "0.4.0"
+  branch: "research/ood-robustness-2025"
+  base_commit: "13e9437"
+  last_updated: "2025-10-05"
+  data_source: "output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv"
+  data_records: 175454
+  data_trades_processed: 424479155
+  data_period: "2022-01-01 to 2025-09-30"
+  data_generation_date: "2025-10-04"
+  data_generation_method: "rangebar-export (memory-efficient build)"
+  changelog:
+    - version: "0.4.0"
+      date: "2025-10-05"
+      changes: "Post-hoc calibration failed (temperature + Platt scaling) - retraining required"
+    - version: "0.3.0"
+      date: "2025-10-05"
+      changes: "Temperature scaling calibration attempted and failed"
+    - version: "0.2.0"
+      date: "2025-10-04"
+      changes: "Completed training and evaluation - documented conformal coverage SLO violation"
+    - version: "0.1.0"
+      date: "2025-10-04"
+      changes: "Initial plan with validation results"
+
+# Service Level Objectives (SLOs)
+slos:
+  availability:
+    training_pipeline:
+      target: "Pipeline executes without crashes"
+      metric: "Training completes or fails with explicit error"
+      validation: "No silent failures, all exceptions propagated"
+
+    data_loading:
+      target: "CSV parsing succeeds or raises ValueError"
+      metric: "Dataset creation returns valid PyTorch Dataset or raises exception"
+      validation: "Schema validation enforced, no default fallbacks"
+
+  correctness:
+    data_integrity:
+      target: "Fixed-point conversion accuracy ±1e-9"
+      metric: "assert (converted_value * 1e9).round() == original_int"
+      validation: "Validate on known test cases from existing rangebar data"
+
+    temporal_ordering:
+      target: "Sequences maintain chronological order"
+      metric: "assert df['open_time'].is_sorted()"
+      validation: "Raise error if temporal ordering violated"
+
+    regime_detection:
+      target: "All samples assigned valid regime labels"
+      metric: "No NaN regime labels after detection"
+      validation: "assert not df['volatility_regime'].is_null().any()"
+
+    model_output:
+      target: "Predictions match expected shapes and ranges"
+      metric: |
+        assert direction_logits.shape == (batch, 3)
+        assert reconstructed.shape == (batch, n_features)
+      validation: "Shape assertions in forward pass"
+
+  observability:
+    training_logging:
+      target: "TensorBoard logs every batch"
+      metric: "Loss curves visible in TensorBoard"
+      validation: "Verify logs/ directory populated"
+
+    checkpoint_tracking:
+      target: "Checkpoints saved every 5 epochs with metadata"
+      metric: "Checkpoint files contain model_state_dict + train_stats"
+      validation: "torch.load(checkpoint) contains required keys"
+
+    evaluation_metrics:
+      target: "All metrics computed and logged"
+      metric: "Metrics dict contains accuracy, ece, regime_accuracy_std"
+      validation: "OODMetrics.compute_all_metrics returns complete dict"
+
+  maintainability:
+    dependency_management:
+      target: "All dependencies declared in pyproject.toml"
+      metric: "uv sync installs all required packages"
+      validation: "No missing imports during runtime"
+
+    code_organization:
+      target: "Imports resolve without sys.path manipulation"
+      metric: "from research.ml_ood.data import RangeBarDataset works"
+      validation: "Package structure follows Python standards"
+
+    error_messages:
+      target: "Exceptions provide actionable context"
+      metric: "Error messages include variable values and expected ranges"
+      validation: "Custom exceptions with descriptive messages"
+
+# Implementation Status
+status:
+  completed:
+    - id: "infra-001"
+      task: "Create research branch"
+      commit: "initial"
+      date: "2025-10-04"
+      validation: "git branch shows research/ood-robustness-2025"
+
+    - id: "infra-002"
+      task: "Implement data pipeline"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/data/dataset.py"
+        - "research/ml_ood/data/regime.py"
+        - "research/ml_ood/data/utils.py"
+      validation: "Files committed to branch"
+
+    - id: "infra-003"
+      task: "Implement transformer encoder"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/models/encoder.py"
+        - "research/ml_ood/models/heads.py"
+        - "research/ml_ood/models/ood_model.py"
+      validation: "Model classes defined with forward() methods"
+
+    - id: "infra-004"
+      task: "Implement training infrastructure"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/training/sampler.py"
+        - "research/ml_ood/training/conformal.py"
+      validation: "Sampler and calibrator classes implemented"
+
+    - id: "infra-005"
+      task: "Implement evaluation suite"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/evaluation/stress_test.py"
+        - "research/ml_ood/evaluation/metrics.py"
+      validation: "Stress testing and metrics classes implemented"
+
+    - id: "infra-006"
+      task: "Create documentation"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/README.md"
+        - "research/ml_ood/ARCHITECTURE.md"
+      validation: "Documentation committed"
+
+  completed:
+    - id: "infra-001"
+      task: "Create research branch"
+      commit: "initial"
+      date: "2025-10-04"
+      validation: "git branch shows research/ood-robustness-2025"
+
+    - id: "infra-002"
+      task: "Implement data pipeline"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/data/dataset.py"
+        - "research/ml_ood/data/regime.py"
+        - "research/ml_ood/data/utils.py"
+      validation: "Files committed to branch"
+
+    - id: "infra-003"
+      task: "Implement transformer encoder"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/models/encoder.py"
+        - "research/ml_ood/models/heads.py"
+        - "research/ml_ood/models/ood_model.py"
+      validation: "Model classes defined with forward() methods"
+
+    - id: "infra-004"
+      task: "Implement training infrastructure"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/training/sampler.py"
+        - "research/ml_ood/training/conformal.py"
+      validation: "Sampler and calibrator classes implemented"
+
+    - id: "infra-005"
+      task: "Implement evaluation suite"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/evaluation/stress_test.py"
+        - "research/ml_ood/evaluation/metrics.py"
+      validation: "Stress testing and metrics classes implemented"
+
+    - id: "infra-006"
+      task: "Create documentation"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/README.md"
+        - "research/ml_ood/ARCHITECTURE.md"
+      validation: "Documentation committed"
+
+    - id: "validate-001"
+      task: "Install dependencies and verify imports"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - All 38 dependencies installed, imports resolve correctly"
+      validation_method: |
+        uv pip install torch numpy polars pyarrow scikit-learn scipy tqdm tensorboard matplotlib seaborn einops
+        python -c "from research.ml_ood.data import RangeBarDataset; print('OK')"
+        python -c "from research.ml_ood.models import OODRobustRangeBarModel; print('OK')"
+      details: "See STATUS.yaml validate-001_dependencies, validate-002_imports"
+
+    - id: "validate-002-synthetic"
+      task: "Test data loading with synthetic rangebar data"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - Dataset loads, 25 valid samples from 50 bars"
+      synthetic_data: "test_data/synthetic_rangebar_test.csv (50 bars)"
+      parameters_tested:
+        sequence_len: 5
+        regime_lookback: 10
+      validation_method: |
+        Dataset created successfully
+        Sample shape: (5, 14) features
+        Target labels: {0, 1, 2} (down/sideways/up)
+        Regime labels: [0-4] volatility quintiles
+      details: "See STATUS.yaml validate-003_data_loading"
+      note: "Production data (175K bars) blocked - see blocker-001"
+
+    - id: "validate-003"
+      task: "Test model instantiation"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - Model: 3,720,113 parameters"
+      validation_method: "Model instantiates, num_parameters > 0"
+      details: "See STATUS.yaml validate-004_model_forward"
+
+    - id: "validate-004"
+      task: "Test forward pass with synthetic batch"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - Shapes correct, loss computation working"
+      results:
+        input_shape: "(8, 5, 14)"
+        direction_logits_shape: "(8, 3)"
+        reconstructed_shape: "(8, 14)"
+        combined_loss: 1.6204
+        direction_loss: 1.1086
+        anomaly_loss: 1.0236
+      details: "See STATUS.yaml validate-004_model_forward"
+
+    - id: "validate-005"
+      task: "Test training loop with synthetic data"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - 3 batches, loss decreasing"
+      results:
+        batch_1_loss: 1.2933
+        batch_2_loss: 0.8706
+        batch_3_loss: 0.7550
+        gradient_flow: "working"
+        optimizer: "working"
+      details: "See STATUS.yaml validate-005_training_loop"
+
+  completed_blockers:
+    - id: "blocker-001-resolution"
+      task: "Resolve production data availability"
+      completed: "2025-10-04"
+      resolution: "Generated locally with memory-efficient rangebar-export"
+      outcome: |
+        File: output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv
+        Records: 175,454 bars
+        Trades: 424,479,155
+        Schema: ✓ Validated
+      details: "See STATUS.yaml blocker-001 (severity: resolved)"
+
+    - id: "blocker-002-resolution"
+      task: "Fix rangebar-export library dependency"
+      completed: "2025-10-04"
+      resolution: "Rebuilt with cargo (system OpenSSL)"
+      outcome: "Binary executes successfully"
+      details: "See STATUS.yaml blocker-002 (severity: resolved)"
+
+  completed_training:
+    - id: "train-001"
+      task: "Run full training (50 epochs) on production SOLUSDT data"
+      completed: "2025-10-04"
+      duration: "3h 1m"
+      data_source: "output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv"
+      data_records: 175454
+      sequence_count:
+        train: 153587
+        test: 21867
+        total: 175454
+      training_config:
+        epochs: 50
+        batch_size: 256
+        device: "cuda"
+        sequence_len: 64
+        embedding_dim: 128
+        optimizer: "AdamW (lr=1e-4, weight_decay=0.01)"
+        regime_stratified_sampling: true
+      results:
+        final_loss: 0.800
+        final_direction_loss: 0.790
+        final_anomaly_loss: 0.020
+        model_parameters: 3720113
+        checkpoints_saved: 11
+        tensorboard_logs: "research/ml_ood/experiments/run1/logs/events.out.tfevents.1759620606.kab.3240782.0"
+      output_files:
+        final_model: "research/ml_ood/experiments/run1/final_model.pt (15MB)"
+        checkpoints: "research/ml_ood/experiments/run1/checkpoint_epoch*.pt (43MB each)"
+        logs: "research/ml_ood/experiments/run1/logs/"
+      slo_compliance:
+        availability_training_pipeline: "✓ Completed 50 epochs without crashes"
+        correctness_data_integrity: "✓ Fixed-point conversion with string→float cast for turnovers"
+        correctness_temporal_ordering: "✓ Data loaded chronologically, temporal assertion passed"
+        observability_training_logging: "✓ TensorBoard logs created"
+        observability_checkpoint_tracking: "✓ Checkpoints saved every 5 epochs"
+        maintainability_dependency_management: "✓ All imports resolved after path fixes"
+      issues_resolved:
+        - "Import errors: Fixed relative→absolute imports (research.ml_ood.*)"
+        - "Training package: Removed non-existent trainer.py from __init__.py"
+        - "Schema parsing: Added schema_overrides for turnover columns (exceed i64 range)"
+        - "Turnover casting: String→Float64 conversion before division by 1e9"
+      validation_status: "✓ Checkpoint structure validated (model_state_dict + train_stats + config)"
+
+  completed_evaluation:
+    - id: "eval-001"
+      task: "Evaluate trained model on test set"
+      completed: "2025-10-04"
+      status: "✓ PASSED"
+      results:
+        accuracy: 0.5973
+        precision: 0.5973
+        recall: 0.5973
+        f1: 0.5973
+        ece: 0.0464
+        regime_accuracy_mean: 0.5973
+        regime_accuracy_std: 0.0733
+        anomaly_mean: 0.007045
+        anomaly_std: 0.039251
+      slo_compliance:
+        accuracy_gt_baseline: "✓ 0.5973 > 0.33"
+        ece_lt_threshold: "✓ 0.0464 < 0.15"
+        regime_stability: "✓ std=0.0733 (low variance)"
+      validation: "All test set SLOs met"
+      details: "research/ml_ood/experiments/run1/EVALUATION_RESULTS.md"
+
+    - id: "eval-002"
+      task: "Conformal calibration and coverage testing"
+      completed: "2025-10-04"
+      status: "✗ FAILED (SLO Violation)"
+      results:
+        target_coverage: 0.900
+        empirical_coverage: 0.578
+        coverage_gap: 0.322
+        quantile_threshold: 0.5639
+        avg_set_size: 1.00
+        median_set_size: 1.0
+        calibration_samples: 87671
+        test_samples: 87671
+      slo_violation:
+        metric: "coverage_gap"
+        value: 0.322
+        threshold: 0.05
+        severity: "critical"
+        description: "Coverage gap 32.2% >> 5% tolerance"
+      root_cause: "Model overconfidence (prediction sets always size 1)"
+      analysis: |
+        Model exhibits extreme overconfidence, producing prediction sets of size 1.
+        This prevents conformal prediction from providing coverage guarantees.
+        Despite low ECE (0.0464), probability distributions are overly peaked.
+      remediation_required:
+        - "Temperature scaling (T>1) to reduce overconfidence"
+        - "Platt scaling or isotonic regression"
+        - "Label smoothing in training"
+        - "Ensemble methods for uncertainty"
+      blocking_issues:
+        - "Cannot deploy without conformal coverage guarantees"
+        - "Uncertainty estimates unreliable"
+      details: "research/ml_ood/experiments/run1/EVALUATION_RESULTS.md"
+
+    - id: "eval-003"
+      task: "Stress testing on Terra/Luna crash and FTX collapse"
+      completed: "2025-10-04"
+      status: "✗ SKIPPED (blocked by eval-002 failure)"
+      reason: "Error propagation policy: eval-002 SLO violation blocks subsequent evaluations"
+      test_periods:
+        terra_luna_crash: "2022-05-07 to 2022-05-12"
+        ftx_collapse: "2022-11-06 to 2022-11-11"
+      details: "Not executed per raise-and-propagate policy"
+
+  failed_calibration:
+    - id: "calibrate-001"
+      task: "Temperature scaling for conformal calibration"
+      attempted: "2025-10-05"
+      status: "✗ FAILED (Temperature scaling insufficient)"
+      duration: "2 hours"
+      approach: |
+        Post-hoc temperature scaling (Guo et al. ICML 2017)
+        Optimization: Minimize ECE on validation set
+        Bounds: T ∈ [1.0, 10.0] (reduce overconfidence only)
+      results:
+        optimal_temperature: 1.0006
+        baseline_ece: 0.0442
+        calibrated_ece: 0.0443
+        ece_improvement: -0.0001
+        empirical_coverage: 0.573
+        coverage_gap: 0.327
+        iterations: 20
+      root_cause: |
+        ECE optimization found T≈1 (no change) because:
+        1. Baseline ECE already very low (0.0442)
+        2. ECE measures binned calibration, not tail uncertainty
+        3. Model overconfidence not addressable via single-parameter T scaling
+        4. Conformal coverage failure is fundamentally different from ECE miscalibration
+      analysis: |
+        Temperature scaling requires uniform miscalibration (single T parameter).
+        This model exhibits complex overconfidence pattern (prediction sets always size 1).
+        ECE-based calibration cannot fix tail uncertainty required for conformal prediction.
+      blocking_issue: "Temperature scaling cannot resolve conformal coverage SLO violation"
+      details: "research/ml_ood/experiments/run1/TEMPERATURE_CALIBRATION_FAILURE.md"
+      script: "research/ml_ood/calibrate_temperature.py"
+      log: "/tmp/temperature_calibration_fixed.log"
+
+    - id: "calibrate-002"
+      task: "Platt scaling for conformal calibration"
+      attempted: "2025-10-05"
+      status: "✗ FAILED (Platt scaling insufficient)"
+      duration: "1.5 hours"
+      approach: |
+        Per-class logistic regression (Platt 1999)
+        Method: sklearn.linear_model.LogisticRegression (one-vs-rest)
+        Fit: P(y=c|x) = σ(A_c · logit_c + B_c)
+        Stratified splitting to handle class imbalance
+      results:
+        class_0_A: 3.2357
+        class_0_B: -1.2558
+        class_0_samples: 26201
+        class_1_A: 1.0000
+        class_1_B: 0.0000
+        class_1_samples: 0
+        class_2_A: 3.3981
+        class_2_B: -1.3206
+        class_2_samples: 26401
+        baseline_ece: 0.0462
+        calibrated_ece: 0.0345
+        ece_improvement: 0.0117
+        empirical_coverage: 0.600
+        coverage_gap: 0.300
+        avg_set_size: 1.00
+      class_imbalance_finding: |
+        Class 1 ("sideways") has 0 samples in entire dataset.
+        Model trained for 3-class output but data only contains classes 0 and 2.
+        Used identity scaling (A=1, B=0) for class 1.
+      root_cause: |
+        Platt scaling improved ECE (0.0462 → 0.0345, 25% reduction) but coverage improved minimally (57% → 60%).
+        Prediction sets still size 1.00 (always single class).
+        Post-hoc methods have limited expressiveness - model's learned features produce extreme logits.
+        Even with per-class parameters (A, B), cannot reduce overconfidence enough for conformal prediction.
+      analysis: |
+        Platt scaling: 6 parameters (2 per class) vs temperature scaling: 1 parameter.
+        Better ECE but marginal conformal coverage improvement (57.3% → 60.0%).
+        Root issue: Model's learned representations inherently overconfident.
+        Post-hoc calibration (temperature/Platt) transforms logits but cannot change features.
+        Training-time regularization required to prevent extreme logits.
+      blocking_issue: "Post-hoc calibration methods cannot resolve severe model overconfidence"
+      details: "research/ml_ood/experiments/run1/PLATT_CALIBRATION_FAILURE.md"
+      script: "research/ml_ood/calibrate_platt.py"
+      log: "/tmp/platt_calibration.log"
+
+  completed_training_rerun:
+    - id: "train-002"
+      task: "Retrain with label smoothing (α=0.3)"
+      completed: "2025-10-05"
+      duration: "4h 9m"
+      training_start: "2025-10-05 16:55"
+      training_end: "2025-10-05 21:04"
+      data_source: "output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv"
+      data_records: 175454
+      sequence_count:
+        train: 153587
+        test: 21867
+        total: 175454
+      training_config:
+        epochs: 50
+        batch_size: 256
+        device: "cuda"
+        sequence_len: 64
+        embedding_dim: 128
+        label_smoothing: 0.3
+        optimizer: "AdamW (lr=1e-4, weight_decay=0.01)"
+        regime_stratified_sampling: true
+      results:
+        final_loss: 0.9435
+        final_epoch: 50
+        model_parameters: 3720113
+        checkpoints_saved: 11
+      output_files:
+        final_model: "research/ml_ood/experiments/run2_label_smoothing_0.3/final_model.pt (15MB)"
+        checkpoints: "research/ml_ood/experiments/run2_label_smoothing_0.3/checkpoint_epoch*.pt (43MB each)"
+        logs: "research/ml_ood/experiments/run2_label_smoothing_0.3/logs/"
+      status: "awaiting_evaluation"
+      rationale: |
+        Temperature scaling (1 parameter) failed: T=1.0006, coverage 57.3%
+        Platt scaling (6 parameters) failed: coverage 60.0%
+        Post-hoc methods cannot fix extreme logits in learned features.
+        Training-time regularization required to address root cause.
+        Label smoothing α=0.3 (3x standard) to aggressively reduce overconfidence.
+
+  failed_evaluation_run2:
+    - id: "eval-004"
+      task: "Evaluate run2 model (label_smoothing=0.3)"
+      completed: "2025-10-05"
+      status: "✗ FAILED (SLO Violation)"
+      results:
+        accuracy: 0.5872
+        precision: 0.5876
+        recall: 0.5872
+        f1: 0.5865
+        ece: 0.0885
+        regime_accuracy_mean: 0.5871
+        regime_accuracy_std: 0.0625
+        anomaly_mean: 0.006001
+        anomaly_std: 0.038552
+        target_coverage: 0.900
+        empirical_coverage: 0.569
+        coverage_gap: 0.331
+        avg_set_size: 1.00
+        median_set_size: 1.0
+      slo_violation:
+        metric: "coverage_gap"
+        value: 0.331
+        threshold: 0.05
+        severity: "critical"
+        description: "Coverage gap 33.1% >> 5% tolerance"
+      comparison_run1_vs_run2:
+        accuracy: "0.5973 → 0.5872 (-1.7%)"
+        ece: "0.0464 → 0.0885 (+90.7%, worse)"
+        coverage: "57.8% → 56.9% (-0.9%)"
+        coverage_gap: "32.2% → 33.1% (+0.9%, worse)"
+      root_cause: |
+        Label smoothing α=0.3 degraded calibration instead of improving it.
+        ECE increased from 0.0464 to 0.0885 (90% worse).
+        Coverage marginally worse (57.8% → 56.9%).
+        Prediction sets remain size 1.00 (extreme overconfidence persists).
+      analysis: |
+        Label smoothing penalizes correct predictions uniformly.
+        For balanced datasets, this can harm calibration on easy examples.
+        Dataset has 0 samples for class 1 (sideways) - binary classification in practice.
+        Model already has low ECE (0.0464), uniform smoothing not appropriate.
+        Need method targeting hard/uncertain examples specifically.
+      blocking_issue: "Label smoothing approach failed - focal loss required"
+      details: "/tmp/eval_run2.log"
+
+  pending:
+    - id: "train-003"
+      task: "Focal loss retraining (γ=2.0)"
+      priority: "critical"
+      depends_on: ["eval-004"]
+      status: "required_for_production"
+      description: |
+        Retrain with focal loss: L = -(1-p_t)^γ log(p_t)
+        γ=2.0: Down-weight easy examples, focus on hard examples
+        Prevents overconfidence on clear patterns
+        Improves calibration on uncertain boundaries
+
+        Implementation: Modify CrossEntropyLoss with focal term
+        Full 50-epoch retraining required (≈4 hours)
+        Target: ECE < 0.10, conformal coverage gap < 5%
+      estimated_effort: "5-9 hours (4h training + 1-2h validation + 0-3h debugging)"
+      rationale: |
+        Label smoothing failed (ECE 0.0464 → 0.0885, coverage 57.8% → 56.9%)
+        Focal loss specifically targets overconfident predictions
+        Proven effective for imbalanced datasets (Lin et al. ICCV 2017)
+        No uniform penalty on correct predictions
+      implementation_notes: |
+        class FocalLoss(nn.Module):
+            def __init__(self, alpha=1.0, gamma=2.0):
+                super().__init__()
+                self.alpha = alpha
+                self.gamma = gamma
+
+            def forward(self, inputs, targets):
+                ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+                p_t = torch.exp(-ce_loss)
+                focal_loss = self.alpha * (1 - p_t) ** self.gamma * ce_loss
+                return focal_loss.mean()
+
+        Replace: criterion = nn.CrossEntropyLoss(label_smoothing=0.3)
+        With: criterion = FocalLoss(alpha=1.0, gamma=2.0)
+
+    - id: "train-004"
+      task: "Ensemble methods (if train-003 fails)"
+      priority: "critical"
+      depends_on: ["train-003"]
+      status: "conditional"
+      description: |
+        Train 5 models with different seeds (seed ∈ {42, 43, 44, 45, 46})
+        Ensemble prediction: p_ensemble = (1/5) Σ p_i
+        Prediction variance as uncertainty: σ²(x) = Var[p_1(x), ..., p_5(x)]
+        Thresholding: Include class c if p_c + k·σ_c > quantile
+      estimated_effort: "20-30 hours (5 models × 4h each + 2h integration)"
+
+    - id: "doc-001"
+      task: "Document experimental results"
+      priority: "medium"
+      depends_on: ["eval-001"]
+      status: "partial"
+      output_file: "research/ml_ood/experiments/run1/EVALUATION_RESULTS.md"
+      validation: "✓ Created with eval-001/002 results"
+
+    - id: "optimize-001"
+      task: "Model distillation (optional production optimization)"
+      priority: "low"
+      blockers: ["train-002"]
+      description: |
+        Distill 128-dim encoder to 32-dim student model
+        Target: 10x faster inference, <5% accuracy loss
+        Method: Knowledge distillation from teacher logits
+      status: "deferred"
+      rationale: "Optimization not in initial SLOs"
+
+# Dependency Graph
+dependencies:
+  validate-001: []
+  validate-002: ["validate-001"]
+  validate-003: ["validate-001"]
+  validate-004: ["validate-003"]
+  train-001: ["validate-002", "validate-004"]
+  train-002: ["train-001"]
+  eval-001: ["train-002"]
+  eval-002: ["train-002"]
+  eval-003: ["train-002"]
+  doc-001: ["eval-001", "eval-002", "eval-003"]
+  optimize-001: ["train-002"]
+
+# Error Handling Policy
+error_handling:
+  principle: "Fail fast, propagate errors, no silent defaults"
+
+  rules:
+    - "No try/except without re-raise"
+    - "No default fallback values (use required arguments)"
+    - "No silent data imputation (raise on missing data)"
+    - "Validation errors include context (expected vs actual)"
+    - "Use assert for invariants (with descriptive messages)"
+
+  examples:
+    data_validation: |
+      # CORRECT
+      if not df["open_time"].is_sorted():
+          raise ValueError(
+              f"Temporal ordering violated: "
+              f"first={df['open_time'][0]}, last={df['open_time'][-1]}"
+          )
+
+      # INCORRECT
+      if not df["open_time"].is_sorted():
+          df = df.sort("open_time")  # Silent fix
+
+    shape_validation: |
+      # CORRECT
+      assert logits.shape == (batch_size, n_classes), \
+          f"Expected shape ({batch_size}, {n_classes}), got {logits.shape}"
+
+      # INCORRECT
+      if logits.shape[1] != n_classes:
+          logits = logits[:, :n_classes]  # Silent truncation
+
+    missing_data: |
+      # CORRECT
+      if csv_path is None:
+          raise ValueError("csv_path is required")
+
+      # INCORRECT
+      csv_path = csv_path or "default.csv"
+
+# Next Actions (Priority Order)
+next_actions:
+  - id: "validate-001"
+    command: "cd research/ml_ood && uv sync"
+    expected: "Dependencies install successfully"
+
+  - id: "validate-002"
+    command: |
+      python -c "
+      from pathlib import Path
+      from research.ml_ood.data import RangeBarDataset
+      dataset = RangeBarDataset(
+          csv_path=Path('output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv'),
+          sequence_len=64,
+      )
+      print(f'Dataset: {len(dataset):,} samples')
+      "
+    expected: "Dataset loads successfully"
+
+  - id: "validate-004"
+    command: |
+      python -c "
+      import torch
+      from research.ml_ood.models import OODRobustRangeBarModel
+      model = OODRobustRangeBarModel(n_features=14)
+      batch = torch.randn(8, 64, 14)
+      outputs = model(batch)
+      print(f'Logits: {outputs[\"direction_logits\"].shape}')
+      print(f'Reconstructed: {outputs[\"reconstructed\"].shape}')
+      "
+    expected: "Forward pass succeeds"
+
+  - id: "train-001"
+    command: |
+      python -m research.ml_ood.train \
+        --data output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv \
+        --epochs 1 \
+        --batch-size 256 \
+        --output-dir research/ml_ood/experiments/dryrun
+    expected: "1 epoch completes, checkpoint saved"
+
+# References (for context, not promotional)
+references:
+  architecture: "research/ml_ood/ARCHITECTURE.md"
+  usage: "research/ml_ood/README.md"
+  code:
+    data_pipeline: "research/ml_ood/data/"
+    models: "research/ml_ood/models/"
+    training: "research/ml_ood/training/"
+    evaluation: "research/ml_ood/evaluation/"
+
+  related_commits:
+    - commit: "13e9437"
+      message: "feat: OOD-robust ML pipeline with transformer auto-features"
+      files: 20
+      lines: 3670

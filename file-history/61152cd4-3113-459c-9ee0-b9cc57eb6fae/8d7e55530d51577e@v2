@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""
+Aggregate tick data to 1-minute bars for a single month.
+
+Usage:
+    python scripts/aggregate_month.py 2023 10
+    python scripts/aggregate_month.py 2025 6
+    python scripts/aggregate_month.py 2024 12 --data-dir data/
+"""
+
+import sys
+from pathlib import Path
+import argparse
+import pandas as pd
+import numpy as np
+
+
+def aggregate_month_to_1min(tick_file: Path, output_file: Path) -> dict:
+    """
+    Aggregate tick data to comprehensive 1-minute bars.
+
+    Schema (Full OHLC + Irreversible Metrics):
+      ✅ open, high, low, close - Traditional OHLC
+      ✅ vwap         - Volume-weighted average (can't reconstruct from OHLC)
+      ✅ volume       - Total traded size
+      ✅ buy_volume   - Buy-side volume (order flow, IRREVERSIBLE)
+      ✅ sell_volume  - Sell-side volume (order flow, IRREVERSIBLE)
+      ✅ trades       - Number of fills (IRREVERSIBLE)
+      ✅ largest_trade - Max single trade size (whale detection, IRREVERSIBLE)
+    """
+    print(f"Loading tick data: {tick_file.name}")
+    df = pd.read_parquet(tick_file)
+    print(f"  Trades: {len(df):,}")
+    print(f"  Symbols: {df['symbol'].nunique()}")
+
+    # Ensure timestamp is datetime with UTC
+    df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+
+    # Floor to 1-minute boundaries
+    df['minute'] = df['timestamp'].dt.floor('1min')
+
+    # Calculate VWAP components
+    df['weighted_price'] = df['price'] * df['size']
+
+    # Separate buy/sell volumes (IRREVERSIBLE INFORMATION)
+    df['buy_size'] = np.where(df['side'] == 'buy', df['size'], 0)
+    df['sell_size'] = np.where(df['side'] == 'sell', df['size'], 0)
+
+    print("Aggregating to 1-min bars...")
+
+    # Aggregate by (symbol, minute) - Full OHLC + additional metrics
+    grouped = df.groupby(['symbol', 'minute'])
+
+    bars = grouped.agg({
+        'price': ['first', 'max', 'min', 'last'],  # OHLC
+        'size': ['sum', 'max'],                     # Total volume + largest trade
+        'buy_size': 'sum',                          # Buy volume
+        'sell_size': 'sum',                         # Sell volume
+        'weighted_price': 'sum',                    # For VWAP
+        'timestamp': 'count'                        # Trade count
+    }).reset_index()
+
+    # Flatten multi-level columns
+    bars.columns = ['symbol', 'timestamp', 'open', 'high', 'low', 'close',
+                    'volume', 'largest_trade', 'buy_volume', 'sell_volume',
+                    'weighted_price_sum', 'trades']
+
+    # Calculate VWAP
+    bars['vwap'] = bars['weighted_price_sum'] / bars['volume']
+
+    # Final schema (OHLC + comprehensive metrics)
+    bars = bars[[
+        'timestamp', 'symbol', 'open', 'high', 'low', 'close', 'vwap',
+        'volume', 'buy_volume', 'sell_volume', 'trades', 'largest_trade'
+    ]]
+
+    # Data type optimization
+    bars = bars.astype({
+        'open': 'float32',
+        'high': 'float32',
+        'low': 'float32',
+        'close': 'float32',
+        'vwap': 'float32',
+        'volume': 'float32',
+        'buy_volume': 'float32',
+        'sell_volume': 'float32',
+        'trades': 'uint16',
+        'largest_trade': 'float32'
+    })
+
+    # Save with maximum compression
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    bars.to_parquet(
+        output_file,
+        compression='zstd',
+        compression_level=9,  # Max compression
+        index=False
+    )
+
+    # Report
+    input_size_mb = tick_file.stat().st_size / 1024 / 1024
+    output_size_mb = output_file.stat().st_size / 1024 / 1024
+    compression_ratio = input_size_mb / output_size_mb
+
+    print(f"\nResults:")
+    print(f"  Input: {input_size_mb:.0f} MB ({len(df):,} trades)")
+    print(f"  Output: {output_size_mb:.0f} MB ({len(bars):,} bars)")
+    print(f"  Compression: {compression_ratio:.1f}x reduction")
+
+    return {
+        'file': output_file,
+        'bars': len(bars),
+        'size_mb': output_size_mb,
+        'compression_ratio': compression_ratio
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Aggregate tick data to 1-min bars for a single month'
+    )
+    parser.add_argument('year', type=int, help='Year (e.g., 2023)')
+    parser.add_argument('month', type=int, help='Month (1-12)')
+    parser.add_argument('--data-dir', type=Path, default=Path('data'),
+                       help='Base data directory (default: data/)')
+
+    args = parser.parse_args()
+
+    # Validate
+    if args.month < 1 or args.month > 12:
+        print(f"ERROR: Month must be 1-12, got {args.month}")
+        return 1
+
+    print("="*80)
+    print(f"Aggregating to 1-Min Bars: {args.year}-{args.month:02d}")
+    print("="*80)
+
+    # Input file
+    tick_file = args.data_dir / "raw_ticks" / str(args.year) / f"{args.month:02d}.parquet"
+
+    if not tick_file.exists():
+        print(f"\n❌ ERROR: Tick data not found: {tick_file}")
+        print(f"\nDownload first:")
+        print(f"  python scripts/download_month.py {args.year} {args.month} --ticks")
+        return 1
+
+    # Output file
+    output_file = args.data_dir / "1min_bars" / str(args.year) / f"{args.month:02d}.parquet"
+
+    if output_file.exists():
+        print(f"\n⚠️  Output already exists: {output_file}")
+        print("Overwrite? [y/N]: ", end='', flush=True)
+
+        # Auto-confirm if running non-interactively
+        if not sys.stdin.isatty():
+            print("y (auto-confirmed)")
+            proceed = True
+        else:
+            proceed = input().strip().lower() == 'y'
+
+        if not proceed:
+            print("\nCancelled.")
+            return 0
+
+    # Aggregate
+    result = aggregate_month_to_1min(tick_file, output_file)
+
+    print("\n" + "="*80)
+    print("✅ AGGREGATION COMPLETE")
+    print("="*80)
+    print(f"\nSaved to: {output_file}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

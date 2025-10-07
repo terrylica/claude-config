@@ -1,0 +1,60 @@
+#!/bin/bash
+# Download SPOT tick data for 33 months (2023-01 to 2025-09)
+# Optimal concurrency: c=13 (116.3 MB/s peak throughput)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$PROJECT_ROOT/data"
+PYTHON="$(cd "$PROJECT_ROOT/.." && pwd)/.venv/bin/python"
+
+echo "=============================================================================="
+echo "SPOT Tick Data Download: 2023-01 to 2025-09 (33 months)"
+echo "=============================================================================="
+echo "Concurrency: 13 parallel downloads (optimal)"
+echo "Target directory: $DATA_DIR/raw_ticks/"
+echo ""
+
+# Generate month list
+MONTHS=(
+  "2023 1" "2023 2" "2023 3" "2023 4" "2023 5" "2023 6"
+  "2023 7" "2023 8" "2023 9" "2023 10" "2023 11" "2023 12"
+  "2024 1" "2024 2" "2024 3" "2024 4" "2024 5" "2024 6"
+  "2024 7" "2024 8" "2024 9" "2024 10" "2024 11" "2024 12"
+  "2025 1" "2025 2" "2025 3" "2025 4" "2025 5" "2025 6"
+  "2025 7" "2025 8" "2025 9"
+)
+
+START_TIME=$(date +%s)
+
+# Create download function
+download_month() {
+  local year=$1
+  local month=$2
+  echo "[$(date '+%H:%M:%S')] Starting SPOT download: $year-$(printf '%02d' $month)"
+  $PYTHON "$PROJECT_ROOT/scripts/download_month.py" "$year" "$month" --ticks --market-type spot --data-dir "$DATA_DIR" 2>&1 | grep -E "(✓|ERROR|Downloading|Saved)"
+  echo "[$(date '+%H:%M:%S')] Completed SPOT download: $year-$(printf '%02d' $month)"
+}
+
+export -f download_month
+export DATA_DIR
+export PYTHON
+export PROJECT_ROOT
+
+# Run downloads in parallel with c=13
+printf '%s\n' "${MONTHS[@]}" | xargs -n 2 -P 13 bash -c 'download_month "$@"' _
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+MINUTES=$((DURATION / 60))
+SECONDS=$((DURATION % 60))
+
+echo ""
+echo "=============================================================================="
+echo "✅ SPOT DOWNLOAD COMPLETE"
+echo "=============================================================================="
+echo "Duration: ${MINUTES}m ${SECONDS}s"
+echo "Storage usage:"
+du -sh "$DATA_DIR/raw_ticks/" 2>/dev/null || echo "Directory not yet created"
+echo ""

@@ -1,0 +1,378 @@
+"""
+OKX Tick Data Provider with on-demand resampling.
+
+This module provides a price provider that works with tick-level data stored
+in Parquet format. It supports:
+- Loading tick data from Parquet (efficient filtering with predicate pushdown)
+- On-demand resampling to any frequency (1m, 5m, 1h, 4h, 8h, etc.)
+- OHLC candles with VWAP computation
+- Multiple symbol support
+
+Key features:
+- Zero aggregation at storage time
+- Flexible resampling at query time
+- Fast filtering via Parquet predicate pushdown
+- Forward-fill for missing price data
+"""
+
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Literal
+
+import pandas as pd
+import numpy as np
+
+from .utils import normalize_symbol, validate_date_range
+
+logger = logging.getLogger(__name__)
+
+# Type hints for aggregation methods
+AggMethod = Literal["ohlc", "vwap", "mean", "median", "last"]
+
+
+class TickPriceProvider:
+    """
+    Price provider that resamples tick data on-demand.
+
+    This provider loads tick-level data from Parquet and resamples it to
+    any desired frequency when queried.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> provider = TickPriceProvider(
+        ...     tick_data_dir=Path("data/okx_ticks"),
+        ...     symbols=["BTC-USDT", "ETH-USDT"]
+        ... )
+        >>>
+        >>> # Get 1-hour candles for October 2023
+        >>> candles = provider.get_candles(
+        ...     symbols=["BTC-USDT"],
+        ...     start_date="2023-10-01",
+        ...     end_date="2023-10-31",
+        ...     freq="1h"
+        ... )
+        >>>
+        >>> # Get VWAP prices (single price per interval)
+        >>> prices = provider.get_prices(
+        ...     symbols=["BTC-USDT", "ETH-USDT"],
+        ...     start_date="2023-10-01",
+        ...     end_date="2023-10-31",
+        ...     freq="8h",
+        ...     method="vwap"
+        ... )
+    """
+
+    def __init__(
+        self,
+        tick_data_dir: Path,
+        symbols: Optional[List[str]] = None,
+        market_type: str = "spot",
+    ):
+        """
+        Initialize tick price provider.
+
+        Args:
+            tick_data_dir: Directory containing Parquet tick data files (YYYYMM.parquet)
+            symbols: Optional list of symbols to preload (improves query performance)
+            market_type: "spot" or "swap"
+        """
+        self.tick_data_dir = Path(tick_data_dir)
+        self.symbols = symbols or []
+        self.market_type = market_type
+
+        # Normalize symbols
+        self.symbols = [normalize_symbol(s, market_type) for s in self.symbols]
+
+        if not self.tick_data_dir.exists():
+            raise FileNotFoundError(f"Tick data directory not found: {self.tick_data_dir}")
+
+        logger.info(f"Initialized TickPriceProvider with {len(self.symbols)} symbols")
+
+    def load_tick_data(
+        self,
+        symbols: List[str],
+        start_date: str,
+        end_date: str,
+    ) -> pd.DataFrame:
+        """
+        Load tick data from Parquet for specified date range.
+
+        This method:
+        1. Determines which month files to load (e.g., 202310.parquet, 202311.parquet)
+        2. Loads tick data with Parquet predicate pushdown for efficient filtering
+        3. Filters by symbol and date range
+        4. Returns sorted tick data
+
+        Args:
+            symbols: List of symbols (will be normalized)
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+
+        Returns:
+            DataFrame with columns: timestamp, symbol, price, size, side, trade_value
+
+        Raises:
+            ValueError: If no data found for date range
+        """
+        # Normalize symbols
+        symbols = [normalize_symbol(s, self.market_type) for s in symbols]
+
+        # Validate date range
+        start_ts, end_ts = validate_date_range(start_date, end_date)
+
+        # Extend end_ts to include entire day (23:59:59.999999)
+        end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+
+        # Determine which month files to load
+        month_files = self._get_month_files(start_ts, end_ts)
+
+        if not month_files:
+            raise ValueError(f"No tick data files found for {start_date} to {end_date}")
+
+        logger.info(f"Loading tick data from {len(month_files)} month(s) for {len(symbols)} symbol(s)")
+
+        # Load tick data from all month files
+        chunks = []
+        for month_file in month_files:
+            try:
+                # Use Parquet filters for efficient loading
+                df = pd.read_parquet(
+                    month_file,
+                    filters=[
+                        ("symbol", "in", symbols),
+                        ("timestamp", ">=", start_ts),
+                        ("timestamp", "<=", end_ts),
+                    ],
+                )
+
+                if not df.empty:
+                    chunks.append(df)
+                    logger.debug(f"Loaded {len(df):,} trades from {month_file.name}")
+
+            except Exception as e:
+                logger.warning(f"Failed to load {month_file}: {e}")
+                continue
+
+        if not chunks:
+            raise ValueError(f"No tick data found for symbols {symbols} in range {start_date} to {end_date}")
+
+        # Combine and sort
+        combined = pd.concat(chunks, ignore_index=True)
+        combined = combined.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+        logger.info(
+            f"Loaded {len(combined):,} trades for {combined['symbol'].nunique()} symbol(s) "
+            f"from {combined['timestamp'].min()} to {combined['timestamp'].max()}"
+        )
+
+        return combined
+
+    def get_candles(
+        self,
+        symbols: List[str],
+        start_date: str,
+        end_date: str,
+        freq: str = "1h",
+    ) -> pd.DataFrame:
+        """
+        Get OHLC candles by resampling tick data.
+
+        Args:
+            symbols: List of symbols
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            freq: Resampling frequency (pandas offset alias: "1min", "5min", "1h", "4h", "8h", etc.)
+
+        Returns:
+            DataFrame with multi-index (timestamp, symbol) and columns:
+            - open: First price in interval
+            - high: Highest price in interval
+            - low: Lowest price in interval
+            - close: Last price in interval
+            - volume: Total size traded
+            - trade_value: Total trade value (for VWAP computation)
+            - vwap: Volume-weighted average price
+        """
+        # Load tick data (returns normalized symbols)
+        ticks = self.load_tick_data(symbols, start_date, end_date)
+
+        # Normalize symbols for filtering
+        normalized_symbols = [normalize_symbol(s, self.market_type) for s in symbols]
+
+        # Resample per symbol
+        candles_list = []
+
+        for symbol in normalized_symbols:
+            symbol_ticks = ticks[ticks["symbol"] == symbol].copy()
+
+            if symbol_ticks.empty:
+                logger.warning(f"No tick data for {symbol} in range {start_date} to {end_date}")
+                continue
+
+            # Set timestamp as index for resampling
+            symbol_ticks = symbol_ticks.set_index("timestamp")
+
+            # Resample to OHLC
+            candles = symbol_ticks.resample(freq).agg({
+                "price": ["first", "max", "min", "last"],
+                "size": "sum",
+                "trade_value": "sum",
+            })
+
+            # Flatten column names
+            candles.columns = ["open", "high", "low", "close", "volume", "trade_value"]
+
+            # Drop rows with no trades
+            candles = candles.dropna(subset=["open"])
+
+            # Compute VWAP
+            candles["vwap"] = np.where(
+                candles["volume"] > 0,
+                candles["trade_value"] / candles["volume"],
+                candles["close"]  # Fallback to close if no volume
+            )
+
+            # Add symbol column
+            candles["symbol"] = symbol
+
+            candles_list.append(candles)
+
+        if not candles_list:
+            raise ValueError(f"No candles generated for symbols {symbols}")
+
+        # Combine all symbols
+        combined = pd.concat(candles_list)
+
+        # Create multi-index
+        combined = combined.reset_index().set_index(["timestamp", "symbol"])
+
+        logger.info(
+            f"Generated {len(combined):,} candles at {freq} frequency for {len(symbols)} symbol(s)"
+        )
+
+        return combined
+
+    def get_prices(
+        self,
+        symbols: List[str],
+        start_date: str,
+        end_date: str,
+        freq: str = "8h",
+        method: AggMethod = "vwap",
+    ) -> pd.DataFrame:
+        """
+        Get single price per interval (simplified candles).
+
+        This is useful for backtesting where you just need one price per period.
+
+        Args:
+            symbols: List of symbols
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            freq: Resampling frequency
+            method: Aggregation method:
+                - "vwap": Volume-weighted average price (default, most accurate)
+                - "ohlc": Returns open/high/low/close (same as get_candles)
+                - "mean": Simple mean of all tick prices
+                - "median": Median of all tick prices
+                - "last": Last tick price in interval
+
+        Returns:
+            DataFrame with columns: timestamp, symbol, price
+            (If method="ohlc", returns open/high/low/close/vwap columns)
+        """
+        if method == "ohlc":
+            # Return full candles
+            return self.get_candles(symbols, start_date, end_date, freq)
+
+        # Load tick data (returns normalized symbols)
+        ticks = self.load_tick_data(symbols, start_date, end_date)
+
+        # Normalize symbols for filtering
+        normalized_symbols = [normalize_symbol(s, self.market_type) for s in symbols]
+
+        # Resample per symbol
+        prices_list = []
+
+        for symbol in normalized_symbols:
+            symbol_ticks = ticks[ticks["symbol"] == symbol].copy()
+
+            if symbol_ticks.empty:
+                logger.warning(f"No tick data for {symbol} in range {start_date} to {end_date}")
+                continue
+
+            symbol_ticks = symbol_ticks.set_index("timestamp")
+
+            # Aggregate based on method
+            if method == "vwap":
+                prices = symbol_ticks.resample(freq).apply(
+                    lambda g: g["trade_value"].sum() / g["size"].sum() if g["size"].sum() > 0 else np.nan
+                )
+                prices = prices.to_frame(name="price")
+
+            elif method == "mean":
+                prices = symbol_ticks.resample(freq)["price"].mean().to_frame(name="price")
+
+            elif method == "median":
+                prices = symbol_ticks.resample(freq)["price"].median().to_frame(name="price")
+
+            elif method == "last":
+                prices = symbol_ticks.resample(freq)["price"].last().to_frame(name="price")
+
+            else:
+                raise ValueError(f"Unknown aggregation method: {method}")
+
+            # Drop NaN rows
+            prices = prices.dropna()
+
+            # Add symbol column
+            prices["symbol"] = symbol
+
+            prices_list.append(prices)
+
+        if not prices_list:
+            raise ValueError(f"No prices generated for symbols {symbols}")
+
+        # Combine all symbols
+        combined = pd.concat(prices_list)
+        combined = combined.reset_index()
+
+        logger.info(
+            f"Generated {len(combined):,} prices at {freq} frequency using {method} method"
+        )
+
+        return combined
+
+    def _get_month_files(self, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> List[Path]:
+        """
+        Get list of month Parquet files covering the date range.
+
+        Args:
+            start_ts: Start timestamp
+            end_ts: End timestamp
+
+        Returns:
+            List of Path objects for month files (e.g., 202310.parquet)
+        """
+        month_files = []
+
+        # Generate month strings (YYYYMM)
+        current = pd.Timestamp(year=start_ts.year, month=start_ts.month, day=1)
+        end_month = pd.Timestamp(year=end_ts.year, month=end_ts.month, day=1)
+
+        while current <= end_month:
+            month_str = f"{current.year:04d}{current.month:02d}"
+            month_file = self.tick_data_dir / f"{month_str}.parquet"
+
+            if month_file.exists():
+                month_files.append(month_file)
+            else:
+                logger.warning(f"Month file not found: {month_file}")
+
+            # Advance to next month
+            if current.month == 12:
+                current = pd.Timestamp(year=current.year + 1, month=1, day=1)
+            else:
+                current = pd.Timestamp(year=current.year, month=current.month + 1, day=1)
+
+        return month_files

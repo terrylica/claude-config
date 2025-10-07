@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# Canonical Backtest Runner for v1.10.1
+#
+# Usage: ./workflows/backtest/run_v1_10_1.sh <start-date> <end-date> [capital]
+#
+# Example: ./workflows/backtest/run_v1_10_1.sh 2024-01-01 2024-03-31 10000
+#
+
+set -euo pipefail
+
+START_DATE="${1:-}"
+END_DATE="${2:-}"
+CAPITAL="${3:-10000}"
+
+if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
+    echo "Usage: $0 <start-date> <end-date> [capital]"
+    echo "Example: $0 2024-01-01 2024-03-31 10000"
+    exit 1
+fi
+
+# Determine run directory name
+RUN_NAME=$(echo "$START_DATE" | cut -d'-' -f1)_Q$(( ($(echo "$START_DATE" | cut -d'-' -f2) - 1) / 3 + 1 ))
+RUN_DIR="results/v1.10.1/runs/$RUN_NAME"
+
+mkdir -p "$RUN_DIR"
+
+echo "Running v1.10.1 backtest:"
+echo "  Period: $START_DATE to $END_DATE"
+echo "  Capital: \$$CAPITAL"
+echo "  Output: $RUN_DIR"
+echo
+
+# Run backtest
+uv run --active python src/backtests/v1_10_1_real_perp_temporal.py \
+    --start "$START_DATE" \
+    --end "$END_DATE" \
+    --capital "$CAPITAL" \
+    | tee "$RUN_DIR/backtest.log"
+
+# Move results to canonical location
+START_COMPACT=$(echo "$START_DATE" | tr -d '-')
+END_COMPACT=$(echo "$END_DATE" | tr -d '-')
+
+mv "results/v1.10-modular-${START_COMPACT}-${END_COMPACT}.parquet" \
+   "$RUN_DIR/backtest_${START_COMPACT}_${END_COMPACT}.parquet"
+
+mv "results/v1.10-modular-${START_COMPACT}-${END_COMPACT}.csv" \
+   "$RUN_DIR/backtest_${START_COMPACT}_${END_COMPACT}.csv"
+
+echo
+echo "✓ Results saved to $RUN_DIR/"
+ls -lh "$RUN_DIR/"

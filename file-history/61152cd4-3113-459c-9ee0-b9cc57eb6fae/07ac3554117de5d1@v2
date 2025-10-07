@@ -1,0 +1,436 @@
+# Audit: Corrected Backtester Implementation
+
+**Date:** September 30, 2025
+**Auditor:** Terry Li
+**File:** `funding_arb_strat_corrected.py`
+**Status:** ⚠️ **SUBTLE LOOK-AHEAD BIAS DETECTED**
+
+---
+
+## 🎯 Executive Summary
+
+Our corrected backtester implements all of Victor's strategy rules correctly, BUT contains a **subtle remaining look-ahead bias** in the rebalancing decision logic.
+
+**Issue:** The advantage calculation uses **T rates** to decide whether to rebalance, when it should use **T-1 rates**.
+
+**Impact:** Moderate — rebalancing decisions have perfect foresight of T returns.
+
+**Fix Required:** YES — Move advantage calculation to use T-1 rates.
+
+---
+
+## ✅ Victor's Rules Implementation Checklist
+
+| Rule | Config | Implementation | Status |
+|------|--------|----------------|--------|
+| **1. Universe** | Top-5 by \|fundingRate\| | Line 209: `capped_topk_weights_minmax(rates_prev, k=5)` | ✅ CORRECT |
+| **2. Weights** | Min 5%, Max 50%, Sum 100% | Lines 111-132: Min/max caps + normalization | ✅ CORRECT |
+| **3. Allocator** | Deterministic single-pass | Lines 98-133: Deterministic algorithm | ✅ CORRECT |
+| **4. Cadence** | 8h default, daily optional | Lines 175-178: Resampling logic | ✅ CORRECT |
+| **5. Min-hold** | ≥24h after change | Lines 217-220: Elapsed time check | ✅ CORRECT |
+| **6. Hurdle** | ≥3 bps advantage | Line 228: `advantage_bps >= HURDLE_BPS` | ⚠️ **BIAS** |
+| **7. Value-vs-cost** | Edge ≥ fees | Lines 229-232: Turnover fee comparison | ⚠️ **BIAS** |
+| **8. No-trade bands** | ±5% tolerance | Lines 148-165, 233: Band application | ✅ CORRECT |
+| **9. Fees** | VIP-7, 60% maker | Lines 82-95: Blended fee calculation | ✅ CORRECT |
+| **10. Returns** | Gross × fee_factor | Lines 247-249: Return application | ✅ CORRECT |
+
+**Summary:** 8/10 fully correct, 2/10 have subtle look-ahead bias in advantage calculation.
+
+---
+
+## 🐛 The Subtle Look-Ahead Bias
+
+### Location: Lines 212-232
+
+```python
+# Get PREVIOUS rates (T-1) for selection
+t_prev = times[i-2]
+g_prev = snap[snap["funding_time"] == t_prev]
+rates_prev = g_prev.set_index("symbol")["fundingRate"]
+
+# Get CURRENT rates (T) for returns
+g_curr = snap[snap["funding_time"] == t]
+rates_curr = g_curr.set_index("symbol")["fundingRate"]
+
+# Select portfolio using T-1 rates (CORRECT)
+target = capped_topk_weights_minmax(rates_prev, k=TOP_K, max_w=MAX_W, min_w=MIN_W)
+
+# ⚠️ PROBLEM: Calculate advantages using CURRENT rates (T)
+gross_current = portfolio_gross_factor(prev_w, rates_curr)  # ← Uses T rates!
+gross_target  = portfolio_gross_factor(target, rates_curr)  # ← Uses T rates!
+
+# Min-hold check
+can_change = True
+if last_change_time is not None:
+    elapsed = (t - last_change_time).total_seconds() / 3600.0
+    can_change = elapsed >= MIN_HOLD_HOURS
+
+# ⚠️ PROBLEM: Advantage calculated with T rates (look-ahead)
+advantage_bps = (gross_target - gross_current) * 1e4
+
+# Rebalancing decision uses look-ahead advantage
+if can_change and advantage_bps >= HURDLE_BPS:
+    turnover_full = l1_half_turnover(target, prev_w)
+    fee_factor_full = fee_factor_for_turnover(turnover_full)
+    fee_drag_bps_full = (1.0 - fee_factor_full) * 1e4
+    # ⚠️ PROBLEM: Comparing T-based advantage to fees (look-ahead)
+    if advantage_bps >= fee_drag_bps_full:
+        clipped = apply_no_trade_bands(target, prev_w, BAND)
+        ...
+```
+
+### Why This is Wrong
+
+**Timeline at 08:00 UTC:**
+```
+00:00-08:00: Period accrues → Rate settles at 08:00 = X
+08:00: Decision point
+  - Settlement happens NOW
+  - Rate X is announced NOW
+  - BUT: We need to decide BEFORE knowing X
+  - We should use T-1 rate to estimate advantage
+```
+
+**Current Logic (Wrong):**
+```python
+# At 08:00, after settlement
+rates_curr = rates_at_08:00  # Rate for 00:00-08:00 period (just announced)
+
+# Evaluate advantage using this rate
+advantage = gross_factor(target, rates_curr) - gross_factor(prev_w, rates_curr)
+
+# Decide to rebalance based on THIS RATE
+if advantage >= hurdle:
+    rebalance()  # ← Decision uses perfect knowledge of T
+```
+
+**Corrected Logic (Right):**
+```python
+# At 08:00, BEFORE knowing settled rate
+rates_prev = rates_at_00:00  # Last known rate (from T-1)
+
+# Estimate advantage using T-1 rates
+advantage_est = gross_factor(target, rates_prev) - gross_factor(prev_w, rates_prev)
+
+# Decide to rebalance based on ESTIMATE
+if advantage_est >= hurdle:
+    rebalance()  # ← Decision uses only T-1 knowledge
+
+# THEN apply actual returns using T rates
+rates_curr = rates_at_08:00
+pnl = gross_factor(new_portfolio, rates_curr)
+```
+
+---
+
+## 📊 Impact Analysis
+
+### What Gets Leaked
+
+**Rebalancing decisions have perfect foresight:**
+1. Know exact T rates before deciding to rebalance
+2. Only rebalance when T rates favor the target portfolio
+3. Avoid rebalancing when T rates don't justify it
+
+**Example Scenario:**
+
+```
+Time: 08:00 UTC
+T-1 rate (00:00): BTC = 0.0001, ETH = 0.0002
+T rate (08:00):   BTC = 0.0003, ETH = 0.0001
+
+Current portfolio: 100% ETH
+Target portfolio: 100% BTC (selected using T-1)
+
+❌ Current logic:
+- Calculates advantage using T rates
+- BTC advantage = 0.0003, ETH current = 0.0001
+- Advantage = 20 bps → Rebalances to BTC ✓ (correct decision!)
+
+✅ Correct logic:
+- Calculates advantage using T-1 rates
+- BTC advantage = 0.0001, ETH current = 0.0002
+- Advantage = -10 bps → Does NOT rebalance (might miss opportunity)
+
+Actual outcome:
+- Rebalancing to BTC earned 0.0003 (30 bps)
+- Staying in ETH earned 0.0001 (10 bps)
+- Current logic: Made optimal decision (look-ahead)
+- Correct logic: Avoided rebalance (conservative, realistic)
+```
+
+### Quantifying the Bias
+
+**This bias is LESS severe than Victor's original because:**
+- Portfolio selection uses T-1 (correct)
+- Only the rebalancing gate uses T rates
+
+**However, it's still wrong because:**
+- Rebalancing decisions get perfect foresight
+- Strategy over-trades when T rates justify it
+- Real trading would use T-1 estimates, be more conservative
+
+**Expected impact:**
+- Backtest APY: Inflated by ~2-5 pp
+- Trading frequency: Higher than realistic
+- Risk-adjusted returns: Overstated (knows when to trade)
+
+---
+
+## 🔧 The Fix
+
+### Corrected Rebalancing Logic
+
+**Before (Look-ahead bias):**
+```python
+# Select using T-1 (CORRECT)
+target = capped_topk_weights_minmax(rates_prev, ...)
+
+# ❌ Evaluate using T rates (WRONG)
+gross_current = portfolio_gross_factor(prev_w, rates_curr)
+gross_target = portfolio_gross_factor(target, rates_curr)
+advantage_bps = (gross_target - gross_current) * 1e4
+
+# Decide based on T advantage
+if advantage_bps >= HURDLE_BPS:
+    rebalance()
+```
+
+**After (No bias):**
+```python
+# Select using T-1 (CORRECT)
+target = capped_topk_weights_minmax(rates_prev, ...)
+
+# ✅ Evaluate using T-1 rates (CORRECT)
+gross_current = portfolio_gross_factor(prev_w, rates_prev)
+gross_target = portfolio_gross_factor(target, rates_prev)
+advantage_bps = (gross_target - gross_current) * 1e4
+
+# Decide based on T-1 advantage (realistic estimate)
+if advantage_bps >= HURDLE_BPS:
+    # Additional check: value-vs-cost using estimated advantage
+    turnover_full = l1_half_turnover(target, prev_w)
+    fee_factor_full = fee_factor_for_turnover(turnover_full)
+    fee_drag_bps_full = (1.0 - fee_factor_full) * 1e4
+
+    if advantage_bps >= fee_drag_bps_full:
+        clipped = apply_no_trade_bands(target, prev_w, BAND)
+        turnover = l1_half_turnover(clipped, prev_w)
+        fee_factor = fee_factor_for_turnover(turnover)
+        new_w = clipped
+        executed = True
+    else:
+        new_w = prev_w
+        executed = False
+else:
+    new_w = prev_w
+    executed = False
+
+# THEN apply actual returns using T rates (what actually happened)
+gross = portfolio_gross_factor(new_w, rates_curr)
+net = gross * fee_factor
+equity *= net
+```
+
+---
+
+## 📝 Code Changes Required
+
+### File: `funding_arb_strat_corrected.py`
+
+**Lines 212-214 (Change):**
+```python
+# OLD (uses T rates for advantage):
+gross_current = portfolio_gross_factor(prev_w, rates_curr)
+gross_target  = portfolio_gross_factor(target, rates_curr)
+
+# NEW (uses T-1 rates for advantage):
+gross_current = portfolio_gross_factor(prev_w, rates_prev)
+gross_target  = portfolio_gross_factor(target, rates_prev)
+```
+
+**That's it!** Just change which rates are used for advantage calculation.
+
+**Lines 246-249 (Keep as is):**
+```python
+# Apply returns using CURRENT rates (what actually happened)
+gross = portfolio_gross_factor(new_w, rates_curr)  # ← Still use T rates here!
+net = gross * fee_factor
+equity *= net
+```
+
+This is CORRECT — we use T rates for actual returns, just not for decisions.
+
+---
+
+## 🧪 Testing Strategy
+
+### Before vs After Comparison
+
+Run both versions on same dataset and compare:
+
+**Metrics to track:**
+1. **APY** — expect 2-5 pp lower with fix
+2. **Number of rebalances** — expect fewer trades
+3. **Average turnover** — expect lower
+4. **Sharpe ratio** — may improve (less overtrading)
+
+**Expected results:**
+```
+Version              APY      Sharpe    Trades    Avg Turnover
+------------------------------------------------------------------
+Current (bias)       70.25%   17.11     ?         ?
+Fixed (no bias)      65-68%   16-18     Lower     Lower
+Victor original      75.61%   19.45     ?         ?
+```
+
+### Validation Tests
+
+1. **Manual spot check:**
+   - Pick a random timestamp
+   - Verify advantage uses T-1 rates
+   - Verify returns use T rates
+
+2. **Temporal integrity test:**
+   - At each decision point, log available data
+   - Confirm no T data used in decisions
+   - Confirm T data only used for returns
+
+3. **Comparison to Victor's version:**
+   - Should be closer to Victor's results (but still lower due to T-1 selection)
+   - Difference should be 5-10 pp, not 0 pp
+
+---
+
+## ✅ Other Components (Already Correct)
+
+### Portfolio Selection (Lines 209-210) ✅
+```python
+target = capped_topk_weights_minmax(rates_prev, k=TOP_K, max_w=MAX_W, min_w=MIN_W)
+```
+**Status:** CORRECT — Uses T-1 rates
+
+### Return Application (Lines 246-249) ✅
+```python
+gross = portfolio_gross_factor(new_w, rates_curr)
+net = gross * fee_factor
+equity *= net
+```
+**Status:** CORRECT — Uses T rates for actual returns
+
+### Min-Hold Check (Lines 217-220) ✅
+```python
+can_change = True
+if last_change_time is not None:
+    elapsed = (t - last_change_time).total_seconds() / 3600.0
+    can_change = elapsed >= MIN_HOLD_HOURS
+```
+**Status:** CORRECT — No temporal issues
+
+### No-Trade Bands (Line 233) ✅
+```python
+clipped = apply_no_trade_bands(target, prev_w, BAND)
+```
+**Status:** CORRECT — Applied after decision
+
+### Fee Calculations (Lines 229-232) ✅
+```python
+turnover_full = l1_half_turnover(target, prev_w)
+fee_factor_full = fee_factor_for_turnover(turnover_full)
+fee_drag_bps_full = (1.0 - fee_factor_full) * 1e4
+```
+**Status:** CORRECT — Turnover calculation doesn't leak future data
+
+---
+
+## 🎯 Recommendations
+
+### Immediate Fix (Critical)
+
+**Change lines 212-214 to use T-1 rates for advantage:**
+```python
+gross_current = portfolio_gross_factor(prev_w, rates_prev)
+gross_target  = portfolio_gross_factor(target, rates_prev)
+```
+
+### Testing Plan
+
+1. **Run fixed version** on same dataset
+2. **Compare results** to current version
+3. **Validate** temporal correctness
+4. **Document** performance delta
+
+### Expected Outcomes
+
+**APY:** 65-68% (down from 70.25%)
+- Current: 70.25% (has rebalancing look-ahead)
+- Fixed: 65-68% (no look-ahead at all)
+- Victor: 75.61% (has selection + rebalancing look-ahead)
+
+**Trading characteristics:**
+- Fewer rebalances (more conservative)
+- Lower turnover (less perfect timing)
+- Possibly better risk-adjusted returns (less overtrading)
+
+### Documentation Updates
+
+After fix:
+1. Update `EXECUTIVE_SUMMARY_FOR_VICTOR.md` with new results
+2. Document the additional bias found and fixed
+3. Provide side-by-side comparison of all three versions
+
+---
+
+## 📊 Summary
+
+### Current Status
+
+**Corrected Backtester (`funding_arb_strat_corrected.py`):**
+- ✅ Implements all 10 of Victor's strategy rules
+- ✅ Uses T-1 rates for portfolio selection (major fix)
+- ⚠️ Uses T rates for rebalancing decision (subtle bias)
+- ✅ Uses T rates for return application (correct)
+
+**Bias Severity:**
+- **Victor's original:** High (selection + rebalancing look-ahead)
+- **Our current version:** Low (only rebalancing look-ahead)
+- **Fully fixed version:** None (need to fix advantage calculation)
+
+### Required Actions
+
+1. **Fix lines 212-214** — change to use `rates_prev`
+2. **Re-run backtest** on same dataset
+3. **Compare results** — expect 2-5 pp APY reduction
+4. **Validate correctness** — manual spot checks
+5. **Update documentation** — new performance figures
+
+### Final Status After Fix
+
+**All Victor's rules:** ✅ Implemented correctly
+**Temporal correctness:** ✅ No look-ahead bias
+**Performance claims:** ⚠️ Need re-validation with fix
+**Ready for deployment:** ✅ After fix and re-test
+
+---
+
+## 💡 Key Insight
+
+**The danger of subtle bias:**
+
+Even after fixing the obvious look-ahead bias (using T rates for selection), we had a subtle remaining bias (using T rates for rebalancing decisions).
+
+**This shows why careful audits are critical:**
+- First pass: Fixed selection (major bias)
+- Second pass: Found rebalancing (subtle bias)
+- Third pass: Validated all other components (clean)
+
+**Lesson:** Always ask "At decision time T, do we know this data?"
+- T-1 rates? ✅ Yes (settled yesterday)
+- T rates? ❌ No (settling right now)
+- Use T-1 for ALL decisions, T only for returns
+
+---
+
+**Status:** ⚠️ One more fix needed, then fully clean.
+
+**Recommendation:** Apply fix, re-test, then present final results to Victor.

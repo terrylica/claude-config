@@ -1,0 +1,208 @@
+"""Transformer-based feature encoder with positional embeddings."""
+
+import math
+from typing import Optional
+
+import torch
+import torch.nn as nn
+
+
+class PositionalEncoding(nn.Module):
+    """Learnable positional encoding for temporal sequences.
+
+    Unlike fixed sinusoidal encodings, this learns position-dependent
+    patterns specific to range bar sequences.
+    """
+
+    def __init__(self, d_model: int, max_len: int = 5000, dropout: float = 0.1):
+        """Initialize positional encoding.
+
+        Args:
+            d_model: Embedding dimension
+            max_len: Maximum sequence length
+            dropout: Dropout probability
+        """
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Learnable positional embeddings
+        self.pos_embedding = nn.Parameter(torch.randn(1, max_len, d_model))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Add positional encoding to input.
+
+        Args:
+            x: (batch, seq_len, d_model) tensor
+
+        Returns:
+            Position-encoded tensor
+        """
+        seq_len = x.size(1)
+        x = x + self.pos_embedding[:, :seq_len, :]
+        return self.dropout(x)
+
+
+class TransformerFeatureEncoder(nn.Module):
+    """Transformer encoder for automatic feature learning from range bars.
+
+    Architecture:
+        1. Input projection: n_features → d_model
+        2. Positional encoding (learnable)
+        3. Multi-layer transformer encoder
+        4. Output projection: d_model → embedding_dim
+
+    OOD Robustness Features:
+        - Layer normalization (handles distribution shifts)
+        - Dropout for uncertainty estimation
+        - Attention over relative patterns (not absolute price levels)
+    """
+
+    def __init__(
+        self,
+        n_features: int = 14,
+        d_model: int = 256,
+        n_heads: int = 8,
+        n_layers: int = 4,
+        dim_feedforward: int = 1024,
+        dropout: float = 0.1,
+        embedding_dim: int = 128,
+        max_seq_len: int = 512,
+    ):
+        """Initialize transformer encoder.
+
+        Args:
+            n_features: Number of input features per bar
+            d_model: Transformer hidden dimension
+            n_heads: Number of attention heads
+            n_layers: Number of transformer layers
+            dim_feedforward: Dimension of feedforward network
+            dropout: Dropout probability
+            embedding_dim: Final embedding dimension
+            max_seq_len: Maximum sequence length
+        """
+        super().__init__()
+
+        self.n_features = n_features
+        self.d_model = d_model
+        self.embedding_dim = embedding_dim
+
+        # Input projection
+        self.input_projection = nn.Linear(n_features, d_model)
+
+        # Positional encoding
+        self.pos_encoder = PositionalEncoding(
+            d_model=d_model,
+            max_len=max_seq_len,
+            dropout=dropout,
+        )
+
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,  # (batch, seq, feature) format
+            norm_first=True,  # Pre-LN for better gradient flow
+        )
+
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer=encoder_layer,
+            num_layers=n_layers,
+            norm=nn.LayerNorm(d_model),
+        )
+
+        # Output projection to embedding space
+        self.output_projection = nn.Sequential(
+            nn.Linear(d_model, dim_feedforward),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, embedding_dim),
+            nn.LayerNorm(embedding_dim),
+        )
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """Initialize weights with Xavier uniform."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        return_attention: bool = False,
+    ) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            x: (batch, seq_len, n_features) input sequences
+            mask: Optional attention mask
+            return_attention: Whether to return attention weights
+
+        Returns:
+            (batch, embedding_dim) learned representations
+            Or tuple of (embeddings, attention_weights) if return_attention=True
+        """
+        batch_size, seq_len, n_features = x.shape
+        assert n_features == self.n_features, \
+            f"Expected {self.n_features} features, got {n_features}"
+
+        # Project to transformer dimension
+        x = self.input_projection(x)  # (batch, seq_len, d_model)
+
+        # Add positional encoding
+        x = self.pos_encoder(x)  # (batch, seq_len, d_model)
+
+        # Transformer encoding
+        # Note: For attention weights extraction, we'd need to modify TransformerEncoder
+        # For now, we just get the output
+        encoded = self.transformer(x, mask=mask)  # (batch, seq_len, d_model)
+
+        # Global pooling: Take the last position (causal structure)
+        # This represents the "current state" after seeing the full sequence
+        last_encoded = encoded[:, -1, :]  # (batch, d_model)
+
+        # Project to embedding space
+        embedding = self.output_projection(last_encoded)  # (batch, embedding_dim)
+
+        if return_attention:
+            # Attention extraction requires modifying transformer internals
+            # For now, return None as placeholder
+            return embedding, None
+
+        return embedding
+
+    def get_attention_rollout(self) -> Optional[torch.Tensor]:
+        """Compute attention rollout for interpretability.
+
+        This would require storing attention weights during forward pass.
+        Placeholder for future implementation.
+
+        Returns:
+            None (not yet implemented)
+        """
+        # TODO: Implement attention rollout visualization
+        return None
+
+    @property
+    def num_parameters(self) -> int:
+        """Count trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return (
+            f"TransformerFeatureEncoder(\n"
+            f"  n_features={self.n_features},\n"
+            f"  d_model={self.d_model},\n"
+            f"  embedding_dim={self.embedding_dim},\n"
+            f"  parameters={self.num_parameters:,}\n"
+            f")"
+        )

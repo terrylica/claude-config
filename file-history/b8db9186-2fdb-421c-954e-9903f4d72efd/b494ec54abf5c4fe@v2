@@ -1,0 +1,341 @@
+# Investigation Findings
+## Root Cause Analysis Results
+
+**Version:** 1.0.0
+**Last Updated:** 2025-10-02
+**Status:** Phase 1 Complete, Phase 2 In Progress
+
+---
+
+## Phase 1: Perpetual Data Source Analysis
+
+**Status:** ✅ COMPLETE
+**Duration:** 25 minutes
+**Severity:** CRITICAL
+
+### Root Cause Identified
+
+**Finding:** Backtester uses **synthetic delta-neutral calculation** with no real perpetual price data.
+
+**Evidence:**
+
+#### 1. Data Verification
+```python
+# Checked data/1min_bars/2023/01.parquet
+Total symbols: 661
+Spot symbols: 661
+Swap symbols: 0  # ← NO PERPETUAL DATA
+```
+
+#### 2. Code Analysis (v1.9-modular.py)
+
+**Line 114:**
+```python
+self.price_provider = BarPriceProvider(bar_data_dir, market_type="spot")
+```
+**Issue:** Only loads SPOT market data. No perpetual data loaded.
+
+**Line 287:**
+```python
+spot_symbols = [s.replace('-SWAP', '') for s in symbols]
+```
+**Issue:** Converts perpetual symbols to spot for price lookup.
+
+**Lines 295, 311:**
+```python
+entry_prices_df = self.get_spot_prices(spot_symbols, entry_time, entry_time)
+exit_prices_df = self.get_spot_prices(spot_symbols, exit_time, exit_time)
+```
+**Issue:** Both entry and exit use SPOT prices only.
+
+**Lines 358-361 (CRITICAL):**
+```python
+# Spot PnL (long position)
+spot_pnl = (exit_price - entry_price) * position_size
+
+# Perp PnL (short position)
+perp_pnl = (entry_price - exit_price) * position_size
+```
+
+**Mathematical Proof:**
+```
+perp_pnl = (entry_price - exit_price) * position_size
+         = -(exit_price - entry_price) * position_size
+         = -spot_pnl
+
+Therefore:
+market_pnl = spot_pnl + perp_pnl
+           = spot_pnl + (-spot_pnl)
+           = 0  (ALWAYS, by construction)
+```
+
+### Impact Analysis
+
+**ISSUE-001: Zero Perpetual Symbols**
+- **Status:** RESOLVED (root cause identified)
+- **Explanation:** No perpetual data downloaded or aggregated
+- **Severity:** CRITICAL
+
+**ISSUE-002: Perfect Market Neutrality**
+- **Status:** RESOLVED (root cause identified)
+- **Explanation:** perp_pnl = -spot_pnl mathematically enforced
+- **Variance:** Exactly $0.00 across all 1,697 periods (not real hedging)
+- **Severity:** CRITICAL
+
+**ISSUE-003: 0% Positive Market P&L**
+- **Status:** RESOLVED (root cause identified)
+- **Explanation:** market_pnl = 0 always (byproduct of ISSUE-002)
+- **Severity:** HIGH (blocked by ISSUE-002)
+
+### Implications
+
+#### 1. Backtest Validity
+
+**Current Implementation:**
+- ❌ Does NOT test real delta-neutral hedging
+- ❌ Assumes perfect spot-perp price tracking
+- ❌ Ignores basis risk
+- ❌ Ignores execution timing differences
+- ❌ Ignores perpetual funding mechanism impact on perp price
+
+**What It Actually Tests:**
+- ✅ Funding rate prediction accuracy
+- ✅ Symbol selection strategy
+- ✅ Spot price execution timing
+- ❌ Does NOT test hedging effectiveness
+
+#### 2. Real-World vs Backtest
+
+**In Real Trading:**
+```python
+# Spot entry:  $16,500.00 at T+1m
+# Perp entry:  $16,502.50 at T+1m (basis: +$2.50)
+#
+# Spot exit:   $16,600.00 at T+8h
+# Perp exit:   $16,598.75 at T+8h (basis: -$1.25)
+#
+# Actual market P&L:
+spot_pnl = (16600 - 16500) * position_size = +$100 * pos
+perp_pnl = (16502.50 - 16598.75) * position_size = -$96.25 * pos
+market_pnl = +$3.75 * pos  # NOT zero!
+```
+
+**In Current Backtest:**
+```python
+# Uses SAME spot price for both:
+spot_pnl = (16600 - 16500) * position_size = +$100 * pos
+perp_pnl = (16500 - 16600) * position_size = -$100 * pos
+market_pnl = $0  # ALWAYS zero (synthetic)
+```
+
+**Gap:** Backtest ignores ±1-5 bps basis fluctuation (typical) and execution slippage.
+
+#### 3. Performance Accuracy
+
+**What +6.04% Return Represents:**
+- Funding rate collection: ✅ Accurate
+- Transaction costs: ✅ Included (VIP-7 fees)
+- Spread costs: ❌ Missing (1-3 pp APY impact)
+- Basis risk: ❌ Not modeled (±0.5-2 pp APY impact)
+- Execution slippage: ❌ Partially modeled (T+1m delay only)
+
+**Estimated Real-World APY:**
+```
+Backtest APY:     2.26%
+- Spread costs:   -0.3% to -0.8%
+- Basis risk:     -0.1% to -0.5%
+==================
+Realistic APY:    1.4% to 1.9%
+```
+
+### Recommendations
+
+**Priority 1: CRITICAL (Before Live Trading)**
+
+#### Rec-1: Add Perpetual Price Data
+```yaml
+Action: Download and aggregate perpetual SWAP data
+Files: data/raw_ticks/*/**.parquet (add SWAP symbols)
+Pipeline:
+  - scripts/download_month.py: Add market_type='swap' parameter
+  - scripts/aggregate_month.py: Process SWAP symbols
+  - libs/okx-price-provider: Support market_type='swap'
+Effort: 8 hours
+Impact: Enables real delta-neutral testing
+```
+
+#### Rec-2: Modify Backtester for Real Perp Prices
+```python
+# v1.10-modular.py changes:
+
+# Line 114: Add perpetual price provider
+self.spot_provider = BarPriceProvider(bar_data_dir, market_type="spot")
+self.perp_provider = BarPriceProvider(bar_data_dir, market_type="swap")
+
+# Lines 295-323: Separate spot and perp price loading
+entry_spot_prices = self.spot_provider.get_prices(spot_symbols, ...)
+entry_perp_prices = self.perp_provider.get_prices(swap_symbols, ...)
+
+# Lines 358-361: Use actual prices
+spot_pnl = (exit_spot_price - entry_spot_price) * position_size
+perp_pnl = (entry_perp_price - exit_perp_price) * position_size
+```
+
+#### Rec-3: Add Basis Risk Metrics
+```python
+# New validation metrics:
+basis_entry = entry_perp_price - entry_spot_price
+basis_exit = exit_perp_price - exit_spot_price
+basis_pnl = (basis_exit - basis_entry) * position_size
+
+# Track:
+- Basis volatility (std dev of basis changes)
+- Basis convergence (does basis → 0 near settlement?)
+- Basis risk P&L (separate from funding)
+```
+
+**Priority 2: IMPORTANT (Validation)**
+
+#### Rec-4: Baseline Comparison
+```yaml
+Action: Run both synthetic and real-perp backtests side-by-side
+Purpose: Quantify basis risk impact
+Metrics:
+  - APY difference
+  - Market P&L distribution (real vs zero)
+  - Sharpe ratio change
+```
+
+#### Rec-5: Document Assumptions
+```yaml
+Update AUDIT_SUMMARY.md:
+  - Section 2.2: Document synthetic calculation
+  - Section 7.1: Explain why market_pnl = 0
+  - Section 9: Add "real perpetual data" to deletion conditions
+```
+
+**Priority 3: NICE-TO-HAVE (Enhancement)**
+
+#### Rec-6: Add Execution Noise Simulation
+```python
+# Even with real perp data, add realistic execution variance:
+spot_entry_price += np.random.normal(0, spot_price * 0.0001)  # ±1 bps
+perp_entry_price += np.random.normal(0, perp_price * 0.0001)  # ±1 bps
+```
+
+### Updated Service Level Objectives
+
+**Correctness SLO:** ❌ VIOLATED
+```
+Target: 100% accuracy in P&L calculations
+Actual: Synthetic calculation, not real market hedging
+Violation: Delta-neutral assumption vs reality
+```
+
+**Availability SLO:** ✅ PARTIAL
+```
+Target: All required data accessible
+Actual: Spot data ✅, Perpetual data ❌
+Coverage: 50% of required data sources
+```
+
+**Observability SLO:** ✅ MET
+```
+Target: All calculations traceable
+Actual: Successfully traced synthetic calculation
+Result: Root cause identified in 25 minutes
+```
+
+---
+
+## Phase 2: Delta-Neutral Calculation Validation
+
+**Status:** ⏸ PAUSED (waiting for perpetual data implementation decision)
+**Blocking:** ISSUE-002 resolution
+
+### Options for Resolution
+
+#### Option A: Accept Synthetic Calculation (Conservative)
+**Pros:**
+- Current backtest still valid for funding collection testing
+- No data pipeline changes needed
+- Conservative assumption (perfect hedging)
+
+**Cons:**
+- Overstates real-world performance by 0.5-2 pp APY
+- Cannot validate hedging effectiveness
+- Ignores basis risk
+
+**Decision Criteria:** If primary goal is funding rate prediction testing only.
+
+#### Option B: Implement Real Perpetual Data (Recommended)
+**Pros:**
+- Realistic delta-neutral testing
+- Quantifies basis risk
+- Production-ready validation
+
+**Cons:**
+- Requires data pipeline updates (8 hours)
+- May reduce backtest APY by 0.5-2 pp
+- Additional 7 GB storage (perp 1-min bars)
+
+**Decision Criteria:** If goal is live trading deployment.
+
+### Next Steps
+
+**Awaiting User Decision:**
+1. Continue with synthetic calculation (document limitations)
+2. Implement real perpetual data (recommended for production)
+
+If Option B selected:
+- [ ] Update download scripts to include SWAP market
+- [ ] Re-aggregate all months with SWAP data
+- [ ] Modify v1.9-modular.py to use real perp prices
+- [ ] Re-run 32-month backtest
+- [ ] Compare synthetic vs real results
+
+---
+
+## Phase 3: P&L Reconciliation Trace
+
+**Status:** 🔴 BLOCKED (awaiting Phase 2)
+**Reason:** $7.36 mismatch may be related to synthetic calculation rounding
+
+---
+
+## Phase 4: Gap Analysis
+
+**Status:** 🔴 BLOCKED (awaiting Phase 2)
+
+---
+
+## Phase 5: Enhancement Implementation
+
+**Status:** 🔴 BLOCKED (awaiting all phases)
+
+---
+
+## Version History
+
+### v1.0.0 (2025-10-02 - Phase 1 Complete)
+- Identified root cause: Synthetic delta-neutral calculation
+- No perpetual data in 1-min bars
+- perp_pnl = -spot_pnl (mathematical enforcement)
+- Documented implications and recommendations
+- Awaiting user decision on Option A vs B
+
+---
+
+## References
+
+### Code Locations
+- v1.9-modular.py:114 (spot-only price provider)
+- v1.9-modular.py:287 (SWAP → spot conversion)
+- v1.9-modular.py:358-361 (synthetic perp_pnl calculation)
+
+### Data Verification
+- data/1min_bars/2023/01.parquet (661 spot, 0 swap symbols)
+
+### Related Documents
+- INVESTIGATION_PLAN.md (investigation framework)
+- AUDIT_SUMMARY.md (original audit findings)

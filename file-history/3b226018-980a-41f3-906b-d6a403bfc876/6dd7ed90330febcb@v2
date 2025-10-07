@@ -1,0 +1,883 @@
+# OOD Robust Trading Profit Roadmap
+
+**Date**: 2025-10-01
+**Goal**: OOD robust trading profit based on rolling window walk-forward analysis
+**Status**: Gap analysis complete, implementation roadmap defined
+
+---
+
+## 🎯 Executive Summary
+
+### Current Alignment with Goal: 45% Ready
+
+**Strengths (what you have)**:
+- ✅ Temporal validation infrastructure (walk-forward CV, TimeSeriesSplit)
+- ✅ Custom fitness engine with MFE/MAE trading metrics
+- ✅ Microstructure features for high-frequency data
+- ✅ Regime detection for market conditions (cycleness)
+- ✅ Zero-magic-number principles
+- ✅ Comprehensive roadmap docs for trading strategy
+
+**Critical Gaps (what's missing)**:
+- ❌ **Backtesting framework** (not installed, not implemented)
+- ❌ **OOD robustness testing** (no distribution shift detection)
+- ❌ **Trading profit metrics** (Sharpe, Sortino, PnL, drawdown)
+- ❌ **Position sizing & risk management**
+- ❌ **Transaction cost modeling**
+
+---
+
+## 📊 Current State Analysis
+
+### ✅ ALIGNED WITH GOAL (Keep & Enhance)
+
+#### 1. Core Infrastructure (core_lib/)
+```
+core_lib/
+├── validation/temporal_validation_utils.py   ✅ SOTA temporal patterns
+├── sync/data_source_manager.py               ✅ Data access
+├── constraints/market_constraints.py         ✅ Market enums
+└── utilities/                                 ✅ Shared utilities
+```
+**Status**: Production-ready
+**Action**: Enhance with OOD detection utilities
+
+#### 2. Walk-Forward Validation (validation/)
+```
+validation/
+├── walk_forward/
+│   ├── simple_multi_objective_demo.py        ✅ Rolling origin CV
+│   └── complete_framework.py                 ✅ Comprehensive validation
+└── nested_cv/
+    ├── nested_cv_temporal_slicing.py         ✅ Nested CV (1,879 lines)
+    └── convergence_monitor_integration.py    ✅ Convergence detection
+```
+**Status**: Production-ready for ML validation
+**Gap**: Not integrated with trading profit metrics
+**Action**: Add profit-based optimization to walk-forward loop
+
+#### 3. Trading-Relevant Features (features/)
+```
+features/
+├── fitness/
+│   └── fitness_engine.py                     ✅ MFE/MAE trading metrics
+├── microstructure/                           ✅ 5 SOTA modules
+└── cycleness/                                ✅ Regime detection MVP
+```
+**Status**: Excellent foundation
+**Gap**: Fitness engine not integrated with backtesting
+**Action**: Bridge fitness metrics to backtesting framework
+
+#### 4. Data Pipeline (data_pipeline/)
+```
+data_pipeline/
+├── binance/                                  ✅ Binance collector
+└── gap_filling/                              ✅ 8 gap-filling scripts
+```
+**Status**: Production-ready
+**Action**: Add regime labeling for OOD detection
+
+---
+
+### ⚠️ UNCERTAIN VALUE (Review & Decide)
+
+#### Research Experiments (docs/ideas_brewing/)
+```
+docs/ideas_brewing/
+├── multi_objective_mae_mfe_meta_features/
+│   └── fail_fast/
+│       ├── realistic_market_simulation/      ⚠️ Might be useful for OOD stress testing
+│       ├── direct_quality_measurement/       ⚠️ Synthetic data quality (not trading)
+│       ├── sota_financial_ts_generators/     ⚠️ Research, not production
+│       └── training_optimization/            ⚠️ GPU training experiments
+└── meta-features-cycleness/                  ⚠️ Overlaps with features/cycleness/
+```
+
+**Status**: 29 Python files, all dated Sep 15 (stale, 2+ weeks old)
+**Issues**:
+1. **Synthetic data generation focus** - not aligned with real trading profit
+2. **Quality measurement for generators** - academic exercise, not profit-focused
+3. **Stale experiments** - haven't been touched since Sep 15
+
+**Decision Matrix**:
+| Component | Keep? | Reason |
+|-----------|-------|--------|
+| `realistic_market_simulation/` | **MAYBE** | Could generate stress scenarios for OOD testing |
+| `direct_quality_measurement/` | **PRUNE** | Evaluates synthetic data, not trading performance |
+| `sota_financial_ts_generators/` | **PRUNE** | Research dead end for trading profit goal |
+| `training_optimization/` | **PRUNE** | GPU experiments, not trading-focused |
+| `meta-features-cycleness/` | **PRUNE** | Superseded by features/cycleness/ |
+
+**Recommendation**: Archive entire `docs/ideas_brewing/` to `archive/research_experiments/`
+
+---
+
+### ❌ CRITICAL GAPS (Must Build)
+
+#### 1. Backtesting Framework
+**Current**: MISSING (mentioned in CLAUDE.md but not installed or implemented)
+**Required**:
+```python
+# Add to pyproject.toml dependencies
+"backtesting>=0.3.3"  # User specified backtesting.py ONLY
+
+# Implement wrapper
+automation/
+└── backtesting/
+    ├── backtest_engine.py           # Wrapper for backtesting.py
+    ├── profit_metrics.py            # Sharpe, Sortino, Calmar, PnL
+    ├── transaction_costs.py         # Slippage + fees model
+    └── walk_forward_backtest.py     # Integrate with validation/walk_forward/
+```
+
+**Priority**: CRITICAL (blocks trading profit goal)
+
+#### 2. OOD Robustness Testing
+**Current**: MISSING (no distribution shift detection)
+**Required**:
+```python
+core_lib/ood/
+├── distribution_shift_detector.py   # KL divergence, Wasserstein distance
+├── regime_classifier.py             # Label market regimes (bull/bear/sideways/crash)
+├── ood_test_suite.py                # Systematic OOD stress tests
+└── robustness_metrics.py            # Performance degradation tracking
+```
+
+**Key Capabilities**:
+- Detect when validation/test data diverges from training distribution
+- Label time periods by regime using features/cycleness/
+- Test model performance across different regimes
+- Track performance degradation as market conditions shift
+
+**Priority**: CRITICAL (core to OOD robust goal)
+
+#### 3. Trading Profit Metrics
+**Current**: fitness_engine has MFE/MAE but not integrated
+**Required**:
+```python
+automation/backtesting/profit_metrics.py:
+- Sharpe Ratio
+- Sortino Ratio
+- Calmar Ratio
+- Max Drawdown
+- Win Rate
+- Profit Factor
+- Expectancy
+- Recovery Factor
+- Ulcer Index
+```
+
+**Priority**: CRITICAL (need profit-based optimization, not just MAE/RMSE)
+
+#### 4. Position Sizing & Risk Management
+**Current**: MISSING
+**Required**:
+```python
+automation/trading/
+├── position_sizer.py                # Kelly, fixed fraction, volatility-based
+├── risk_manager.py                  # Stop-loss, take-profit, portfolio limits
+└── execution_simulator.py           # Order filling simulation
+```
+
+**Priority**: HIGH (prevents unrealistic backtest results)
+
+#### 5. Transaction Cost Modeling
+**Current**: MISSING
+**Required**:
+```python
+automation/backtesting/transaction_costs.py:
+- Maker/taker fees (Binance: 0.1% taker, 0.075% maker with BNB)
+- Slippage model (market impact)
+- Spread costs
+- Realistic order fills
+```
+
+**Priority**: HIGH (critical for realistic profit estimation)
+
+---
+
+## 🗑️ PRUNE Strategy
+
+### Phase 1: Archive Stale Research (Immediate)
+
+```bash
+# Archive entire ideas_brewing directory
+git mv docs/ideas_brewing/ archive/research_experiments/ideas_brewing/
+
+# Keep only potentially useful market simulation
+git mv archive/research_experiments/ideas_brewing/multi_objective_mae_mfe_meta_features/fail_fast/realistic_market_simulation/ \
+    core_lib/ood/market_simulation/
+
+# Document what was archived
+```
+
+**Disk space freed**: ~500KB Python code
+**Benefit**: Clean workspace, clear focus on trading profit goal
+
+### Phase 2: Remove Dead Library Integration Docs
+
+```bash
+# Move library experiments to archive unless actively used
+docs/roadmap/lib_*.md  # Review each:
+- lib_backtesting.md   → Keep if exists
+- lib_shap.md          → Archive (not trading-focused)
+- lib_darts.md         → Archive (research, not used)
+- lib_river.md         → Archive (online learning, not immediate need)
+- lib_tsai.md          → Archive
+- lib_tabpfn_ts.md     → Archive (research)
+```
+
+### Phase 3: Consolidate Documentation
+
+```bash
+# Keep only trading-relevant roadmaps
+docs/roadmap/
+├── parameterless_adaptive_trading_strategy.md  ✅ KEEP (core strategy)
+├── rolling_origin_framework.md                 ✅ KEEP (walk-forward)
+├── principles_and_compliance.md                ✅ KEEP (zero-magic-number)
+├── custom_fitness_research.md                  ✅ KEEP (trading fitness)
+└── technical_implementation.md                 ✅ KEEP (implementation guide)
+
+# Archive rest to docs/archive/research_roadmaps/
+```
+
+---
+
+## 🌱 GROW Strategy
+
+### Phase 1: Critical Trading Infrastructure (Week 1)
+
+#### 1.1 Install & Setup Backtesting Framework
+```bash
+# Add to pyproject.toml
+[project.dependencies]
++ "backtesting>=0.3.3",
+
+# Install
+uv add backtesting
+
+# Create wrapper structure
+mkdir -p automation/backtesting
+mkdir -p automation/trading
+```
+
+#### 1.2 Implement Core Backtesting Engine
+```python
+# automation/backtesting/backtest_engine.py
+"""
+Wrapper for backtesting.py library integrated with walk-forward validation
+"""
+from backtesting import Backtest, Strategy
+from typing import Dict, List
+import pandas as pd
+
+class WalkForwardBacktest:
+    """
+    Walk-forward backtesting with proper temporal splits
+
+    Integrates:
+    - validation/walk_forward/ for CV splits
+    - features/fitness/fitness_engine.py for signal generation
+    - Transaction costs and slippage modeling
+    """
+
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        strategy: Strategy,
+        cv_config: dict,
+        transaction_costs: dict = None
+    ):
+        self.data = data
+        self.strategy = strategy
+        self.cv_config = cv_config
+        self.transaction_costs = transaction_costs or {
+            'maker_fee': 0.00075,  # Binance with BNB
+            'taker_fee': 0.001,
+            'slippage_pct': 0.0005
+        }
+
+    def run_walk_forward(self) -> Dict:
+        """Run walk-forward backtest with temporal integrity"""
+        # Use TimeSeriesSplit from core_lib.validation
+        # Return profit metrics for each fold
+        pass
+```
+
+#### 1.3 Implement Profit Metrics Module
+```python
+# automation/backtesting/profit_metrics.py
+"""
+Trading profit metrics for walk-forward optimization
+"""
+
+def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+    """Annual Sharpe Ratio"""
+    excess_returns = returns - risk_free_rate
+    return np.sqrt(252) * excess_returns.mean() / excess_returns.std()
+
+def calculate_sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+    """Annual Sortino Ratio (downside deviation only)"""
+    excess_returns = returns - risk_free_rate
+    downside_returns = returns[returns < 0]
+    downside_std = downside_returns.std()
+    return np.sqrt(252) * excess_returns.mean() / downside_std
+
+def calculate_max_drawdown(equity_curve: pd.Series) -> float:
+    """Maximum drawdown percentage"""
+    cummax = equity_curve.cummax()
+    drawdown = (equity_curve - cummax) / cummax
+    return drawdown.min()
+
+def calculate_calmar_ratio(returns: pd.Series) -> float:
+    """Annual return / max drawdown"""
+    annual_return = (1 + returns.mean()) ** 252 - 1
+    max_dd = calculate_max_drawdown((1 + returns).cumprod())
+    return annual_return / abs(max_dd)
+
+# ... more metrics
+```
+
+**Deliverable**: Working backtesting framework integrated with walk-forward CV
+
+---
+
+### Phase 2: OOD Robustness Testing (Week 2)
+
+#### 2.1 Distribution Shift Detection
+```python
+# core_lib/ood/distribution_shift_detector.py
+"""
+Detect when test/validation distribution diverges from training
+"""
+from scipy.stats import ks_2samp, wasserstein_distance
+import numpy as np
+
+class DistributionShiftDetector:
+    """
+    Detect distribution shifts using multiple methods
+    """
+
+    def __init__(self, significance_level: float = 0.05):
+        self.significance_level = significance_level
+
+    def detect_shift_ks_test(
+        self,
+        train_features: np.ndarray,
+        test_features: np.ndarray
+    ) -> Dict:
+        """
+        Kolmogorov-Smirnov test for distribution shift
+
+        Returns:
+            {
+                'shift_detected': bool,
+                'p_value': float,
+                'statistic': float,
+                'features_shifted': List[int]  # Which features shifted
+            }
+        """
+        n_features = train_features.shape[1]
+        shifted_features = []
+
+        for i in range(n_features):
+            statistic, p_value = ks_2samp(train_features[:, i], test_features[:, i])
+            if p_value < self.significance_level:
+                shifted_features.append(i)
+
+        return {
+            'shift_detected': len(shifted_features) > 0,
+            'n_shifted_features': len(shifted_features),
+            'features_shifted': shifted_features
+        }
+
+    def detect_shift_wasserstein(
+        self,
+        train_features: np.ndarray,
+        test_features: np.ndarray,
+        threshold: float = 0.1
+    ) -> Dict:
+        """Wasserstein distance for distribution shift"""
+        distances = []
+        for i in range(train_features.shape[1]):
+            dist = wasserstein_distance(train_features[:, i], test_features[:, i])
+            distances.append(dist)
+
+        mean_distance = np.mean(distances)
+        return {
+            'shift_detected': mean_distance > threshold,
+            'mean_distance': mean_distance,
+            'per_feature_distances': distances
+        }
+```
+
+#### 2.2 Regime Classification for OOD Testing
+```python
+# core_lib/ood/regime_classifier.py
+"""
+Classify market regimes for OOD robustness testing
+"""
+
+class MarketRegimeClassifier:
+    """
+    Label time periods by market regime
+
+    Regimes:
+    - Bull: Trending up, low volatility
+    - Bear: Trending down, low volatility
+    - Sideways: No trend, low volatility
+    - High Volatility: Any trend, high volatility
+    - Crash: Sharp drop, extreme volatility
+    """
+
+    def __init__(self, lookback_window: int = 60):
+        self.lookback_window = lookback_window
+
+    def classify_regimes(self, ohlcv: pd.DataFrame) -> pd.Series:
+        """
+        Classify each time period into regime
+
+        Uses features/cycleness/ for change point detection
+        Uses features/microstructure/ for volatility
+        """
+        # Calculate trend (SMA slope)
+        # Calculate volatility (realized variance)
+        # Detect crashes (bipower variation spikes)
+        # Return regime labels
+        pass
+
+    def split_by_regime(
+        self,
+        data: pd.DataFrame,
+        regimes: pd.Series
+    ) -> Dict[str, pd.DataFrame]:
+        """Split data by regime for OOD testing"""
+        return {
+            regime: data[regimes == regime]
+            for regime in regimes.unique()
+        }
+```
+
+#### 2.3 OOD Test Suite
+```python
+# core_lib/ood/ood_test_suite.py
+"""
+Systematic OOD robustness testing framework
+"""
+
+class OODTestSuite:
+    """
+    Test model performance under distribution shift
+    """
+
+    def run_regime_conditional_test(
+        self,
+        model,
+        train_data: pd.DataFrame,
+        test_data: pd.DataFrame,
+        backtest_engine: WalkForwardBacktest
+    ) -> Dict:
+        """
+        Test performance on each market regime separately
+
+        Returns:
+            {
+                'bull_sharpe': float,
+                'bear_sharpe': float,
+                'sideways_sharpe': float,
+                'crash_sharpe': float,
+                'overall_sharpe': float,
+                'regime_consistency': float  # Std dev of regime Sharpes
+            }
+        """
+        pass
+
+    def run_temporal_holdout_test(
+        self,
+        model,
+        data: pd.DataFrame,
+        n_holdout_periods: int = 5
+    ) -> Dict:
+        """
+        Hold out recent time periods for OOD testing
+
+        Train on older data, test on progressively newer data
+        Track performance degradation over time
+        """
+        pass
+
+    def run_stress_test(
+        self,
+        model,
+        data: pd.DataFrame,
+        stress_scenarios: List[str]
+    ) -> Dict:
+        """
+        Test on specific stress scenarios
+
+        Scenarios:
+        - 2020 COVID crash
+        - 2022 bear market
+        - 2021 bull run
+        - Flash crashes
+        - Low liquidity periods
+        """
+        pass
+```
+
+**Deliverable**: Comprehensive OOD testing infrastructure
+
+---
+
+### Phase 3: Integration & Optimization (Week 3)
+
+#### 3.1 Integrate Fitness Engine with Backtesting
+```python
+# automation/trading/fitness_based_strategy.py
+"""
+Trading strategy using fitness_engine for signals
+"""
+from features.fitness.fitness_engine import CustomFitnessEngine
+from backtesting import Strategy
+
+class FitnessBasedStrategy(Strategy):
+    """
+    Backtesting.py strategy using CustomFitnessEngine
+
+    Integrates:
+    - features/fitness/fitness_engine.py for MFE/MAE signals
+    - features/microstructure/ for entry features
+    - automation/trading/position_sizer.py for sizing
+    - automation/trading/risk_manager.py for exits
+    """
+
+    # Use fitness signals to generate entry/exit signals
+    # Apply position sizing
+    # Apply risk management
+    pass
+```
+
+#### 3.2 Walk-Forward Optimization with Profit Metrics
+```python
+# automation/optimization/walk_forward_optimizer.py
+"""
+Optimize strategy parameters using walk-forward with profit metrics
+"""
+
+class WalkForwardOptimizer:
+    """
+    Optimize using profit metrics (Sharpe) instead of prediction metrics (MAE)
+    """
+
+    def optimize_for_profit(
+        self,
+        strategy_class,
+        data: pd.DataFrame,
+        param_grid: Dict,
+        cv_config: Dict,
+        objective: str = 'sharpe_ratio'
+    ) -> Dict:
+        """
+        Walk-forward optimization with profit objective
+
+        Different from ML optimization:
+        - Objective is Sharpe ratio, not MAE
+        - Includes transaction costs
+        - Tests on OOD regimes
+        - Returns trading performance, not prediction accuracy
+        """
+        # Use TimeSeriesSplit
+        # For each fold:
+        #   - Optimize params on train using grid search
+        #   - Backtest on test with transaction costs
+        #   - Calculate Sharpe ratio
+        # Return params with best average Sharpe
+        pass
+```
+
+#### 3.3 End-to-End Pipeline
+```python
+# automation/pipelines/ood_robust_trading_pipeline.py
+"""
+Complete pipeline from data → features → backtest → OOD validation → profit
+"""
+
+class OODRobustTradingPipeline:
+    """
+    End-to-end pipeline for OOD robust trading profit
+
+    Steps:
+    1. Collect data (data_pipeline/)
+    2. Generate features (features/)
+    3. Train model with walk-forward CV (validation/)
+    4. Backtest with transaction costs (automation/backtesting/)
+    5. Test OOD robustness (core_lib/ood/)
+    6. Calculate profit metrics (automation/backtesting/profit_metrics.py)
+    7. Generate report with regime-conditional performance
+    """
+
+    def run_full_pipeline(
+        self,
+        symbol: str = "SOLUSDT",
+        interval: str = "15m",
+        start_date: str = "2022-09-10",
+        end_date: str = "2025-08-31"
+    ) -> Dict:
+        """Run complete OOD robust trading profit pipeline"""
+        # 1. Data collection
+        # 2. Feature generation
+        # 3. Regime labeling
+        # 4. Walk-forward backtest
+        # 5. OOD testing
+        # 6. Profit analysis
+        pass
+```
+
+**Deliverable**: Complete automated pipeline from data to OOD-validated profit
+
+---
+
+## 📋 Implementation Timeline
+
+### Week 1: Critical Trading Infrastructure
+**Days 1-2**: Install backtesting.py, create wrapper
+**Days 3-4**: Implement profit metrics module
+**Day 5**: Test basic walk-forward backtest
+**Deliverable**: Working backtesting with Sharpe/Sortino/Calmar
+
+### Week 2: OOD Robustness Testing
+**Days 1-2**: Distribution shift detector
+**Days 3-4**: Regime classifier using cycleness features
+**Day 5**: OOD test suite implementation
+**Deliverable**: Regime-conditional performance testing
+
+### Week 3: Integration & Optimization
+**Days 1-2**: Integrate fitness_engine with backtesting
+**Days 3-4**: Walk-forward profit optimization
+**Day 5**: End-to-end pipeline
+**Deliverable**: Complete OOD robust trading pipeline
+
+### Week 4: Validation & Documentation
+**Days 1-3**: Run full pipeline on SOLUSDT 3-year data
+**Day 4**: Generate comprehensive performance report
+**Day 5**: Documentation and examples
+**Deliverable**: Production-ready OOD robust trading system
+
+---
+
+## 🎯 Success Criteria
+
+### Must-Have (CRITICAL)
+- [ ] Backtesting framework installed and integrated with walk-forward CV
+- [ ] Trading profit metrics (Sharpe, Sortino, Calmar, Max DD) calculated
+- [ ] Transaction costs properly modeled
+- [ ] OOD distribution shift detection working
+- [ ] Regime-conditional backtesting implemented
+- [ ] Performance tested across bull/bear/sideways/crash regimes
+
+### Should-Have (HIGH PRIORITY)
+- [ ] Position sizing system (Kelly, fixed fraction, volatility-based)
+- [ ] Risk management (stop-loss, take-profit)
+- [ ] Walk-forward optimization using Sharpe (not MAE)
+- [ ] Fitness engine integrated with backtesting signals
+- [ ] End-to-end pipeline automated
+
+### Nice-to-Have (MEDIUM PRIORITY)
+- [ ] Performance attribution analysis
+- [ ] Trade execution simulation (realistic fills)
+- [ ] Drawdown analysis and recovery tracking
+- [ ] Feature importance for profit (SHAP on trades)
+
+---
+
+## 🚨 Critical Decisions Needed
+
+### 1. Archive or Repurpose ideas_brewing/?
+**Question**: Should we archive entire `docs/ideas_brewing/` or extract useful parts?
+
+**Options**:
+- **Option A (Recommended)**: Archive entire directory, start fresh with trading focus
+- **Option B**: Extract `realistic_market_simulation/` for OOD stress testing, archive rest
+- **Option C**: Keep all for reference (clutters workspace)
+
+**Recommendation**: **Option B** - Extract market simulation for OOD, archive rest
+
+### 2. Which Backtesting Library?
+**Question**: Stick with backtesting.py or explore alternatives?
+
+**Options**:
+- **backtesting.py** (your specification): Simple, fast, good for prototyping
+- **vectorbt**: More powerful, GPU-accelerated, complex
+- **bt**: More mature, institutional-grade, harder to learn
+
+**Recommendation**: **backtesting.py** (per CLAUDE.md specification)
+
+### 3. OOD Testing Approach?
+**Question**: How rigorous should OOD testing be?
+
+**Options**:
+- **Light**: Just regime-conditional performance (bull/bear/sideways)
+- **Medium (Recommended)**: Regime + distribution shift detection + temporal holdout
+- **Heavy**: Above + stress scenarios + adversarial examples
+
+**Recommendation**: **Medium** - Balances rigor with implementation time
+
+---
+
+## 📁 Recommended Final Structure
+
+```
+ml-feature-experiments/
+├── core_lib/                        # Core utilities
+│   ├── sync/                        # Data access
+│   ├── validation/                  # Temporal validation patterns
+│   ├── constraints/                 # Market enums
+│   ├── utilities/                   # Shared utilities
+│   └── ood/                         # 🆕 OOD testing utilities
+│       ├── distribution_shift_detector.py
+│       ├── regime_classifier.py
+│       ├── ood_test_suite.py
+│       └── market_simulation/       # Extracted from ideas_brewing
+├── data_pipeline/                   # Data collection
+│   ├── binance/
+│   └── gap_filling/
+├── features/                        # Feature engineering
+│   ├── microstructure/              # SOTA microstructure
+│   ├── cycleness/                   # Regime detection
+│   └── fitness/                     # Trading fitness metrics
+├── validation/                      # ML validation
+│   ├── nested_cv/
+│   └── walk_forward/
+├── automation/                      # 🆕 Trading automation
+│   ├── backtesting/                 # Backtesting framework
+│   │   ├── backtest_engine.py
+│   │   ├── profit_metrics.py
+│   │   ├── transaction_costs.py
+│   │   └── walk_forward_backtest.py
+│   ├── trading/                     # Trading logic
+│   │   ├── fitness_based_strategy.py
+│   │   ├── position_sizer.py
+│   │   ├── risk_manager.py
+│   │   └── execution_simulator.py
+│   ├── optimization/                # Strategy optimization
+│   │   └── walk_forward_optimizer.py
+│   └── pipelines/                   # End-to-end pipelines
+│       └── ood_robust_trading_pipeline.py
+├── experiments/                     # Active trading experiments
+├── examples/                        # Usage examples
+│   ├── 01_basic_backtest.py
+│   ├── 02_walk_forward_optimization.py
+│   ├── 03_ood_robustness_test.py
+│   └── 04_full_pipeline.py
+├── archive/                         # Archived code
+│   ├── dead_code/
+│   ├── failed_experiments/
+│   ├── data_collection_legacy/
+│   └── research_experiments/        # 🆕 Archived ideas_brewing
+│       └── ideas_brewing/
+└── docs/                            # Documentation
+    ├── roadmap/                     # Keep trading-focused roadmaps only
+    └── archive/                     # 🆕 Archived research roadmaps
+```
+
+---
+
+## 🚀 Quick Start (After Implementation)
+
+### Example 1: Basic Backtest
+```python
+from automation.backtesting.backtest_engine import WalkForwardBacktest
+from automation.trading.fitness_based_strategy import FitnessBasedStrategy
+from data_pipeline.binance.binance_public_data_collector import collect_data
+
+# 1. Collect data
+data = collect_data(symbol="SOLUSDT", interval="15m", start="2022-09-10", end="2025-08-31")
+
+# 2. Create strategy using fitness signals
+strategy = FitnessBasedStrategy
+
+# 3. Run walk-forward backtest
+backtest = WalkForwardBacktest(
+    data=data,
+    strategy=strategy,
+    cv_config={'n_splits': 5, 'test_size': 90, 'gap': 7}
+)
+
+results = backtest.run_walk_forward()
+print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+print(f"Max Drawdown: {results['max_drawdown']:.2%}")
+print(f"Win Rate: {results['win_rate']:.2%}")
+```
+
+### Example 2: OOD Robustness Test
+```python
+from core_lib.ood.ood_test_suite import OODTestSuite
+from core_lib.ood.regime_classifier import MarketRegimeClassifier
+
+# 1. Classify regimes
+classifier = MarketRegimeClassifier()
+regimes = classifier.classify_regimes(data)
+
+# 2. Run regime-conditional test
+ood_suite = OODTestSuite()
+ood_results = ood_suite.run_regime_conditional_test(
+    model=strategy,
+    train_data=train_data,
+    test_data=test_data,
+    backtest_engine=backtest
+)
+
+print("Performance by Regime:")
+print(f"  Bull:     Sharpe = {ood_results['bull_sharpe']:.2f}")
+print(f"  Bear:     Sharpe = {ood_results['bear_sharpe']:.2f}")
+print(f"  Sideways: Sharpe = {ood_results['sideways_sharpe']:.2f}")
+print(f"  Crash:    Sharpe = {ood_results['crash_sharpe']:.2f}")
+print(f"Regime Consistency: {ood_results['regime_consistency']:.2f} (lower = more robust)")
+```
+
+### Example 3: Full Pipeline
+```python
+from automation.pipelines.ood_robust_trading_pipeline import OODRobustTradingPipeline
+
+# Run complete pipeline
+pipeline = OODRobustTradingPipeline()
+results = pipeline.run_full_pipeline(
+    symbol="SOLUSDT",
+    interval="15m",
+    start_date="2022-09-10",
+    end_date="2025-08-31"
+)
+
+# Results include:
+# - Walk-forward backtest performance
+# - OOD robustness scores
+# - Regime-conditional Sharpes
+# - Transaction cost impact
+# - Detailed trade log
+```
+
+---
+
+## 📚 References
+
+### Implemented Patterns
+- CLAUDE.md: "backtesting.py ONLY" - followed
+- Temporal validation utils: TimeSeriesSplit, Pipeline, walk-forward CV
+- Zero-magic-number principles: Data-driven parameters
+- Custom fitness: MFE/MAE trading metrics
+
+### Roadmap Docs (Keep)
+- `docs/roadmap/parameterless_adaptive_trading_strategy.md` - Full trading system design
+- `docs/roadmap/rolling_origin_framework.md` - Walk-forward methodology
+- `docs/roadmap/custom_fitness_research.md` - Trading fitness background
+
+### Academic References
+- **Prado (2018)**: "Advances in Financial Machine Learning" - Chapter 7 (Cross-Validation), Chapter 12 (Backtesting)
+- **Bailey et al. (2014)**: "The Probability of Backtest Overfitting" - Walk-forward validation
+- **Lopez de Prado (2015)**: "The Future of Empirical Finance" - Combinatorial purged CV
+
+---
+
+**Status**: Ready for implementation
+**Next Step**: Review and approve prune/grow decisions, then begin Week 1 implementation
+

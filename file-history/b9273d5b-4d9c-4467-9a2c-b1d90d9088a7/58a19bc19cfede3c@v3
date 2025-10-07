@@ -1,0 +1,221 @@
+#!/bin/bash
+# Continuous download progress monitor with stall detection
+# Usage: ./scripts/monitor_downloads.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$PROJECT_ROOT/data"
+
+# Log files
+SPOT_LOG="$PROJECT_ROOT/download_spot_sequential.log"
+SWAP_LOG="$PROJECT_ROOT/download_swap_sequential.log"
+
+# State file for tracking changes
+STATE_FILE="/tmp/download_monitor_state.txt"
+
+# Expected totals
+TOTAL_MONTHS=33
+EXPECTED_SPOT_SIZE="45G"
+EXPECTED_SWAP_SIZE="45G"
+
+# Initialize state file if not exists
+if [ ! -f "$STATE_FILE" ]; then
+    echo "0|0|0|0|$(date +%s)" > "$STATE_FILE"
+fi
+
+# Format seconds to MM:SS or HH:MM:SS
+format_duration() {
+    local seconds=$1
+    local hours=$((seconds / 3600))
+    local minutes=$(((seconds % 3600) / 60))
+    local secs=$((seconds % 60))
+
+    if [ $hours -gt 0 ]; then
+        printf "%02d:%02d:%02d" $hours $minutes $secs
+    else
+        printf "%02d:%02d" $minutes $secs
+    fi
+}
+
+# Clear screen and show header
+clear_and_header() {
+    clear
+    echo "╔════════════════════════════════════════════════════════════════════════════╗"
+    echo "║         OKX Data Download Monitor - Auto-refresh every 5 seconds         ║"
+    echo "╚════════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "⏰ $(date '+%Y-%m-%d %H:%M:%S')"
+    echo ""
+}
+
+# Check process status
+check_processes() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 Process Status"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    SPOT_PROCS=$(ps aux | grep "download_spot_sequential" | grep -v grep | wc -l)
+    SWAP_PROCS=$(ps aux | grep "download_swap_sequential" | grep -v grep | wc -l)
+
+    if [ "$SPOT_PROCS" -gt 0 ]; then
+        echo "✅ SPOT download: RUNNING"
+    else
+        echo "⏹️  SPOT download: STOPPED"
+    fi
+
+    if [ "$SWAP_PROCS" -gt 0 ]; then
+        echo "✅ SWAP download: RUNNING"
+    else
+        echo "⏹️  SWAP download: STOPPED"
+    fi
+    echo ""
+}
+
+# Count downloaded files and detect changes
+check_files_and_progress() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📁 Downloaded Files"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Current counts
+    SPOT_COUNT=$(find "$DATA_DIR/raw_ticks" -name "*.parquet" 2>/dev/null | wc -l)
+    SWAP_COUNT=$(find "$DATA_DIR/raw_ticks_swap" -name "*.parquet" 2>/dev/null | wc -l)
+
+    # Current sizes (in KB for precision)
+    SPOT_SIZE_KB=$(du -sk "$DATA_DIR/raw_ticks" 2>/dev/null | cut -f1 || echo "0")
+    SWAP_SIZE_KB=$(du -sk "$DATA_DIR/raw_ticks_swap" 2>/dev/null | cut -f1 || echo "0")
+
+    # Read previous state
+    IFS='|' read -r PREV_SPOT_COUNT PREV_SWAP_COUNT PREV_SPOT_SIZE PREV_SWAP_SIZE LAST_CHANGE_TIME < "$STATE_FILE"
+
+    # Detect if anything changed
+    NOW=$(date +%s)
+    if [ "$SPOT_COUNT" != "$PREV_SPOT_COUNT" ] || \
+       [ "$SWAP_COUNT" != "$PREV_SWAP_COUNT" ] || \
+       [ "$SPOT_SIZE_KB" != "$PREV_SPOT_SIZE" ] || \
+       [ "$SWAP_SIZE_KB" != "$PREV_SWAP_SIZE" ]; then
+        # Progress detected! Update state
+        LAST_CHANGE_TIME=$NOW
+        echo "$SPOT_COUNT|$SWAP_COUNT|$SPOT_SIZE_KB|$SWAP_SIZE_KB|$LAST_CHANGE_TIME" > "$STATE_FILE"
+    fi
+
+    # Calculate time since last change
+    TIME_SINCE_CHANGE=$((NOW - LAST_CHANGE_TIME))
+    FORMATTED_TIME=$(format_duration $TIME_SINCE_CHANGE)
+
+    SPOT_PROGRESS=$((SPOT_COUNT * 100 / TOTAL_MONTHS))
+    SWAP_PROGRESS=$((SWAP_COUNT * 100 / TOTAL_MONTHS))
+
+    echo "SPOT: $SPOT_COUNT/$TOTAL_MONTHS files ($SPOT_PROGRESS%)"
+    echo "SWAP: $SWAP_COUNT/$TOTAL_MONTHS files ($SWAP_PROGRESS%)"
+    echo ""
+
+    # Show time since last progress
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "⏱️  Time Since Last Progress"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    if [ $TIME_SINCE_CHANGE -lt 60 ]; then
+        # Less than 1 minute - normal
+        echo "✅ $FORMATTED_TIME (actively downloading)"
+    elif [ $TIME_SINCE_CHANGE -lt 300 ]; then
+        # 1-5 minutes - possibly working on large file
+        echo "⏳ $FORMATTED_TIME (may be processing large file)"
+    elif [ $TIME_SINCE_CHANGE -lt 600 ]; then
+        # 5-10 minutes - warning
+        echo "⚠️  $FORMATTED_TIME (WARNING: No progress detected)"
+    else
+        # 10+ minutes - alert
+        echo "🚨 $FORMATTED_TIME (ALERT: Possible stall! Check logs)"
+    fi
+    echo ""
+}
+
+# Check storage usage
+check_storage() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "💾 Storage Usage"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    SPOT_SIZE=$(du -sh "$DATA_DIR/raw_ticks" 2>/dev/null | cut -f1 || echo "0")
+    SWAP_SIZE=$(du -sh "$DATA_DIR/raw_ticks_swap" 2>/dev/null | cut -f1 || echo "0")
+
+    echo "SPOT: $SPOT_SIZE (target: $EXPECTED_SPOT_SIZE)"
+    echo "SWAP: $SWAP_SIZE (target: $EXPECTED_SWAP_SIZE)"
+    echo ""
+}
+
+# Show latest activity
+check_activity() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🔄 Latest Activity"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    if [ -f "$SPOT_LOG" ]; then
+        echo "SPOT (last 3 lines):"
+        tail -3 "$SPOT_LOG" | sed 's/^/  /'
+    else
+        echo "SPOT: No log file yet"
+    fi
+    echo ""
+
+    if [ -f "$SWAP_LOG" ]; then
+        echo "SWAP (last 3 lines):"
+        tail -3 "$SWAP_LOG" | sed 's/^/  /'
+    else
+        echo "SWAP: No log file yet"
+    fi
+    echo ""
+}
+
+# Show memory usage
+check_memory() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🧠 Memory Status"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    free -h | head -2 | sed 's/^/  /'
+    echo ""
+}
+
+# Show completion status
+check_completion() {
+    SPOT_COUNT=$(find "$DATA_DIR/raw_ticks" -name "*.parquet" 2>/dev/null | wc -l)
+    SWAP_COUNT=$(find "$DATA_DIR/raw_ticks_swap" -name "*.parquet" 2>/dev/null | wc -l)
+
+    if [ "$SPOT_COUNT" -eq "$TOTAL_MONTHS" ] && [ "$SWAP_COUNT" -eq "$TOTAL_MONTHS" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎉 ALL DOWNLOADS COMPLETE!"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Next steps:"
+        echo "  1. Run: ./scripts/aggregate_spot_33months.sh"
+        echo "  2. Run: ./scripts/aggregate_swap_33months.sh"
+        echo ""
+        rm -f "$STATE_FILE"  # Clean up state file
+        exit 0
+    fi
+}
+
+# Main loop
+echo "Starting download monitor... (Press Ctrl+C to stop)"
+echo "Tracking progress changes to detect stalls..."
+sleep 2
+
+while true; do
+    clear_and_header
+    check_processes
+    check_files_and_progress
+    check_storage
+    check_activity
+    check_memory
+    check_completion
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "ℹ️  Refreshing in 5 seconds... (Ctrl+C to stop)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    sleep 5
+done

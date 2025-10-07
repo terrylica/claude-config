@@ -1,0 +1,212 @@
+# Victor CBO Analysis - OKX Funding Rate Arbitrage
+
+**Research-Grade Backtest Framework for Funding Rate Arbitrage**
+
+CBO: Victor Hogrefre | Auditor: Terry Li (Engineering Lead) | Strategy: Market-neutral funding rate arbitrage on OKX USDT-margined perpetuals
+
+---
+
+## 📁 Canonical Directory Structure
+
+```
+victor-cbo-analysis/
+├── src/                               # Source code (versioned)
+│   ├── backtests/                     # Backtest implementations
+│   │   ├── v1_8_4_q2q3_spot_filtered.py
+│   │   ├── v1_9_synthetic_perp.py
+│   │   └── v1_10_1_real_perp_temporal.py    # ✨ Current (v1.10.1)
+│   ├── data_pipeline/                 # Data infrastructure
+│   │   ├── downloaders/               # OKX CDN download scripts
+│   │   ├── aggregators/               # Tick → 1min bar aggregation
+│   │   └── utils/                     # Pipeline utilities
+│   └── validation/                    # Validation tools
+│
+├── workflows/                         # Orchestration scripts
+│   ├── download/                      # Data download workflows
+│   ├── aggregate/                     # Data aggregation workflows
+│   ├── backtest/                      # Backtest runners
+│   │   └── run_v1_10_1.sh            # ✨ Run v1.10.1 backtest
+│   └── monitoring/                    # Process monitoring
+│
+├── data/                              # Data hierarchy (133GB)
+│   ├── raw/                           # Raw tick data (119GB)
+│   │   ├── spot/                      # SPOT market ticks
+│   │   └── swap/                      # SWAP (perpetual) ticks
+│   ├── processed/                     # Aggregated data (14GB)
+│   │   ├── spot_1min/                 # 1-min SPOT bars
+│   │   ├── swap_1min/                 # 1-min SWAP bars
+│   │   └── funding_rates/             # Funding rate history
+│   └── metadata/                      # Data quality tracking
+│
+├── results/                           # Backtest results (versioned)
+│   └── v1.10.1/                       # ✨ Current version results
+│       ├── metadata.json              # Version info, validation status
+│       ├── runs/                      # Backtest runs
+│       │   └── 2024_Q1/              # Q1 2024: +11.79% return
+│       │       ├── backtest_*.parquet # Period-level results
+│       │       ├── backtest_*.csv     # Human-readable format
+│       │       └── summary_stats.json # Performance metrics
+│       └── analysis/                  # Comparative analysis
+│
+├── reports/                           # Analysis reports & documentation
+│   ├── strategy/                      # Strategy documentation
+│   ├── validation/                    # Temporal integrity audits
+│   ├── audits/                        # Code audits
+│   ├── performance/                   # Performance analysis
+│   └── deployment/                    # Deployment planning
+│
+├── docs/                              # Technical documentation
+│   ├── architecture/                  # System architecture
+│   ├── configuration/                 # Configuration reference
+│   ├── api/                           # API documentation
+│   └── development/                   # Development guides
+│
+├── tests/                             # Test suite
+├── notebooks/                         # Jupyter analysis notebooks
+└── .archive/                          # Historical code versions
+```
+
+---
+
+## 🚀 Quick Start
+
+### Run v1.10.1 Backtest
+
+```bash
+# Option 1: Using wrapper script (recommended)
+./workflows/backtest/run_v1_10_1.sh 2024-01-01 2024-03-31 10000
+
+# Option 2: Direct execution
+uv run --active python src/backtests/v1_10_1_real_perp_temporal.py \
+  --start 2024-01-01 \
+  --end 2024-03-31 \
+  --capital 10000
+```
+
+**Output**: Results saved to `results/v1.10.1/runs/2024_Q1/`
+
+---
+
+## 📊 Latest Results (v1.10.1 on Q1 2024)
+
+| Metric | Value |
+|--------|-------|
+| **Total Return** | **+11.79%** (+$1,178.70) |
+| Period | 2024-01-01 to 2024-03-31 |
+| Win Rate | 64.7% (163/252 periods) |
+| Total Funding | $923.75 |
+| Skip Rate | 7.01% (data gaps) |
+| Temporal Violations | **0** ✅ |
+| Prediction Accuracy | 81.7% (sign) |
+
+**Monthly Breakdown:**
+- Jan 2024: -2.22% (negative funding environment)
+- Feb 2024: +8.24% (strong performance)
+- Mar 2024: +5.76% (continued profitability)
+
+---
+
+## 🎯 v1.10.1 Key Features
+
+### Temporal Integrity Guarantees
+- ✅ **Point-in-time symbol filtering**: Month M selections use only symbols available in month M
+- ✅ **No future information**: Symbols from future months cannot appear in past selections
+- ✅ **Execution delay**: Entry at T+1m, exit at T+8h (realistic timing)
+- ✅ **Data validation**: All 4 prices (spot entry/exit, perp entry/exit) required or period skipped
+- ✅ **Walk-forward ready**: Symbol availability advances month-by-month automatically
+
+### Automated Validation
+- **SLO 1**: Market PnL variance > 0 (proves real perp prices) ✅ PASS
+- **SLO 2**: Basis std dev > 0 (proves basis tracking) ✅ PASS
+- **SLO 3**: Basis metrics 100% populated ✅ PASS
+- **SLO 4**: Data availability >= 99% ⚠ WARNING (93%)
+
+### Real Perpetual Prices
+- Uses actual SWAP market prices (not synthetic)
+- Delta-neutral hedging with real basis tracking
+- Market PnL variance: 1198.12 (confirms real prices)
+
+---
+
+## 📖 Strategy Overview
+
+**Strategy**: Prediction-Based Selection with Spot Filter
+
+1. **Every 8 hours**: OKX publishes predicted funding rates for next period
+2. **Selection**: Choose top-5 symbols with highest positive predicted rates
+3. **Filters**:
+   - Positive predicted rates only
+   - USDT-quoted symbols only
+   - SPOT market must exist (pre-filter)
+4. **Entry (T+1m)**:
+   - Long spot position
+   - Short perpetual position (delta-neutral)
+5. **Hold 8 hours** until next settlement
+6. **Exit & Collect**: Close positions, collect funding based on actual rate
+
+**P&L Sources**:
+- Funding collected (strategy target)
+- Spot price change (hedged)
+- Perp price change (hedged)
+- Basis movement (residual risk)
+
+---
+
+## 🛠️ Data Pipeline
+
+### Download Historical Data
+```bash
+# SPOT markets (49GB)
+./workflows/download/spot_full_history.sh
+
+# SWAP markets (70GB)
+./workflows/download/swap_full_history.sh
+```
+
+### Aggregate to 1-Min Bars
+```bash
+# SPOT aggregation (22GB → 8.6GB)
+./workflows/aggregate/spot_full_history.sh
+
+# SWAP aggregation (70GB → 5.3GB)
+./workflows/aggregate/swap_full_history.sh
+```
+
+**Optimal Concurrency**: c=13 parallel downloads (116.3 MB/s throughput)
+
+---
+
+## 📚 Documentation
+
+- **Strategy**: `reports/strategy/` - Strategy overview and upgrade plans
+- **Validation**: `reports/validation/` - Temporal integrity audits
+- **Performance**: `reports/performance/` - Historical analysis
+- **Architecture**: `docs/architecture/` - System design
+- **Configuration**: `docs/configuration/` - Setup reference
+
+---
+
+## ⚠️ Limitations & Risk Disclosure
+
+- **NOT machine learning**: Uses exchange-provided predictions (not ML models)
+- **Prediction risk**: Exchange predictions can be wrong → negative funding possible
+- **Data gaps**: Missing price data causes period skips
+- **Network assumptions**: Assumes instant execution at T+1m (ignores slippage)
+- **Basis risk**: Spot-perp basis can move adversely during holding period
+
+**Example Failure Mode**: Predicted +50 bps but actual -25 bps → pay 25 bps funding
+
+---
+
+## 📝 Version History
+
+- **v1.10.1** (2024-10-05): Temporal integrity validation + point-in-time filtering
+- **v1.10** (2024-10-03): Real perpetual price integration
+- **v1.9** (2024-10-03): Modular architecture with synthetic perp prices
+- **v1.8.4** (Earlier): Q2/Q3 2025 spot-filtered backtest
+
+---
+
+## 📄 License
+
+Research-only. Not for production deployment without comprehensive risk assessment.

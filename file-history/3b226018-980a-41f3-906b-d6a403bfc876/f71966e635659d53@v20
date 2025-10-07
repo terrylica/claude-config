@@ -1,0 +1,355 @@
+# CLAUDE.md
+
+## Execution Pattern
+
+**Development/Testing (Native UV - Fast Iteration):**
+```bash
+# Preferred for quick testing and development
+uv run --active python -m <module_path>
+
+# Probe dependencies in isolation (no install to workspace)
+uvx --from <package> python -c "import <module>; print('OK')"
+
+# Test scripts in /tmp (minimal workspace impact)
+uv run --active python /tmp/test_script.py
+```
+
+**Production/CI (Docker - Reproducible Environment):**
+```bash
+# Use for final validation and CI pipelines
+docker exec ml-dev python -m <module_path>
+```
+
+**Testing Philosophy:**
+- **Development**: Use `uv/uvx` for speed, iterate in `/tmp`
+- **Validation**: Use Docker for environment reproducibility
+- **Probing**: Use `uvx --from <pkg>` to test dependencies without installing
+
+## Docker Container (Optional - For Reproducible Builds)
+
+- **Runtime**: Colima (pure CLI, no GUI) - `colima start`
+- **Container name**: `ml-dev`
+- **Working directory**: `/workspace`
+- **Install command**: `docker exec ml-dev pip install -e '.[dev]'`
+- **Note**: Not required for development; use UV for faster iteration
+
+## Project Context
+
+- **Dockerfile fix**: `ENV CONDA_PLUGINS_AUTO_ACCEPT_TOS=true` resolves Anaconda ToS requirement (July 2025)
+- **Templates** (output format for validated features):
+  - Templates define the FeatureSet structure for validation
+  - Use IPSS+VIF pipeline to select features → then conform to template format
+  - Examples: `ohlcv_comprehensive_sizex_v5.py`, `ohlcv_fluid-dynamics_sizex_v1.py`
+
+## PR Policy (ZERO-TRUST WHITELIST)
+
+**Philosophy:** BLOCK EVERYTHING until explicitly approved
+
+**Automated enforcement:** `.github/workflows/enforce-production-only.yml`
+
+**Current whitelist:** EMPTY (nothing allowed)
+
+**Workflow:**
+1. Create PR with code changes
+2. PR will FAIL (expected - whitelist is empty)
+3. Review failed PR to see blocked files
+4. If approved, manually add pattern to whitelist in workflow file
+5. Commit whitelist update to main first
+6. Rebase/update PR - it will now pass
+
+**Example whitelist patterns:**
+```bash
+'^ml_feature_set/bundled/.*\.py$'     # Python files in bundled/
+'^pyproject\.toml$'                    # Project config
+'^README\.md$'                         # Root README only
+```
+
+**Whitelist location:** Line 45 in `.github/workflows/enforce-production-only.yml`
+
+**Policy:** Default deny - no files merge to main unless pattern is explicitly added to whitelist
+
+## Sample Data
+
+- **Binance timestamps**: Always use `datetime.fromtimestamp(ts/1000, tz=timezone.utc)` (naive conversion creates fake DST duplicates)
+
+## Key Architecture Points
+
+- **`actual_ready_time`**: Framework-generated (not in CSVs), simulates data availability delay
+- **`resample_factors`**: Multi-timeframe (different intervals via OHLCV aggregation), NOT multi-period (different lookbacks)
+
+## Feature Construction Patterns (Off-the-Shelf)
+
+**Pandas methods:**
+- `.ewm()` - Exponentially weighted (MACD, adaptive indicators)
+- `.expanding()` - Walk-forward cumulative features
+- `.rank(pct=True)` - Percentile normalization (0-1)
+- `.pipe()` - Method chaining for pipelines
+- `.groupby().transform()` - Group stats → original rows
+- `.interpolate(method='time')` - Time-aware missing data
+- `.resample().interpolate()` - Upsample with interpolation
+- Named aggs: `agg(vol_mean=('volume', 'mean'))`
+
+**sklearn transformers (OOD-robust):**
+- `PolynomialFeatures(interaction_only=True)` - Feature crosses (RSI×Volume)
+- `QuantileTransformer(output_distribution='normal')` - Outliers → Gaussian (robust)
+- `RobustScaler()` - IQR-based scaling (outlier-resistant)
+
+**Robust statistics:**
+- `scipy.stats.median_abs_deviation()` - MAD (more robust than std)
+- `scipy.stats.mstats.winsorize()` - Cap extremes (vs trimming)
+- Downside deviation - Semi-variance for risk metrics
+
+**Normalization principles:**
+- `np.arctan()` - Smooth squashing (unbounded → bounded, vs hard clip)
+- Multi-period families - Sweep all periods (5,10,15,20,25,30), let model choose vs expert
+- Second-order features - Derivatives of moving averages (acceleration = Δ(MA))
+
+**Higher-order derivatives (velocity/acceleration/jerk):**
+- `scipy.signal.savgol_filter(deriv=1/2/3)` - Industry standard (Savitzky-Golay smoothing + differentiation)
+- `derivative` package (2024, experimental) - Total Variation Regularization for extremely noisy data
+- Note: 3rd+ order rarely used in production (noise-sensitive)
+
+**Signal decomposition (production):**
+- `pywt.wavedec()` - Wavelet decomposition (trend/detail separation)
+- `statsmodels.tsa.seasonal.STL` - Seasonal/trend/residual split
+
+**Information theory (production):**
+- `sklearn.feature_selection.mutual_info_regression()` - Mutual information (non-linear dependence)
+
+**Regime detection (feature generation only, not for selection validation):**
+- `hmmlearn.GaussianHMM` - Hidden Markov Models (unsupervised regime features)
+
+**Spectral & cross-series analysis:**
+- `scipy.signal.coherence()` - Frequency coherence between series
+- `scipy.signal.csd()` - Cross-spectral density (phase relationships)
+- `scipy.fft` - Frequency domain features
+
+**Financial risk metrics:**
+- Maximum drawdown - Steepest peak-to-trough decline
+- Sortino ratio - Downside deviation (vs total volatility in Sharpe)
+- Calmar ratio - Return / max drawdown
+
+**Advanced aggregations:**
+- `statsmodels.regression.rolling.RollingOLS` - Rolling regression (beta over time)
+- `scipy.signal.fftconvolve()` - Fast convolution (moving averages)
+- `scipy.signal.find_peaks()` - Peak detection
+
+**Realized measures (Andersen-Bollerslev framework):**
+- Realized volatility - Sum of squared intraperiod returns (5-min benchmark)
+- Bipower variation - Barndorff-Nielsen & Shephard (separates jumps from continuous volatility)
+- Jump detection - Realized variance minus bipower variation
+- Range-based volatility:
+  - Parkinson (5x more efficient than close-to-close)
+  - Garman-Klass (7.4x more efficient, assumes no jumps)
+  - Yang-Zhang (14x more efficient, handles opening jumps & drift)
+
+**Microstructure proxies (OHLCV-compatible):**
+- Amihud ILLIQ - `|return|/dollar_volume` (illiquidity measure)
+- High-low Amihud - `(high-low)/volume` (range-based illiquidity)
+- VPIN estimation - Volume-synchronized informed trading (classify buy/sell from price changes)
+- Kyle's lambda proxy - Market impact/adverse selection
+- Order flow imbalance - Tick rule (price > prev = buy, < prev = sell)
+
+**Fractal analysis:**
+- Higuchi fractal dimension - Complexity of time series trajectory
+- Box-counting dimension - Fractal structure of price patterns
+
+**Math utilities:**
+- `np.einsum('ij,ik->jk')` - Efficient covariance matrices
+- Broadcasting - Pairwise operations without loops
+
+---
+
+### Research/Experimental (not in minimal production stack)
+
+**Complexity measures:**
+- `ordpy` - Permutation entropy (order-based)
+- `antropy` - Sample/approximate/multiscale entropy
+- `nolds.dfa()` - Detrended Fluctuation Analysis (Hurst parameter)
+- `PyRQA` - Recurrence Quantification Analysis
+
+**Causal discovery:**
+- `tigramite` - Transfer entropy, Granger causality
+
+**Advanced decomposition:**
+- `PyEMD` - Empirical Mode Decomposition (from "Signal decomposition" section)
+
+**Nonlinear dependence:**
+- `pyvinecopulib`/`pycop` - Vine copulas, tail dependence
+
+**Relational:**
+- `getML` - Automated cross-table aggregations (requires license)
+
+**Fast alternatives:**
+- `infomeasure` - Entropy/MI (10x faster than scipy)
+
+---
+
+### Methods to Avoid (Blacklist)
+
+**Multi-environment knockoffs:**
+- ❌ Avoid unless environments are objectively defined (e.g., BTC/ETH/SPY, pre/post regulatory)
+- Reason: Subjective "bull/bear/sideways" regimes risk circularity (using outcome to validate features)
+
+**Universal HSIC kernel scans:**
+- ❌ Avoid O(n²) pairwise checks across all features
+- Reason: Most OHLCV transforms are near-linear; costly with marginal benefit over stability selection + VIF
+- Use sparingly: Only targeted checks on high-Pearson pairs if needed
+
+**Performance reference:** See `.claude/performance-blacklist.md` (not priority)
+
+**OOD robustness principles (2025 research):**
+- **Invariant features** - Extract features stable across distribution shifts (e.g., permutation entropy, DFA)
+- **Decoupling** - Separate task-relevant from task-irrelevant features (e.g., EMD separates trend/noise)
+- **Information-theoretic** - Mutual information, transfer entropy resist spurious correlations
+- **Robust estimators** - MAD, winsorization, quantile transforms handle outliers without overfitting
+- **Causal structures** - Focus on causal relationships (tigramite) vs correlations for regime shifts
+
+**Excluded:** tsfresh, catch22/featuretools (automated but not OOD-robust enough)
+
+## OOD-Robust Feature Pipeline (3-Phase Workflow)
+
+### Phase 1: Candidate Generation (Exhaustive Atom Library)
+**Goal:** Systematically compute ALL candidate features from comprehensive library catalog
+
+**Atom Library Catalog:** See `.claude/atom-library-catalog.md` (50+ libraries, ~2000 atoms planned; Layers A-B implemented: ~120 atoms)
+
+**Layer Organization:** See `.claude/orthogonality-layers.md` (A-H layered approach ensures orthogonality by construction)
+
+**Current Implementation:**
+- **Layer A** (24 atoms): Calendar & market structure features (holidays, Fourier seasonality)
+- **Layer B** (~100 atoms): Trend/vol baselines (lags, rolling stats, STL, EWM, realized vol)
+- **Layers C-H**: Placeholder (to be implemented: time-frequency, entropy, topology, motifs, anomaly, kitchen sink)
+
+**Process:**
+1. Read OHLCV data from CSV (must have `actual_ready_time` or `date` column)
+2. Compute Layer A (calendars) → ~24 atoms
+3. Compute Layer B (baselines) → ~100 atoms
+4. Orthogonalize Layer B vs Layer A (OLS residuals)
+5. Output: Wide CSV with ~120 columns (Layers A-B; expandable to ~2000 when C-H implemented)
+
+**CLI Command (Development - UV):**
+```bash
+# Fast iteration with native Python (no Docker required)
+uv run --active python -m ml_feature_set.atoms.compute_all \
+  --data ml_feature_set/sample_data/resampled_binance_SOL-5m.csv \
+  --layers A,B \
+  --output /tmp/sol5m_atoms_wide.csv
+```
+
+**CLI Command (Production - Docker):**
+```bash
+# Reproducible environment for final validation
+docker exec ml-dev python -m ml_feature_set.atoms.compute_all \
+  --data ml_feature_set/sample_data/resampled_binance_SOL-5m.csv \
+  --layers A,B \
+  --output /tmp/sol5m_atoms_wide.csv
+```
+
+**Output Format:**
+- Wide CSV: `actual_ready_time` (index) | `atom_1` | `atom_2` | ... | `atom_120`
+- Ready for Phase 2 (IPSS+VIF selection) to filter down to ~20-60 final features
+
+**Key Files:**
+- `.claude/atom-library-catalog.md` - What to compute (library + parameter details)
+- `.claude/orthogonality-layers.md` - How to organize (layer strategy + orthogonalization)
+- `ml_feature_set/atoms/library.py` - Core AtomSpec/AtomLibrary classes
+- `ml_feature_set/atoms/formulas/layer_a_calendars.py` - Layer A implementations
+- `ml_feature_set/atoms/formulas/layer_b_baselines.py` - Layer B implementations
+- `ml_feature_set/atoms/compute_all.py` - Batch computation CLI
+
+---
+
+### Phase 2: Selection (IPSS + VIF)
+**Goal:** Keep stable, non-redundant features
+
+**Two-stage pipeline:**
+1. **IPSS** (Integrated Path Stability Selection)
+   - Bootstrap: Block/stationary (`arch` package), block size ≈ 64 bars (TF-appropriate)
+   - Selector: `Lasso (L1)` (default) or `RandomForest` (alternative)
+   - Keep features with selection frequency ≥ threshold
+   - CV: Purged/embargoed `TimeSeriesSplit` (`sklearn`)
+
+2. **VIF Prune** (Variance Inflation Factor)
+   - Iteratively drop features with VIF ≥ threshold (typically 5.0)
+   - Stop when all VIF < threshold
+   - Library: `statsmodels.stats.outliers_influence.variance_inflation_factor`
+
+**Controls:**
+- `--stability-B 100` - Bootstrap iterations (100-200)
+- `--stability-thr 0.70` - Selection frequency threshold (0.5-0.8)
+- `--vif 5.0` - VIF threshold (5.0-10.0)
+- `--final-k 20` - Hard cap on final feature count (highest stability freq post-VIF)
+
+**Optional (use sparingly):**
+- **Graphical Lasso** (`sklearn.covariance.GraphicalLassoCV`) - Conditional de-duplication before VIF if high dimensionality
+- **Targeted nonlinearity check** (`dcor`, `hyppo`) - Only on flagged high-Pearson pairs to avoid O(n²) cost
+
+---
+
+### Phase 3: Template Conformance (Output Format)
+**Goal:** Package validated features into FeatureSet structure
+
+**Process:**
+- Take IPSS+VIF survivors
+- Conform to template structure for validation
+- Templates define output format, NOT feature generation method
+
+**Examples:**
+- `ohlcv_comprehensive_sizex_v5.py` (non-linear features)
+- `ohlcv_fluid-dynamics_sizex_v1.py` (vectorized pandas patterns)
+
+---
+
+### CLI Execution (Docker-First)
+```bash
+docker exec ml-dev python -m ml_feature_set.cli churn \
+  --data data/ohlcv.parquet --target ret_1h \
+  --tfs 1m,5m,15m,1h \
+  --win 1m:5-240 5m:3-96 15m:3-64 1h:2-48 \
+  --atoms-k 60 --final-k 20 \
+  --selector lasso --stability-B 100 --stability-thr 0.70 \
+  --vif 5.0
+```
+
+**Probing protocol:**
+- Always probe in `/tmp` with `uv/uvx` before touching repo env
+- Test: `uvx --from <package> python -c "import <module>"`
+- Degrade gracefully to `sklearn`-only path if optional libs unavailable
+
+---
+
+### Minimal Implementation Stack
+**Core (required):**
+- `numpy`, `pandas`, `pyarrow` (Parquet), `scikit-learn`, `statsmodels` (VIF), `arch` (bootstrap)
+- `tqdm`, `pydantic`, `typer` (CLI), `pytest` (tests)
+
+**Optional (fail-soft):**
+- `lightgbm`, `xgboost`, `catboost` (tree-guided atoms)
+- `dcor`, `hyppo` (targeted nonlinearity checks)
+
+**Dev quality:**
+- `ruff`, `black`
+
+**Env management:**
+- `uv`, `uvx` (probing in /tmp)
+
+---
+
+### OOD-Robustness Principles
+- **Perturbation stability** (bootstrap) > hand-labeled regimes
+- **No leakage** (purged/embargoed CV)
+- **Parsimony** (L1/shallow trees) + **de-duplication** (VIF mandatory)
+- **Explicit fences** (timeframe list, per-TF lookback bounds)
+
+---
+
+### Output Report (Always Include)
+- Input feature count → IPSS survivors (freq ≥ threshold) → post-VIF count → final_k
+- Per-feature selection frequency (0-1)
+- Removal reasons: VIF value or targeted nonlinearity result
+- Thresholds used: stability threshold, VIF threshold, final_k
+
+
+**Infrastructure:**
+- Anaconda ToS: https://stackoverflow.com/questions/79702788/

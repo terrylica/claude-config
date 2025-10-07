@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Debug script to verify BarPriceProvider correctly loads SPOT vs SWAP data for PRCL."""
+
+import pandas as pd
+from pathlib import Path
+import sys
+
+# Add libs to path
+libs_path = Path(__file__).parent / "libs" / "okx-price-provider" / "src"
+sys.path.insert(0, str(libs_path))
+
+from okx_price_provider.bar_provider import BarPriceProvider
+
+def main():
+    # Initialize providers
+    spot_dir = Path("data/1min_bars")
+    swap_dir = Path("data/1min_bars_swap")
+
+    print("=" * 80)
+    print("PROVIDER INITIALIZATION")
+    print("=" * 80)
+    print(f"SPOT dir: {spot_dir.resolve()}")
+    print(f"SWAP dir: {swap_dir.resolve()}")
+    print()
+
+    spot_provider = BarPriceProvider(spot_dir, market_type="spot")
+    swap_provider = BarPriceProvider(swap_dir, market_type="swap")
+
+    print(f"SPOT provider initialized with market_type: {spot_provider.market_type}")
+    print(f"SWAP provider initialized with market_type: {swap_provider.market_type}")
+    print()
+
+    # Test timestamp from the error
+    test_time = pd.Timestamp("2024-05-17 16:01:00", tz="UTC")
+
+    print("=" * 80)
+    print("TESTING PRCL-USDT (SPOT)")
+    print("=" * 80)
+    spot_data = spot_provider.get_prices(
+        symbols=["PRCL-USDT"],
+        start_date=test_time,
+        end_date=test_time,
+        freq="1min",
+        method="vwap"
+    )
+
+    if spot_data is not None and len(spot_data) > 0:
+        print(spot_data)
+        spot_price = spot_data['price'].iloc[0]
+        print(f"\nSPOT PRCL-USDT price at {test_time}: ${spot_price:.15f}")
+    else:
+        print("NO DATA RETURNED")
+    print()
+
+    print("=" * 80)
+    print("TESTING PRCL-USDT-SWAP (PERP)")
+    print("=" * 80)
+    swap_data = swap_provider.get_prices(
+        symbols=["PRCL-USDT-SWAP"],
+        start_date=test_time,
+        end_date=test_time,
+        freq="1min",
+        method="vwap"
+    )
+
+    if swap_data is not None and len(swap_data) > 0:
+        print(swap_data)
+        swap_price = swap_data['price'].iloc[0]
+        print(f"\nSWAP PRCL-USDT-SWAP price at {test_time}: ${swap_price:.15f}")
+    else:
+        print("NO DATA RETURNED")
+    print()
+
+    # Compare
+    if spot_data is not None and swap_data is not None:
+        print("=" * 80)
+        print("COMPARISON")
+        print("=" * 80)
+        print(f"SPOT price: ${spot_price:.15f}")
+        print(f"SWAP price: ${swap_price:.15f}")
+        print(f"Difference: ${abs(swap_price - spot_price):.15f}")
+        print(f"% Diff: {abs(swap_price - spot_price) / spot_price * 100:.6f}%")
+
+        if abs(spot_price - swap_price) < 1e-10:
+            print("\n⚠️  IDENTICAL PRICES - SYNTHETIC CALCULATION DETECTED!")
+        else:
+            print("\n✓ Different prices - Real market data")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,272 @@
+"""
+Position sizing and allocation strategies.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Dict, Optional
+from .state import PortfolioState
+from .constraints import PositionConstraints
+
+
+class BaseAllocator(ABC):
+    """Abstract base class for allocation strategies."""
+
+    def __init__(self, constraints: Optional[PositionConstraints] = None):
+        """
+        Initialize allocator.
+
+        Args:
+            constraints: Optional position constraints (min/max sizes, etc.)
+        """
+        self.constraints = constraints or PositionConstraints()
+
+    @abstractmethod
+    def allocate(
+        self,
+        target_weights: Dict[str, float],
+        portfolio: PortfolioState,
+        prices: Dict[str, float]
+    ) -> Dict[str, float]:
+        """
+        Calculate dollar allocations for each symbol.
+
+        Args:
+            target_weights: Desired portfolio weights {symbol: weight}
+            portfolio: Current portfolio state
+            prices: Current market prices {symbol: price}
+
+        Returns:
+            Dollar allocations {symbol: usd_amount}
+        """
+        pass
+
+
+class DollarAllocator(BaseAllocator):
+    """
+    Allocate based on absolute dollar amounts.
+
+    Converts percentage weights to dollar amounts with constraints applied.
+    """
+
+    def allocate(
+        self,
+        target_weights: Dict[str, float],
+        portfolio: PortfolioState,
+        prices: Dict[str, float]
+    ) -> Dict[str, float]:
+        """
+        Allocate available cash based on target weights.
+
+        Respects:
+        - Max/min position sizes
+        - Available cash constraints
+        - Allocation ordering (largest first)
+
+        Args:
+            target_weights: Target weights (should sum to ~1.0)
+            portfolio: Current portfolio state
+            prices: Current prices
+
+        Returns:
+            Dollar allocations for each symbol
+        """
+        available_cash = portfolio.get_available_cash()
+        total_value = portfolio.get_total_value(prices)
+
+        allocations = {}
+        total_allocated = 0.0
+
+        # Sort by weight (largest first) for more realistic execution
+        sorted_symbols = sorted(
+            target_weights.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        for symbol, weight in sorted_symbols:
+            # Desired dollar amount based on total portfolio value
+            desired_usd = weight * total_value
+
+            # Apply position size constraints
+            desired_usd = self.constraints.clip_position_size(desired_usd)
+
+            # Can't allocate more than available cash
+            max_allocatable = available_cash - total_allocated
+
+            if max_allocatable < self.constraints.min_position_usd:
+                # Not enough cash left for minimum position
+                continue
+
+            # Take minimum of desired and available
+            actual_usd = min(desired_usd, max_allocatable)
+
+            # Check if meets minimum
+            if actual_usd >= self.constraints.min_position_usd:
+                allocations[symbol] = actual_usd
+                total_allocated += actual_usd
+
+            # Stop if we've allocated all available cash
+            if total_allocated >= available_cash * 0.9999:  # Small tolerance
+                break
+
+        return allocations
+
+
+class PercentAllocator(BaseAllocator):
+    """
+    Allocate as percentage of total portfolio value.
+
+    Similar to DollarAllocator but always references current total value.
+    """
+
+    def allocate(
+        self,
+        target_weights: Dict[str, float],
+        portfolio: PortfolioState,
+        prices: Dict[str, float]
+    ) -> Dict[str, float]:
+        """
+        Allocate based on percentage of total portfolio value.
+
+        Args:
+            target_weights: Target weights
+            portfolio: Current portfolio state
+            prices: Current prices
+
+        Returns:
+            Dollar allocations
+        """
+        total_value = portfolio.get_total_value(prices)
+        allocations = {}
+
+        for symbol, weight in target_weights.items():
+            desired_usd = weight * total_value
+
+            # Apply constraints
+            desired_usd = self.constraints.clip_position_size(desired_usd)
+
+            if desired_usd >= self.constraints.min_position_usd:
+                allocations[symbol] = desired_usd
+
+        return allocations
+
+
+class TargetValueAllocator(BaseAllocator):
+    """
+    Rebalancing allocator that calculates trades needed to reach target weights.
+
+    Unlike DollarAllocator which only uses available cash, this considers
+    existing positions and calculates what to buy/sell.
+    """
+
+    def __init__(
+        self,
+        constraints: Optional[PositionConstraints] = None,
+        tolerance: float = 0.01
+    ):
+        """
+        Initialize rebalancing allocator.
+
+        Args:
+            constraints: Position constraints
+            tolerance: Don't rebalance if within this fraction of target
+        """
+        super().__init__(constraints)
+        self.tolerance = tolerance
+
+    def allocate(
+        self,
+        target_weights: Dict[str, float],
+        portfolio: PortfolioState,
+        prices: Dict[str, float]
+    ) -> Dict[str, float]:
+        """
+        Calculate rebalancing trades to achieve target weights.
+
+        Args:
+            target_weights: Target portfolio weights
+            portfolio: Current portfolio state
+            prices: Current prices
+
+        Returns:
+            Dictionary of trades: {symbol: dollar_amount}
+            Positive = buy, Negative = sell
+        """
+        total_value = portfolio.get_total_value(prices)
+        trades = {}
+
+        # Calculate what we need for each position
+        for symbol, target_weight in target_weights.items():
+            target_value = target_weight * total_value
+
+            # Apply constraints
+            target_value = self.constraints.clip_position_size(target_value)
+
+            # Get current position value
+            current_value = 0.0
+            if symbol in portfolio.positions:
+                current_value = portfolio.positions[symbol].get_current_value(
+                    prices[symbol]
+                )
+
+            # Calculate difference
+            diff = target_value - current_value
+
+            # Check if outside tolerance band
+            diff_pct = abs(diff) / total_value if total_value > 0 else 0
+
+            if diff_pct > self.tolerance:
+                # Respect minimum position size
+                if abs(diff) >= self.constraints.min_position_usd:
+                    trades[symbol] = diff
+
+        # Close positions not in target
+        for symbol in portfolio.positions:
+            if symbol not in target_weights:
+                current_value = portfolio.positions[symbol].get_current_value(
+                    prices[symbol]
+                )
+                trades[symbol] = -current_value  # Sell entire position
+
+        return trades
+
+
+class EqualWeightAllocator(BaseAllocator):
+    """Allocate equal dollar amounts to each symbol."""
+
+    def allocate(
+        self,
+        target_weights: Dict[str, float],
+        portfolio: PortfolioState,
+        prices: Dict[str, float]
+    ) -> Dict[str, float]:
+        """
+        Allocate equally across all symbols.
+
+        Args:
+            target_weights: Symbols to allocate to (weights ignored)
+            portfolio: Current portfolio state
+            prices: Current prices
+
+        Returns:
+            Equal dollar allocations
+        """
+        available_cash = portfolio.get_available_cash()
+        n_symbols = len(target_weights)
+
+        if n_symbols == 0:
+            return {}
+
+        # Equal split
+        equal_amount = available_cash / n_symbols
+
+        # Apply constraints
+        equal_amount = self.constraints.clip_position_size(equal_amount)
+
+        allocations = {}
+
+        if equal_amount >= self.constraints.min_position_usd:
+            for symbol in target_weights:
+                allocations[symbol] = equal_amount
+
+        return allocations

@@ -1,0 +1,521 @@
+# Phase 5: MAE/MFE Quality-Based Feature Selection
+
+**Date**: 2025-10-03
+**Status**: Implementation
+**Branch**: feat/ood-robust/EL-1009
+**Context**: OOD robustness pipeline - feature selection with directional trading target
+
+## Objective
+
+Select 20-30 features from 48 candidates using MAE/MFE quality target and IPSS stability selection.
+
+**Input**: 48 features from pruning manifest (|r| ≤ 0.90)
+**Output**: 20-30 features validated for directional CTA trading (high-frequency intraday)
+**Method**: MAE/MFE target labeling + VIF filtering + IPSS stability selection
+
+## Target Variable: MAE/MFE Quality
+
+### Definition
+
+**Maximum Favorable Excursion (MFE)**: Maximum profit opportunity within horizon
+**Maximum Adverse Excursion (MAE)**: Maximum drawdown within horizon
+**Quality**: MFE/MAE ratio (reward/risk, higher = better)
+
+### Formulation
+
+For entry price P₀ at time t, looking forward H bars:
+
+**Long position**:
+```
+MFE_long = max(high[t+1:t+H+1]) - P₀
+MAE_long = P₀ - min(low[t+1:t+H+1])
+long_quality = MFE_long / MAE_long  (if MAE_long > 0, else clip to max)
+```
+
+**Short position**:
+```
+MFE_short = P₀ - min(low[t+1:t+H+1])
+MAE_short = max(high[t+1:t+H+1]) - P₀
+short_quality = MFE_short / MAE_short  (if MAE_short > 0, else clip to max)
+```
+
+**Best direction**: Direction with higher quality (long if long_quality > short_quality)
+
+### Parameters
+
+**Horizon H**: 20 bars (100 minutes for 5-min data)
+- **Rationale**: Intraday directional trading at "relatively high frequency"
+- **Adjustable**: Test H=10,20,40 for sensitivity analysis
+
+**Quality clipping**: 100.0 (max quality for perfect trades, MAE=0)
+**Quality threshold**: 1.5 (entry filter: MFE must be ≥1.5x MAE)
+
+### Edge Cases
+
+| Condition | MFE | MAE | Quality | Handling |
+|-----------|-----|-----|---------|----------|
+| Flat market | 0 | 0 | Undefined | Set to np.nan, exclude from training |
+| Perfect trade | >0 | 0 | ∞ | Clip to 100.0 (max quality) |
+| No opportunity | 0 | >0 | 0 | Valid (poor trade) |
+| Normal trade | >0 | >0 | MFE/MAE | Valid |
+
+### SLO Definitions
+
+**Correctness**:
+- Lookahead verification: Entry at close[t], window at [t+1:t+H+1] (no future data)
+- Edge case handling: All conditions mapped to valid values or np.nan
+- Numerical precision: Quality calculation error < 1e-10
+
+**Availability**:
+- Data sufficiency: Require >= 100 rows after horizon truncation
+- Valid samples: Exclude np.nan quality (flat markets only)
+- Coverage: >= 80% of samples must have valid quality labels
+
+**Observability**:
+- Log quality distribution (min, max, mean, median, percentiles)
+- Log sample counts (total, long-biased, short-biased, neutral)
+- On error: Raise with clear message (no silent NaN propagation)
+
+**Maintainability**:
+- Use pandas rolling operations (out-of-box)
+- No custom MAE/MFE algorithms (use .rolling().max(), .rolling().min())
+- Document assumptions (entry = close[t], instant execution)
+
+## Pipeline Stages
+
+### Stage 1: Target Calculation
+**Input**: OHLCV data (9,901 rows)
+**Output**: Quality labels (long_quality, short_quality, best_direction, best_quality)
+**Script**: `compute_targets.py`
+
+**Implementation**:
+```python
+def calculate_directional_quality(df, horizon=20, max_quality=100.0):
+    """
+    Calculate MAE/MFE quality for long/short positions
+
+    Returns:
+        DataFrame with: long_quality, short_quality, best_direction, best_quality
+    """
+    n = len(df)
+    long_quality = np.full(n, np.nan)
+    short_quality = np.full(n, np.nan)
+
+    for i in range(n - horizon):
+        entry_price = df['close'].iloc[i]
+        window_high = df['high'].iloc[i+1:i+horizon+1].max()
+        window_low = df['low'].iloc[i+1:i+horizon+1].min()
+
+        # Long position
+        MFE_long = window_high - entry_price
+        MAE_long = entry_price - window_low
+
+        if MAE_long > 0:
+            long_quality[i] = min(MFE_long / MAE_long, max_quality)
+        elif MFE_long > 0 and MAE_long == 0:
+            long_quality[i] = max_quality  # Perfect trade
+        # else: MFE_long == MAE_long == 0 → np.nan (flat market)
+
+        # Short position (symmetric)
+        MFE_short = entry_price - window_low
+        MAE_short = window_high - entry_price
+
+        if MAE_short > 0:
+            short_quality[i] = min(MFE_short / MAE_short, max_quality)
+        elif MFE_short > 0 and MAE_short == 0:
+            short_quality[i] = max_quality
+
+    results = pd.DataFrame({
+        'long_quality': long_quality,
+        'short_quality': short_quality
+    }, index=df.index)
+
+    results['best_direction'] = np.where(
+        results['long_quality'] > results['short_quality'],
+        'long', 'short'
+    )
+    results['best_quality'] = np.maximum(
+        results['long_quality'],
+        results['short_quality']
+    )
+
+    return results
+```
+
+**Validation**:
+- Check lookahead: Verify window starts at i+1, not i
+- Check coverage: Valid quality >= 80% of samples
+- Check distribution: Log percentiles, detect anomalies
+
+---
+
+### Stage 2: Feature Filtering (Pruning Manifest)
+**Input**: 89 atoms
+**Output**: 48 features (pruned)
+**Reference**: `.claude/feature-pruning-manifest.md`
+
+**Implementation**:
+```python
+import yaml
+
+# Load pruning manifest
+with open('.claude/feature-pruning-manifest.md') as f:
+    content = f.read()
+    manifest = yaml.safe_load(content.split('---')[1])
+
+# Filter to kept features
+pruned = set(manifest['pruned_features'].keys())
+kept_features = [f for f in atoms_df.columns if f not in pruned]
+
+X = atoms_df[kept_features]  # 48 features
+```
+
+**Validation**:
+- Verify 48 features (not 89)
+- Verify no pruned features in X
+- Check for missing features (raise if any)
+
+---
+
+### Stage 3: VIF Filtering
+**Input**: 48 features
+**Output**: 37 features (VIF ≤ 5.0, validated)
+**Script**: `run_vif_filter.py`
+**Time**: 9.7s (validated in vif_feasibility_test_20251003)
+
+**Implementation**:
+```python
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+def iterative_vif_filter(X, threshold=5.0, max_iterations=50):
+    """
+    Iteratively remove features with VIF > threshold
+
+    Returns:
+        Filtered DataFrame, removal log
+    """
+    X_filtered = X.copy()
+    removed = []
+    iteration = 0
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        if len(X_filtered.columns) < 2:
+            raise ValueError("Only 1 feature left before convergence")
+
+        # Calculate VIF
+        vif_values = []
+        for i in range(len(X_filtered.columns)):
+            vif = variance_inflation_factor(X_filtered.values, i)
+            vif_values.append(vif)
+
+        max_vif = max(vif_values)
+        max_idx = vif_values.index(max_vif)
+        max_feature = X_filtered.columns[max_idx]
+
+        if max_vif <= threshold:
+            break  # Converged
+
+        # Remove feature
+        removed.append({'feature': max_feature, 'vif': max_vif})
+        X_filtered = X_filtered.drop(columns=[max_feature])
+
+    if max_vif > threshold:
+        raise RuntimeError(f"VIF did not converge after {max_iterations} iterations")
+
+    return X_filtered, removed
+```
+
+**SLOs**:
+- **Correctness**: Use statsmodels VIF (out-of-box, no custom implementation)
+- **Availability**: Converge within 50 iterations (validated: 12 iterations)
+- **Observability**: Log each removal (feature name, VIF value)
+- **Maintainability**: Raise on non-convergence (no silent failures)
+
+---
+
+### Stage 4: Embargoed Time Series CV
+**Input**: Features (37 after VIF), targets (quality labels)
+**Output**: Train/val splits with embargo gap
+**Script**: `ml_feature_set/validation/time_series_cv.py`
+
+**Implementation**:
+```python
+class EmbargoedTimeSeriesSplit:
+    """
+    Time series CV with embargo period between train and validation
+
+    Embargo prevents target lookahead:
+    Train: [0...1000]
+    Gap (embargo): [1001...1020]  ← H=20 bars, cannot use (target depends on future)
+    Val: [1021...2000]
+    """
+
+    def __init__(self, n_splits=5, test_size=0.2, embargo=20):
+        self.n_splits = n_splits
+        self.test_size = test_size
+        self.embargo = embargo
+
+    def split(self, X, y=None, groups=None):
+        n = len(X)
+        test_size = int(n * self.test_size)
+
+        for i in range(self.n_splits):
+            test_end = n - (self.n_splits - i - 1) * test_size
+            test_start = test_end - test_size
+            train_end = test_start - self.embargo  # Embargo gap
+
+            if train_end <= 0:
+                raise ValueError(f"Insufficient data for {self.n_splits} splits with embargo={self.embargo}")
+
+            train_idx = np.arange(0, train_end)
+            test_idx = np.arange(test_start, test_end)
+
+            yield train_idx, test_idx
+```
+
+**SLOs**:
+- **Correctness**: Embargo = horizon (H=20) to prevent target lookahead
+- **Availability**: Require sufficient data for n_splits (raise if insufficient)
+- **Observability**: Log train/val sizes per fold
+- **Maintainability**: Extend sklearn TimeSeriesSplit pattern (familiar API)
+
+---
+
+### Stage 5: IPSS Stability Selection
+**Input**: 37 features (VIF filtered), quality targets
+**Output**: 20-30 features (stable + important)
+**Script**: `run_ipss.py`
+
+**Implementation**:
+```python
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.inspection import permutation_importance
+from arch.bootstrap import StationaryBootstrap
+
+def ipss_stability_selection(
+    X, y,
+    n_bootstrap=100,
+    threshold=0.70,
+    block_size=64,
+    cv_splits=5,
+    embargo=20
+):
+    """
+    Integrated Path Stability Selection
+
+    Args:
+        X: Features (n_samples, n_features)
+        y: Targets (n_samples, 2) for [long_quality, short_quality]
+        n_bootstrap: Bootstrap iterations
+        threshold: Selection frequency cutoff
+        block_size: Stationary bootstrap block size
+        cv_splits: CV folds
+        embargo: Embargo bars (= horizon)
+
+    Returns:
+        selected_features: List of feature names
+        selection_freq: Dict of feature -> selection frequency
+    """
+    cv = EmbargoedTimeSeriesSplit(n_splits=cv_splits, embargo=embargo)
+    bs = StationaryBootstrap(block_size=block_size, y=y)
+
+    selection_counts = np.zeros(X.shape[1])
+
+    for boot_idx in range(n_bootstrap):
+        # Bootstrap sample
+        for data in bs.bootstrap(1):
+            X_boot = X.iloc[data[0][0]]
+            y_boot = y[data[0][0]]
+
+        # Cross-validation
+        for train_idx, val_idx in cv.split(X_boot):
+            X_train, y_train = X_boot.iloc[train_idx], y_boot[train_idx]
+            X_val, y_val = X_boot.iloc[val_idx], y_boot[val_idx]
+
+            # Train model
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+            model.fit(X_train, y_train)
+
+            # Permutation importance
+            result = permutation_importance(
+                model, X_val, y_val,
+                n_repeats=10,
+                random_state=42
+            )
+
+            # Count selections (importance > 0)
+            selected = result.importances_mean > 0
+            selection_counts += selected
+
+    # Calculate selection frequency
+    total_selections = n_bootstrap * cv_splits
+    selection_freq = selection_counts / total_selections
+
+    # Select features above threshold
+    selected_mask = selection_freq >= threshold
+    selected_features = X.columns[selected_mask].tolist()
+
+    freq_dict = {
+        feat: freq
+        for feat, freq in zip(X.columns, selection_freq)
+    }
+
+    return selected_features, freq_dict
+```
+
+**SLOs**:
+- **Correctness**: Use sklearn permutation_importance, arch bootstrap (out-of-box)
+- **Availability**: n_bootstrap >= 100 (sufficient for stability), complete within reasonable time
+- **Observability**: Log selection frequency per feature, bootstrap progress
+- **Maintainability**: Standard IPSS pattern, no custom stability algorithms
+
+---
+
+## Data Specifications
+
+### Input Data
+- **Source**: `ml_feature_set/sample_data/resampled_binance_SOL-5m.csv`
+- **Rows**: 10,000 bars (9,901 after NaN drop)
+- **Date range**: 2022-10-03 to 2022-11-07 (35 days)
+- **Frequency**: 5-minute bars
+
+### Usable Samples After Horizon
+- **Total**: 9,901 bars
+- **Horizon H**: 20 bars
+- **Usable**: 9,881 samples (9,901 - 20)
+- **Embargo per fold**: 20 bars
+- **CV folds**: 5
+- **Samples per fold**: ~1,976 bars
+
+**Availability validation**: 1,976 bars >> 100 minimum ✅
+
+---
+
+## Execution Sequence
+
+### Script Order
+1. `compute_targets.py` - Calculate MAE/MFE quality labels
+2. `apply_pruning_manifest.py` - Filter 89 → 48 features
+3. `run_vif_filter.py` - Filter 48 → 37 features (VIF ≤ 5.0)
+4. `run_ipss.py` - Select 37 → 20-30 features (stability ≥ 0.70)
+5. `generate_report.py` - Summary statistics, feature list
+
+### CLI Execution
+```bash
+cd experiments/phase5_mae_mfe_ipss_20251003
+
+# Stage 1: Targets
+docker exec ml-dev python -m compute_targets
+
+# Stage 2-3: Filtering
+docker exec ml-dev python -m apply_pruning_manifest
+docker exec ml-dev python -m run_vif_filter
+
+# Stage 4: IPSS
+docker exec ml-dev python -m run_ipss
+
+# Stage 5: Report
+docker exec ml-dev python -m generate_report
+```
+
+---
+
+## Output Artifacts
+
+### Results Directory Structure
+```
+experiments/phase5_mae_mfe_ipss_20251003/
+├── README.md (this file)
+├── compute_targets.py
+├── apply_pruning_manifest.py
+├── run_vif_filter.py
+├── run_ipss.py
+├── generate_report.py
+├── results/
+│   ├── quality_labels.csv (long_quality, short_quality, best_direction)
+│   ├── features_48_pruned.txt
+│   ├── features_37_vif.txt
+│   ├── features_20-30_ipss.txt (FINAL)
+│   ├── vif_removal_log.csv
+│   └── ipss_selection_freq.csv
+└── FINDINGS.md (generated)
+```
+
+### Final Deliverable
+- **File**: `results/features_20-30_ipss.txt`
+- **Content**: List of 20-30 feature names
+- **Format**: One feature per line
+- **Usage**: Input to Phase 6 (OOD robustness testing)
+
+### Metadata
+- **File**: `results/ipss_selection_freq.csv`
+- **Content**: Feature name, selection frequency (0-1), VIF value
+- **Purpose**: Understand feature stability and importance
+
+---
+
+## SLO Compliance Summary
+
+**Correctness**:
+- Out-of-box implementations: pandas, statsmodels VIF, sklearn RandomForest, arch bootstrap
+- No custom MAE/MFE, VIF, or IPSS algorithms
+- Numerical precision: Quality calculation, VIF formula error < 1e-10
+- Lookahead prevention: Embargoed CV with embargo = horizon
+
+**Availability**:
+- Data sufficiency: 9,881 usable samples >> 100 minimum
+- VIF convergence: Validated (12 iterations, 9.7s)
+- IPSS completion: n_bootstrap=100, cv_splits=5 feasible
+- Valid quality coverage: >= 80% samples (exclude flat markets only)
+
+**Observability**:
+- Log all stages: Target distribution, VIF removals, IPSS progress
+- Log selection frequencies: Per-feature stability scores
+- On error: Raise with clear message (no silent failures)
+- Output metrics: Quality statistics, feature counts, convergence status
+
+**Maintainability**:
+- Modular scripts: One stage per script
+- Out-of-box libraries: sklearn, statsmodels, arch, pandas
+- Standard patterns: IPSS, embargoed CV, VIF iteration
+- Documentation: Inline comments, docstrings, README
+
+---
+
+## Known Limitations
+
+### Data Constraints
+- **Temporal**: 35 days (insufficient for Phase 6 OOD testing)
+- **Action**: Obtain 2022-2025 data in parallel with Phase 5
+- **Impact**: Phase 5 feasible, Phase 6 blocked until data obtained
+
+### Horizon Sensitivity
+- **Fixed H**: 20 bars (100 min for 5-min data)
+- **Sensitivity**: Not tested (H=10,20,40)
+- **Recommendation**: Test sensitivity in Phase 6 if needed
+
+### Multi-Output Regression
+- **Assumption**: sklearn supports multi-output for RandomForest
+- **Validation**: Verify during IPSS execution
+- **Fallback**: None (raise if unsupported)
+
+---
+
+## Cross-References
+
+**Framework**:
+- `CLAUDE.md` (lines 264-296) - Phase 2 specification (IPSS + VIF)
+- `NEXT_STEPS.md` (lines 20-92) - Phase 5 detailed tasks
+
+**Related experiments**:
+- `experiments/orthogonality_filtering_20251003/` - Pruning manifest source
+- `experiments/vif_feasibility_test_20251003/` - VIF validation
+
+**Permanent references**:
+- `.claude/feature-pruning-manifest.md` - 48 kept features
+- `.claude/vif-validation-20251003.md` - VIF feasibility results
+
+**Next phase**:
+- `experiments/phase6_ood_robustness_YYYYMMDD/` - OOD testing (requires multi-year data)

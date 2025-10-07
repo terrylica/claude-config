@@ -1,0 +1,314 @@
+# Dukascopy Design Document - Polish Summary
+**Date:** 2025-09-30
+**Status:** ✅ COMPLETE - All Q1-Q18 decisions incorporated
+
+---
+
+## Document Updated
+
+**File:** `/Users/terryli/eon/rangebar/docs/planning/research/dukascopy-rangebar-construction.md`
+
+---
+
+## Changes Applied
+
+### 1. Executive Summary (NEW - Q9)
+- Added at document start
+- 3-paragraph overview of challenge, solution, and key decisions
+- Estimated effort: 6-12 hours total
+
+### 2. Conversion Strategy (UPDATED)
+**Before:**
+- Simple mid-price calculation
+- Direction inference from volume asymmetry
+- No validation
+
+**After:**
+```rust
+fn tick_to_synthetic_trade(
+    tick: &DukascopyTick,
+    instrument: &str,
+    id: i64,
+    strictness: ValidationStrictness,
+) -> Result<AggTrade, DukascopyError>
+```
+- Tick validation (Q12: bid > 0, ask > 0, bid < ask, spread limits)
+- Decimal factor from embedded config (Q15)
+- Price range validation by instrument type (Q18: Forex 0.01-10k)
+- Direction: `is_buyer_maker = false` (arbitrary default, Q10)
+- Timestamp normalization via `normalize_timestamp()` (Q16, Q17)
+- Zero-volume: use actual value (Q14)
+
+### 3. Volume Semantics (UPDATED - Q1, Q10, Q11)
+**Before:**
+- Three options presented
+- Filtering strategy for zero-volume ticks
+
+**After:**
+```rust
+DukascopyRangeBar {
+    base: RangeBar {
+        volume: bid_vol + ask_vol,  // Total liquidity
+        buy_volume: 0,              // No segregation
+        sell_volume: 0,             // No segregation
+    },
+    spread_stats: SpreadStats { ... }
+}
+```
+- No buy/sell segregation (direction unknown)
+- All ticks processed (including zero-volume)
+- Zero-volume tick frequency tracked separately
+
+### 4. Spread Statistics (UPDATED - Q6 revision, Q13)
+**Before:**
+- Moving average (unspecified type)
+- No reset strategy
+
+**After:**
+```rust
+pub struct SpreadStats {
+    // SMA accumulators (not EMA!)
+    spread_sum: FixedPoint,
+    bid_liquidity_sum: FixedPoint,
+    ask_liquidity_sum: FixedPoint,
+
+    // Min/max per bar
+    min_spread: FixedPoint,
+    max_spread: FixedPoint,
+
+    // Counters per bar
+    tick_count: u32,
+    zero_volume_tick_count: u32,
+
+    // Totals per bar
+    total_bid_liquidity: FixedPoint,
+    total_ask_liquidity: FixedPoint,
+}
+
+// Calculate averages on demand (O(1))
+pub fn avg_spread(&self) -> FixedPoint {
+    FixedPoint(self.spread_sum.0 / self.tick_count as i64)
+}
+```
+- Per-bar SMA (reset on bar close)
+- O(1) updates and queries
+- No EMA complexity
+
+### 5. Builder Implementation (UPDATED - Q5, Q12, Q13)
+**Before:**
+- Returns `Option<RangeBar>`
+- No error handling
+- No validation strictness
+- Filter-based approach
+
+**After:**
+```rust
+pub struct DukascopyRangeBarBuilder {
+    processor: RangeBarProcessor,
+    tick_counter: i64,
+    instrument: String,
+    validation_strictness: ValidationStrictness,
+    current_spread_stats: SpreadStats,
+}
+
+pub fn process_tick(&mut self, tick: &DukascopyTick)
+    -> Result<Option<DukascopyRangeBar>, DukascopyError>
+{
+    validate_tick(tick, self.validation_strictness)?;
+    self.current_spread_stats.update(tick);
+    let synthetic_trade = tick_to_synthetic_trade(...)?;
+    let maybe_bar = self.processor.process_single_trade(synthetic_trade)?;
+
+    if let Some(base) = maybe_bar {
+        let completed_bar = DukascopyRangeBar {
+            base,
+            spread_stats: self.current_spread_stats.clone(),
+        };
+        self.current_spread_stats = SpreadStats::new();  // Reset
+        Ok(Some(completed_bar))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn get_incomplete_bar(&self) -> Option<DukascopyRangeBar> {
+    self.processor.get_incomplete_bar().map(|base| {
+        DukascopyRangeBar {
+            base,
+            spread_stats: self.current_spread_stats.clone(),
+        }
+    })
+}
+```
+- Result-based error handling
+- Configurable validation strictness
+- SpreadStats snapshot on bar close
+- Per-bar reset
+
+### 6. Quick Reference (NEW - Q9)
+Added concise reference section with:
+- Conversion formulas
+- Volume & direction handling
+- Structure overview
+- Error types
+- Config details (embedded TOML)
+- Timestamp handling
+
+### 7. Key Decisions Summary (UPDATED)
+**Before:** 6 decisions
+
+**After:** 12 decisions including:
+- Price: Mid-price with decimal factor
+- Volume: Total liquidity
+- Direction: false (not used)
+- Buy/Sell Segregation: No segregation
+- Zero-Volume: Process all
+- Validation: Configurable strictness
+- SpreadStats: Per-bar SMA
+- Error Handling: Module-level DukascopyError
+- Config: Embedded TOML
+- Timestamp: 2000-2035 validation
+
+### 8. Implementation Checklist (UPDATED)
+**Before:** 4 sections, 20 items
+
+**After:** 8 sections, 35 items:
+- Core Types & Config (6 items)
+- Error Handling (4 items)
+- Conversion Layer (6 items)
+- Builder Implementation (5 items)
+- SpreadStats Implementation (5 items)
+- Core Changes (2 items)
+- Validation & Testing (8 items)
+
+### 9. Example Usage (UPDATED)
+**Before:**
+- Simple usage without error handling
+- Filter-based approach
+- `InstrumentType` parameter
+
+**After:**
+```rust
+fn main() -> Result<(), DukascopyError> {
+    let mut builder = DukascopyRangeBarBuilder::new(
+        25,
+        "EURUSD",
+        ValidationStrictness::Strict,
+    );
+
+    for tick in tick_stream {
+        match builder.process_tick(&tick) {
+            Ok(Some(completed_bar)) => { /* ... */ },
+            Ok(None) => { /* ... */ },
+            Err(e) => { /* ... */ }
+        }
+    }
+
+    if let Some(partial_bar) = builder.get_incomplete_bar() {
+        println!("Partial bar: {:?}", partial_bar);
+    }
+
+    Ok(())
+}
+```
+- Result-based error handling
+- Validation strictness parameter
+- Spread stats access examples
+- Incomplete bar retrieval
+
+### 10. Conclusion (UPDATED)
+Enhanced with:
+- Key achievements (5 bullet points)
+- Semantic honesty emphasis
+- Production-ready error handling
+- Revised effort estimate: 6-12 hours total
+
+---
+
+## Sections Removed
+
+1. **"Filtering Strategy"** section
+   - Reason: Q7 decided to process all ticks (no filtering)
+   - Zero-volume handling now part of Volume Semantics section
+
+---
+
+## Inconsistencies Fixed (GAP-8)
+
+| Issue | Before | After |
+|-------|--------|-------|
+| Direction inference | `bid_vol > ask_vol` logic | `is_buyer_maker = false` (not used) |
+| Zero-volume filtering | Forex filters, Crypto doesn't | All ticks processed |
+| Return type | `Option<RangeBar>` | `Result<Option<DukascopyRangeBar>, DukascopyError>` |
+| Builder fields | `instrument_type: InstrumentType` | `instrument: String, validation_strictness` |
+| Moving average | Unspecified | Per-bar SMA (explicit) |
+
+---
+
+## All Q1-Q18 Decisions Incorporated
+
+✅ Q1: Volume semantics (dual tracking)
+✅ Q2: Direction inference (None → false default)
+✅ Q3: Structure (wrapper pattern)
+✅ Q4: Incomplete bar (implement get_incomplete_bar)
+✅ Q5: Error handling (DukascopyError)
+✅ Q6: Moving average (REVISED to SMA)
+✅ Q7: Zero-volume (process all)
+✅ Q8: Implementation sequencing (parallel tracks)
+✅ Q9: Documentation (executive summary + quick reference)
+✅ Q10: Buy/sell segregation (no segregation)
+✅ Q11: RangeBar.volume (total liquidity)
+✅ Q12: Mid-price validation (configurable strictness)
+✅ Q13: SpreadStats reset (reset on bar close)
+✅ Q14: Zero-volume quantity (use actual 0.0)
+✅ Q15: Instrument config (embed TOML)
+✅ Q16: Timestamp validation (2000-2035)
+✅ Q17: Timezone (no special handling, GMT=UTC)
+✅ Q18: Decimal factor validation (type-specific ranges)
+
+---
+
+## Supporting Documents Created
+
+1. **`/tmp/dukascopy-rangebar-qa-log.md`** (1,171 lines)
+   - Complete Q&A decision log (Q1-Q18)
+   - Rationale and implications for each decision
+
+2. **`/tmp/dukascopy-integration-gaps.md`** (236 lines)
+   - Gap analysis identifying 9 critical blockers
+   - Cross-validation: Q&A vs Design vs Codebase
+
+3. **`/tmp/talipp-ema-analysis.md`** (361 lines)
+   - Analysis of talipp EMA patterns
+   - Comparison of SMA vs EMA approaches
+   - Recommendation for SMA (per-bar semantics)
+
+4. **`/tmp/dukascopy-design-polish-summary.md`** (this file)
+   - Summary of all changes applied
+
+---
+
+## User Memory Updated
+
+**File:** `~/.claude/CLAUDE.md`
+
+**Change:**
+```diff
+- **Indicators (when needed)**: Reference talipp pattern (github.com/nardew/talipp) for O(1) incremental updates when rolling metrics are required
+```
+
+Added reference to talipp pattern as optional guidance when rolling metrics are needed (not applicable for Dukascopy's per-bar SMA use case).
+
+---
+
+## Result
+
+**Design document is now:**
+- ✅ Complete and implementation-ready
+- ✅ Consistent across all sections
+- ✅ Incorporates all 18 Q&A decisions
+- ✅ Includes executive summary and quick reference
+- ✅ Production-ready with robust error handling
+- ✅ Zero critical gaps or blockers remaining
+
+**Ready for implementation: 6-12 hours estimated effort**

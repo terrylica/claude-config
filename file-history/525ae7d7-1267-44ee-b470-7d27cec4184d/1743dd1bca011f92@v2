@@ -1,0 +1,48 @@
+#!/bin/bash
+# xclip wrapper for Claude Code that uses OSC 52 over SSH
+# This allows /export to work when SSH'd into a remote machine
+
+# OSC 52 copy function
+osc52_copy() {
+  local input
+  if [ -t 0 ]; then
+    input="$*"
+  else
+    input=$(cat)
+  fi
+
+  local encoded=$(printf %s "$input" | base64 | tr -d '\n')
+
+  if [ -n "$TMUX" ]; then
+    printf "\033Ptmux;\033\033]52;c;%s\007\033\\" "$encoded" >&2
+  else
+    printf "\033]52;c;%s\007" "$encoded" >&2
+  fi
+}
+
+# Parse xclip arguments (basic compatibility)
+selection="clipboard"
+in_mode=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -selection|-sel)
+      selection="$2"
+      shift 2
+      ;;
+    -i|-in)
+      in_mode=true
+      shift
+      ;;
+    -o|-out)
+      echo "xclip -o (paste) not supported via OSC 52" >&2
+      exit 1
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Read from stdin and copy via OSC 52
+osc52_copy

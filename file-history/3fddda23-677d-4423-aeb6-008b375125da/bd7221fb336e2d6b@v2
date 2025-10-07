@@ -1,0 +1,154 @@
+"""
+VIF Iterative Filtering
+
+Filters 48 features to 37 features using VIF threshold ≤ 5.0.
+
+SLOs:
+- Correctness: Use statsmodels VIF (out-of-box), no custom implementation
+- Availability: Converge within 50 iterations (validated: 12 iterations)
+- Observability: Log each removal (feature name, VIF value)
+- Maintainability: Raise on non-convergence
+
+Validated: 48 features → 37 features in 9.7s (vif_feasibility_test_20251003)
+
+Usage:
+    cd /workspace
+    python -m experiments.phase5_mae_mfe_ipss_20251003.run_vif_filter
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+import numpy as np
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# Add workspace to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+
+def iterative_vif_filter(X: pd.DataFrame, threshold: float = 5.0, max_iterations: int = 50) -> tuple:
+    """
+    Iteratively remove features with VIF > threshold
+
+    Args:
+        X: Feature matrix (n_samples, n_features)
+        threshold: VIF threshold (5.0 standard for feature engineering)
+        max_iterations: Maximum iterations (safety limit)
+
+    Returns:
+        (filtered_df, removal_log)
+
+    Raises:
+        ValueError: If < 2 features remain before convergence
+        RuntimeError: If max_iterations exceeded without convergence
+    """
+    X_filtered = X.copy()
+    removed = []
+    iteration = 0
+
+    print(f"\nVIF filtering (threshold ≤ {threshold}):")
+    print(f"  Initial features: {len(X_filtered.columns)}")
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        # SLO: Availability - Must have at least 2 features
+        if len(X_filtered.columns) < 2:
+            raise ValueError(
+                f"Only 1 feature left before convergence (iteration {iteration}). "
+                f"Removed so far: {len(removed)} features."
+            )
+
+        # Calculate VIF for all features (out-of-box statsmodels)
+        vif_values = []
+        for i in range(len(X_filtered.columns)):
+            vif = variance_inflation_factor(X_filtered.values, i)
+            vif_values.append(vif)
+
+        max_vif = max(vif_values)
+        max_idx = vif_values.index(max_vif)
+        max_feature = X_filtered.columns[max_idx]
+
+        # Check convergence
+        if max_vif <= threshold:
+            print(f"\n✓ Converged at iteration {iteration}")
+            print(f"  Max VIF: {max_vif:.2f} ≤ {threshold}")
+            break
+
+        # Log removal (SLO: Observability)
+        print(f"  Iteration {iteration:2d}: Remove '{max_feature}' (VIF={max_vif:.2f})")
+
+        removed.append({
+            'iteration': iteration,
+            'feature': max_feature,
+            'vif': max_vif
+        })
+
+        # Remove feature
+        X_filtered = X_filtered.drop(columns=[max_feature])
+
+    # SLO: Availability - Must converge
+    if max_vif > threshold:
+        raise RuntimeError(
+            f"VIF did not converge after {max_iterations} iterations. "
+            f"Max VIF: {max_vif:.2f} > threshold {threshold}. "
+            f"Removed {len(removed)} features."
+        )
+
+    print(f"\nVIF filtering complete:")
+    print(f"  Iterations: {iteration}")
+    print(f"  Features removed: {len(removed)}")
+    print(f"  Features remaining: {len(X_filtered.columns)}")
+
+    return X_filtered, removed
+
+
+def main():
+    """Execute VIF filtering pipeline"""
+    print("="*70)
+    print("Phase 5: VIF Filtering (48 → 37 Features)")
+    print("="*70)
+
+    # Paths
+    input_csv = Path(__file__).parent / "results/atoms_48_pruned.csv"
+    output_txt = Path(__file__).parent / "results/features_37_vif.txt"
+    output_csv = Path(__file__).parent / "results/atoms_37_vif.csv"
+    log_csv = Path(__file__).parent / "results/vif_removal_log.csv"
+
+    # Load 48 features
+    print(f"\nLoading pruned atoms from: {input_csv}")
+    if not input_csv.exists():
+        raise FileNotFoundError(
+            f"Pruned atoms not found: {input_csv}\n"
+            f"Run apply_pruning_manifest.py first"
+        )
+
+    atoms_df = pd.read_csv(input_csv, index_col=0, parse_dates=True)
+    print(f"Loaded {len(atoms_df)} rows × {len(atoms_df.columns)} features")
+
+    # VIF filtering
+    filtered_df, removal_log = iterative_vif_filter(atoms_df, threshold=5.0)
+
+    # Save feature list
+    with open(output_txt, 'w') as f:
+        for feature in filtered_df.columns:
+            f.write(f"{feature}\n")
+
+    print(f"\n✓ Feature list saved to: {output_txt}")
+
+    # Save atom values
+    filtered_df.to_csv(output_csv)
+    print(f"✓ Atom values saved to: {output_csv}")
+
+    # Save removal log
+    log_df = pd.DataFrame(removal_log)
+    log_df.to_csv(log_csv, index=False)
+    print(f"✓ Removal log saved to: {log_csv}")
+
+    print("\n" + "="*70)
+    print("VIF filtering complete")
+    print("="*70)
+
+
+if __name__ == '__main__':
+    main()

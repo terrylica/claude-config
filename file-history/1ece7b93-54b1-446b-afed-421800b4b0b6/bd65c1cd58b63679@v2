@@ -1,0 +1,795 @@
+#!/usr/bin/env python3
+"""
+Victor's Funding Rate Arbitrage Backtester V1.10 - Real Perpetual Prices
+
+CRITICAL UPDATE: Real perpetual price integration (v1.9 → v1.10)
+- Dual price providers: SPOT (data/1min_bars/) + PERP (data/1min_bars_swap/)
+- Real delta-neutral hedging with actual perpetual prices
+- Basis tracking: entry/exit basis in bps, basis P&L calculation
+- Error handling: fail-fast on missing perp data (no fallbacks)
+
+Changes from v1.9:
+- v1.9: perp_pnl = -spot_pnl (synthetic, market_pnl = $0 always)
+- v1.10: perp_pnl from real SWAP prices (market_pnl variance > 0)
+
+Strategy: Prediction-Based Selection with Spot Filter
+- At settlement T: Select top-5 based on PREDICTED funding_rate for next period
+- Filter 1: POSITIVE predicted rates only
+- Filter 2: USDT-quoted symbols only
+- Filter 3: SPOT MARKET EXISTS (pre-filter BEFORE selection)
+- Entry at T+1m (realistic execution delay)
+- Collect funding at next settlement based on ACTUAL real_funding_rate
+
+PREDICTION METHODOLOGY:
+- funding_rate: Exchange-announced predicted rate for NEXT period (T→T+8h)
+- real_funding_rate: Actual settled funding rate for CURRENT period
+- Strategy exploits exchange predictions, NOT machine learning models
+- Temporal integrity: Only trade symbols with available data at entry_time
+- No look-ahead bias: Symbols filtered at runtime based on data availability
+
+SLOs:
+- Correctness: market_pnl variance > 0, basis_std_dev > 0
+- Availability: perp price data >= 99% of periods
+- Observability: basis metrics populated for 100% of trades
+- Maintainability: BarPriceProvider interface unchanged
+- Temporal integrity: No future information used in past decisions
+
+TEMPORAL INTEGRITY GUARANTEES (v1.10.1):
+- Point-in-time symbol filtering: Month M selections use only symbols available in month M
+- No future information: Symbols from future months cannot appear in past selections
+- Execution delay: Entry at T+1m, exit at T+8h (realistic execution timing)
+- Data validation: All 4 prices (spot entry/exit, perp entry/exit) required or period skipped
+- Walk-forward ready: Symbol availability advances month-by-month automatically
+
+LIMITATIONS & DISCLAIMERS:
+- NOT machine learning: Strategy uses exchange-provided funding_rate predictions
+- No train/test split: Single historical backtest (not walk-forward validation)
+- Prediction risk: Exchange predictions can be wrong → negative funding possible
+- Data gaps: Missing price data causes period skips (affects performance)
+- Network assumptions: Assumes instant execution at T+1m (ignores slippage)
+
+STRATEGY RISK PROFILE:
+- Negative returns possible: Exchange predictions sometimes wrong (pred +0.05%, actual -0.02%)
+- Funding volatility: actual_rate can differ significantly from predicted_rate
+- Basis risk: Spot-perp basis can move adversely during holding period
+- Liquidity risk: Assumes sufficient liquidity for delta-neutral positions
+- Example failure mode: Predicted +50 bps but actual -25 bps → pay 25 bps funding
+
+VALIDATION FRAMEWORK:
+- SLO 1: Market PnL variance > 0 (proves real perp prices used)
+- SLO 2: Basis std dev > 0 (proves basis tracking functional)
+- SLO 3: Basis metrics 100% populated (data quality)
+- SLO 4: Data availability >= 99% (minimizes skips)
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import timedelta, datetime
+import sys
+import argparse
+
+# Add okx-price-provider to path (adjusted for src/backtests/ location)
+# Path: src/backtests/v1_10_1 → victor-cbo-analysis → funding-rate-arbitrage → libs
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "libs" / "okx-price-provider" / "src"))
+
+from okx_price_provider.bar_provider import BarPriceProvider
+
+
+class FundingRateArbitrageBacktester:
+    """
+    Backtest funding rate arbitrage with real prices and no lookahead bias.
+
+    Uses modular data structure and pre-aggregated 1-min bars for speed and efficiency.
+    """
+
+    def __init__(self, start_date: str, end_date: str, initial_capital=10000):
+        """
+        Initialize backtester with modular data structure.
+
+        Args:
+            start_date: Start date for backtest (YYYY-MM-DD)
+            end_date: End date for backtest (YYYY-MM-DD)
+            initial_capital: Starting capital in USD
+        """
+        self.initial_capital = initial_capital
+        self.capital = initial_capital
+        self.start_date = pd.to_datetime(start_date, utc=True)
+        self.end_date = pd.to_datetime(end_date, utc=True)
+
+        # Load funding rates from modular structure
+        print(f"Loading funding rates for {start_date} to {end_date}...")
+        funding_rates_paths = self._get_funding_rate_paths()
+
+        if not funding_rates_paths:
+            raise ValueError(f"No funding rate data found for {start_date} to {end_date}")
+
+        print(f"Found {len(funding_rates_paths)} funding rate file(s)")
+        dfs = []
+        for path in funding_rates_paths:
+            df = pd.read_parquet(path)
+            df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+            dfs.append(df)
+            print(f"  {path}: {len(df):,} records")
+
+        self.funding_rates = pd.concat(dfs, ignore_index=True)
+        self.funding_rates = self.funding_rates.sort_values('timestamp')
+
+        # Filter to date range
+        self.funding_rates = self.funding_rates[
+            (self.funding_rates['timestamp'] >= self.start_date) &
+            (self.funding_rates['timestamp'] <= self.end_date)
+        ]
+
+        # Filter out sub-minute artifacts (only keep minute-aligned settlements)
+        # This aligns with 1-min bar data and realistic T+1m execution delay
+        self.funding_rates['second'] = self.funding_rates['timestamp'].dt.second
+        minute_aligned = self.funding_rates[self.funding_rates['second'] == 0].copy()
+        minute_aligned = minute_aligned.drop(columns=['second'])
+
+        artifacts_removed = len(self.funding_rates) - len(minute_aligned)
+        if artifacts_removed > 0:
+            print(f"Filtered {artifacts_removed:,} sub-minute settlement artifacts")
+
+        self.funding_rates = minute_aligned
+
+        # Dynamic settlement period detection
+        self.funding_rates['settlement_period'] = self.funding_rates['timestamp']
+
+        # Detect dominant settlement frequency
+        time_diffs = self.funding_rates.groupby('symbol')['timestamp'].diff()
+        mode_freq = time_diffs.mode()
+        if len(mode_freq) > 0:
+            freq_hours = mode_freq.iloc[0].total_seconds() / 3600
+            print(f"Detected settlement frequency: {freq_hours:.1f} hours (most common)")
+
+        print(f"Total: {len(self.funding_rates):,} funding rate records")
+        print(f"Symbols: {self.funding_rates['symbol'].nunique()}")
+        print(f"Date range: {self.funding_rates['timestamp'].min()} to {self.funding_rates['timestamp'].max()}")
+        print()
+
+        # Initialize DUAL price providers (SPOT + PERP)
+        spot_bar_dir = Path("data/1min_bars")
+        perp_bar_dir = Path("data/1min_bars_swap")
+
+        print(f"Initializing SPOT price provider from {spot_bar_dir}...")
+        if not spot_bar_dir.exists():
+            raise FileNotFoundError(f"SPOT data directory not found: {spot_bar_dir}")
+        self.spot_provider = BarPriceProvider(spot_bar_dir, market_type="spot")
+
+        print(f"Initializing PERP price provider from {perp_bar_dir}...")
+        if not perp_bar_dir.exists():
+            raise FileNotFoundError(f"PERP data directory not found: {perp_bar_dir}")
+        self.perp_provider = BarPriceProvider(perp_bar_dir, market_type="spot")
+
+        print("Price providers ready (SPOT + PERP)")
+        print()
+
+        # Build month-by-month available spot symbols mapping (point-in-time)
+        print("Building available spot symbols by month (point-in-time)...")
+        self.spot_symbols_by_month = self._get_available_spot_symbols()
+        total_unique = len(set().union(*self.spot_symbols_by_month.values()))
+        print(f"Total unique symbols across all months: {total_unique}")
+        print()
+
+    def _get_funding_rate_paths(self):
+        """Get all funding rate parquet files for the date range."""
+        funding_rates_dir = Path("data/funding_rates")
+
+        if not funding_rates_dir.exists():
+            return []
+
+        paths = []
+
+        # Get year-months in range
+        current = self.start_date.replace(day=1)
+        end = self.end_date.replace(day=1)
+
+        while current <= end:
+            year = current.year
+            month = current.month
+            month_file = funding_rates_dir / str(year) / f"{month:02d}.parquet"
+
+            if month_file.exists():
+                paths.append(month_file)
+
+            # Move to next month
+            current += pd.DateOffset(months=1)
+
+        return paths
+
+    def _get_available_spot_symbols(self):
+        """Build time-aware mapping of spot symbols by month."""
+        bar_data_dir = Path("data/1min_bars")
+        symbols_by_month = {}  # {month_key: set(symbols)}
+
+        # Get year-months in range
+        current = self.start_date.replace(day=1)
+        end = self.end_date.replace(day=1)
+
+        while current <= end:
+            month_key = f"{current.year}-{current.month:02d}"
+            month_file = bar_data_dir / str(current.year) / f"{current.month:02d}.parquet"
+
+            if month_file.exists():
+                try:
+                    # Read just the symbol column to minimize memory
+                    df = pd.read_parquet(month_file, columns=['symbol'])
+                    symbols_by_month[month_key] = set(df['symbol'].unique())
+                    print(f"  {month_key}: {len(symbols_by_month[month_key])} symbols")
+                except Exception as e:
+                    print(f"  ⚠ Failed to read {month_file}: {e}")
+                    symbols_by_month[month_key] = set()
+            else:
+                symbols_by_month[month_key] = set()
+
+            # Move to next month
+            current += pd.DateOffset(months=1)
+
+        return symbols_by_month
+
+    def get_settlement_periods(self):
+        """Get all settlement periods in the dataset."""
+        return sorted(self.funding_rates['settlement_period'].unique())
+
+    def select_top5_at_settlement(self, settlement_time):
+        """
+        Select top-5 symbols based on PREDICTED funding_rate for next period.
+
+        Strategy: Prediction-Based with Spot Filter
+        - Use funding_rate (prediction for T+8h) from settlement T
+        - Only select POSITIVE predicted rates
+        - Only select USDT-quoted symbols
+        - Only select symbols with SPOT MARKETS (pre-filter BEFORE top-5)
+
+        Args:
+            settlement_time: Settlement timestamp
+
+        Returns:
+            List of top-5 symbols with predicted and actual rates
+        """
+        # Get all rates at this settlement
+        rates_at_settlement = self.funding_rates[
+            self.funding_rates['settlement_period'] == settlement_time
+        ].copy()
+
+        # Filter 1: USDT-quoted symbols only
+        rates_at_settlement = rates_at_settlement[
+            rates_at_settlement['symbol'].str.contains('-USDT', na=False)
+        ]
+
+        # Filter 2: Positive PREDICTED rates only
+        positive_predictions = rates_at_settlement[rates_at_settlement['funding_rate'] > 0].copy()
+
+        # Filter 3: SPOT MARKET EXISTS (pre-filter BEFORE selection)
+        # Get point-in-time symbol availability for this month
+        month_key = f"{settlement_time.year}-{settlement_time.month:02d}"
+        available_in_month = self.spot_symbols_by_month.get(month_key, set())
+
+        # Convert swap symbol to spot symbol (e.g., "BTC-USDT-SWAP" → "BTC-USDT")
+        positive_predictions['spot_symbol'] = positive_predictions['symbol'].str.replace('-SWAP', '')
+
+        # Only keep symbols whose spot equivalent exists in THIS MONTH's 1-min bar data
+        tradeable = positive_predictions[
+            positive_predictions['spot_symbol'].isin(available_in_month)
+        ].copy()
+
+        # Drop the temporary column
+        tradeable = tradeable.drop(columns=['spot_symbol'])
+
+        if len(tradeable) < 5:
+            # Not enough tradeable symbols, return what we have
+            top_5 = tradeable.nlargest(len(tradeable), 'funding_rate')
+        else:
+            # Select top-5 by highest predicted positive rate (from tradeable universe)
+            top_5 = tradeable.nlargest(5, 'funding_rate')
+
+        return top_5[['symbol', 'funding_rate', 'real_funding_rate']].to_dict('records')
+
+    def get_spot_prices(self, symbols, start_time, end_time, freq='1min'):
+        """
+        Get spot prices for symbols over time period.
+
+        Args:
+            symbols: List of symbols
+            start_time: Start timestamp
+            end_time: End timestamp
+            freq: Resampling frequency
+
+        Returns:
+            DataFrame with columns: timestamp, symbol, price
+        """
+        # Get prices from 1-min bars (VWAP)
+        prices = self.spot_provider.get_prices(
+            symbols=symbols,
+            start_date=start_time,
+            end_date=end_time,
+            freq=freq,
+            method='vwap'
+        )
+
+        return prices
+
+    def get_perp_prices(self, symbols, start_time, end_time, freq='1min'):
+        """
+        Get perpetual (SWAP) prices for symbols over time period.
+
+        Args:
+            symbols: List of SWAP symbols (e.g., ['BTC-USDT-SWAP'])
+            start_time: pd.Timestamp
+            end_time: pd.Timestamp
+            freq: str, default '1min'
+
+        Returns:
+            pd.DataFrame with columns: timestamp, symbol, price
+
+        Raises:
+            ValueError: If no price data returned for requested period
+        """
+        prices = self.perp_provider.get_prices(
+            symbols=symbols,
+            start_date=start_time,
+            end_date=end_time,
+            freq=freq,
+            method='vwap'
+        )
+
+        if prices is None or len(prices) == 0:
+            raise ValueError(
+                f"No perp prices returned for {symbols} "
+                f"between {start_time} and {end_time}"
+            )
+
+        return prices
+
+    def simulate_trade_period(self, settlement_time, next_settlement_time):
+        """
+        Simulate one trading period.
+
+        Timeline:
+        - T (settlement_time): Settlement happens, rates finalized
+        - T+0s: Select top-5 based on funding_rate (prediction)
+        - T+1m: Enter positions (realistic execution delay)
+        - T+8h (next_settlement_time): Exit positions, collect funding
+
+        Args:
+            settlement_time: Current settlement timestamp
+            next_settlement_time: Next settlement timestamp
+
+        Returns:
+            dict with trade results
+        """
+        # 1. SELECTION (at T, using funding_rate PREDICTION for T+8h)
+        top_5 = self.select_top5_at_settlement(settlement_time)
+
+        if len(top_5) == 0:
+            # No positive USDT-quoted predictions available
+            return None
+
+        symbols = [item['symbol'] for item in top_5]
+        predicted_rates = {item['symbol']: item['funding_rate'] for item in top_5}
+        current_rates = {item['symbol']: item['real_funding_rate'] for item in top_5}
+
+        # Separate spot and perp symbols
+        spot_symbols = [s.replace('-SWAP', '') for s in symbols]
+        perp_symbols = symbols  # Keep SWAP suffix
+
+        # 2. ENTRY TIMING (at T+1m, realistic execution delay)
+        entry_time = settlement_time + timedelta(minutes=1)
+        exit_time = next_settlement_time
+
+        # 3. GET ENTRY PRICES (SPOT + PERP)
+        try:
+            entry_spot_df = self.get_spot_prices(spot_symbols, entry_time, entry_time, freq='1min')
+            entry_perp_df = self.get_perp_prices(perp_symbols, entry_time, entry_time, freq='1min')
+        except Exception as e:
+            print(f"  ⚠ Failed to get entry prices at {entry_time}: {e}")
+            return None
+
+        # 4. GET EXIT PRICES (SPOT + PERP)
+        try:
+            exit_spot_df = self.get_spot_prices(spot_symbols, exit_time, exit_time, freq='1min')
+            exit_perp_df = self.get_perp_prices(perp_symbols, exit_time, exit_time, freq='1min')
+        except Exception as e:
+            print(f"  ⚠ Failed to get exit prices at {exit_time}: {e}")
+            return None
+
+        # Extract prices into dictionaries with validation
+        entry_spot_prices = {}
+        entry_perp_prices = {}
+        exit_spot_prices = {}
+        exit_perp_prices = {}
+
+        for swap_sym, spot_sym in zip(perp_symbols, spot_symbols):
+            # Check all 4 prices before adding symbol (atomic check)
+            spot_entry_data = entry_spot_df[entry_spot_df['symbol'] == spot_sym]
+            perp_entry_data = entry_perp_df[entry_perp_df['symbol'] == swap_sym]
+            spot_exit_data = exit_spot_df[exit_spot_df['symbol'] == spot_sym]
+            perp_exit_data = exit_perp_df[exit_perp_df['symbol'] == swap_sym]
+
+            # Skip if ANY price is missing (prevents look-ahead bias)
+            if len(spot_entry_data) == 0:
+                print(f"  ⚠ Skipping {swap_sym}: No SPOT entry data for {spot_sym} at {entry_time}")
+                continue
+            if len(perp_entry_data) == 0:
+                print(f"  ⚠ Skipping {swap_sym}: No PERP entry data at {entry_time}")
+                continue
+            if len(spot_exit_data) == 0:
+                print(f"  ⚠ Skipping {swap_sym}: No SPOT exit data for {spot_sym} at {exit_time}")
+                continue
+            if len(perp_exit_data) == 0:
+                print(f"  ⚠ Skipping {swap_sym}: No PERP exit data at {exit_time}")
+                continue
+
+            # All 4 prices available - add to dicts
+            entry_spot_prices[swap_sym] = spot_entry_data['price'].iloc[0]
+            entry_perp_prices[swap_sym] = perp_entry_data['price'].iloc[0]
+            exit_spot_prices[swap_sym] = spot_exit_data['price'].iloc[0]
+            exit_perp_prices[swap_sym] = perp_exit_data['price'].iloc[0]
+
+        # Check if we have any tradeable symbols after filtering
+        tradeable_symbols = list(entry_spot_prices.keys())
+        if len(tradeable_symbols) == 0:
+            print(f"  ⚠ No tradeable symbols (all skipped due to missing data)")
+            return None
+
+        # 5. GET ACTUAL FUNDING RATES AT T+8h (what we actually collect)
+        actual_rates_at_next = self.funding_rates[
+            self.funding_rates['settlement_period'] == next_settlement_time
+        ].set_index('symbol')['real_funding_rate'].to_dict()
+
+        # 6. CALCULATE PNL FOR EACH SYMBOL
+        trades = []
+        total_funding = 0
+        total_spot_pnl = 0
+        total_perp_pnl = 0
+
+        # Equal allocation across tradeable symbols
+        allocation_per_symbol = self.capital / len(tradeable_symbols)
+
+        for symbol in tradeable_symbols:
+            # Extract prices for this symbol
+            spot_entry = entry_spot_prices[symbol]
+            spot_exit = exit_spot_prices[symbol]
+            perp_entry = entry_perp_prices[symbol]
+            perp_exit = exit_perp_prices[symbol]
+
+            # Position sizing based on SPOT entry price
+            position_size = allocation_per_symbol / spot_entry
+
+            # Predicted vs actual funding rate
+            predicted_rate = predicted_rates.get(symbol, 0)
+            current_rate_at_T = current_rates.get(symbol, 0)
+            actual_rate = actual_rates_at_next.get(symbol, 0)
+
+            # Funding collected (based on actual rate at T+8h)
+            funding = actual_rate * allocation_per_symbol
+
+            # SPOT P&L (long position)
+            spot_pnl = (spot_exit - spot_entry) * position_size
+
+            # PERP P&L (short position) - REAL PRICES
+            perp_pnl = (perp_entry - perp_exit) * position_size
+
+            # Basis tracking (new metrics)
+            basis_entry_bps = (perp_entry - spot_entry) / spot_entry * 10000
+            basis_exit_bps = (perp_exit - spot_exit) / spot_exit * 10000
+            basis_change_bps = basis_exit_bps - basis_entry_bps
+
+            # Basis P&L (impact of basis movement on notional)
+            basis_pnl = (basis_exit_bps - basis_entry_bps) / 10000 * allocation_per_symbol
+
+            # Synthetic calculation check (SLO: Correctness)
+            if abs(perp_pnl + spot_pnl) < 1e-10:
+                raise ValueError(
+                    f"Synthetic calculation detected: perp_pnl=-spot_pnl for {symbol}. "
+                    f"spot_pnl={spot_pnl:.6f}, perp_pnl={perp_pnl:.6f}"
+                )
+
+            # Total PnL for this symbol
+            symbol_pnl = funding + spot_pnl + perp_pnl
+
+            total_funding += funding
+            total_spot_pnl += spot_pnl
+            total_perp_pnl += perp_pnl
+
+            trades.append({
+                'symbol': symbol,
+
+                # SPOT prices
+                'spot_entry_price': spot_entry,
+                'spot_exit_price': spot_exit,
+
+                # PERP prices (NEW)
+                'perp_entry_price': perp_entry,
+                'perp_exit_price': perp_exit,
+
+                # Basis metrics (NEW)
+                'basis_entry_bps': basis_entry_bps,
+                'basis_exit_bps': basis_exit_bps,
+                'basis_change_bps': basis_change_bps,
+                'basis_pnl': basis_pnl,
+
+                # Position and rates
+                'position_size': position_size,
+                'predicted_rate': predicted_rate,
+                'current_rate_at_T': current_rate_at_T,
+                'actual_rate': actual_rate,
+
+                # P&L components
+                'funding': funding,
+                'spot_pnl': spot_pnl,
+                'perp_pnl': perp_pnl,
+                'total_pnl': symbol_pnl
+            })
+
+        # Total period PnL
+        period_pnl = total_funding + total_spot_pnl + total_perp_pnl
+
+        return {
+            'settlement_time': settlement_time,
+            'next_settlement': next_settlement_time,
+            'entry_time': entry_time,
+            'exit_time': exit_time,
+            'symbols': symbols,
+            'trades': trades,
+            'total_funding': total_funding,
+            'total_spot_pnl': total_spot_pnl,
+            'total_perp_pnl': total_perp_pnl,
+            'period_pnl': period_pnl,
+            'period_return_pct': (period_pnl / self.capital) * 100
+        }
+
+    def run_backtest(self):
+        """
+        Run full backtest over date range.
+
+        Returns:
+            DataFrame with results for each period
+        """
+        settlements = self.get_settlement_periods()
+
+        print('=' * 90)
+        print('Running Backtest - Strategy: Prediction-Based with Spot Filter (Modular)')
+        print('=' * 90)
+        print(f"Settlement periods: {len(settlements) - 1}")
+        print(f"Date range: {settlements[0]} to {settlements[-1]}")
+        print(f"Initial capital: ${self.initial_capital:,.2f}")
+        print()
+
+        results = []
+
+        for i in range(len(settlements) - 1):
+            settlement_time = settlements[i]
+            next_settlement = settlements[i + 1]
+
+            print(f"Period {i+1}/{len(settlements)-1}: {settlement_time} → {next_settlement}")
+
+            result = self.simulate_trade_period(settlement_time, next_settlement)
+
+            if result:
+                # Update capital
+                self.capital += result['period_pnl']
+                result['capital'] = self.capital
+                result['total_return_pct'] = ((self.capital - self.initial_capital) / self.initial_capital) * 100
+
+                results.append(result)
+
+                print(f"  Symbols: {', '.join(result['symbols'])}")
+                print(f"  Funding: ${result['total_funding']:+.2f} | Spot: ${result['total_spot_pnl']:+.2f} | Perp: ${result['total_perp_pnl']:+.2f}")
+                print(f"  Period PnL: ${result['period_pnl']:+.2f} ({result['period_return_pct']:+.4f}%)")
+                print(f"  Capital: ${result['capital']:,.2f} (Total return: {result['total_return_pct']:+.2f}%)")
+            else:
+                print(f"  ⚠ Skipped (missing data)")
+
+            print()
+
+        # Convert to DataFrame
+        results_df = pd.DataFrame(results)
+
+        # Summary statistics
+        print('=' * 90)
+        print('BACKTEST SUMMARY')
+        print('=' * 90)
+        print(f"Periods traded: {len(results_df)}")
+        print(f"Initial capital: ${self.initial_capital:,.2f}")
+        print(f"Final capital: ${self.capital:,.2f}")
+        print(f"Total return: {((self.capital - self.initial_capital) / self.initial_capital) * 100:+.2f}%")
+        print()
+
+        if len(results_df) > 0:
+            print(f"Total funding collected: ${results_df['total_funding'].sum():,.2f}")
+            print(f"Total spot PnL: ${results_df['total_spot_pnl'].sum():,.2f}")
+            print(f"Total perp PnL: ${results_df['total_perp_pnl'].sum():,.2f}")
+            print()
+
+            print(f"Average period return: {results_df['period_return_pct'].mean():.4f}%")
+            print(f"Median period return: {results_df['period_return_pct'].median():.4f}%")
+            print(f"Best period: {results_df['period_return_pct'].max():.4f}%")
+            print(f"Worst period: {results_df['period_return_pct'].min():.4f}%")
+            print()
+
+            # Win rate
+            wins = (results_df['period_pnl'] > 0).sum()
+            total = len(results_df)
+            print(f"Win rate: {wins}/{total} ({(wins/total)*100:.1f}%)")
+
+        print('=' * 90)
+
+        return results_df
+
+    def validate_slos(self, results_df):
+        """Validate Service Level Objectives."""
+        print("\n" + "="*80)
+        print("SLO VALIDATION")
+        print("="*80)
+
+        # SLO 1: Market PnL variance > 0 (real perp prices)
+        results_df['market_pnl'] = results_df['total_spot_pnl'] + results_df['total_perp_pnl']
+        market_var = results_df['market_pnl'].var()
+        slo1_pass = market_var > 0
+        print(f"\n✓ SLO 1 - Market PnL Variance: {market_var:.4f}")
+        print(f"  Requirement: > 0 (proves real perp prices, not synthetic)")
+        print(f"  Status: {'✓ PASS' if slo1_pass else '✗ FAIL'}")
+
+        # SLO 2: Parse trades and check basis
+        all_trades = []
+        for trades_list in results_df['trades']:
+            if isinstance(trades_list, str):
+                all_trades.extend(eval(trades_list))
+            else:
+                all_trades.extend(trades_list)
+        trades_df = pd.DataFrame(all_trades)
+
+        basis_std = trades_df['basis_entry_bps'].std()
+        slo2_pass = basis_std > 0
+        print(f"\n✓ SLO 2 - Basis Std Dev: {basis_std:.4f} bps")
+        print(f"  Requirement: > 0 (proves basis tracking works)")
+        print(f"  Status: {'✓ PASS' if slo2_pass else '✗ FAIL'}")
+
+        # SLO 3: Basis metrics populated 100%
+        basis_populated = (~trades_df['basis_entry_bps'].isna()).sum()
+        total_trades = len(trades_df)
+        slo3_pass = basis_populated == total_trades
+        print(f"\n✓ SLO 3 - Basis Populated: {basis_populated}/{total_trades} ({basis_populated/total_trades*100:.1f}%)")
+        print(f"  Requirement: 100%")
+        print(f"  Status: {'✓ PASS' if slo3_pass else '✗ FAIL'}")
+
+        # SLO 4: Data availability >= 99%
+        total_periods = len(self.get_settlement_periods())
+        traded_periods = len(results_df)
+        availability_pct = traded_periods / total_periods * 100
+        slo4_pass = availability_pct >= 99
+        print(f"\n✓ SLO 4 - Data Availability: {availability_pct:.2f}%")
+        print(f"  Requirement: >= 99%")
+        print(f"  Periods traded: {traded_periods}/{total_periods}")
+        print(f"  Status: {'✓ PASS' if slo4_pass else '⚠ WARNING' if availability_pct >= 95 else '✗ FAIL'}")
+
+        all_pass = slo1_pass and slo2_pass and slo3_pass
+        print("\n" + "="*80)
+        print(f"Overall: {'✓ ALL SLOs PASS' if all_pass else '✗ SOME SLOs FAIL'}")
+        print("="*80)
+
+        return all_pass, trades_df
+
+    def audit_temporal_integrity(self, results_df, trades_df):
+        """Comprehensive temporal integrity audit."""
+        print("\n" + "="*80)
+        print("TEMPORAL INTEGRITY AUDIT")
+        print("="*80)
+
+        # Check 1: Entry always after settlement
+        results_df['settlement_dt'] = pd.to_datetime(results_df['settlement_time'])
+        results_df['entry_dt'] = pd.to_datetime(results_df['entry_time'])
+        violations = (results_df['entry_dt'] <= results_df['settlement_dt']).sum()
+
+        print(f"\n✓ Entry Timing Check")
+        print(f"  Requirement: entry_time (T+1m) > settlement_time (T)")
+        print(f"  Violations: {violations}")
+        print(f"  Status: {'✓ PASS' if violations == 0 else '✗ FAIL'}")
+
+        # Check 2: Funding rate prediction accuracy
+        print(f"\n✓ Funding Rate Prediction Analysis")
+        pred_errors = (trades_df['actual_rate'] - trades_df['predicted_rate']).abs()
+        print(f"  Mean absolute error: {pred_errors.mean()*10000:.2f} bps")
+        print(f"  Median absolute error: {pred_errors.median()*10000:.2f} bps")
+        print(f"  Std error: {pred_errors.std()*10000:.2f} bps")
+
+        # Check 3: Prediction sign accuracy
+        pred_positive = trades_df['predicted_rate'] > 0
+        actual_positive = trades_df['actual_rate'] > 0
+        sign_matches = (pred_positive == actual_positive).sum()
+        print(f"  Sign accuracy: {sign_matches}/{len(trades_df)} ({sign_matches/len(trades_df)*100:.1f}%)")
+
+        # Check 4: Basis metrics sanity
+        print(f"\n✓ Basis Metrics Statistics")
+        print(f"  Mean entry basis: {trades_df['basis_entry_bps'].mean():.2f} bps")
+        print(f"  Mean exit basis: {trades_df['basis_exit_bps'].mean():.2f} bps")
+        print(f"  Mean basis change: {trades_df['basis_change_bps'].mean():.2f} bps")
+        print(f"  Basis std dev: {trades_df['basis_entry_bps'].std():.2f} bps")
+
+        # Check 5: Data quality - skip rate
+        total_periods = len(self.get_settlement_periods())
+        traded = len(results_df)
+        skipped = total_periods - traded
+        skip_rate = skipped / total_periods * 100
+
+        print(f"\n✓ Data Quality Metrics")
+        print(f"  Total periods: {total_periods}")
+        print(f"  Traded periods: {traded}")
+        print(f"  Skipped periods: {skipped} ({skip_rate:.2f}%)")
+        print(f"  Status: {'✓ GOOD' if skip_rate < 5 else '⚠ ACCEPTABLE' if skip_rate < 10 else '✗ POOR'}")
+
+        print("\n" + "="*80)
+        return violations == 0
+
+
+def main():
+    """Run backtest with flexible date range support."""
+    parser = argparse.ArgumentParser(
+        description='Funding Rate Arbitrage Backtester V1.10 - Real Perpetual Prices'
+    )
+    parser.add_argument('--start', required=True, help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end', required=True, help='End date (YYYY-MM-DD)')
+    parser.add_argument('--capital', type=float, default=10000, help='Initial capital (default: 10000)')
+
+    args = parser.parse_args()
+
+    # Initialize backtester
+    backtester = FundingRateArbitrageBacktester(
+        start_date=args.start,
+        end_date=args.end,
+        initial_capital=args.capital
+    )
+
+    # Run backtest
+    results = backtester.run_backtest()
+
+    # Validate SLOs
+    if len(results) > 0:
+        slos_pass, trades_df = backtester.validate_slos(results)
+
+        # Audit temporal integrity
+        integrity_pass = backtester.audit_temporal_integrity(results, trades_df)
+    else:
+        print("\n⚠ No results to validate (no periods traded)")
+
+    # Save results
+    start_str = args.start.replace('-', '')
+    end_str = args.end.replace('-', '')
+    output_path = Path(f"results/v1.10-modular-{start_str}-{end_str}.parquet")
+    output_path.parent.mkdir(exist_ok=True)
+
+    results.to_parquet(output_path)
+    print(f"\n✓ Results saved to {output_path}")
+
+    # Also save as CSV for easy inspection
+    csv_path = output_path.with_suffix('.csv')
+    results.to_csv(csv_path, index=False)
+    print(f"✓ Results saved to {csv_path}")
+
+    # Monthly breakdown
+    if len(results) > 0:
+        print("\n" + "="*90)
+        print("MONTHLY BREAKDOWN")
+        print("="*90)
+
+        results['month'] = pd.to_datetime(results['settlement_time']).dt.to_period('M')
+
+        for month in sorted(results['month'].unique()):
+            month_data = results[results['month'] == month]
+            total_funding = month_data['total_funding'].sum()
+            total_return = month_data['period_pnl'].sum()
+            final_capital = month_data['capital'].iloc[-1]
+            win_rate = (month_data['period_pnl'] > 0).sum() / len(month_data) * 100
+
+            print(f"\n{month}:")
+            print(f"  Periods: {len(month_data)}")
+            print(f"  Total funding: ${total_funding:,.2f}")
+            print(f"  Total PnL: ${total_return:,.2f}")
+            print(f"  Win rate: {win_rate:.1f}%")
+            print(f"  Final capital: ${final_capital:,.2f}")
+
+
+if __name__ == "__main__":
+    main()

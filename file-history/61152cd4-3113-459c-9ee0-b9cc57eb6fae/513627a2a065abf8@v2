@@ -1,0 +1,186 @@
+# Option B Implementation Status
+## Real Perpetual Data Integration
+
+**Date:** 2025-10-03
+**Status:** Phase 1 Complete - Download Script Validated
+
+---
+
+## Phase 1: Download Script Validation ✅ COMPLETE
+
+### Modified Script Created
+**File:** `/tmp/option_b_implementation/download_month_swap.py`
+
+**Key Changes:**
+```python
+# Added --market-type parameter
+parser.add_argument('--market-type', choices=['spot', 'swap', 'both'],
+                   default='spot', help='Market type to download')
+
+# Modified download_ticks_month() to support both markets
+def download_ticks_month(year: int, month: int, output_dir: Path, market_type: str = "spot"):
+    msg_type = "allspot" if market_type == "spot" else "allswap"
+    # Uses separate directories: raw_ticks (spot) vs raw_ticks_swap (swap)
+```
+
+**Usage Examples:**
+```bash
+# Download SWAP data for Jan 2024
+uv run --active python download_month_swap.py 2024 1 --ticks --market-type swap
+
+# Download both spot and swap
+uv run --active python download_month_swap.py 2024 1 --ticks --market-type both
+```
+
+### Validation Results (from /tmp/swap_test/)
+**Test 1 - SWAP Download:** ✅ PASSED
+- 157,025,030 trades downloaded
+- 195 SWAP symbols (BTC-USDT-SWAP, ETH-USDT-SWAP, etc.)
+- File size: 1,865 MB
+
+**Test 2 - SWAP Aggregation:** ✅ PASSED
+- 7.7M 1-min bars created
+- 12.3x compression ratio
+- All SWAP symbols preserved
+
+**Test 3 - SWAP Verification:** ✅ PASSED
+- OHLCV data complete
+- Columns verified: timestamp, symbol, open, high, low, close, vwap, volume, buy_volume, sell_volume, trades, largest_trade
+
+---
+
+## Phase 2: Backtester Modification (NEXT)
+
+### Current Implementation (v1.9-modular.py)
+**Problem:** Uses synthetic delta-neutral calculation
+```python
+# Lines 358-361 (INCORRECT)
+spot_pnl = (exit_price - entry_price) * position_size
+perp_pnl = (entry_price - exit_price) * position_size
+# Result: perp_pnl = -spot_pnl ALWAYS (not real hedging)
+```
+
+### Required Changes (v1.10-modular.py)
+**Solution:** Use real perpetual prices
+
+```python
+# Line 114: Add perpetual price provider
+self.spot_provider = BarPriceProvider(bar_data_dir, market_type="spot")
+self.perp_provider = BarPriceProvider(bar_data_dir, market_type="swap")
+
+# Lines 295-323: Separate spot and perp price loading
+entry_spot_prices = self.spot_provider.get_prices(spot_symbols, entry_time, entry_time)
+entry_perp_prices = self.perp_provider.get_prices(swap_symbols, entry_time, entry_time)
+
+exit_spot_prices = self.spot_provider.get_prices(spot_symbols, exit_time, exit_time)
+exit_perp_prices = self.perp_provider.get_prices(swap_symbols, exit_time, exit_time)
+
+# Lines 358-361: Use actual prices
+spot_pnl = (exit_spot_price - entry_spot_price) * position_size
+perp_pnl = (entry_perp_price - exit_perp_price) * position_size  # Real perp prices!
+```
+
+### New Metrics to Add
+```python
+# Basis tracking
+basis_entry = entry_perp_price - entry_spot_price
+basis_exit = exit_perp_price - exit_spot_price
+basis_pnl = (basis_exit - basis_entry) * position_size
+
+# Output columns to add:
+- 'basis_entry' (bps)
+- 'basis_exit' (bps)
+- 'basis_pnl' (USD)
+```
+
+---
+
+## Phase 3: Production Deployment (PENDING)
+
+### Step 1: Download SWAP Data for All Months
+```bash
+# Estimated 21 months × 1.5 GB avg = 32 GB raw ticks
+# Download range: 2023-01 to 2024-12
+
+for year in 2023 2024; do
+  for month in {1..12}; do
+    uv run --active python scripts/download_month_swap.py $year $month \
+      --ticks --market-type swap --data-dir data/
+  done
+done
+```
+
+**Estimated Time:** ~2 hours
+**Storage Required:** ~32 GB raw, ~7 GB aggregated
+
+### Step 2: Aggregate SWAP Data
+```bash
+# Aggregate to 1-min bars
+for year in 2023 2024; do
+  for month in {1..12}; do
+    uv run --active python scripts/aggregate_month.py $year $month \
+      --data-dir data/ --input-dir raw_ticks_swap --output-dir 1min_bars_swap
+  done
+done
+```
+
+**Estimated Time:** ~30 minutes
+
+### Step 3: Re-run Backtest with Real Data
+```bash
+# Run v1.10-modular.py with real perp prices
+uv run --active python v1.10-modular.py \
+  --start 2023-01-01 --end 2025-08-31 --capital 1000000 \
+  --spot-data data/1min_bars \
+  --perp-data data/1min_bars_swap
+```
+
+---
+
+## Expected Results
+
+### Performance Adjustment
+```
+Current (synthetic):     +6.04% (32 months) = ~2.26% APY
+Expected (real):         +5.0-5.8% (32 months) = ~1.9-2.2% APY
+Reduction:               -0.5 to -2.0 pp due to basis risk
+```
+
+### Market P&L Distribution
+```
+Current (synthetic):
+- Mean: $0.00
+- Std Dev: $0.00
+- Positive periods: 0%
+
+Expected (real):
+- Mean: ~$0 (should average near zero)
+- Std Dev: $500-$2000 (basis fluctuation)
+- Positive periods: 40-60% (random walk around zero)
+```
+
+---
+
+## Files Generated
+
+### /tmp/option_b_implementation/
+- `download_month_swap.py` - Modified download script with --market-type support
+- `IMPLEMENTATION_STATUS.md` - This document
+
+### /tmp/swap_test/ (Validation)
+- `TEST_RESULTS.txt` - Validation test results
+- `raw_ticks/2024/01.parquet` - 157M SWAP trades (1.87 GB)
+- `1min_bars/2024/01.parquet` - 7.7M SWAP bars (152 MB)
+
+---
+
+## Next Actions
+
+1. ✅ Create download_month_swap.py with --market-type support
+2. ✅ Validate SWAP download pipeline (Jan 2024 test)
+3. ⏳ Create v1.10-modular.py with real perp price support
+4. ⏸ Test v1.10 with small dataset (Jan 2024 only)
+5. ⏸ Download full 21-month SWAP dataset
+6. ⏸ Aggregate to 1-min bars
+7. ⏸ Run full 32-month backtest
+8. ⏸ Compare synthetic vs real results

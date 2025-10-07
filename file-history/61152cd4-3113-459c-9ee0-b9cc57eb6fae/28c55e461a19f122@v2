@@ -1,0 +1,54 @@
+#!/bin/bash
+# Monitor SWAP download progress
+# Usage: ./scripts/check_swap_download_progress.sh
+
+echo "=================================="
+echo "SWAP Download Progress Monitor"
+echo "=================================="
+echo ""
+
+# Check if download is running
+if ps aux | grep -v grep | grep "download_swap_21months.sh" > /dev/null; then
+    echo "✓ Download process is RUNNING"
+else
+    echo "⚠ Download process NOT FOUND (may have completed or failed)"
+fi
+
+echo ""
+echo "--- Last 20 lines of log ---"
+tail -20 swap_download_phase1.log | grep -vE "^DEBUG|Unnecessary package"
+
+echo ""
+echo "--- Downloaded files ---"
+echo "2023:"
+if [ -d "data/raw_ticks_swap/2023" ]; then
+    ls -lh data/raw_ticks_swap/2023/ | tail -n +2 | awk '{print "  " $9 " - " $5}'
+    COUNT_2023=$(ls data/raw_ticks_swap/2023/*.parquet 2>/dev/null | wc -l)
+    echo "  Total: $COUNT_2023/12 months"
+else
+    echo "  Directory not yet created"
+fi
+
+echo ""
+echo "2024:"
+if [ -d "data/raw_ticks_swap/2024" ]; then
+    ls -lh data/raw_ticks_swap/2024/ | tail -n +2 | awk '{print "  " $9 " - " $5}'
+    COUNT_2024=$(ls data/raw_ticks_swap/2024/*.parquet 2>/dev/null | wc -l)
+    echo "  Total: $COUNT_2024/12 months"
+else
+    echo "  Directory not yet created"
+fi
+
+echo ""
+echo "--- Total storage ---"
+if [ -d "data/raw_ticks_swap" ]; then
+    du -sh data/raw_ticks_swap/
+else
+    echo "  No data yet"
+fi
+
+echo ""
+echo "=================================="
+echo "To check full log: tail -f swap_download_phase1.log"
+echo "To check background process: ps aux | grep download_swap"
+echo "=================================="

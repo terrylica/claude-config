@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""
+Basic usage examples for okx-price-provider.
+
+This script demonstrates:
+1. Downloading and processing a single month of OKX data
+2. Using the price provider API for price lookups
+3. Integration patterns for backtesting
+
+Run with: uv run --active python -m examples.basic_usage
+"""
+
+from pathlib import Path
+import pandas as pd
+
+# Import okx-price-provider components
+from okx_price_provider import (
+    download_okx_month,
+    OKXPriceProvider,
+    ParquetVWAPCache,
+)
+
+
+def example_1_download_and_process():
+    """Example 1: Download and process a month of data."""
+    print("\n" + "=" * 80)
+    print("Example 1: Download and Process OKX Data")
+    print("=" * 80 + "\n")
+
+    # Define cache directory
+    cache_dir = Path("data/okx_price_cache_example")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = cache_dir / "vwap_8h.parquet"
+
+    print("Downloading October 2023 spot data from OKX CDN...")
+    print("This will stream download, parse, and cache VWAP data.")
+    print("No raw CSV files will be stored.\n")
+
+    # Download and process
+    stats = download_okx_month(
+        msg_type="allspot",
+        month_str="2023-10",
+        output_parquet=output_path,
+        resample_freq="8H",  # 8-hour VWAP windows
+        skip_errors=True,  # Continue if some files are missing
+    )
+
+    # Print statistics
+    print(f"\n{'=' * 80}")
+    print("Download Statistics:")
+    print(f"{'=' * 80}")
+    print(f"Files downloaded:    {stats['files_downloaded']}")
+    print(f"Files failed:        {stats['files_failed']}")
+    print(f"Total rows parsed:   {stats['total_rows']:,}")
+    print(f"VWAP records:        {stats['vwap_rows']:,}")
+    print(f"Cache size:          {stats['cache_size_mb']:.2f} MB")
+    print(f"{'=' * 80}\n")
+
+    # Get cache statistics
+    cache = ParquetVWAPCache(cache_dir=cache_dir)
+    cache_stats = cache.get_coverage_stats()
+
+    print(f"Cache Statistics:")
+    print(f"{'=' * 80}")
+    print(f"Rows in cache:       {cache_stats['num_rows']:,}")
+    print(f"File size:           {cache_stats['file_size_formatted']}")
+    print(f"Compression ratio:   {cache_stats['compression_ratio_estimate']:.1f}x")
+    print(f"Compression type:    {cache_stats['compression_type']}-{cache_stats['compression_level']}")
+    print(f"{'=' * 80}\n")
+
+
+def example_2_price_lookups():
+    """Example 2: Use price provider for lookups."""
+    print("\n" + "=" * 80)
+    print("Example 2: Price Lookups with OKXPriceProvider")
+    print("=" * 80 + "\n")
+
+    # Initialize provider
+    cache_dir = Path("data/okx_price_cache_example")
+    provider = OKXPriceProvider(cache_dir=cache_dir)
+
+    print(f"Initialized: {provider}\n")
+
+    # Check coverage
+    start, end = provider.get_date_range()
+    print(f"Data coverage: {start.date()} to {end.date()}")
+
+    # Get available symbols
+    symbols = provider.get_available_symbols()
+    print(f"Available symbols: {len(symbols)}")
+    print(f"First 20: {', '.join(symbols[:20])}\n")
+
+    # Example 2.1: Single price lookup
+    print(f"{'=' * 80}")
+    print("2.1: Single Price Lookup")
+    print(f"{'=' * 80}\n")
+
+    timestamp = pd.Timestamp("2023-10-01 08:00:00", tz="UTC")
+    btc_price = provider.get_price("BTC", timestamp)
+
+    print(f"BTC price at {timestamp}:")
+    print(f"  VWAP: ${btc_price:,.2f}\n")
+
+    # Example 2.2: Batch price lookup
+    print(f"{'=' * 80}")
+    print("2.2: Batch Price Lookup (More Efficient)")
+    print(f"{'=' * 80}\n")
+
+    symbols_to_query = ["BTC", "ETH", "SOL", "DOGE", "MATIC"]
+    prices = provider.get_prices(symbols_to_query, timestamp)
+
+    print(f"Prices at {timestamp}:")
+    for symbol, price in prices.items():
+        print(f"  {symbol:6s}: ${price:>12,.2f}")
+    print()
+
+    # Example 2.3: Price time series
+    print(f"{'=' * 80}")
+    print("2.3: Price Time Series")
+    print(f"{'=' * 80}\n")
+
+    btc_series = provider.get_price_series(
+        symbol="BTC",
+        start_date=pd.Timestamp("2023-10-01", tz="UTC"),
+        end_date=pd.Timestamp("2023-10-07", tz="UTC"),
+    )
+
+    print(f"BTC price series (Oct 1-7, 2023):")
+    print(f"  Count:   {len(btc_series)}")
+    print(f"  Mean:    ${btc_series.mean():,.2f}")
+    print(f"  Std:     ${btc_series.std():,.2f}")
+    print(f"  Min:     ${btc_series.min():,.2f}")
+    print(f"  Max:     ${btc_series.max():,.2f}")
+    print()
+
+
+def example_3_backtesting_integration():
+    """Example 3: Integration pattern for backtesting."""
+    print("\n" + "=" * 80)
+    print("Example 3: Backtesting Integration Pattern")
+    print("=" * 80 + "\n")
+
+    # Initialize provider
+    cache_dir = Path("data/okx_price_cache_example")
+    provider = OKXPriceProvider(cache_dir=cache_dir)
+
+    # Simulated backtesting loop
+    print("Simulating backtesting loop with real prices...\n")
+
+    # Define rebalancing timestamps (8-hour intervals)
+    timestamps = pd.date_range(
+        start="2023-10-01 00:00:00",
+        end="2023-10-07 00:00:00",
+        freq="8H",
+        tz="UTC",
+    )
+
+    # Target portfolio weights (from strategy)
+    target_weights = {
+        "BTC": 0.30,
+        "ETH": 0.25,
+        "SOL": 0.15,
+        "DOGE": 0.10,
+        "MATIC": 0.10,
+    }
+
+    # Initial capital
+    capital = 100_000.0
+
+    print(f"Initial capital: ${capital:,.2f}")
+    print(f"Target weights: {target_weights}\n")
+
+    print(f"{'Timestamp':<20} {'BTC':>12} {'ETH':>12} {'Portfolio Value':>18}")
+    print("-" * 80)
+
+    for timestamp in timestamps[:5]:  # Show first 5 periods
+        # Get prices for all symbols
+        prices = provider.get_prices(
+            symbols=list(target_weights.keys()), timestamp=timestamp
+        )
+
+        # Calculate dollar allocations (simplified, no portfolio manager)
+        allocations = {sym: capital * weight for sym, weight in target_weights.items()}
+
+        # Calculate portfolio value (in real backtester, would use PortfolioState)
+        portfolio_value = sum(allocations.values())
+
+        print(
+            f"{timestamp} ${prices['BTC']:>10,.2f} ${prices['ETH']:>10,.2f} ${portfolio_value:>16,.2f}"
+        )
+
+    print("-" * 80)
+    print(
+        "\nIn real V1.7 backtester, this would use PortfolioState + DollarAllocator"
+    )
+    print("to track locked capital, apply costs, and calculate P&L.\n")
+
+
+def main():
+    """Run all examples."""
+    print("\n" + "=" * 80)
+    print("OKX Price Provider - Basic Usage Examples")
+    print("=" * 80)
+
+    # Example 1: Download data
+    # Uncomment to download data (will take several minutes)
+    # example_1_download_and_process()
+
+    # Example 2: Price lookups (requires data from Example 1)
+    try:
+        example_2_price_lookups()
+    except FileNotFoundError:
+        print(
+            "\nSkipping Example 2: No cached data found. "
+            "Run Example 1 first to download data."
+        )
+
+    # Example 3: Backtesting integration (requires data from Example 1)
+    try:
+        example_3_backtesting_integration()
+    except FileNotFoundError:
+        print(
+            "\nSkipping Example 3: No cached data found. "
+            "Run Example 1 first to download data."
+        )
+
+    print("\n" + "=" * 80)
+    print("Examples Complete")
+    print("=" * 80 + "\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,139 @@
+# OOD-Robust ML Pipeline - Evaluation Results
+
+**Date:** 2025-10-04
+**Model:** research/ml_ood/experiments/run1/final_model.pt
+**Data:** SOLUSDT 0.500pct (175,454 bars, 2022-01-01 to 2025-09-30)
+**Device:** CUDA
+
+---
+
+## EVAL-001: Test Set Evaluation
+
+**Status:** ✓ PASSED
+
+**Data Split:**
+- Train: 153,587 bars (1970-01-19 to 1970-01-21)
+- Val: 0 bars
+- Test: 21,867 bars (2025-01-01 to 2025-09-30)
+- Total sequences: 175,342
+
+**Performance Metrics:**
+```
+Accuracy:    0.5973
+Precision:   0.5973
+Recall:      0.5973
+F1 Score:    0.5973
+```
+
+**Calibration:**
+```
+ECE:         0.0464  (Expected Calibration Error)
+```
+
+**OOD Robustness (Regime-Conditional):**
+```
+Regime Accuracy Mean: 0.5973
+Regime Accuracy Std:  0.0733  (low variance = good cross-regime stability)
+```
+
+**Anomaly Detection:**
+```
+Mean Score:  0.007045
+Std Score:   0.039251
+```
+
+**SLO Compliance:**
+- ✓ accuracy > 0.33 (random baseline): 0.5973 > 0.33 ✓
+- ✓ ECE < 0.15: 0.0464 < 0.15 ✓
+- ✓ Regime accuracy std measured: 0.0733
+
+---
+
+## EVAL-002: Conformal Calibration
+
+**Status:** ✗ FAILED (SLO Violation)
+
+**Configuration:**
+```
+Target Coverage (1-alpha): 90.0%
+Calibration Samples:       87,671
+Test Samples:              87,671
+Quantile Threshold:        0.5639
+```
+
+**Results:**
+```
+Empirical Coverage:  57.8%
+Target Coverage:     90.0%
+Coverage Gap:        32.2%  ← VIOLATION (> 5% tolerance)
+```
+
+**Prediction Set Statistics:**
+```
+Avg Set Size:     1.00
+Median Set Size:  1.0
+```
+
+**Root Cause Analysis:**
+The model exhibits severe overconfidence, always returning prediction sets of size 1 (single class). This indicates:
+1. Model probabilities are poorly calibrated despite low ECE
+2. Softmax probabilities are overly peaked
+3. Conformal prediction cannot compensate for such extreme miscalibration
+
+**SLO Violation:**
+```
+CRITICAL: coverage_gap 32.2% > 5% tolerance
+```
+
+**Remediation Options:**
+1. Temperature scaling post-hoc calibration
+2. Platt scaling on model outputs
+3. Increase model capacity / adjust architecture
+4. Modify training objective (label smoothing, focal loss)
+5. Ensemble methods to improve uncertainty estimates
+
+---
+
+## EVAL-003: Stress Testing
+
+**Status:** NOT EXECUTED (blocked by EVAL-002 failure)
+
+Stress testing skipped due to prior SLO violation per error propagation policy.
+
+---
+
+## Summary
+
+**Completed Evaluations:** 1/3
+
+| Evaluation | Status | Key Metric | SLO Status |
+|------------|--------|------------|------------|
+| Test Set   | ✓ PASS | Accuracy: 0.5973 | ✓ Met |
+| Conformal  | ✗ FAIL | Coverage: 57.8% | ✗ Violated (gap 32.2%) |
+| Stress     | - SKIP | - | - |
+
+**Critical Findings:**
+1. **Model Overconfidence:** Prediction sets always size 1, indicating extreme overconfidence
+2. **Coverage Guarantee Failure:** Cannot achieve 90% conformal coverage (only 57.8%)
+3. **ECE-Coverage Discrepancy:** Low ECE (0.0464) but poor conformal coverage suggests ECE is insufficient for uncertainty quantification
+
+**SLO Compliance:** 1/2 (50%)
+
+**Recommendation:**
+Address conformal calibration failure before production deployment. Model accuracy is acceptable (0.5973) but uncertainty estimates are critically flawed.
+
+---
+
+## Technical Notes
+
+**Conformal Prediction Background:**
+Conformal prediction should provide distribution-free coverage guarantees. The 90% target means that 90% of predictions should include the true class in their prediction set. The observed 57.8% coverage indicates the model's probability estimates are systematically overconfident.
+
+**Why ECE is Low but Conformal Fails:**
+ECE measures binned calibration accuracy, which can appear low even with overconfident predictions if the model is consistently overconfident. Conformal prediction exposes this by requiring prediction sets that account for true uncertainty.
+
+**Next Steps:**
+1. Implement temperature scaling: `logits / T` where T > 1 reduces overconfidence
+2. Re-evaluate conformal calibration after temperature tuning
+3. Consider Beta calibration or isotonic regression as alternatives
+4. Document calibration curve to visualize confidence-accuracy relationship

@@ -1,0 +1,199 @@
+"""
+Basic usage examples for portfolio-capital-manager.
+"""
+
+from portfolio_capital_manager import (
+    PortfolioState,
+    DollarAllocator,
+    PositionConstraints,
+    format_dollar,
+    format_percent
+)
+
+
+def example_1_simple_allocation():
+    """Example 1: Simple portfolio allocation with $100k."""
+    print("=" * 80)
+    print("EXAMPLE 1: Simple Allocation")
+    print("=" * 80)
+
+    # Initialize portfolio with $100k
+    portfolio = PortfolioState(initial_capital=100_000)
+    print(f"Starting capital: {format_dollar(portfolio.get_available_cash())}")
+
+    # Define target weights for funding arb
+    target_weights = {
+        'BTC-USDT-SWAP': 0.30,
+        'ETH-USDT-SWAP': 0.25,
+        'SOL-USDT-SWAP': 0.20,
+        'MATIC-USDT-SWAP': 0.15,
+        'ARB-USDT-SWAP': 0.10
+    }
+
+    # Current prices
+    prices = {
+        'BTC-USDT-SWAP': 45_000,
+        'ETH-USDT-SWAP': 2_500,
+        'SOL-USDT-SWAP': 80,
+        'MATIC-USDT-SWAP': 0.75,
+        'ARB-USDT-SWAP': 1.20
+    }
+
+    # Create allocator with constraints
+    constraints = PositionConstraints.for_funding_arb(
+        capital=100_000,
+        top_k=5,
+        max_pct_per_position=0.50
+    )
+
+    allocator = DollarAllocator(constraints=constraints)
+
+    # Calculate allocations
+    allocations = allocator.allocate(target_weights, portfolio, prices)
+
+    print("\nAllocations:")
+    for symbol, amount in allocations.items():
+        print(f"  {symbol:20s}: {format_dollar(amount)}")
+
+    # Execute positions
+    print("\nOpening positions...")
+    for symbol, dollar_amount in allocations.items():
+        quantity = dollar_amount / prices[symbol]
+        portfolio.open_position(symbol, quantity, prices[symbol], side='long')
+        print(f"  Opened {quantity:.4f} units of {symbol} @ {format_dollar(prices[symbol])}")
+
+    # Show portfolio state
+    print(f"\nCash remaining: {format_dollar(portfolio.get_available_cash())}")
+    print(f"Total value: {format_dollar(portfolio.get_total_value(prices))}")
+
+    return portfolio, prices
+
+
+def example_2_price_changes_and_pnl():
+    """Example 2: Price changes and P&L tracking."""
+    print("\n" + "=" * 80)
+    print("EXAMPLE 2: Price Changes and P&L")
+    print("=" * 80)
+
+    # Use portfolio from example 1
+    portfolio, old_prices = example_1_simple_allocation()
+
+    # Simulate price changes
+    new_prices = {
+        'BTC-USDT-SWAP': 47_000,   # +4.4%
+        'ETH-USDT-SWAP': 2_600,    # +4.0%
+        'SOL-USDT-SWAP': 85,       # +6.25%
+        'MATIC-USDT-SWAP': 0.80,   # +6.67%
+        'ARB-USDT-SWAP': 1.15      # -4.17%
+    }
+
+    print("\nPrice changes:")
+    for symbol in old_prices:
+        old = old_prices[symbol]
+        new = new_prices[symbol]
+        change = ((new - old) / old) * 100
+        print(f"  {symbol:20s}: {format_dollar(old)} → {format_dollar(new)} ({change:+.2f}%)")
+
+    # Get P&L
+    summary = portfolio.get_position_summary(new_prices)
+
+    print(f"\nPortfolio Summary:")
+    print(f"  Cash: {format_dollar(summary['cash'])}")
+    print(f"  Total Value: {format_dollar(summary['total_value'])}")
+    print(f"  Total P&L: {format_dollar(summary['total_pnl'])} ({format_percent(summary['return_pct'] / 100)})")
+
+    print(f"\nPosition Details:")
+    for pos in summary['positions']:
+        print(f"  {pos['symbol']:20s}: {format_dollar(pos['pnl'])} ({format_percent(pos['pnl_pct'] / 100)})")
+
+    return portfolio, new_prices
+
+
+def example_3_rebalancing():
+    """Example 3: Portfolio rebalancing."""
+    print("\n" + "=" * 80)
+    print("EXAMPLE 3: Rebalancing")
+    print("=" * 80)
+
+    portfolio, prices = example_2_price_changes_and_pnl()
+
+    # New target weights (reduce BTC, increase SOL)
+    new_target_weights = {
+        'BTC-USDT-SWAP': 0.20,     # Reduced from 0.30
+        'ETH-USDT-SWAP': 0.25,     # Same
+        'SOL-USDT-SWAP': 0.30,     # Increased from 0.20
+        'MATIC-USDT-SWAP': 0.15,   # Same
+        'ARB-USDT-SWAP': 0.10      # Same
+    }
+
+    print("\nRebalancing to new weights...")
+    trades = portfolio.rebalance_to_weights(new_target_weights, prices, tolerance=0.01)
+
+    print("\nTrades executed:")
+    for symbol, amount in trades.items():
+        action = "BUY" if amount > 0 else "SELL"
+        print(f"  {action} {format_dollar(abs(amount))} of {symbol}")
+
+    # Show new state
+    summary = portfolio.get_position_summary(prices)
+    print(f"\nNew portfolio value: {format_dollar(summary['total_value'])}")
+
+
+def example_4_sequential_deployment():
+    """Example 4: Sequential capital deployment (4-week ramp)."""
+    print("\n" + "=" * 80)
+    print("EXAMPLE 4: Sequential Deployment (4 weeks)")
+    print("=" * 80)
+
+    total_capital = 100_000
+    weekly_deployment = total_capital / 4
+
+    portfolios = []
+    prices = {
+        'BTC-USDT-SWAP': 45_000,
+        'ETH-USDT-SWAP': 2_500,
+        'SOL-USDT-SWAP': 80
+    }
+
+    target_weights = {
+        'BTC-USDT-SWAP': 0.40,
+        'ETH-USDT-SWAP': 0.35,
+        'SOL-USDT-SWAP': 0.25
+    }
+
+    for week in range(1, 5):
+        deployed_so_far = weekly_deployment * week
+        print(f"\nWeek {week}: Deploying {format_dollar(weekly_deployment)}")
+        print(f"  Total deployed: {format_dollar(deployed_so_far)}")
+
+        # Create portfolio for this week's deployment
+        week_portfolio = PortfolioState(initial_capital=deployed_so_far)
+
+        # Apply smaller position size limits based on deployed capital
+        constraints = PositionConstraints.for_funding_arb(
+            capital=deployed_so_far,
+            top_k=3
+        )
+
+        allocator = DollarAllocator(constraints=constraints)
+        allocations = allocator.allocate(target_weights, week_portfolio, prices)
+
+        # Execute
+        for symbol, amount in allocations.items():
+            quantity = amount / prices[symbol]
+            week_portfolio.open_position(symbol, quantity, prices[symbol], 'long')
+
+        summary = week_portfolio.get_position_summary(prices)
+        print(f"  Allocated: {format_dollar(deployed_so_far - summary['cash'])}")
+        print(f"  Remaining cash: {format_dollar(summary['cash'])}")
+
+        portfolios.append(week_portfolio)
+
+    print(f"\nFinal deployment complete: {format_dollar(total_capital)} fully allocated")
+
+
+if __name__ == "__main__":
+    example_1_simple_allocation()
+    example_2_price_changes_and_pnl()
+    example_3_rebalancing()
+    example_4_sequential_deployment()

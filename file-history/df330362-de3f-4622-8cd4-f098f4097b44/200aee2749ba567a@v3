@@ -1,0 +1,328 @@
+"""End-to-end training script for OOD-robust range bar model.
+
+Usage:
+    uv run --active python -m research.ml_ood.train --help
+    uv run --active python -m research.ml_ood.train --data output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv
+"""
+
+import argparse
+from pathlib import Path
+from typing import Optional
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
+from research.ml_ood.data import RangeBarDataset, create_splits, FixedPointConverter
+from research.ml_ood.models import OODRobustRangeBarModel
+from research.ml_ood.training import RegimeStratifiedSampler, ConformalCalibrator
+
+
+def train_epoch(
+    model: nn.Module,
+    train_loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+    device: torch.device,
+    epoch: int,
+    writer: Optional[SummaryWriter] = None,
+) -> dict[str, float]:
+    """Train for one epoch.
+
+    Args:
+        model: Model to train
+        train_loader: Training data loader
+        optimizer: Optimizer
+        scheduler: Learning rate scheduler
+        device: Device to run on
+        epoch: Current epoch number
+        writer: TensorBoard writer
+
+    Returns:
+        Dictionary of epoch metrics
+    """
+    model.train()
+
+    total_loss = 0.0
+    total_direction_loss = 0.0
+    total_anomaly_loss = 0.0
+    n_batches = 0
+
+    pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
+
+    for batch_idx, batch in enumerate(pbar):
+        sequences = batch["features"].to(device)
+        targets = batch["target"].to(device)
+
+        # Get last bar features for reconstruction target
+        original_features = sequences[:, -1, :].to(device)
+
+        # Forward pass
+        outputs = model(sequences)
+
+        # Compute loss
+        loss, loss_dict = model.compute_loss(
+            outputs=outputs,
+            targets=targets,
+            original_features=original_features,
+        )
+
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        optimizer.step()
+
+        # Update metrics
+        total_loss += loss.item()
+        total_direction_loss += loss_dict["direction_loss"]
+        total_anomaly_loss += loss_dict["anomaly_loss"]
+        n_batches += 1
+
+        # Update progress bar
+        pbar.set_postfix({
+            "loss": loss.item(),
+            "dir": loss_dict["direction_loss"],
+            "anom": loss_dict["anomaly_loss"],
+        })
+
+        # Log to TensorBoard
+        if writer is not None:
+            global_step = epoch * len(train_loader) + batch_idx
+            writer.add_scalar("train/batch_loss", loss.item(), global_step)
+            writer.add_scalar("train/direction_loss", loss_dict["direction_loss"], global_step)
+            writer.add_scalar("train/anomaly_loss", loss_dict["anomaly_loss"], global_step)
+
+    # Step scheduler
+    if scheduler is not None:
+        scheduler.step()
+
+    # Epoch metrics
+    metrics = {
+        "loss": total_loss / n_batches,
+        "direction_loss": total_direction_loss / n_batches,
+        "anomaly_loss": total_anomaly_loss / n_batches,
+    }
+
+    return metrics
+
+
+@torch.no_grad()
+def evaluate(
+    model: nn.Module,
+    data_loader: DataLoader,
+    device: torch.device,
+    split_name: str = "val",
+) -> dict[str, float]:
+    """Evaluate model.
+
+    Args:
+        model: Model to evaluate
+        data_loader: Data loader
+        device: Device to run on
+        split_name: Name of split (for logging)
+
+    Returns:
+        Dictionary of evaluation metrics
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    for batch in tqdm(data_loader, desc=f"Eval {split_name}"):
+        sequences = batch["features"].to(device)
+        targets = batch["target"].to(device)
+        original_features = sequences[:, -1, :].to(device)
+
+        # Forward pass
+        outputs = model(sequences)
+
+        # Compute loss
+        loss, _ = model.compute_loss(
+            outputs=outputs,
+            targets=targets,
+            original_features=original_features,
+        )
+
+        # Compute accuracy
+        preds = torch.argmax(outputs["direction_logits"], dim=-1)
+        correct = (preds == targets).sum().item()
+
+        total_loss += loss.item() * len(targets)
+        total_correct += correct
+        total_samples += len(targets)
+
+    metrics = {
+        "loss": total_loss / total_samples,
+        "accuracy": total_correct / total_samples,
+    }
+
+    print(f"{split_name.upper()} - Loss: {metrics['loss']:.4f}, Accuracy: {metrics['accuracy']:.1%}")
+
+    return metrics
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Train OOD-robust range bar model")
+    parser.add_argument("--data", type=str, required=True, help="Path to range bar CSV")
+    parser.add_argument("--output-dir", type=str, default="research/ml_ood/experiments",
+                        help="Output directory for checkpoints and logs")
+    parser.add_argument("--batch-size", type=int, default=256, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--sequence-len", type=int, default=64, help="Sequence length")
+    parser.add_argument("--embedding-dim", type=int, default=128, help="Embedding dimension")
+    parser.add_argument("--device", type=str, default="auto", help="Device (auto/cpu/cuda/mps)")
+    parser.add_argument("--no-regime-stratify", action="store_true",
+                        help="Disable regime-stratified sampling")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+
+    args = parser.parse_args()
+
+    # Set random seed
+    torch.manual_seed(args.seed)
+
+    # Device selection
+    if args.device == "auto":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+
+    print(f"Using device: {device}")
+
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load and split data
+    print(f"\nLoading data from {args.data}")
+    df = FixedPointConverter.load_csv(Path(args.data))
+    df = FixedPointConverter.compute_features(df)
+    train_df, val_df, test_df = create_splits(df)
+
+    # Create datasets
+    print("\nCreating datasets...")
+    train_dataset = RangeBarDataset(
+        csv_path=Path(args.data),
+        sequence_len=args.sequence_len,
+        detect_regimes=True,
+    )
+
+    # Normalize features using training stats
+    train_stats = train_dataset.normalize_features()
+
+    # Create data loaders
+    if args.no_regime_stratify:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=4,
+        )
+    else:
+        sampler = RegimeStratifiedSampler(
+            train_dataset,
+            batch_size=args.batch_size,
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            sampler=sampler,
+            num_workers=4,
+        )
+
+    # Create model
+    print("\nInitializing model...")
+    model = OODRobustRangeBarModel(
+        n_features=len(train_dataset.feature_cols),
+        embedding_dim=args.embedding_dim,
+    ).to(device)
+
+    print(model)
+
+    # Optimizer and scheduler
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=0.01,
+    )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=args.epochs,
+        eta_min=1e-6,
+    )
+
+    # TensorBoard writer
+    writer = SummaryWriter(log_dir=output_dir / "logs")
+
+    # Training loop
+    print("\nStarting training...")
+    best_val_acc = 0.0
+
+    for epoch in range(1, args.epochs + 1):
+        print(f"\n{'='*60}")
+        print(f"Epoch {epoch}/{args.epochs}")
+        print(f"{'='*60}")
+
+        # Train
+        train_metrics = train_epoch(
+            model=model,
+            train_loader=train_loader,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            device=device,
+            epoch=epoch,
+            writer=writer,
+        )
+
+        # Log epoch metrics
+        writer.add_scalar("train/epoch_loss", train_metrics["loss"], epoch)
+        writer.add_scalar("train/epoch_direction_loss", train_metrics["direction_loss"], epoch)
+        writer.add_scalar("train/epoch_anomaly_loss", train_metrics["anomaly_loss"], epoch)
+        writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], epoch)
+
+        print(f"\nTrain - Loss: {train_metrics['loss']:.4f}")
+
+        # Save checkpoint
+        if epoch % 5 == 0 or epoch == args.epochs:
+            checkpoint_path = output_dir / f"checkpoint_epoch{epoch}.pt"
+            torch.save({
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "train_metrics": train_metrics,
+                "train_stats": train_stats,
+            }, checkpoint_path)
+            print(f"Saved checkpoint to {checkpoint_path}")
+
+    # Save final model
+    final_path = output_dir / "final_model.pt"
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "train_stats": train_stats,
+        "config": vars(args),
+    }, final_path)
+
+    print(f"\n{'='*60}")
+    print(f"Training complete! Model saved to {final_path}")
+    print(f"{'='*60}")
+
+    writer.close()
+
+
+if __name__ == "__main__":
+    main()

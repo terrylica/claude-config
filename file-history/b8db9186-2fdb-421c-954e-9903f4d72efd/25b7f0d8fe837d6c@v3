@@ -1,0 +1,60 @@
+#!/bin/bash
+# Full Data Pipeline: Download → Aggregate → Backtest
+# Runs sequentially with progress reporting
+
+set -e  # Exit on error
+
+echo "================================================================================"
+echo "FULL DATA PIPELINE - 32-Month Backtest ($1M Capital)"
+echo "================================================================================"
+echo ""
+echo "Pipeline Steps:"
+echo "  1. Download 2023 Q1-Q3 data (9 months)"
+echo "  2. Download 2024 full year (12 months)"
+echo "  3. Aggregate all 2023-2025 to 1-min bars"
+echo "  4. Verify data quality"
+echo "  5. Delete raw ticks (save 35 GB)"
+echo "  6. Run 32-month backtest"
+echo ""
+echo "Estimated time: 4-7 hours"
+echo "================================================================================"
+echo ""
+
+# Step 1: Download 2023 Q1-Q3
+echo "STEP 1/6: Downloading 2023 Q1-Q3..."
+echo "y" | uv run --active python scripts/download_range.py --start 2023-01 --end 2023-09 --ticks
+
+# Step 2: Download 2024
+echo ""
+echo "STEP 2/6: Downloading 2024 full year..."
+echo "y" | uv run --active python scripts/download_range.py --start 2024-01 --end 2024-12 --ticks
+
+# Step 3: Aggregate all to 1-min bars
+echo ""
+echo "STEP 3/6: Aggregating to 1-min bars..."
+echo "y" | uv run --active python scripts/aggregate_range.py --start 2023-01 --end 2025-08
+
+# Step 4: Verify quality (sample check)
+echo ""
+echo "STEP 4/6: Verifying data quality..."
+uv run --active python verify_1min_bars.py
+
+# Step 5: Delete raw ticks
+echo ""
+echo "STEP 5/6: Deleting raw ticks..."
+du -sh data/raw_ticks 2>/dev/null || echo "No raw ticks to delete"
+rm -rf data/raw_ticks/
+echo "✓ Raw ticks deleted"
+
+# Step 6: Run 32-month backtest with $1M capital
+echo ""
+echo "STEP 6/6: Running 32-month backtest ($1M capital)..."
+uv run --active python v1.9-modular.py --start 2023-01-01 --end 2025-08-31 --capital 1000000
+
+echo ""
+echo "================================================================================"
+echo "✓ PIPELINE COMPLETE"
+echo "================================================================================"
+echo ""
+echo "Results saved to: results/v1.9-modular-20230101-20250831.*"
+echo ""

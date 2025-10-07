@@ -1,0 +1,509 @@
+# Temporal Audit: `next_funding_rate.py` (Leverage Strategy)
+
+**Auditor:** Terry Li (Engineering Lead)
+**Date:** September 30, 2025
+**Status:** ⚠️ **Prediction Logic Verified — Backtest Missing**
+
+---
+
+## 🎯 Executive Summary
+
+**Victor's Claim:** The leverage strategy (using OKX's formula) is free of look-ahead bias.
+
+**Audit Finding:** The **prediction logic** in `next_funding_rate.py` is **temporally correct** and uses only historical data. However, this file is **NOT a backtester** — it's a live scanner. To validate Victor's claim, we need to see the corresponding backtest implementation.
+
+| Component | Status | Finding |
+|-----------|--------|---------|
+| **Prediction Logic** | ✅ Temporally Correct | Uses only historical premium data |
+| **OKX Formula Implementation** | ✅ Correct | Follows documented API behavior |
+| **Real-Time Scanner** | ✅ Production-Ready | No temporal violations detected |
+| **Backtester** | ❌ **MISSING** | No backtest found in codebase |
+| **Performance Claims** | ⚠️ **UNVALIDATED** | Cannot verify without backtest |
+
+---
+
+## 🔍 What `next_funding_rate.py` Actually Does
+
+This is a **live prediction tool**, not a backtester. It:
+
+1. **Predicts next funding rate** using OKX's premium-index formula
+2. **Calculates costs** (borrow APR, financing APR)
+3. **Recommends actions** (Long Spot + Short Perp, etc.)
+4. **Shows 3-day realized performance** (historical, not predicted)
+5. **Outputs to CSV** for monitoring
+
+**What it does NOT do:**
+- ❌ Backtest historical predictions against outcomes
+- ❌ Simulate trading decisions over time
+- ❌ Calculate equity curve or portfolio performance
+- ❌ Compute Sharpe ratio or drawdowns
+- ❌ Validate prediction accuracy
+
+---
+
+## ✅ Temporal Analysis: Prediction Logic
+
+### How Predictions Work
+
+**At time T (e.g., 07:45 UTC):**
+
+```
+Current window:  00:00 ────────────►[NOW: 07:45]────► 08:00 (settlement)
+                        465 minutes elapsed     15 min remaining
+
+Next window:     08:00 ──────────────────────────────► 16:00 (next settlement)
+```
+
+**Code Flow (Lines 246-293):**
+
+```python
+def estimate_next_rate_and_meta(inst_id: str, base: str):
+    # 1. Get next settlement time
+    next_ms = meta["next_funding_ms"]  # 08:00 UTC
+
+    # 2. Calculate elapsed time in current window
+    win_mins = minutes_since_window_start(now_ms, next_ms, interval_s)
+    # Returns: 465 minutes (7 hours 45 min)
+
+    # 3. Get premium history from window start to NOW
+    premiums_recent_first = get_premium_history(inst_id, win_mins)
+    # Gets premiums from 00:00 to 07:45 (465 data points)
+
+    # 4. Calculate weighted moving average
+    avg_premium = weighted_moving_average(premiums)
+    # WMA of 00:00-07:45 premiums
+
+    # 5. Apply OKX's adjustment formula
+    adj = max(-0.0005, min(0.0005, (interest - avg_premium)))
+    est = avg_premium + adj
+    # Estimated rate for NEXT period (08:00-16:00)
+
+    return est  # Prediction for next settlement
+```
+
+### Temporal Correctness Check
+
+**Information Set at 07:45 UTC:**
+- ✅ Premium data from 00:00 to 07:45 (historical)
+- ✅ Current orderbook (real-time)
+- ✅ Index price (real-time)
+- ✅ Last settled funding rate (historical)
+- ❌ Premium data from 07:45 to 08:00 (future - not used)
+- ❌ Actual rate that will settle at 08:00 (future - not used)
+
+**Conclusion:** The prediction uses **only data available at decision time**. No look-ahead bias in prediction logic.
+
+---
+
+## 🔬 Key Components Analysis
+
+### 1. Premium History (Lines 199-217)
+
+```python
+def get_premium_history(inst_id: str, limit_minutes: int):
+    """Gets historical premium data up to NOW"""
+    rows = okx_get(path, {"instId": inst_id, "limit": str(limit_minutes)})
+```
+
+**Temporal Check:**
+- API endpoint: `/api/v5/market/premium-history`
+- Returns: Historical premium-index values (1-minute granularity)
+- Direction: Recent-first (newest to oldest)
+- **Status:** ✅ No future data accessed
+
+### 2. Current Premium Index (Lines 174-192)
+
+```python
+def current_premium_index(inst_id: str, base: str):
+    """Calculates current premium from orderbook and index"""
+    idx_px = get_index_price(base)        # Current spot index
+    bids, asks = get_orderbook(inst_id)   # Current perp orderbook
+
+    imp_bid = impact_price_from_book(bids, impact_value, ct_val)
+    imp_ask = impact_price_from_book(asks, impact_value, ct_val)
+
+    return (a - b) / idx_px  # Premium-index formula
+```
+
+**Temporal Check:**
+- Uses real-time orderbook and index price
+- Available to traders at decision time
+- OKX uses same formula for official premium-index
+- **Status:** ✅ No temporal violations
+
+### 3. OKX Estimation Formula (Lines 283-285)
+
+```python
+# Interest per interval (documented by OKX)
+interest = 0.0003 / (24.0 / hours)  # Default 0.01% per 8h
+
+# Adjustment (clamped to ±0.05%)
+adj = max(-0.0005, min(0.0005, (interest - avg_premium)))
+
+# Estimated next rate
+est = avg_premium + adj
+```
+
+**OKX's Official Formula:**
+```
+next_funding_rate = clamp(premium_index + (interest_rate - premium_index), -0.05%, +0.05%)
+```
+
+**Temporal Check:**
+- Formula is public and documented
+- Uses average premium from current window
+- Available to all traders in real-time
+- **Status:** ✅ Correct implementation, no bias
+
+### 4. Realized 3-Day Performance (Lines 343-383)
+
+```python
+def realized_3d_absolute_net(inst_id: str, symbol: str, windows_per_day: int):
+    """Calculate net profit from LAST 3 days (historical)"""
+    rows = okx_get("/api/v5/public/funding-rate-history",
+                   {"instId": inst_id, "limit": str(needed)})
+
+    for r in rows:
+        fr = float(r["fundingRate"])  # Historical settled rate
+        income = abs(fr)
+        net_pw = income - fin_pw  # Net after financing
+        total += net_pw
+
+    apy_3d_net = total * (365.0 / 3.0)
+    return total, apy_3d_net
+```
+
+**Temporal Check:**
+- Uses `/api/v5/public/funding-rate-history` (historical rates only)
+- Calculates realized profit from past 3 days
+- Does NOT predict future performance
+- **Status:** ✅ No look-ahead bias
+
+---
+
+## ⚠️ Critical Gap: Missing Backtest
+
+### What We Have
+
+**`next_funding_rate.py` provides:**
+- ✅ Real-time rate predictions
+- ✅ Cost calculations (leverage, borrow, financing)
+- ✅ Action recommendations
+- ✅ Historical 3-day performance
+
+**What We DON'T Have:**
+- ❌ **Backtest implementation**
+- ❌ Validation of prediction accuracy over time
+- ❌ Equity curve using predicted rates
+- ❌ Performance metrics (APY, Sharpe, drawdowns)
+- ❌ Proof that strategy works without look-ahead
+
+### Questions for Victor
+
+1. **Where is the backtest for this strategy?**
+   - Is there a separate script?
+   - Was it run manually?
+   - What were the results?
+
+2. **What performance did the leverage strategy achieve?**
+   - APY? Sharpe ratio?
+   - Time period tested?
+   - Number of trades?
+
+3. **How accurate are the predictions?**
+   - Correlation between predicted and actual rates?
+   - Mean absolute error?
+   - Directional accuracy (% of correct sign predictions)?
+
+4. **Has this been live traded?**
+   - Paper trading results?
+   - Real money results?
+   - Comparison to backtest?
+
+---
+
+## 🧪 How to Build a Proper Backtest
+
+To validate Victor's claim, we need a backtest that:
+
+### Step 1: Historical Prediction Simulation
+
+```python
+for each historical funding period T:
+    # At time T-1 (before settlement)
+    # Simulate what we would have known
+
+    # 1. Get premium data from window start to T-1
+    premiums = get_premium_history(inst_id, elapsed_minutes)
+
+    # 2. Predict rate for period T using historical data
+    predicted_rate_T = estimate_using_okx_formula(premiums)
+
+    # 3. Make trading decision based on prediction
+    if predicted_rate_T > break_even:
+        action = "enter_position"
+    else:
+        action = "stand_by"
+```
+
+### Step 2: Apply Actual Outcomes
+
+```python
+    # After settlement at T
+    # Get ACTUAL rate that settled (from history)
+    actual_rate_T = get_settled_rate(inst_id, time_T)
+
+    # Apply actual returns
+    if action == "enter_position":
+        position_pnl = abs(actual_rate_T) - financing_costs
+        equity *= (1 + position_pnl * leverage)
+```
+
+### Step 3: Track Prediction Accuracy
+
+```python
+    # Store for analysis
+    predictions.append({
+        "time": T,
+        "predicted": predicted_rate_T,
+        "actual": actual_rate_T,
+        "error": abs(predicted_rate_T - actual_rate_T),
+        "correct_sign": (predicted_rate_T * actual_rate_T) > 0
+    })
+```
+
+### Step 4: Calculate Metrics
+
+```python
+# After full backtest
+final_apy = calculate_apy(equity_curve)
+sharpe = calculate_sharpe(returns)
+prediction_corr = correlation(predicted_rates, actual_rates)
+mae = mean_absolute_error(predicted_rates, actual_rates)
+directional_accuracy = pct_correct_sign_predictions
+```
+
+---
+
+## 📊 Expected Validation Results
+
+### If Strategy is Good
+
+**Prediction Accuracy:**
+- Correlation: > 0.3 (some predictive power)
+- MAE: < 0.0001 (< 10 basis points error)
+- Directional accuracy: > 60% (better than random)
+
+**Performance:**
+- APY: Positive and stable
+- Sharpe: > 1.0 (risk-adjusted returns)
+- Drawdowns: < 20%
+
+### If Strategy Has Hidden Look-Ahead
+
+**Prediction Accuracy:**
+- Correlation: < 0.1 (no predictive power)
+- High error rates
+- Directional accuracy ≈ 50% (random)
+
+**Performance:**
+- Backtest results much worse than claimed
+- High variance in returns
+- Strategy doesn't work in live trading
+
+---
+
+## 🎓 Key Insight: Prediction vs Backtest
+
+### Victor's Claim Analysis
+
+Victor said:
+> "The second strategy there, the one that uses the leverage, that doesn't have the look-ahead bias, because it basically it uses okx's own formula to calculate or estimate the next funding rate"
+
+**What this means:**
+1. ✅ The **prediction method** is temporally correct (uses historical data)
+2. ✅ The **formula** is public and available in real-time
+3. ⚠️ This does NOT guarantee the **backtest** is free of bias
+
+**Why the distinction matters:**
+
+Having a temporally correct prediction formula is necessary but NOT sufficient to prove bias-free backtesting.
+
+**You still need to ensure:**
+1. **Predictions are made at T-1** (before you know actual T rate)
+2. **Returns use actual T rates** (not predicted rates)
+3. **No other temporal leakage** (e.g., in position sizing, execution timing)
+4. **Realistic execution assumptions** (slippage, fills, latency)
+
+**Example of subtle bias even with correct predictions:**
+
+```python
+# WRONG: Backtest with hidden bias
+for T in history:
+    # Predict at T-1 (correct)
+    predicted = predict_using_okx_formula(T-1)
+
+    # But then...
+    actual = get_actual_rate(T)  # You know this now!
+
+    # Decision uses actual rate (WRONG!)
+    if actual > break_even:  # ← Look-ahead!
+        enter_position()
+
+    # Returns use actual rate (correct)
+    pnl = abs(actual) - costs
+```
+
+The prediction itself is fine, but the **decision logic** uses future information.
+
+---
+
+## ✅ `next_funding_rate.py` Temporal Audit Results
+
+### Prediction Logic: PASS ✅
+
+| Component | Temporal Check | Status |
+|-----------|----------------|--------|
+| Premium history data | Uses historical data only | ✅ PASS |
+| Current orderbook | Real-time, available at decision time | ✅ PASS |
+| Index price | Real-time, publicly available | ✅ PASS |
+| OKX formula | Public, documented, no future data | ✅ PASS |
+| 3-day realized | Historical settled rates only | ✅ PASS |
+
+**Conclusion:** The prediction logic is temporally correct and uses only information available at decision time.
+
+### Backtest: NOT FOUND ❌
+
+**Status:** No backtest implementation found in codebase.
+
+**Cannot verify:**
+- Whether predictions are used correctly in historical simulation
+- Whether actual performance matches Victor's claims
+- Whether there are other temporal violations in trading logic
+
+---
+
+## 🎯 Recommendations
+
+### Immediate Actions
+
+1. **Ask Victor for Backtest**
+   - Where is the backtest script?
+   - What were the exact results?
+   - Can we reproduce them?
+
+2. **Validate Prediction Quality**
+   - Sample recent predictions vs actual rates
+   - Measure correlation and error rates
+   - Determine if strategy has edge
+
+3. **Check for Other Temporal Issues**
+   - Position sizing logic
+   - Execution timing assumptions
+   - Entry/exit decision flow
+
+### If No Backtest Exists
+
+4. **Build Proper Backtest**
+   - Use `next_funding_rate.py` prediction logic
+   - Simulate historical decisions using T-1 data
+   - Apply actual T rates for returns
+   - Track prediction accuracy over time
+
+5. **Compare to Victor's Claims**
+   - If backtest results match claims → strategy is valid
+   - If backtest results differ → may indicate hidden bias or overfitting
+
+### Before Production Deployment
+
+6. **Paper Trading Validation**
+   - Run strategy in paper trading mode
+   - Track predicted vs actual rates
+   - Validate real-time performance
+
+7. **Prediction Monitoring**
+   - Log all predictions and outcomes
+   - Calculate rolling accuracy metrics
+   - Alert if accuracy degrades
+
+---
+
+## 📋 Summary
+
+### ✅ What We Verified
+
+1. **Prediction logic is temporally correct**
+   - Uses only historical premium data
+   - Implements OKX's public formula correctly
+   - No access to future information
+
+2. **Real-time scanner is production-ready**
+   - Properly structured for live trading
+   - Includes cost calculations and action recommendations
+   - 3-day realized performance tracking
+
+3. **Code quality is good**
+   - Clean structure
+   - Proper error handling
+   - Reasonable defaults
+
+### ⚠️ What We Could NOT Verify
+
+1. **No backtest found**
+   - Cannot validate historical performance claims
+   - Cannot measure prediction accuracy over time
+   - Cannot confirm absence of other temporal violations
+
+2. **Performance claims unvalidated**
+   - Need to see backtest results
+   - Need prediction accuracy metrics
+   - Need comparison to live trading
+
+3. **Strategy edge unclear**
+   - Prediction quality unknown
+   - Risk-adjusted returns unknown
+   - Drawdown characteristics unknown
+
+### 🎯 Next Steps
+
+**Priority 1:** Find or build the backtest for this strategy
+
+**Priority 2:** Validate prediction accuracy on historical data
+
+**Priority 3:** Compare backtest results to Victor's claims
+
+**Priority 4:** If results match, proceed with paper trading validation
+
+---
+
+## 🤔 Questions for Discussion
+
+1. **Does Victor have a backtest for the leverage strategy?**
+   - If yes, where is it?
+   - If no, how were performance claims generated?
+
+2. **What were the exact performance metrics?**
+   - APY? Sharpe? Drawdowns?
+   - Time period? Number of trades?
+
+3. **Has this been validated in live trading?**
+   - Paper trading results?
+   - Real money results?
+
+4. **How good are the predictions?**
+   - Correlation with actual rates?
+   - Mean error?
+   - Directional accuracy?
+
+5. **Are there other Python files we're missing?**
+   - Backtest scripts in different location?
+   - Jupyter notebooks with analysis?
+   - Other validation tools?
+
+---
+
+**Status:** Prediction logic verified ✅ — Backtest needed ⚠️
+
+**Recommendation:** Cannot fully validate Victor's claim without seeing the backtest implementation. The prediction logic is temporally correct, but we need to verify it's used correctly in historical simulation.
+
+**Next:** Ask Victor for the backtest code or offer to build one to validate the strategy.

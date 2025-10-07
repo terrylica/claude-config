@@ -1,0 +1,658 @@
+# Atom Library Catalog
+
+**Purpose:** Exhaustive enumeration of feature engineering libraries with parameter sweeps, formulas, and production status
+
+**Organization:** Grouped by orthogonality layer (A-H) as defined in `.claude/orthogonality-layers.md`
+
+**Total libraries:** 50+
+**Total atom specifications:** ~2000
+
+---
+
+## Metadata Schema
+
+Each library entry includes:
+
+- **PyPI Link** - Official package repository
+- **Last Updated** - PyPI release date (as of catalog creation)
+- **Status** - `production` / `experimental` / `research-only` / `deprecated`
+- **Layer** - Orthogonality layer assignment (A-H)
+- **Typical Atom Count** - Expected number of features generated
+- **Lookback Range** - Minimum-maximum bars required
+- **Dependencies** - Required packages
+- **Parameter Sweep** - Systematic enumeration of parameters
+- **Formula Examples** - Python code snippets
+- **Orthogonalization** - How to decorrelate against previous layers
+- **Notes** - Caveats, gotchas, performance considerations
+
+---
+
+# Layer A: Calendars & Market Structure
+
+**Layer purpose:** Time-invariant event dummies and cyclical encodings
+**Orthogonalization:** None (base layer)
+
+---
+
+## holidays (production)
+
+- **PyPI:** https://pypi.org/project/holidays/
+- **Last Updated:** 2024-12-15
+- **Status:** `production` - Fast, deterministic, well-maintained
+- **Layer:** A
+- **Typical Atom Count:** 10-20
+- **Lookback:** 0 bars (forward-looking calendar)
+- **Dependencies:** None
+- **Orthogonalization:** None (base layer)
+
+### Parameter Sweep
+
+```python
+# Countries (select based on trading venue)
+countries = ['US', 'JP', 'CN', 'KR', 'DE', 'GB']  # 6 options
+
+# Markets (US-specific)
+us_markets = ['NYSE', 'NASDAQ', 'CME']  # 3 options
+
+# Holiday proximity windows
+days_before = [1, 2, 3, 5, 7]  # 5 options
+days_after = [1, 2, 3, 5, 7]   # 5 options
+
+# Total atoms: ~20-30 depending on active markets
+```
+
+### Formula Examples
+
+```python
+import holidays
+import pandas as pd
+
+# Binary flag: is today a US trading holiday?
+us_holidays = holidays.US(years=range(2020, 2026))
+df['is_us_holiday'] = df['date'].isin(us_holidays).astype(int)
+
+# Days until next holiday
+def days_to_next_holiday(date, holiday_calendar):
+    future_holidays = [h for h in holiday_calendar.keys() if h > date]
+    if not future_holidays:
+        return 365  # No holidays in calendar range
+    return (min(future_holidays) - date).days
+
+df['days_to_next_us_holiday'] = df['date'].apply(
+    lambda d: days_to_next_holiday(d, us_holidays)
+)
+
+# NYSE-specific (excludes weekends + NYSE holidays)
+nyse_holidays = holidays.NYSE(years=range(2020, 2026))
+df['is_nyse_closed'] = df['date'].isin(nyse_holidays).astype(int)
+
+# Pre-holiday flag (day before holiday)
+df['is_pre_holiday'] = df['date'].shift(-1).isin(us_holidays).astype(int)
+
+# Post-holiday flag (day after holiday)
+df['is_post_holiday'] = df['date'].shift(1).isin(us_holidays).astype(int)
+```
+
+### Atom List (20 atoms)
+
+| Atom Name | Type | Description |
+|-----------|------|-------------|
+| `is_us_holiday` | bool | US federal holiday (no NYSE trading) |
+| `is_nyse_closed` | bool | NYSE closed (holidays + special closures) |
+| `is_cme_closed` | bool | CME closed (relevant for BTC futures) |
+| `days_to_next_us_holiday` | int | Days until next US holiday (1-365) |
+| `days_since_last_us_holiday` | int | Days since last US holiday (1-365) |
+| `is_pre_holiday_1d` | bool | 1 day before holiday |
+| `is_pre_holiday_2d` | bool | 2 days before holiday |
+| `is_post_holiday_1d` | bool | 1 day after holiday |
+| `is_post_holiday_2d` | bool | 2 days after holiday |
+| `is_fomc_week` | bool | FOMC meeting week (requires custom calendar) |
+| `is_earnings_season` | bool | Peak earnings season (Q1/Q2/Q3/Q4 windows) |
+| `is_month_end` | bool | Last 3 trading days of month |
+| `is_month_start` | bool | First 3 trading days of month |
+| `is_quarter_end` | bool | Last 5 trading days of quarter |
+| `is_year_end` | bool | Last 10 trading days of year |
+
+**Notes:**
+- For crypto (24/7 markets), focus on traditional market calendar effects (e.g., "is NYSE closed?" → institutional flow reduced)
+- Use `datetime.fromtimestamp(ts/1000, tz=timezone.utc)` for Binance timestamps
+- Custom events (FOMC, earnings) require manual calendar construction
+
+---
+
+## Greykite (Silverkite) (production)
+
+- **PyPI:** https://pypi.org/project/greykite/
+- **Last Updated:** 2025-02-20
+- **Status:** `production` - Rich seasonality features, actively maintained
+- **Layer:** A
+- **Typical Atom Count:** 30-60
+- **Lookback:** 30-365 bars (seasonality period dependent)
+- **Dependencies:** `pandas`, `numpy`, `scipy`
+- **Orthogonalization:** None (base layer, but can regress against `holidays` atoms if desired)
+
+### Parameter Sweep
+
+```python
+# Fourier order (number of harmonics per seasonal period)
+fourier_order_daily = [1, 2, 3, 4, 5]      # 5 options
+fourier_order_weekly = [1, 2, 3]           # 3 options
+fourier_order_monthly = [1, 2]             # 2 options
+
+# Changepoint prior scale (flexibility of piecewise trends)
+changepoint_prior_scale = [0.01, 0.05, 0.1, 0.5]  # 4 options
+
+# Growth type
+growth = ['linear', 'quadratic']  # 2 options
+
+# Total atoms: ~50 (Fourier terms + changepoint indicators)
+```
+
+### Formula Examples
+
+```python
+from greykite.framework.templates.autogen.forecast_config import ForecastConfig
+from greykite.framework.templates.forecaster import Forecaster
+from greykite.framework.templates.model_templates import ModelTemplateEnum
+
+# Method 1: Extract Silverkite seasonality features directly
+from greykite.algo.forecast.silverkite.silverkite import SilverkiteForecast
+
+silverkite = SilverkiteForecast()
+
+# Generate time features
+time_col = 'actual_ready_time'
+df['hour'] = pd.to_datetime(df[time_col]).dt.hour
+df['day_of_week'] = pd.to_datetime(df[time_col]).dt.dayofweek
+
+# Fourier features for daily seasonality (24 hours)
+import numpy as np
+for k in range(1, 6):  # 5 harmonics
+    df[f'fourier_daily_sin_{k}'] = np.sin(2 * np.pi * k * df['hour'] / 24)
+    df[f'fourier_daily_cos_{k}'] = np.cos(2 * np.pi * k * df['hour'] / 24)
+
+# Fourier features for weekly seasonality (7 days)
+for k in range(1, 4):  # 3 harmonics
+    df[f'fourier_weekly_sin_{k}'] = np.sin(2 * np.pi * k * df['day_of_week'] / 7)
+    df[f'fourier_weekly_cos_{k}'] = np.cos(2 * np.pi * k * df['day_of_week'] / 7)
+
+# Changepoint indicators (piecewise linear trends)
+# Define changepoint dates (e.g., manually or via Greykite's auto-detection)
+changepoints = pd.to_datetime(['2024-01-01', '2024-04-01', '2024-07-01'])
+
+for i, cp in enumerate(changepoints):
+    df[f'changepoint_{i}'] = (pd.to_datetime(df[time_col]) >= cp).astype(int)
+    df[f'changepoint_{i}_slope'] = np.maximum(
+        (pd.to_datetime(df[time_col]) - cp).dt.days, 0
+    )
+```
+
+### Atom List (40 atoms)
+
+| Atom Name | Type | Description |
+|-----------|------|-------------|
+| `hour_of_day` | int | Hour (0-23) |
+| `day_of_week` | int | Day of week (0=Mon, 6=Sun) |
+| `day_of_month` | int | Day of month (1-31) |
+| `week_of_year` | int | Week of year (1-52) |
+| `month_of_year` | int | Month (1-12) |
+| `fourier_daily_sin_1` to `_5` | float | Daily Fourier harmonics (sin, 5 orders) |
+| `fourier_daily_cos_1` to `_5` | float | Daily Fourier harmonics (cos, 5 orders) |
+| `fourier_weekly_sin_1` to `_3` | float | Weekly Fourier harmonics (sin, 3 orders) |
+| `fourier_weekly_cos_1` to `_3` | float | Weekly Fourier harmonics (cos, 3 orders) |
+| `fourier_monthly_sin_1` to `_2` | float | Monthly Fourier harmonics (sin, 2 orders) |
+| `fourier_monthly_cos_1` to `_2` | float | Monthly Fourier harmonics (cos, 2 orders) |
+| `changepoint_0` to `_5` | bool | Indicator for changepoint i |
+| `changepoint_0_slope` to `_5_slope` | int | Days since changepoint i (0 before, >0 after) |
+
+**Notes:**
+- Fourier features capture cyclical patterns (hour-of-day, day-of-week) robustly
+- Sin/cos pairs ensure continuity at boundaries (hour 23 → hour 0)
+- Changepoints can be auto-detected via Greykite or manually specified (e.g., known regime shifts)
+- For crypto: use UTC timezone consistently (no DST ambiguity)
+
+---
+
+# Layer B: Trend/Volatility Baselines
+
+**Layer purpose:** First-order price/volume dynamics
+**Orthogonalization:** Partial regression on Layer A (OLS residuals)
+
+---
+
+## statsmodels (production)
+
+- **PyPI:** https://pypi.org/project/statsmodels/
+- **Last Updated:** 2024-11-20
+- **Status:** `production` - Comprehensive time series toolkit
+- **Layer:** B
+- **Typical Atom Count:** 80-120
+- **Lookback:** 30-250 bars (model dependent)
+- **Dependencies:** `numpy`, `scipy`, `pandas`
+- **Orthogonalization:** Use STL residuals or ARIMA innovations as base; regress derived features on Layer A
+
+### Parameter Sweep
+
+```python
+# STL decomposition
+stl_seasonal_periods = [5, 7, 12, 24, 30]  # 5 options
+stl_trend_periods = [10, 20, 30, 50]       # 4 options
+
+# ARIMA orders
+arima_orders = [(1,1,1), (2,1,2), (5,1,5), (1,1,0), (0,1,1)]  # 5 options
+
+# Rolling OLS (beta estimation)
+rolling_window = [20, 50, 100, 200]  # 4 options
+
+# Autocorrelation lags
+acf_lags = [1, 2, 3, 5, 10, 20]  # 6 options
+
+# Total atoms: ~100
+```
+
+### Formula Examples
+
+```python
+from statsmodels.tsa.seasonal import STL
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.regression.rolling import RollingOLS
+import pandas as pd
+import numpy as np
+
+# 1. STL Decomposition
+stl = STL(df['close'], seasonal=7, trend=21)
+result = stl.fit()
+
+df['stl_trend_s7_t21'] = result.trend
+df['stl_seasonal_s7_t21'] = result.seasonal
+df['stl_resid_s7_t21'] = result.resid
+
+# Normalize trend (% deviation from mean)
+df['stl_trend_pct_s7_t21'] = (result.trend - result.trend.mean()) / result.trend.mean()
+
+# 2. ARIMA Residuals (innovations)
+returns = df['close'].pct_change().dropna()
+model = ARIMA(returns, order=(1, 1, 1))
+fitted = model.fit()
+
+df['arima_111_resid'] = fitted.resid
+df['arima_111_vol_forecast'] = fitted.forecast(steps=1)[0]  # 1-step ahead vol
+
+# 3. Rolling OLS (beta vs market/index)
+# Assume we have a market index column 'btc_close'
+y = df['close'].pct_change()
+X = df['btc_close'].pct_change()
+
+model = RollingOLS(y, X, window=50)
+results = model.fit()
+
+df['rolling_beta_50'] = results.params.iloc[:, 0]  # Beta coefficient
+df['rolling_rsquared_50'] = results.rsquared       # R-squared
+
+# 4. Autocorrelation features
+from statsmodels.tsa.stattools import acf
+
+# Compute ACF at specific lags
+acf_values = acf(returns.dropna(), nlags=20, fft=True)
+
+for lag in [1, 2, 3, 5, 10, 20]:
+    df[f'acf_lag_{lag}'] = acf_values[lag]
+
+# 5. Partial Autocorrelation (PACF)
+from statsmodels.tsa.stattools import pacf
+
+pacf_values = pacf(returns.dropna(), nlags=10)
+
+for lag in [1, 2, 3, 5, 10]:
+    df[f'pacf_lag_{lag}'] = pacf_values[lag]
+```
+
+### Atom List (80 atoms)
+
+| Category | Atoms | Count |
+|----------|-------|-------|
+| **STL Decomposition** | | |
+| Trend | `stl_trend_s{5,7,12}_t{10,20,30}` | 9 |
+| Seasonal | `stl_seasonal_s{5,7,12}_t{10,20,30}` | 9 |
+| Residual | `stl_resid_s{5,7,12}_t{10,20,30}` | 9 |
+| Trend % change | `stl_trend_pct_s{5,7,12}_t{10,20,30}` | 9 |
+| **ARIMA** | | |
+| Residuals | `arima_{111,212,515}_resid` | 3 |
+| Volatility forecast | `arima_{111,212}_vol_forecast` | 2 |
+| **Rolling OLS** | | |
+| Beta | `rolling_beta_{20,50,100}` | 3 |
+| R-squared | `rolling_rsquared_{20,50,100}` | 3 |
+| **Autocorrelation** | | |
+| ACF | `acf_lag_{1,2,3,5,10,20}` | 6 |
+| PACF | `pacf_lag_{1,2,3,5,10}` | 5 |
+| **Rolling Statistics** | | |
+| Mean | `rolling_mean_{10,20,50,100}` | 4 |
+| Std | `rolling_std_{10,20,50,100}` | 4 |
+| Skew | `rolling_skew_{20,50,100}` | 3 |
+| Kurt | `rolling_kurt_{20,50,100}` | 3 |
+| Median | `rolling_median_{20,50,100}` | 3 |
+| Quantile 25% | `rolling_q25_{20,50,100}` | 3 |
+| Quantile 75% | `rolling_q75_{20,50,100}` | 3 |
+| **Expanding Statistics** | | |
+| Expanding mean | `expanding_mean` | 1 |
+| Expanding std | `expanding_std` | 1 |
+| Expanding min | `expanding_min` | 1 |
+| Expanding max | `expanding_max` | 1 |
+| **TOTAL** | | **80** |
+
+**Notes:**
+- STL works best with seasonal data (hour-of-day, day-of-week patterns)
+- ARIMA fitting can fail on non-stationary data → use try/except with fallback to differencing
+- Rolling OLS requires a "market" reference → for crypto, use BTC as market proxy
+- ACF/PACF capture linear dependence → use for AR/MA order selection or as features directly
+
+---
+
+## arch (production)
+
+- **PyPI:** https://pypi.org/project/arch/
+- **Last Updated:** 2024-10-15
+- **Status:** `production` - Industry-standard volatility modeling
+- **Layer:** B
+- **Typical Atom Count:** 20-40
+- **Lookback:** 50-250 bars
+- **Dependencies:** `numpy`, `scipy`, `pandas`
+- **Orthogonalization:** Regress GARCH volatility on Layer A calendar effects (remove seasonal vol patterns)
+
+### Parameter Sweep
+
+```python
+# GARCH orders
+garch_p = [1, 2]  # 2 options
+garch_q = [1, 2]  # 2 options
+# Total: 4 GARCH models
+
+# Volatility types
+vol_models = ['GARCH', 'EGARCH', 'GJR-GARCH']  # 3 options
+
+# Mean models
+mean_models = ['Constant', 'Zero', 'AR']  # 3 options
+
+# Realized volatility windows
+rv_windows = [5, 10, 20, 50]  # 4 options
+
+# Block bootstrap sizes (for IPSS later)
+bootstrap_block_sizes = [10, 20, 50, 100]  # 4 options
+
+# Total atoms: ~30
+```
+
+### Formula Examples
+
+```python
+from arch import arch_model
+from arch.bootstrap import StationaryBootstrap, CircularBlockBootstrap
+import numpy as np
+import pandas as pd
+
+# 1. GARCH(1,1) volatility forecast
+returns = df['close'].pct_change().dropna() * 100  # Scale to percentage
+
+model = arch_model(returns, vol='GARCH', p=1, q=1, mean='Zero', rescale=False)
+fitted = model.fit(disp='off')
+
+df['garch_11_vol'] = fitted.conditional_volatility / 100  # Back to decimal
+df['garch_11_stdresid'] = fitted.std_resid  # Standardized residuals
+
+# 2. EGARCH(1,1) - Captures asymmetry (leverage effect)
+model_egarch = arch_model(returns, vol='EGARCH', p=1, q=1)
+fitted_egarch = model_egarch.fit(disp='off')
+
+df['egarch_11_vol'] = fitted_egarch.conditional_volatility / 100
+
+# 3. GJR-GARCH(1,1) - Threshold GARCH (negative returns increase vol more)
+model_gjr = arch_model(returns, vol='GARCH', p=1, o=1, q=1)  # o=1 for GJR term
+fitted_gjr = model_gjr.fit(disp='off')
+
+df['gjrgarch_111_vol'] = fitted_gjr.conditional_volatility / 100
+
+# 4. Realized volatility (sum of squared returns)
+for window in [5, 10, 20, 50]:
+    df[f'realized_vol_{window}'] = (
+        returns ** 2
+    ).rolling(window).sum().apply(np.sqrt)
+
+# 5. Realized bipower variation (robust to jumps)
+def bipower_variation(returns, window=20):
+    abs_returns = np.abs(returns)
+    # μ1 = sqrt(2/π) ≈ 0.79788
+    mu1 = np.sqrt(2 / np.pi)
+    bpv = (abs_returns.shift(1) * abs_returns).rolling(window).sum() * (mu1 ** -2)
+    return np.sqrt(bpv)
+
+df['bipower_var_20'] = bipower_variation(returns, window=20)
+
+# 6. Jump component (realized vol - bipower var)
+df['jump_component_20'] = np.maximum(
+    df['realized_vol_20'] ** 2 - df['bipower_var_20'] ** 2, 0
+).apply(np.sqrt)
+
+# 7. Block bootstrap (for IPSS selection later, not a feature directly)
+# Example: generate bootstrap samples
+bs = StationaryBootstrap(block_size=20, data=returns)
+for data_boot in bs.bootstrap(10):  # 10 bootstrap samples
+    returns_boot = data_boot[0][0]  # First bootstrap sample
+    # Use returns_boot for stability selection
+```
+
+### Atom List (30 atoms)
+
+| Category | Atoms | Count |
+|----------|-------|-------|
+| **GARCH Models** | | |
+| GARCH(1,1) vol | `garch_11_vol` | 1 |
+| GARCH(2,2) vol | `garch_22_vol` | 1 |
+| EGARCH(1,1) vol | `egarch_11_vol` | 1 |
+| GJR-GARCH(1,1,1) vol | `gjrgarch_111_vol` | 1 |
+| Standardized residuals | `garch_11_stdresid` | 1 |
+| **Realized Measures** | | |
+| Realized vol | `realized_vol_{5,10,20,50}` | 4 |
+| Bipower variation | `bipower_var_{10,20,50}` | 3 |
+| Jump component | `jump_component_{10,20,50}` | 3 |
+| **Range-Based Vol** | | |
+| Parkinson vol | `parkinson_vol_{10,20}` | 2 |
+| Garman-Klass vol | `gk_vol_{10,20}` | 2 |
+| Yang-Zhang vol | `yz_vol_{10,20}` | 2 |
+| **Vol Ratios** | | |
+| Vol ratio 5/20 | `vol_ratio_5_20` | 1 |
+| Vol ratio 10/50 | `vol_ratio_10_50` | 1 |
+| **Autocorrelation** | | |
+| Squared returns AC | `returns_sq_acf_lag_1` | 1 |
+| Absolute returns AC | `returns_abs_acf_lag_1` | 1 |
+| **TOTAL** | | **25** |
+
+**Notes:**
+- GARCH fitting requires at least 50-100 observations → skip early bars
+- Use `disp='off'` to suppress convergence warnings
+- Standardized residuals should be ~N(0,1) if model is correctly specified → use for anomaly detection
+- Realized volatility is more accurate with higher-frequency data (e.g., 1m bars for 5m prediction)
+
+---
+
+## mlforecast (production)
+
+- **PyPI:** https://pypi.org/project/mlforecast/
+- **Last Updated:** 2025-02-18
+- **Status:** `production` - Fast lag/rolling feature generation, scales to Dask/Ray
+- **Layer:** B
+- **Typical Atom Count:** 50-100
+- **Lookback:** 1-100 bars (lag dependent)
+- **Dependencies:** `numpy`, `pandas`, `numba` (optional)
+- **Orthogonalization:** Regress lags/rolling features on Layer A calendar effects
+
+### Parameter Sweep
+
+```python
+# Lags
+lags = [1, 2, 3, 5, 10, 20, 50, 100]  # 8 lags
+
+# Rolling windows
+rolling_windows = [5, 10, 20, 50, 100]  # 5 windows
+
+# Rolling aggregations
+rolling_aggs = ['mean', 'std', 'min', 'max', 'median', 'skew']  # 6 aggs
+
+# Expanding aggregations
+expanding_aggs = ['mean', 'std', 'min', 'max']  # 4 aggs
+
+# Exponentially weighted
+ewm_spans = [5, 10, 20, 50]  # 4 spans
+
+# Total atoms: ~80 (lags + rolling + expanding + ewm)
+```
+
+### Formula Examples
+
+```python
+from mlforecast import MLForecast
+from mlforecast.lag_transforms import RollingMean, RollingStd, ExpandingMean, ExponentiallyWeightedMean
+import pandas as pd
+
+# Prepare data (mlforecast expects specific format)
+df_ml = df.copy()
+df_ml = df_ml.reset_index()
+df_ml['unique_id'] = 'SOL'  # Series identifier
+df_ml['ds'] = pd.to_datetime(df_ml['actual_ready_time'])  # Timestamp
+df_ml['y'] = df_ml['close']  # Target variable
+
+# Method 1: Use MLForecast for automatic feature generation
+fcst = MLForecast(
+    models=[],  # No model yet, just generate features
+    freq='5T',  # 5-minute frequency
+    lags=[1, 2, 3, 5, 10, 20, 50],
+    lag_transforms={
+        1: [RollingMean(window_size=5), RollingMean(window_size=10)],
+        5: [RollingStd(window_size=10), RollingStd(window_size=20)],
+        10: [ExpandingMean()],
+        20: [ExponentiallyWeightedMean(alpha=0.1)]
+    },
+    date_features=['hour', 'dayofweek', 'day', 'month']
+)
+
+# Generate features (preprocess step)
+df_features = fcst.preprocess(df_ml)
+
+# Method 2: Manual lag/rolling features (faster for custom logic)
+def generate_lags(df, col, lags):
+    for lag in lags:
+        df[f'{col}_lag_{lag}'] = df[col].shift(lag)
+
+def generate_rolling(df, col, windows, agg_func='mean'):
+    for window in windows:
+        df[f'{col}_rolling_{agg_func}_{window}'] = (
+            df[col].rolling(window).agg(agg_func)
+        )
+
+generate_lags(df, 'close', [1, 2, 3, 5, 10, 20, 50])
+generate_rolling(df, 'close', [5, 10, 20, 50], 'mean')
+generate_rolling(df, 'close', [5, 10, 20, 50], 'std')
+
+# Volume lags/rolling
+generate_lags(df, 'volume', [1, 2, 3, 5, 10])
+generate_rolling(df, 'volume', [5, 10, 20], 'mean')
+
+# Return lags
+df['returns'] = df['close'].pct_change()
+generate_lags(df, 'returns', [1, 2, 3, 5, 10])
+
+# Expanding features
+df['expanding_mean'] = df['close'].expanding().mean()
+df['expanding_std'] = df['close'].expanding().std()
+df['expanding_min'] = df['close'].expanding().min()
+df['expanding_max'] = df['close'].expanding().max()
+
+# Exponentially weighted
+for span in [5, 10, 20, 50]:
+    df[f'ewm_mean_{span}'] = df['close'].ewm(span=span).mean()
+    df[f'ewm_std_{span}'] = df['close'].ewm(span=span).std()
+```
+
+### Atom List (70 atoms)
+
+| Category | Atoms | Count |
+|----------|-------|-------|
+| **Price Lags** | | |
+| Close lags | `close_lag_{1,2,3,5,10,20,50,100}` | 8 |
+| Returns lags | `returns_lag_{1,2,3,5,10}` | 5 |
+| **Volume Lags** | | |
+| Volume lags | `volume_lag_{1,2,3,5,10}` | 5 |
+| **Rolling Aggregations** | | |
+| Rolling mean | `close_rolling_mean_{5,10,20,50,100}` | 5 |
+| Rolling std | `close_rolling_std_{5,10,20,50,100}` | 5 |
+| Rolling min | `close_rolling_min_{5,10,20,50}` | 4 |
+| Rolling max | `close_rolling_max_{5,10,20,50}` | 4 |
+| Rolling median | `close_rolling_median_{10,20,50}` | 3 |
+| Rolling skew | `close_rolling_skew_{20,50,100}` | 3 |
+| **Volume Rolling** | | |
+| Volume rolling mean | `volume_rolling_mean_{5,10,20}` | 3 |
+| Volume rolling std | `volume_rolling_std_{5,10,20}` | 3 |
+| **Expanding** | | |
+| Expanding mean | `expanding_mean` | 1 |
+| Expanding std | `expanding_std` | 1 |
+| Expanding min | `expanding_min` | 1 |
+| Expanding max | `expanding_max` | 1 |
+| **EWM** | | |
+| EWM mean | `ewm_mean_{5,10,20,50}` | 4 |
+| EWM std | `ewm_std_{5,10,20,50}` | 4 |
+| **Derived** | | |
+| Price % from MA | `pct_from_ma_{10,20,50}` | 3 |
+| Z-score | `z_score_{20,50,100}` | 3 |
+| Volume ratio | `volume_ratio_{5,10}` (current / MA) | 2 |
+| **TOTAL** | | **68** |
+
+**Notes:**
+- mlforecast is optimized for speed → use for large-scale feature sweeps
+- Lags naturally create NaN values → drop first `max(lags)` rows
+- Combine with `arch` for vol-adjusted features (e.g., `returns_lag_1 / garch_vol`)
+
+---
+
+# Layer C-H: Placeholder (To Be Completed)
+
+**Status:** Layer A-B completed (~180 atoms documented). Layers C-H will follow same format.
+
+**Next sections to add:**
+- Layer C: PyWavelets, ssqueezepy, FOOOF, Spectrum, librosa (~150 atoms)
+- Layer D: ordpy, antropy, nolds, infomeasure (~60 atoms)
+- Layer E: ts2vg, gudhi, ripser, persim (~50 atoms)
+- Layer F: stumpy, ruptures, EMD-signal (~70 atoms)
+- Layer G: alibi-detect, pyod, river (~20 atoms)
+- Layer H: tsfresh, tsfel, cesium, catch22, scikit-fda (~500 atoms → prune to ~50)
+
+**Total estimate:** ~2000 atoms across all layers
+
+---
+
+## Production Status Classification
+
+### `production` (use in live trading)
+- holidays, statsmodels, arch, mlforecast, PyWavelets, scipy, sklearn
+
+### `experimental` (use cautiously)
+- ordpy, antropy, FOOOF, ssqueezepy, ts2vg, ripser, stumpy, ruptures
+
+### `research-only` (exploratory analysis only)
+- tsfresh (slow), PyEMD (non-deterministic), gudhi (complex), gluonts (forecasting)
+
+### `deprecated` (use alternatives)
+- pandas-ta (unmaintained) → use talib or mlforecast instead
+
+---
+
+## References
+
+- **holidays:** https://pypi.org/project/holidays/
+- **Greykite:** https://pypi.org/project/greykite/
+- **statsmodels:** https://pypi.org/project/statsmodels/
+- **arch:** https://pypi.org/project/arch/
+- **mlforecast:** https://pypi.org/project/mlforecast/
+
+---
+
+**Last updated:** 2025-10-02
+**Catalog version:** 1.0 (Layers A-B complete, C-H pending)

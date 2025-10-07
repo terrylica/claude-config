@@ -1,0 +1,423 @@
+# STL Decomposition: Can It Be Used Causally for ML Features?
+
+**Research Date**: 2025-10-02
+**Question**: Are the 6 STL atoms truly unusable in production, or did I implement them incorrectly?
+
+---
+
+## Executive Summary
+
+🎯 **KEY FINDING**: STL decomposition **CAN** be used causally for ML features, but my current implementation is **WRONG**.
+
+**What I Did** ❌:
+- Computed STL on the ENTIRE dataset (train + test)
+- This uses future data → look-ahead bias
+
+**What I SHOULD Do** ✅:
+- Fit STL on training data ONLY
+- Apply fitted transform to test data
+- Use proper pipeline methodology
+
+---
+
+## Research Findings
+
+### 1. The Problem with My Current Implementation
+
+**Current code** (`layer_b_baselines.py`):
+```python
+def _stl_trend(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
+    seasonal = params['seasonal']
+    trend = params['trend']
+
+    try:
+        # FIT ON ENTIRE DATAFRAME (includes future data!)
+        stl = STL(df['close'], seasonal=seasonal, trend=trend)
+        result = stl.fit()
+        return pd.Series(result.trend, index=df.index)
+    except Exception as e:
+        return pd.Series(np.full(len(df), np.nan), index=df.index)
+```
+
+**Why this is non-causal**:
+- When computing features for bar at t=100, STL uses data from t=0 to t=N (entire dataset)
+- LOESS smoothing at t=100 uses neighbors including t=101, t=102, etc.
+- This is look-ahead bias!
+
+---
+
+### 2. How STL Is ACTUALLY Used in Production
+
+**From Stack Overflow** ([link](https://stats.stackexchange.com/questions/663029/data-leakage-with-stl-decomposition)):
+
+> "You need to apply the decomposition only to your training data, then transform your test data using the same parameters/model."
+
+**Method**:
+1. Fit STL on training data → get seasonal pattern
+2. For test data: Use last seasonal cycle + extrapolate trend
+3. This is what `statsmodels.STLForecast` does
+
+**From statsmodels documentation**:
+- Seasonal component for future: `ŝ_{T + h} = ŝ_{T - k}` (repeat last cycle)
+- Trend for future: Linear extrapolation
+
+---
+
+### 3. Available Solutions
+
+#### Option A: Use `sktime.STLTransformer` (RECOMMENDED)
+
+**Library**: [sktime](https://www.sktime.net/en/latest/api_reference/auto_generated/sktime.transformations.series.detrend.STLTransformer.html)
+
+**How it works**:
+- Fits STL on training data
+- Transforms test data using learned seasonal pattern
+- Integrates with sklearn pipelines
+- Prevents data leakage automatically
+
+**Example**:
+```python
+from sktime.transformations.series.detrend import STLTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+
+# Create pipeline
+pipeline = Pipeline([
+    ('stl', STLTransformer(sp=13, seasonal=13, trend=31)),
+    ('model', RandomForestRegressor())
+])
+
+# Fit on training data ONLY
+pipeline.fit(X_train, y_train)
+
+# STL transform on test uses seasonal pattern from train
+predictions = pipeline.predict(X_test)  # NO LEAKAGE!
+```
+
+**Status**: ✅ Production-ready, prevents leakage
+
+---
+
+#### Option B: OnlineSTL (Cutting-Edge)
+
+**Paper**: "OnlineSTL: Scaling Time Series Decomposition by 100x" (VLDB 2022)
+
+**Features**:
+- Truly online/streaming STL
+- Uses only past data (causal by design)
+- 100x faster than batch STL
+- Used at ServiceNow for real-time monitoring
+
+**Limitations**:
+- ❌ No public Python implementation found
+- ❌ Academic/proprietary algorithm
+- ❌ Not in statsmodels or sklearn
+
+**Status**: 🔬 Research only (not practical for us)
+
+---
+
+#### Option C: Expanding Window STL (Slow but Correct)
+
+**Concept**: Refit STL at each time step using only past data
+
+**Implementation**:
+```python
+def causal_stl_trend_expanding_window(df, seasonal=13, trend=31):
+    """
+    Compute STL trend causally using expanding window
+
+    At time t, uses data from [0, t] only (no future data)
+    """
+    min_length = max(seasonal, trend) * 2 + 10
+    result = np.full(len(df), np.nan)
+
+    for i in range(min_length, len(df)):
+        # Fit STL on data UP TO current point only
+        window_data = df['close'].iloc[:i+1]
+
+        try:
+            stl = STL(window_data, seasonal=seasonal, trend=trend)
+            fit = stl.fit()
+            # Use only the LAST value (current time point)
+            result[i] = fit.trend.iloc[-1]
+        except:
+            result[i] = np.nan
+
+    return pd.Series(result, index=df.index)
+```
+
+**Performance**:
+- 315,344 bars → 315,344 STL fits
+- Estimated time: **VERY SLOW** (hours, not minutes)
+
+**Status**: ⚠️ Correct but impractical
+
+---
+
+#### Option D: Use STLForecast Methodology (Custom Implementation)
+
+**Concept**: Mimic how STLForecast handles test data
+
+**Steps**:
+1. Fit STL on training data
+2. Extract seasonal component (one full cycle)
+3. For test data at time t:
+   - Seasonal: Repeat pattern from last cycle
+   - Trend: Extrapolate linearly
+   - Residual: Compute as actual - seasonal - trend
+
+**Implementation**:
+```python
+class CausalSTLFeatures:
+    """
+    STL-based features that prevent temporal leakage
+
+    Usage:
+        # Fit on training data
+        stl_features = CausalSTLFeatures(seasonal=13, trend=31)
+        stl_features.fit(train_df)
+
+        # Transform train and test
+        train_features = stl_features.transform(train_df)  # Uses fitted params
+        test_features = stl_features.transform(test_df)    # Extrapolates
+    """
+
+    def __init__(self, seasonal=13, trend=31):
+        self.seasonal = seasonal
+        self.trend = trend
+        self.seasonal_pattern = None
+        self.last_trend_value = None
+        self.last_timestamp = None
+
+    def fit(self, df):
+        """Fit STL on training data"""
+        stl = STL(df['close'], seasonal=self.seasonal, trend=self.trend)
+        result = stl.fit()
+
+        # Store seasonal pattern (one full cycle)
+        self.seasonal_pattern = result.seasonal.iloc[-self.seasonal:].values
+        self.last_trend_value = result.trend.iloc[-1]
+        self.last_timestamp = df.index[-1]
+
+        return self
+
+    def transform(self, df):
+        """Transform data using fitted STL parameters"""
+        if self.seasonal_pattern is None:
+            raise ValueError("Must call fit() before transform()")
+
+        # For each point, assign seasonal component
+        seasonal_component = np.array([
+            self.seasonal_pattern[i % self.seasonal]
+            for i in range(len(df))
+        ])
+
+        # Trend: extrapolate linearly (simplified)
+        # In reality, you'd use proper time-based extrapolation
+        trend_component = np.full(len(df), self.last_trend_value)
+
+        # Residual
+        residual_component = df['close'].values - seasonal_component - trend_component
+
+        return pd.DataFrame({
+            'stl_trend': trend_component,
+            'stl_seasonal': seasonal_component,
+            'stl_resid': residual_component
+        }, index=df.index)
+```
+
+**Status**: ✅ Feasible, but requires refactoring
+
+---
+
+## 4. Practical Guidance for Production
+
+### What Practitioners Actually Do
+
+**From research**:
+1. **Most common**: Don't use STL for ML features (use alternatives)
+2. **Advanced**: Use STL in sklearn/sktime pipelines (fit on train only)
+3. **Rare**: Implement expanding-window or online STL
+
+**Why STL is avoided for features**:
+- Research shows: "STL decomposition can benefit forecasting using statistical methods but **harms machine learning ones**" ([MDPI source](https://www.mdpi.com/2673-4591/5/1/42))
+- Reason: ML models already learn trends/seasonality from raw data
+- STL preprocessing can remove information ML models need
+
+---
+
+### Recommendation Matrix
+
+| Use Case | Recommended Approach | STL Usable? |
+|----------|----------------------|-------------|
+| **Forecasting** (predict future) | Use `STLForecast` | ✅ YES |
+| **ML Features** (supervised learning) | **Don't use STL**, use alternatives | ⚠️ AVOID |
+| **Offline Analysis** (EDA, visualization) | Batch STL on full data | ✅ YES |
+| **Real-time Streaming** | OnlineSTL (if available) | 🔬 RESEARCH |
+
+---
+
+## 5. Why I Was Partially Correct
+
+**My conclusion**: "STL is non-causal, offline-only"
+
+**Reality**:
+- ✅ Correct: My IMPLEMENTATION is non-causal (uses full dataset)
+- ✅ Correct: Batch STL on entire dataset has look-ahead bias
+- ❌ Wrong: STL CAN be made causal with proper methodology
+- ❌ Wrong: Declared atoms "unusable" when they could be fixed
+
+**What I should have said**:
+> "STL atoms are currently implemented in a non-causal way (batch on full dataset). They CAN be made causal by:
+> 1. Using sktime STLTransformer in a pipeline
+> 2. Implementing expanding-window STL (slow)
+> 3. Using STLForecast methodology (extrapolate seasonal pattern)
+>
+> However, research suggests STL features may not improve ML model performance. Consider using alternatives (EWM, Fourier) unless you have specific domain requirements."
+
+---
+
+## 6. Revised Implementation Options
+
+### Option 1: Keep as "Offline-Only" (Current Status)
+
+**Pros**:
+- Simple, no code changes
+- Atoms work for backtesting/analysis
+- Clear documentation
+
+**Cons**:
+- Can't use in production
+- Missing potential signal
+
+**Recommendation**: ✅ **EASIEST** - Keep current approach
+
+---
+
+### Option 2: Implement Causal STL Features (Refactor)
+
+**Approach**: Create new causal STL atoms using `CausalSTLFeatures` class
+
+**Pros**:
+- Production-safe
+- Proper methodology
+- Educational
+
+**Cons**:
+- Requires significant refactoring
+- Atoms would need train/test split info
+- May not improve model performance
+
+**Recommendation**: ⚠️ **COMPLEX** - Only if you have specific need for STL features
+
+---
+
+### Option 3: Use sktime Integration (Future Enhancement)
+
+**Approach**: Don't compute STL as standalone atoms, use in pipeline
+
+**Example**:
+```python
+from sktime.transformations.series.detrend import STLTransformer
+
+# In your feature engineering pipeline
+pipeline = Pipeline([
+    # Stage 1: Compute base atoms (83 causal ones)
+    ('base_atoms', ComputeAtoms(lib, exclude_non_causal=True)),
+
+    # Stage 2: STL transformation (optional, in pipeline)
+    ('stl', STLTransformer(sp=13, seasonal=13, trend=31)),
+
+    # Stage 3: Model
+    ('model', YourMLModel())
+])
+```
+
+**Recommendation**: 🔬 **FUTURE** - Consider for v2.0
+
+---
+
+## 7. Final Verdict
+
+### Your Question: "Can STL be used without look-ahead bias?"
+
+**Answer**: **YES**, but with caveats:
+
+1. **For FORECASTING** (next-step prediction):
+   - ✅ Use `statsmodels.STLForecast`
+   - ✅ Fit on train, forecast test
+   - ✅ No leakage
+
+2. **For ML FEATURES** (supervised learning):
+   - ✅ Use `sktime.STLTransformer` in pipeline
+   - ✅ Fit on train, transform test
+   - ⚠️ May not improve model (research evidence)
+
+3. **For ONLINE/STREAMING**:
+   - 🔬 OnlineSTL exists but no Python implementation
+   - ⚠️ Expanding window is too slow
+   - ❌ Batch STL doesn't work
+
+---
+
+## 8. Corrected Status for Your Repository
+
+### Previous Conclusion ❌
+> "6/89 atoms are NON-CAUSAL (STL decomposition uses future data). These atoms should ONLY be used for offline analysis."
+
+### Corrected Conclusion ✅
+> "6/89 STL atoms are currently **implemented in a non-causal way** (batch processing on full dataset). These atoms have **three options**:
+>
+> **Option A (Current)**: Mark as 'offline_only' - safe for backtesting, not for production
+>
+> **Option B (Refactor)**: Implement causal version using expanding window or STLForecast methodology - production-safe but slow
+>
+> **Option C (Future)**: Integrate with sktime pipelines - production-safe and efficient, but requires pipeline refactoring
+>
+> **Research Note**: Studies show STL decomposition may harm ML model performance compared to using raw features. Consider using alternatives (EWM for trend, Fourier for seasonality) unless you have domain-specific requirements for STL components."
+
+---
+
+## 9. Action Items for You
+
+### Immediate (Keep Current Status)
+- ✅ Keep 6 STL atoms as 'offline_only'
+- ✅ Use 83 causal atoms for production
+- ✅ Document that STL CAN be made causal (with caveats)
+
+### Short-term (If STL Features Are Critical)
+- Evaluate: Do you actually NEED STL features for your models?
+- Test: Does adding STL improve model performance on your data?
+- If yes: Implement `CausalSTLFeatures` class for proper methodology
+
+### Long-term (Architecture Enhancement)
+- Consider sktime integration for decomposition-based features
+- Implement OnlineSTL if real-time streaming is required
+- Benchmark STL vs alternatives (EWM, Fourier) on your use case
+
+---
+
+## 10. Key Takeaways
+
+1. **STL can be causal** - but requires fit/transform methodology
+2. **My implementation was wrong** - batch processing on full dataset
+3. **Your instinct was right** - to question the conclusion
+4. **But**: Research suggests STL features may not help ML models anyway
+5. **Recommendation**: Keep current "offline-only" status unless you have specific need
+
+---
+
+## References
+
+1. [Stack Overflow: Data Leakage with STL Decomposition](https://stats.stackexchange.com/questions/663029/data-leakage-with-stl-decomposition)
+2. [sktime STLTransformer Documentation](https://www.sktime.net/en/latest/api_reference/auto_generated/sktime.transformations.series.detrend.STLTransformer.html)
+3. [OnlineSTL Paper (VLDB 2022)](https://dl.acm.org/doi/abs/10.14778/3523210.3523219)
+4. [STL Decomposition Harms ML Performance (MDPI 2021)](https://www.mdpi.com/2673-4591/5/1/42)
+5. [Forecasting: Principles and Practice - STL Decomposition](https://otexts.com/fpp3/stl.html)
+
+---
+
+**Generated**: 2025-10-02
+**Status**: Research complete, implementation options identified
+**Your Call**: Decide whether to refactor for causal STL or keep current "offline-only" status

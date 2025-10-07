@@ -1,0 +1,406 @@
+"""
+Trading Profit Metrics Module
+
+Comprehensive profit and risk metrics for walk-forward backtest optimization.
+Focuses on trading performance rather than prediction accuracy (MAE/RMSE).
+
+Key metrics:
+- Sharpe Ratio: Risk-adjusted returns
+- Sortino Ratio: Downside risk-adjusted returns
+- Calmar Ratio: Return vs max drawdown
+- Max Drawdown: Peak-to-trough decline
+- Win Rate: Percentage of winning trades
+- Profit Factor: Gross profit / gross loss
+- Expectancy: Average expected profit per trade
+- Recovery Factor: Net profit / max drawdown
+- Ulcer Index: Downside volatility measure
+
+Author: ML Feature Experiments - OOD Trading Profit Implementation
+Date: 2025-10-01
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Dict, Optional, Tuple
+import warnings
+
+warnings.filterwarnings("ignore")
+
+
+class ProfitMetrics:
+    """
+    Calculate comprehensive trading profit metrics
+
+    Designed for walk-forward optimization where objective is
+    trading profit (Sharpe ratio) rather than prediction accuracy (MAE).
+    """
+
+    def __init__(self, risk_free_rate: float = 0.0, periods_per_year: int = 252):
+        """
+        Initialize profit metrics calculator
+
+        Args:
+            risk_free_rate: Annual risk-free rate (default 0.0 for crypto)
+            periods_per_year: Trading periods per year (252 for daily, 365*24 for hourly)
+        """
+        self.risk_free_rate = risk_free_rate
+        self.periods_per_year = periods_per_year
+
+    def calculate_sharpe_ratio(
+        self,
+        returns: pd.Series,
+        risk_free_rate: Optional[float] = None
+    ) -> float:
+        """
+        Calculate annualized Sharpe Ratio
+
+        Sharpe = (Mean Return - Risk Free Rate) / Std Dev * sqrt(periods_per_year)
+
+        Args:
+            returns: Series of period returns
+            risk_free_rate: Override default risk-free rate
+
+        Returns:
+            Annualized Sharpe ratio
+        """
+        if len(returns) < 2:
+            return 0.0
+
+        rfr = risk_free_rate if risk_free_rate is not None else self.risk_free_rate
+        excess_returns = returns - rfr / self.periods_per_year
+
+        if excess_returns.std() == 0:
+            return 0.0
+
+        return np.sqrt(self.periods_per_year) * excess_returns.mean() / excess_returns.std()
+
+    def calculate_sortino_ratio(
+        self,
+        returns: pd.Series,
+        risk_free_rate: Optional[float] = None
+    ) -> float:
+        """
+        Calculate annualized Sortino Ratio (downside deviation only)
+
+        Sortino = (Mean Return - Risk Free Rate) / Downside Std Dev * sqrt(periods_per_year)
+
+        Only penalizes downside volatility, not upside.
+
+        Args:
+            returns: Series of period returns
+            risk_free_rate: Override default risk-free rate
+
+        Returns:
+            Annualized Sortino ratio
+        """
+        if len(returns) < 2:
+            return 0.0
+
+        rfr = risk_free_rate if risk_free_rate is not None else self.risk_free_rate
+        excess_returns = returns - rfr / self.periods_per_year
+
+        downside_returns = returns[returns < 0]
+        if len(downside_returns) == 0 or downside_returns.std() == 0:
+            return 0.0
+
+        downside_std = downside_returns.std()
+        return np.sqrt(self.periods_per_year) * excess_returns.mean() / downside_std
+
+    def calculate_max_drawdown(self, equity_curve: pd.Series) -> float:
+        """
+        Calculate maximum drawdown percentage
+
+        Max DD = max(0, max((Peak - Trough) / Peak))
+
+        Args:
+            equity_curve: Series of cumulative equity values
+
+        Returns:
+            Maximum drawdown as decimal (0.25 = 25% drawdown)
+        """
+        if len(equity_curve) < 2:
+            return 0.0
+
+        cummax = equity_curve.cummax()
+        drawdown = (equity_curve - cummax) / cummax
+        return abs(drawdown.min())
+
+    def calculate_calmar_ratio(
+        self,
+        returns: pd.Series,
+        equity_curve: Optional[pd.Series] = None
+    ) -> float:
+        """
+        Calculate Calmar Ratio (annualized return / max drawdown)
+
+        Calmar = Annualized Return / Max Drawdown
+
+        Higher is better. Measures return vs worst peak-to-trough decline.
+
+        Args:
+            returns: Series of period returns
+            equity_curve: Optional pre-calculated equity curve
+
+        Returns:
+            Calmar ratio
+        """
+        if len(returns) < 2:
+            return 0.0
+
+        # Calculate annualized return
+        annual_return = (1 + returns.mean()) ** self.periods_per_year - 1
+
+        # Calculate max drawdown
+        if equity_curve is None:
+            equity_curve = (1 + returns).cumprod()
+
+        max_dd = self.calculate_max_drawdown(equity_curve)
+
+        if max_dd == 0:
+            return 0.0
+
+        return annual_return / max_dd
+
+    def calculate_win_rate(self, returns: pd.Series) -> float:
+        """
+        Calculate percentage of winning trades
+
+        Win Rate = (Number of positive returns) / (Total trades)
+
+        Args:
+            returns: Series of period returns
+
+        Returns:
+            Win rate as decimal (0.55 = 55% win rate)
+        """
+        if len(returns) == 0:
+            return 0.0
+
+        winning_trades = (returns > 0).sum()
+        total_trades = len(returns)
+
+        return winning_trades / total_trades
+
+    def calculate_profit_factor(self, returns: pd.Series) -> float:
+        """
+        Calculate profit factor (gross profit / gross loss)
+
+        Profit Factor = Sum(Winning Trades) / abs(Sum(Losing Trades))
+
+        > 1.0 = profitable
+        > 1.5 = good
+        > 2.0 = excellent
+
+        Args:
+            returns: Series of period returns
+
+        Returns:
+            Profit factor
+        """
+        if len(returns) == 0:
+            return 0.0
+
+        gross_profit = returns[returns > 0].sum()
+        gross_loss = abs(returns[returns < 0].sum())
+
+        if gross_loss == 0:
+            return float('inf') if gross_profit > 0 else 0.0
+
+        return gross_profit / gross_loss
+
+    def calculate_expectancy(self, returns: pd.Series) -> float:
+        """
+        Calculate expectancy (average expected profit per trade)
+
+        Expectancy = (Win Rate * Avg Win) - (Loss Rate * Avg Loss)
+
+        Positive expectancy means profitable over long run.
+
+        Args:
+            returns: Series of period returns
+
+        Returns:
+            Expectancy as decimal
+        """
+        if len(returns) == 0:
+            return 0.0
+
+        win_rate = self.calculate_win_rate(returns)
+
+        winning_trades = returns[returns > 0]
+        losing_trades = returns[returns < 0]
+
+        avg_win = winning_trades.mean() if len(winning_trades) > 0 else 0.0
+        avg_loss = abs(losing_trades.mean()) if len(losing_trades) > 0 else 0.0
+
+        return (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+
+    def calculate_recovery_factor(
+        self,
+        returns: pd.Series,
+        equity_curve: Optional[pd.Series] = None
+    ) -> float:
+        """
+        Calculate recovery factor (net profit / max drawdown)
+
+        Recovery Factor = Net Profit / Max Drawdown
+
+        Measures ability to recover from drawdowns.
+
+        Args:
+            returns: Series of period returns
+            equity_curve: Optional pre-calculated equity curve
+
+        Returns:
+            Recovery factor
+        """
+        if len(returns) < 2:
+            return 0.0
+
+        net_profit = returns.sum()
+
+        if equity_curve is None:
+            equity_curve = (1 + returns).cumprod()
+
+        max_dd = self.calculate_max_drawdown(equity_curve)
+
+        if max_dd == 0:
+            return float('inf') if net_profit > 0 else 0.0
+
+        return net_profit / max_dd
+
+    def calculate_ulcer_index(self, equity_curve: pd.Series) -> float:
+        """
+        Calculate Ulcer Index (downside volatility measure)
+
+        Ulcer Index = sqrt(mean(drawdown^2))
+
+        Measures depth and duration of drawdowns. Lower is better.
+
+        Args:
+            equity_curve: Series of cumulative equity values
+
+        Returns:
+            Ulcer index
+        """
+        if len(equity_curve) < 2:
+            return 0.0
+
+        cummax = equity_curve.cummax()
+        drawdown_pct = ((equity_curve - cummax) / cummax) * 100  # Convert to percentage
+
+        ulcer = np.sqrt((drawdown_pct ** 2).mean())
+        return ulcer
+
+    def calculate_all_metrics(
+        self,
+        returns: pd.Series,
+        equity_curve: Optional[pd.Series] = None
+    ) -> Dict[str, float]:
+        """
+        Calculate all profit metrics at once
+
+        Args:
+            returns: Series of period returns
+            equity_curve: Optional pre-calculated equity curve
+
+        Returns:
+            Dictionary with all metrics
+        """
+        if equity_curve is None:
+            equity_curve = (1 + returns).cumprod()
+
+        metrics = {
+            'sharpe_ratio': self.calculate_sharpe_ratio(returns),
+            'sortino_ratio': self.calculate_sortino_ratio(returns),
+            'calmar_ratio': self.calculate_calmar_ratio(returns, equity_curve),
+            'max_drawdown': self.calculate_max_drawdown(equity_curve),
+            'win_rate': self.calculate_win_rate(returns),
+            'profit_factor': self.calculate_profit_factor(returns),
+            'expectancy': self.calculate_expectancy(returns),
+            'recovery_factor': self.calculate_recovery_factor(returns, equity_curve),
+            'ulcer_index': self.calculate_ulcer_index(equity_curve),
+            'total_return': equity_curve.iloc[-1] - 1.0 if len(equity_curve) > 0 else 0.0,
+            'annualized_return': (1 + returns.mean()) ** self.periods_per_year - 1,
+            'volatility': returns.std() * np.sqrt(self.periods_per_year),
+            'num_trades': len(returns),
+        }
+
+        return metrics
+
+    def format_metrics_report(self, metrics: Dict[str, float]) -> str:
+        """
+        Format metrics into readable report
+
+        Args:
+            metrics: Dictionary of calculated metrics
+
+        Returns:
+            Formatted string report
+        """
+        report = []
+        report.append("=" * 60)
+        report.append("TRADING PROFIT METRICS REPORT")
+        report.append("=" * 60)
+        report.append("")
+        report.append("📊 Return Metrics:")
+        report.append(f"  Total Return:       {metrics['total_return']:>10.2%}")
+        report.append(f"  Annualized Return:  {metrics['annualized_return']:>10.2%}")
+        report.append(f"  Volatility (ann.):  {metrics['volatility']:>10.2%}")
+        report.append("")
+        report.append("📈 Risk-Adjusted Returns:")
+        report.append(f"  Sharpe Ratio:       {metrics['sharpe_ratio']:>10.3f}")
+        report.append(f"  Sortino Ratio:      {metrics['sortino_ratio']:>10.3f}")
+        report.append(f"  Calmar Ratio:       {metrics['calmar_ratio']:>10.3f}")
+        report.append("")
+        report.append("⚠️  Risk Metrics:")
+        report.append(f"  Max Drawdown:       {metrics['max_drawdown']:>10.2%}")
+        report.append(f"  Ulcer Index:        {metrics['ulcer_index']:>10.2f}")
+        report.append(f"  Recovery Factor:    {metrics['recovery_factor']:>10.2f}")
+        report.append("")
+        report.append("🎯 Trading Statistics:")
+        report.append(f"  Win Rate:           {metrics['win_rate']:>10.2%}")
+        report.append(f"  Profit Factor:      {metrics['profit_factor']:>10.2f}")
+        report.append(f"  Expectancy:         {metrics['expectancy']:>10.4f}")
+        report.append(f"  Number of Trades:   {metrics['num_trades']:>10.0f}")
+        report.append("=" * 60)
+
+        return "\n".join(report)
+
+
+# Convenience functions for quick access
+def calculate_sharpe(returns: pd.Series, periods_per_year: int = 252) -> float:
+    """Quick Sharpe ratio calculation"""
+    metrics = ProfitMetrics(periods_per_year=periods_per_year)
+    return metrics.calculate_sharpe_ratio(returns)
+
+
+def calculate_sortino(returns: pd.Series, periods_per_year: int = 252) -> float:
+    """Quick Sortino ratio calculation"""
+    metrics = ProfitMetrics(periods_per_year=periods_per_year)
+    return metrics.calculate_sortino_ratio(returns)
+
+
+def calculate_max_dd(equity_curve: pd.Series) -> float:
+    """Quick max drawdown calculation"""
+    metrics = ProfitMetrics()
+    return metrics.calculate_max_drawdown(equity_curve)
+
+
+if __name__ == "__main__":
+    # Demo usage
+    print("📊 Profit Metrics Module - Demo\n")
+
+    # Generate sample returns (random walk with positive drift)
+    np.random.seed(42)
+    n_periods = 252  # 1 year of daily data
+    daily_returns = pd.Series(np.random.normal(0.001, 0.02, n_periods))
+
+    # Calculate metrics
+    metrics_calc = ProfitMetrics(periods_per_year=252)
+    all_metrics = metrics_calc.calculate_all_metrics(daily_returns)
+
+    # Print report
+    print(metrics_calc.format_metrics_report(all_metrics))
+
+    print("\n✅ Profit metrics module ready for walk-forward optimization")

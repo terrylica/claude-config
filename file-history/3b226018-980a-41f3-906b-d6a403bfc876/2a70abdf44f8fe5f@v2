@@ -1,0 +1,54 @@
+# VIF Validation (2025-10-03)
+
+**Status**: ✅ Validated - VIF feasible on 48 features
+**Context**: Phase 5 feature selection pipeline (IPSS + VIF)
+
+## Validation Results
+
+**Test**: VIF iterative removal on 48 features from pruning manifest
+
+| Metric | Value | Threshold | Status |
+|--------|-------|-----------|--------|
+| Full VIF matrix | 1.1s | < 300s | ✅ VERY FAST |
+| Iterative VIF removal | 9.7s | < 600s | ✅ VERY FAST |
+| Features: 48 → 37 | 11 removed | N/A | VIF ≤ 5.0 |
+
+**Source**: `experiments/vif_feasibility_test_20251003/` (gitignored, results documented here)
+
+## Why 85 Features Timed Out
+
+**Root cause**: Extreme multicollinearity (r=1.0 pairs) → numerical instability
+
+**Examples**:
+- `hour_of_day_sin` ↔ `fourier_daily_sin_1` (r=1.0)
+- `rolling_mean_*` ↔ `ewm_mean_*` (r>0.99)
+
+**Solution**: Pruning manifest removed r>0.95 pairs → VIF now stable
+
+## Decision
+
+**✅ Use VIF as specified in NEXT_STEPS.md (no changes needed)**
+
+**Pipeline**:
+```
+89 atoms → 48 features (pruning manifest) → 37 features (VIF ≤5) → 20-30 features (IPSS)
+```
+
+**Removed by VIF** (threshold 5.0):
+1. `rolling_max_100` (VIF=571)
+2. `expanding_max` (VIF=277)
+3. `stl_resid_s13_t31` (VIF=174)
+4. `stl_resid_s7_t21` (VIF=42)
+5. `parkinson_vol_20` (VIF=41)
+6. `realized_vol_50` (VIF=28)
+7. `ewm_std_20` (VIF=23)
+8. `parkinson_vol_10` (VIF=15)
+9. `pct_from_ma_10` (VIF=11)
+10. `z_score_20` (VIF=8)
+11. `ewm_std_50` (VIF=6)
+
+## Cross-References
+
+- `NEXT_STEPS.md` (lines 55-65) - VIF validation section
+- `.claude/feature-pruning-manifest.md` - 48 kept features (VIF input)
+- `CLAUDE.md` (lines 283-286) - VIF specification

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Multi-pane variant - Claude + editor + log tail
+
+tmux has-session -t cc 2>/dev/null && tmux attach -t cc || { \
+  tmux new-session -d -s cc -n repl; \
+  tmux set-option  -t cc history-limit 1000000 \; \
+                   set-option  -t cc escape-time 0 \; \
+                   set-option  -t cc mouse on; \
+  tmux set-window-option -t cc:repl aggressive-resize on \; \
+                         set-window-option -t cc:repl remain-on-exit on; \
+  mkdir -p "$HOME/.logs/claude"; \
+  LOG_FILE="$HOME/.logs/claude/trace_$(date +%Y%m%d_%H%M%S).log"; \
+  tmux pipe-pane -t cc:repl "stdbuf -i0 -o0 -e0 tee -a $LOG_FILE"; \
+  tmux send-keys -t cc:repl 'claude --dangerously-skip-permissions --add-dir /tmp --resume --fork-session' C-m; \
+  tmux split-window -h -t cc:repl -c /tmp; \
+  tmux split-window -v -t cc:repl.right "tail -f $LOG_FILE 2>/dev/null || tail -f /dev/null"; \
+  tmux select-pane -t cc:repl.left; \
+  tmux attach -t cc; \
+}

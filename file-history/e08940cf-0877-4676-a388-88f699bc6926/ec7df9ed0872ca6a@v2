@@ -1,0 +1,616 @@
+---
+# OOD-Robust ML Pipeline - Implementation Plan
+# Branch: research/ood-robustness-2025
+# Status: Infrastructure complete, validation pending
+# Last Updated: 2025-10-04
+
+metadata:
+  version: "0.1.0"
+  branch: "research/ood-robustness-2025"
+  base_commit: "13e9437"
+  data_source: "output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv"
+  data_records: 175780
+  data_period: "2022-01-01 to 2025-09-30"
+
+# Service Level Objectives (SLOs)
+slos:
+  availability:
+    training_pipeline:
+      target: "Pipeline executes without crashes"
+      metric: "Training completes or fails with explicit error"
+      validation: "No silent failures, all exceptions propagated"
+
+    data_loading:
+      target: "CSV parsing succeeds or raises ValueError"
+      metric: "Dataset creation returns valid PyTorch Dataset or raises exception"
+      validation: "Schema validation enforced, no default fallbacks"
+
+  correctness:
+    data_integrity:
+      target: "Fixed-point conversion accuracy ±1e-9"
+      metric: "assert (converted_value * 1e9).round() == original_int"
+      validation: "Validate on known test cases from existing rangebar data"
+
+    temporal_ordering:
+      target: "Sequences maintain chronological order"
+      metric: "assert df['open_time'].is_sorted()"
+      validation: "Raise error if temporal ordering violated"
+
+    regime_detection:
+      target: "All samples assigned valid regime labels"
+      metric: "No NaN regime labels after detection"
+      validation: "assert not df['volatility_regime'].is_null().any()"
+
+    model_output:
+      target: "Predictions match expected shapes and ranges"
+      metric: |
+        assert direction_logits.shape == (batch, 3)
+        assert reconstructed.shape == (batch, n_features)
+      validation: "Shape assertions in forward pass"
+
+  observability:
+    training_logging:
+      target: "TensorBoard logs every batch"
+      metric: "Loss curves visible in TensorBoard"
+      validation: "Verify logs/ directory populated"
+
+    checkpoint_tracking:
+      target: "Checkpoints saved every 5 epochs with metadata"
+      metric: "Checkpoint files contain model_state_dict + train_stats"
+      validation: "torch.load(checkpoint) contains required keys"
+
+    evaluation_metrics:
+      target: "All metrics computed and logged"
+      metric: "Metrics dict contains accuracy, ece, regime_accuracy_std"
+      validation: "OODMetrics.compute_all_metrics returns complete dict"
+
+  maintainability:
+    dependency_management:
+      target: "All dependencies declared in pyproject.toml"
+      metric: "uv sync installs all required packages"
+      validation: "No missing imports during runtime"
+
+    code_organization:
+      target: "Imports resolve without sys.path manipulation"
+      metric: "from research.ml_ood.data import RangeBarDataset works"
+      validation: "Package structure follows Python standards"
+
+    error_messages:
+      target: "Exceptions provide actionable context"
+      metric: "Error messages include variable values and expected ranges"
+      validation: "Custom exceptions with descriptive messages"
+
+# Implementation Status
+status:
+  completed:
+    - id: "infra-001"
+      task: "Create research branch"
+      commit: "initial"
+      date: "2025-10-04"
+      validation: "git branch shows research/ood-robustness-2025"
+
+    - id: "infra-002"
+      task: "Implement data pipeline"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/data/dataset.py"
+        - "research/ml_ood/data/regime.py"
+        - "research/ml_ood/data/utils.py"
+      validation: "Files committed to branch"
+
+    - id: "infra-003"
+      task: "Implement transformer encoder"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/models/encoder.py"
+        - "research/ml_ood/models/heads.py"
+        - "research/ml_ood/models/ood_model.py"
+      validation: "Model classes defined with forward() methods"
+
+    - id: "infra-004"
+      task: "Implement training infrastructure"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/training/sampler.py"
+        - "research/ml_ood/training/conformal.py"
+      validation: "Sampler and calibrator classes implemented"
+
+    - id: "infra-005"
+      task: "Implement evaluation suite"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/evaluation/stress_test.py"
+        - "research/ml_ood/evaluation/metrics.py"
+      validation: "Stress testing and metrics classes implemented"
+
+    - id: "infra-006"
+      task: "Create documentation"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/README.md"
+        - "research/ml_ood/ARCHITECTURE.md"
+      validation: "Documentation committed"
+
+  completed:
+    - id: "infra-001"
+      task: "Create research branch"
+      commit: "initial"
+      date: "2025-10-04"
+      validation: "git branch shows research/ood-robustness-2025"
+
+    - id: "infra-002"
+      task: "Implement data pipeline"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/data/dataset.py"
+        - "research/ml_ood/data/regime.py"
+        - "research/ml_ood/data/utils.py"
+      validation: "Files committed to branch"
+
+    - id: "infra-003"
+      task: "Implement transformer encoder"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/models/encoder.py"
+        - "research/ml_ood/models/heads.py"
+        - "research/ml_ood/models/ood_model.py"
+      validation: "Model classes defined with forward() methods"
+
+    - id: "infra-004"
+      task: "Implement training infrastructure"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/training/sampler.py"
+        - "research/ml_ood/training/conformal.py"
+      validation: "Sampler and calibrator classes implemented"
+
+    - id: "infra-005"
+      task: "Implement evaluation suite"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/evaluation/stress_test.py"
+        - "research/ml_ood/evaluation/metrics.py"
+      validation: "Stress testing and metrics classes implemented"
+
+    - id: "infra-006"
+      task: "Create documentation"
+      commit: "13e9437"
+      files:
+        - "research/ml_ood/README.md"
+        - "research/ml_ood/ARCHITECTURE.md"
+      validation: "Documentation committed"
+
+    - id: "validate-001"
+      task: "Install dependencies and verify imports"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - All 38 dependencies installed, imports resolve correctly"
+      validation_method: |
+        uv pip install torch numpy polars pyarrow scikit-learn scipy tqdm tensorboard matplotlib seaborn einops
+        python -c "from research.ml_ood.data import RangeBarDataset; print('OK')"
+        python -c "from research.ml_ood.models import OODRobustRangeBarModel; print('OK')"
+      details: "See STATUS.yaml validate-001_dependencies, validate-002_imports"
+
+    - id: "validate-002-synthetic"
+      task: "Test data loading with synthetic rangebar data"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - Dataset loads, 25 valid samples from 50 bars"
+      synthetic_data: "test_data/synthetic_rangebar_test.csv (50 bars)"
+      parameters_tested:
+        sequence_len: 5
+        regime_lookback: 10
+      validation_method: |
+        Dataset created successfully
+        Sample shape: (5, 14) features
+        Target labels: {0, 1, 2} (down/sideways/up)
+        Regime labels: [0-4] volatility quintiles
+      details: "See STATUS.yaml validate-003_data_loading"
+      note: "Production data (175K bars) blocked - see blocker-001"
+
+    - id: "validate-003"
+      task: "Test model instantiation"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - Model: 3,720,113 parameters"
+      validation_method: "Model instantiates, num_parameters > 0"
+      details: "See STATUS.yaml validate-004_model_forward"
+
+    - id: "validate-004"
+      task: "Test forward pass with synthetic batch"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - Shapes correct, loss computation working"
+      results:
+        input_shape: "(8, 5, 14)"
+        direction_logits_shape: "(8, 3)"
+        reconstructed_shape: "(8, 14)"
+        combined_loss: 1.6204
+        direction_loss: 1.1086
+        anomaly_loss: 1.0236
+      details: "See STATUS.yaml validate-004_model_forward"
+
+    - id: "validate-005"
+      task: "Test training loop with synthetic data"
+      completed: "2025-10-04"
+      outcome: "✓ PASSED - 3 batches, loss decreasing"
+      results:
+        batch_1_loss: 1.2933
+        batch_2_loss: 0.8706
+        batch_3_loss: 0.7550
+        gradient_flow: "working"
+        optimizer: "working"
+      details: "See STATUS.yaml validate-005_training_loop"
+
+  pending:
+    - id: "blocker-001-resolution"
+      task: "Resolve production data availability"
+      priority: "critical"
+      status: "blocked"
+      blocker: "SOLUSDT CSV not available on yca machine"
+      resolution_options:
+        - "Transfer from Terry's Mac (recommended, ~5 min)"
+        - "Generate on yca (requires fixing libssl library, ~30 min)"
+        - "Run training on Terry's Mac (2-4 hours)"
+      details: "See STATUS.yaml blocker-001_missing_production_data"
+
+    - id: "validate-002"
+      task: "Test data loading on SOLUSDT CSV"
+      priority: "critical"
+      blockers: ["validate-001"]
+      depends_on:
+        - file: "output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv"
+          exists: true
+          records: 175780
+      commands:
+        - "python -m research.ml_ood.data.utils"
+      expected_outcome: |
+        Dataset loaded: 175,780 bars
+        Train: ~95K bars (2022-2023)
+        Val: ~24K bars (2024 H1)
+        Test: ~57K bars (2024 H2-2025)
+      error_handling: |
+        - FileNotFoundError: Data file missing, check path
+        - SchemaError: CSV columns mismatch, verify format
+        - AssertionError: Temporal ordering violated, check data
+      validation: |
+        Dataset creates without errors
+        assert len(train_dataset) > 0
+        assert train_dataset.feature_cols has 14 features
+
+    - id: "validate-003"
+      task: "Test model instantiation"
+      priority: "critical"
+      blockers: ["validate-001"]
+      commands:
+        - "python -c 'from research.ml_ood.models import OODRobustRangeBarModel; m = OODRobustRangeBarModel(); print(m.num_parameters)'"
+      expected_outcome: "Model: ~3.5M parameters"
+      error_handling: "Propagate any initialization errors"
+      validation: "Model instantiates, num_parameters > 0"
+
+    - id: "validate-004"
+      task: "Test forward pass with synthetic batch"
+      priority: "high"
+      blockers: ["validate-003"]
+      test_script: |
+        import torch
+        from research.ml_ood.models import OODRobustRangeBarModel
+
+        model = OODRobustRangeBarModel(n_features=14)
+        batch = torch.randn(8, 64, 14)  # (batch, seq_len, features)
+
+        outputs = model(batch)
+        assert outputs["direction_logits"].shape == (8, 3)
+        assert outputs["reconstructed"].shape == (8, 14)
+        print("Forward pass: OK")
+      expected_outcome: "Forward pass completes, shapes correct"
+      error_handling: "Propagate shape mismatches, tensor errors"
+      validation: "No assertion errors"
+
+    - id: "train-001"
+      task: "Dry-run training (1 epoch, 10 batches)"
+      priority: "high"
+      blockers: ["validate-002", "validate-004"]
+      commands:
+        - |
+          python -m research.ml_ood.train \
+            --data output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv \
+            --epochs 1 \
+            --batch-size 256 \
+            --device auto \
+            --output-dir research/ml_ood/experiments/dryrun
+      expected_outcome: |
+        Training starts
+        Regime-stratified sampler initializes
+        1 epoch completes
+        Checkpoint saved
+      error_handling: |
+        - CUDA OOM: Reduce batch_size to 128
+        - DataLoader errors: Check num_workers compatibility
+        - Loss NaN: Check learning rate, gradient clipping
+      validation: |
+        Checkpoint file exists
+        TensorBoard logs created
+        Training completes without crash
+
+    - id: "train-002"
+      task: "Full training (50 epochs)"
+      priority: "medium"
+      blockers: ["train-001"]
+      commands:
+        - |
+          python -m research.ml_ood.train \
+            --data output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv \
+            --epochs 50 \
+            --batch-size 256 \
+            --device auto \
+            --output-dir research/ml_ood/experiments/run1
+      expected_outcome: |
+        50 epochs complete
+        Loss decreases over time
+        Checkpoints saved at epochs 5, 10, 15, ..., 50
+        final_model.pt saved
+      error_handling: "Propagate all errors, no retry logic"
+      validation: |
+        final_model.pt exists
+        Training loss < initial loss
+        TensorBoard shows convergence
+      estimated_time: "2-4 hours (GPU) / 8-12 hours (CPU)"
+
+    - id: "eval-001"
+      task: "Evaluate on test set"
+      priority: "medium"
+      blockers: ["train-002"]
+      test_script: |
+        # Create evaluation script
+        from pathlib import Path
+        import torch
+        from torch.utils.data import DataLoader
+        from research.ml_ood.data import RangeBarDataset
+        from research.ml_ood.models import OODRobustRangeBarModel
+        from research.ml_ood.evaluation import OODMetrics
+
+        # Load model
+        checkpoint = torch.load("research/ml_ood/experiments/run1/final_model.pt")
+        model = OODRobustRangeBarModel()
+        model.load_state_dict(checkpoint["model_state_dict"])
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+
+        # Load test dataset
+        dataset = RangeBarDataset(
+            csv_path=Path("output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv"),
+            sequence_len=64,
+        )
+
+        # Apply training normalization
+        dataset.normalize_features(checkpoint["train_stats"])
+
+        # Test loader
+        test_loader = DataLoader(dataset, batch_size=256, shuffle=False)
+
+        # Compute metrics
+        metrics = OODMetrics.compute_all_metrics(model, test_loader, device)
+        OODMetrics.print_metrics(metrics, title="Test Set Evaluation")
+      expected_outcome: |
+        Test accuracy: >33% (random baseline)
+        ECE: <0.15 (reasonably calibrated)
+        Regime accuracy std: measure of OOD robustness
+      error_handling: "Propagate evaluation errors"
+      validation: "Metrics dict populated, no NaN values"
+
+    - id: "eval-002"
+      task: "Conformal calibration and coverage testing"
+      priority: "medium"
+      blockers: ["train-002"]
+      test_script: |
+        from research.ml_ood.training import ConformalCalibrator
+
+        # Split data: train (calibration) / test
+        calibrator = ConformalCalibrator(alpha=0.1)
+        quantile = calibrator.calibrate(model, calibration_loader, device)
+
+        # Evaluate coverage on test set
+        coverage_metrics = calibrator.evaluate_coverage(model, test_loader, device)
+
+        # Evaluate conditional coverage by regime
+        regime_coverage = calibrator.evaluate_conditional_coverage(
+            model, test_loader, device
+        )
+      expected_outcome: |
+        Target coverage: 90%
+        Empirical coverage: 88-92% (within tolerance)
+        Conditional coverage: Similar across regimes (OOD robustness)
+      error_handling: "Propagate calibration errors"
+      validation: |
+        coverage_gap: ±2% (acceptable)
+        regime_coverage variance: <5% (robust across regimes)
+
+    - id: "eval-003"
+      task: "Stress testing on Terra/Luna crash"
+      priority: "high"
+      blockers: ["train-002"]
+      test_script: |
+        from research.ml_ood.evaluation import StressTestSuite
+
+        stress_tester = StressTestSuite(model, dataset, device)
+
+        # Test Terra/Luna crash (2022-05-07 to 2022-05-12)
+        terra_metrics = stress_tester.run_stress_test(
+            "terra_luna_crash", batch_size=256
+        )
+
+        # Test FTX collapse (2022-11-06 to 2022-11-11)
+        ftx_metrics = stress_tester.run_stress_test(
+            "ftx_collapse", batch_size=256
+        )
+
+        # Compare with normal period
+        comparison = stress_tester.compare_with_normal_period(
+            "terra_luna_crash", normal_loader, batch_size=256
+        )
+      expected_outcome: |
+        Stress period identified (>0 bars)
+        Anomaly scores elevated during crisis
+        Uncertainty increases during crisis (early warning)
+        Accuracy degradation measured
+      error_handling: |
+        - Empty stress period: Verify data includes 2022-05-07 to 2022-05-12
+        - Propagate any evaluation errors
+      validation: |
+        stress_metrics contains required keys
+        uncertainty_trend quantifies behavior change
+        anomaly_mean > normal period anomaly_mean
+
+    - id: "doc-001"
+      task: "Document experimental results"
+      priority: "low"
+      blockers: ["eval-001", "eval-002", "eval-003"]
+      output_file: "research/ml_ood/RESULTS.md"
+      content: |
+        # Experimental Results
+
+        ## Training Configuration
+        - Data: SOLUSDT 0.50bps (175,780 bars, 2022-2025)
+        - Epochs: 50
+        - Batch size: 256
+        - Optimizer: AdamW (lr=1e-4, weight_decay=0.01)
+
+        ## Test Set Performance
+        - Accuracy: {test_accuracy}
+        - ECE: {ece}
+        - Regime accuracy std: {regime_std}
+
+        ## Conformal Prediction
+        - Target coverage: 90%
+        - Empirical coverage: {coverage}
+        - Coverage gap: {coverage_gap}
+
+        ## Stress Testing
+        - Terra/Luna accuracy: {terra_accuracy}
+        - Normal period accuracy: {normal_accuracy}
+        - Degradation: {degradation}
+        - Uncertainty trend: {uncertainty_trend}
+
+        ## OOD Robustness Analysis
+        {regime_conditional_analysis}
+      validation: "RESULTS.md created with actual metrics"
+
+    - id: "optimize-001"
+      task: "Model distillation (optional production optimization)"
+      priority: "low"
+      blockers: ["train-002"]
+      description: |
+        Distill 128-dim encoder to 32-dim student model
+        Target: 10x faster inference, <5% accuracy loss
+        Method: Knowledge distillation from teacher logits
+      status: "deferred"
+      rationale: "Optimization not in initial SLOs"
+
+# Dependency Graph
+dependencies:
+  validate-001: []
+  validate-002: ["validate-001"]
+  validate-003: ["validate-001"]
+  validate-004: ["validate-003"]
+  train-001: ["validate-002", "validate-004"]
+  train-002: ["train-001"]
+  eval-001: ["train-002"]
+  eval-002: ["train-002"]
+  eval-003: ["train-002"]
+  doc-001: ["eval-001", "eval-002", "eval-003"]
+  optimize-001: ["train-002"]
+
+# Error Handling Policy
+error_handling:
+  principle: "Fail fast, propagate errors, no silent defaults"
+
+  rules:
+    - "No try/except without re-raise"
+    - "No default fallback values (use required arguments)"
+    - "No silent data imputation (raise on missing data)"
+    - "Validation errors include context (expected vs actual)"
+    - "Use assert for invariants (with descriptive messages)"
+
+  examples:
+    data_validation: |
+      # CORRECT
+      if not df["open_time"].is_sorted():
+          raise ValueError(
+              f"Temporal ordering violated: "
+              f"first={df['open_time'][0]}, last={df['open_time'][-1]}"
+          )
+
+      # INCORRECT
+      if not df["open_time"].is_sorted():
+          df = df.sort("open_time")  # Silent fix
+
+    shape_validation: |
+      # CORRECT
+      assert logits.shape == (batch_size, n_classes), \
+          f"Expected shape ({batch_size}, {n_classes}), got {logits.shape}"
+
+      # INCORRECT
+      if logits.shape[1] != n_classes:
+          logits = logits[:, :n_classes]  # Silent truncation
+
+    missing_data: |
+      # CORRECT
+      if csv_path is None:
+          raise ValueError("csv_path is required")
+
+      # INCORRECT
+      csv_path = csv_path or "default.csv"
+
+# Next Actions (Priority Order)
+next_actions:
+  - id: "validate-001"
+    command: "cd research/ml_ood && uv sync"
+    expected: "Dependencies install successfully"
+
+  - id: "validate-002"
+    command: |
+      python -c "
+      from pathlib import Path
+      from research.ml_ood.data import RangeBarDataset
+      dataset = RangeBarDataset(
+          csv_path=Path('output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv'),
+          sequence_len=64,
+      )
+      print(f'Dataset: {len(dataset):,} samples')
+      "
+    expected: "Dataset loads successfully"
+
+  - id: "validate-004"
+    command: |
+      python -c "
+      import torch
+      from research.ml_ood.models import OODRobustRangeBarModel
+      model = OODRobustRangeBarModel(n_features=14)
+      batch = torch.randn(8, 64, 14)
+      outputs = model(batch)
+      print(f'Logits: {outputs[\"direction_logits\"].shape}')
+      print(f'Reconstructed: {outputs[\"reconstructed\"].shape}')
+      "
+    expected: "Forward pass succeeds"
+
+  - id: "train-001"
+    command: |
+      python -m research.ml_ood.train \
+        --data output/solusdt_historical_2022_2025/spot_SOLUSDT_rangebar_20220101_20250930_0050bps.csv \
+        --epochs 1 \
+        --batch-size 256 \
+        --output-dir research/ml_ood/experiments/dryrun
+    expected: "1 epoch completes, checkpoint saved"
+
+# References (for context, not promotional)
+references:
+  architecture: "research/ml_ood/ARCHITECTURE.md"
+  usage: "research/ml_ood/README.md"
+  code:
+    data_pipeline: "research/ml_ood/data/"
+    models: "research/ml_ood/models/"
+    training: "research/ml_ood/training/"
+    evaluation: "research/ml_ood/evaluation/"
+
+  related_commits:
+    - commit: "13e9437"
+      message: "feat: OOD-robust ML pipeline with transformer auto-features"
+      files: 20
+      lines: 3670

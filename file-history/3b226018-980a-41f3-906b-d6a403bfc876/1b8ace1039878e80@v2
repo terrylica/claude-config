@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""
+Adversarial Atom Testing Framework
+
+Deep validation beyond basic sensibility checks:
+- Mathematical correctness (unit circle properties, statistical identities)
+- Lag offset verification
+- Edge case handling (window boundaries, extreme values)
+- Cross-validation between related atoms
+- Numerical stability tests
+"""
+
+import sys
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def load_test_data():
+    """Load SOL 5m sample data"""
+    df = pd.read_csv('ml_feature_set/sample_data/resampled_binance_SOL-5m.csv')
+    if 'actual_ready_time' not in df.columns:
+        df['actual_ready_time'] = pd.to_datetime(df['date'])
+    else:
+        df['actual_ready_time'] = pd.to_datetime(df['actual_ready_time'])
+    df = df.set_index('actual_ready_time')
+    return df
+
+
+def test_cyclical_unit_circle(df, lib):
+    """Test sin²+cos²=1 for all cyclical encodings"""
+    print("\n" + "="*80)
+    print("TEST 1: Cyclical Encoding Unit Circle Property")
+    print("="*80)
+
+    pairs = [
+        ('hour_of_day_sin', 'hour_of_day_cos'),
+        ('day_of_week_sin', 'day_of_week_cos'),
+    ]
+
+    issues = []
+    for sin_name, cos_name in pairs:
+        sin_atom = lib.get_atom(sin_name)
+        cos_atom = lib.get_atom(cos_name)
+
+        sin_vals = sin_atom.compute(df)
+        cos_vals = cos_atom.compute(df)
+
+        # Test: sin²+cos²=1
+        sum_squares = sin_vals**2 + cos_vals**2
+        deviation = np.abs(sum_squares - 1.0)
+        max_dev = deviation.max()
+        mean_dev = deviation.mean()
+
+        print(f"\n{sin_name}/{cos_name}:")
+        print(f"   Max deviation from 1.0: {max_dev:.2e}")
+        print(f"   Mean deviation: {mean_dev:.2e}")
+
+        if max_dev > 1e-10:
+            issues.append(f"{sin_name}/{cos_name}: Unit circle violation (max_dev={max_dev:.2e})")
+            print(f"   ❌ FAIL - Not on unit circle")
+        else:
+            print(f"   ✅ PASS - Perfect unit circle")
+
+    return issues
+
+
+def test_fourier_pairs(df, lib):
+    """Test Fourier sin/cos pairs for unit circle"""
+    print("\n" + "="*80)
+    print("TEST 2: Fourier Pairs Unit Circle")
+    print("="*80)
+
+    issues = []
+    for k in [1, 2, 3]:
+        for freq in ['daily', 'weekly']:
+            sin_name = f'fourier_{freq}_sin_{k}'
+            cos_name = f'fourier_{freq}_cos_{k}'
+
+            sin_atom = lib.get_atom(sin_name)
+            cos_atom = lib.get_atom(cos_name)
+
+            if sin_atom and cos_atom:
+                sin_vals = sin_atom.compute(df)
+                cos_vals = cos_atom.compute(df)
+
+                sum_squares = sin_vals**2 + cos_vals**2
+                deviation = np.abs(sum_squares - 1.0)
+                max_dev = deviation.max()
+
+                print(f"\n{sin_name}/{cos_name}:")
+                print(f"   Max deviation from 1.0: {max_dev:.2e}")
+
+                if max_dev > 1e-10:
+                    issues.append(f"{sin_name}/{cos_name}: Unit circle violation (max_dev={max_dev:.2e})")
+                    print(f"   ❌ FAIL")
+                else:
+                    print(f"   ✅ PASS")
+
+    return issues
+
+
+def test_lag_offsets(df, lib):
+    """Verify lag atoms are correctly offset"""
+    print("\n" + "="*80)
+    print("TEST 3: Lag Offset Verification")
+    print("="*80)
+
+    issues = []
+
+    # Test returns lags
+    returns = lib.get_atom('returns').compute(df)
+    for lag in [1, 2, 3, 5, 10, 20]:
+        lag_atom = lib.get_atom(f'returns_lag_{lag}')
+        lag_vals = lag_atom.compute(df)
+
+        # Manually compute expected lag
+        expected_lag = returns.shift(lag)
+
+        # Compare (ignoring NaN)
+        mask = ~(lag_vals.isna() | expected_lag.isna())
+        if mask.sum() > 0:
+            diff = np.abs(lag_vals[mask] - expected_lag[mask])
+            max_diff = diff.max()
+
+            print(f"\nreturns_lag_{lag}:")
+            print(f"   Max difference vs shift({lag}): {max_diff:.2e}")
+
+            if max_diff > 1e-10:
+                issues.append(f"returns_lag_{lag}: Incorrect offset (max_diff={max_diff:.2e})")
+                print(f"   ❌ FAIL - Incorrect lag")
+            else:
+                print(f"   ✅ PASS - Correct lag")
+
+    return issues
+
+
+def test_rolling_window_consistency(df, lib):
+    """Test rolling window atoms match pandas .rolling()"""
+    print("\n" + "="*80)
+    print("TEST 4: Rolling Window Consistency")
+    print("="*80)
+
+    issues = []
+
+    for window in [5, 10, 20, 50]:
+        # Test rolling mean
+        atom = lib.get_atom(f'rolling_mean_{window}')
+        atom_vals = atom.compute(df)
+
+        expected = df['close'].rolling(window).mean()
+
+        mask = ~(atom_vals.isna() | expected.isna())
+        if mask.sum() > 0:
+            diff = np.abs(atom_vals[mask] - expected[mask])
+            max_diff = diff.max()
+
+            print(f"\nrolling_mean_{window}:")
+            print(f"   Max difference vs pandas: {max_diff:.2e}")
+
+            if max_diff > 1e-8:
+                issues.append(f"rolling_mean_{window}: Inconsistent with pandas (max_diff={max_diff:.2e})")
+                print(f"   ❌ FAIL")
+            else:
+                print(f"   ✅ PASS")
+
+    return issues
+
+
+def test_ewm_consistency(df, lib):
+    """Test EWM atoms match pandas .ewm()"""
+    print("\n" + "="*80)
+    print("TEST 5: EWM Consistency")
+    print("="*80)
+
+    issues = []
+
+    for span in [5, 10, 20, 50]:
+        atom = lib.get_atom(f'ewm_mean_{span}')
+        atom_vals = atom.compute(df)
+
+        expected = df['close'].ewm(span=span).mean()
+
+        mask = ~(atom_vals.isna() | expected.isna())
+        if mask.sum() > 0:
+            diff = np.abs(atom_vals[mask] - expected[mask])
+            max_diff = diff.max()
+
+            print(f"\newm_mean_{span}:")
+            print(f"   Max difference vs pandas: {max_diff:.2e}")
+
+            if max_diff > 1e-8:
+                issues.append(f"ewm_mean_{span}: Inconsistent with pandas (max_diff={max_diff:.2e})")
+                print(f"   ❌ FAIL")
+            else:
+                print(f"   ✅ PASS")
+
+    return issues
+
+
+def test_z_score_properties(df, lib):
+    """Test z-score normalization properties"""
+    print("\n" + "="*80)
+    print("TEST 6: Z-Score Properties")
+    print("="*80)
+
+    issues = []
+
+    for window in [10, 20, 50]:
+        z_atom = lib.get_atom(f'z_score_{window}')
+        z_vals = z_atom.compute(df)
+
+        # Remove NaN
+        z_clean = z_vals.dropna()
+
+        if len(z_clean) > 0:
+            # Check if roughly normalized (mean ≈ 0, std ≈ 1 over long periods)
+            # Note: won't be exactly 0,1 due to rolling nature
+            mean = z_clean.mean()
+            std = z_clean.std()
+
+            print(f"\nz_score_{window}:")
+            print(f"   Overall mean: {mean:.4f} (expect ≈ 0)")
+            print(f"   Overall std:  {std:.4f} (expect ≈ 1)")
+
+            # Loose bounds since it's rolling
+            if abs(mean) > 0.1 or abs(std - 1.0) > 0.5:
+                issues.append(f"z_score_{window}: Poor normalization (mean={mean:.4f}, std={std:.4f})")
+                print(f"   ⚠️  WARN - Normalization off")
+            else:
+                print(f"   ✅ PASS")
+
+    return issues
+
+
+def test_returns_computation(df, lib):
+    """Test returns atom correctness"""
+    print("\n" + "="*80)
+    print("TEST 7: Returns Computation")
+    print("="*80)
+
+    issues = []
+
+    returns_atom = lib.get_atom('returns')
+    returns = returns_atom.compute(df)
+
+    # Manual calculation
+    expected = df['close'].pct_change()
+
+    mask = ~(returns.isna() | expected.isna())
+    if mask.sum() > 0:
+        diff = np.abs(returns[mask] - expected[mask])
+        max_diff = diff.max()
+
+        print(f"\nreturns:")
+        print(f"   Max difference vs pct_change(): {max_diff:.2e}")
+
+        if max_diff > 1e-10:
+            issues.append(f"returns: Incorrect computation (max_diff={max_diff:.2e})")
+            print(f"   ❌ FAIL")
+        else:
+            print(f"   ✅ PASS")
+
+    return issues
+
+
+def test_realized_vol_properties(df, lib):
+    """Test realized volatility atoms"""
+    print("\n" + "="*80)
+    print("TEST 8: Realized Volatility Properties")
+    print("="*80)
+
+    issues = []
+
+    for window in [10, 20, 50]:
+        vol_atom = lib.get_atom(f'realized_vol_{window}')
+        vol_vals = vol_atom.compute(df)
+
+        # Should be non-negative
+        if (vol_vals < 0).any():
+            issues.append(f"realized_vol_{window}: Negative values found")
+            print(f"\nrealized_vol_{window}:")
+            print(f"   ❌ FAIL - Negative volatility")
+        else:
+            # Check monotonicity with window size (larger windows should have larger values on average)
+            mean_vol = vol_vals.mean()
+            print(f"\nrealized_vol_{window}:")
+            print(f"   Mean volatility: {mean_vol:.6f}")
+            print(f"   ✅ PASS - All non-negative")
+
+    return issues
+
+
+def test_stl_decomposition_sum(df, lib):
+    """Test STL: trend + seasonal + resid = original"""
+    print("\n" + "="*80)
+    print("TEST 9: STL Decomposition Sum Property")
+    print("="*80)
+
+    issues = []
+
+    for seasonal, trend in [(7, 21), (13, 31)]:
+        trend_atom = lib.get_atom(f'stl_trend_s{seasonal}_t{trend}')
+        seasonal_atom = lib.get_atom(f'stl_seasonal_s{seasonal}_t{trend}')
+        resid_atom = lib.get_atom(f'stl_resid_s{seasonal}_t{trend}')
+
+        trend_vals = trend_atom.compute(df)
+        seasonal_vals = seasonal_atom.compute(df)
+        resid_vals = resid_atom.compute(df)
+
+        # Test: trend + seasonal + resid = close
+        reconstructed = trend_vals + seasonal_vals + resid_vals
+        original = df['close']
+
+        mask = ~(reconstructed.isna() | original.isna())
+        if mask.sum() > 0:
+            diff = np.abs(reconstructed[mask] - original[mask])
+            max_diff = diff.max()
+            mean_diff = diff.mean()
+
+            print(f"\nSTL (s={seasonal}, t={trend}):")
+            print(f"   Max reconstruction error: {max_diff:.2e}")
+            print(f"   Mean reconstruction error: {mean_diff:.2e}")
+
+            if max_diff > 1e-6:
+                issues.append(f"STL s{seasonal}_t{trend}: Poor reconstruction (max_diff={max_diff:.2e})")
+                print(f"   ❌ FAIL")
+            else:
+                print(f"   ✅ PASS")
+
+    return issues
+
+
+def main():
+    print("="*80)
+    print("ADVERSARIAL ATOM TESTING FRAMEWORK")
+    print("="*80)
+
+    # Load library and data
+    print("\nLoading atom library...")
+    lib = load_library_from_formulas()
+    print(f"Loaded {len(lib)} atoms")
+
+    print("\nLoading test data...")
+    df = load_test_data()
+    print(f"Loaded {len(df)} rows")
+
+    # Run all adversarial tests
+    all_issues = []
+
+    all_issues.extend(test_cyclical_unit_circle(df, lib))
+    all_issues.extend(test_fourier_pairs(df, lib))
+    all_issues.extend(test_lag_offsets(df, lib))
+    all_issues.extend(test_rolling_window_consistency(df, lib))
+    all_issues.extend(test_ewm_consistency(df, lib))
+    all_issues.extend(test_z_score_properties(df, lib))
+    all_issues.extend(test_returns_computation(df, lib))
+    all_issues.extend(test_realized_vol_properties(df, lib))
+    all_issues.extend(test_stl_decomposition_sum(df, lib))
+
+    # Final report
+    print("\n" + "="*80)
+    print("ADVERSARIAL TESTING SUMMARY")
+    print("="*80)
+
+    if not all_issues:
+        print("\n✅ ALL ADVERSARIAL TESTS PASSED")
+        print("   No mathematical inconsistencies detected")
+        print("   All atoms demonstrate correct behavior under deep inspection")
+        return 0
+    else:
+        print(f"\n⚠️  {len(all_issues)} ISSUES FOUND:\n")
+        for issue in all_issues:
+            print(f"   - {issue}")
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

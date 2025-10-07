@@ -1,0 +1,62 @@
+#!/bin/bash
+# Master script to download and aggregate all data (SPOT + SWAP)
+# 33 months: 2023-01 to 2025-09
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "=============================================================================="
+echo "Full Data Pipeline: Download + Aggregate (SPOT + SWAP)"
+echo "=============================================================================="
+echo "Period: 2023-01 to 2025-09 (33 months)"
+echo ""
+echo "Estimated time:"
+echo "  - SPOT download: ~45-60 min (c=13)"
+echo "  - SWAP download: ~45-60 min (c=13)"
+echo "  - SPOT aggregation: ~30-45 min"
+echo "  - SWAP aggregation: ~30-45 min"
+echo "  Total: ~2.5-3.5 hours"
+echo ""
+echo "Press Enter to start, or Ctrl+C to cancel..."
+read
+
+START_TIME=$(date +%s)
+
+# Step 1: Download SPOT tick data
+echo ""
+echo "Step 1/4: Downloading SPOT tick data..."
+"$SCRIPT_DIR/download_spot_33months.sh"
+
+# Step 2: Download SWAP tick data
+echo ""
+echo "Step 2/4: Downloading SWAP tick data..."
+"$SCRIPT_DIR/download_swap_33months.sh"
+
+# Step 3: Aggregate SPOT to 1-min bars
+echo ""
+echo "Step 3/4: Aggregating SPOT to 1-min bars..."
+"$SCRIPT_DIR/aggregate_spot_33months.sh"
+
+# Step 4: Aggregate SWAP to 1-min bars
+echo ""
+echo "Step 4/4: Aggregating SWAP to 1-min bars..."
+"$SCRIPT_DIR/aggregate_swap_33months.sh"
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+HOURS=$((DURATION / 3600))
+MINUTES=$(((DURATION % 3600) / 60))
+SECONDS=$((DURATION % 60))
+
+echo ""
+echo "=============================================================================="
+echo "✅ ALL TASKS COMPLETE"
+echo "=============================================================================="
+echo "Total duration: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+echo ""
+echo "Storage summary:"
+du -sh victor-cbo-analysis/data/raw_ticks* victor-cbo-analysis/data/1min_bars* 2>/dev/null || true
+echo ""
+echo "Ready for backtesting!"
+echo ""

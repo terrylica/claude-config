@@ -1,0 +1,235 @@
+"""
+Batch Atom Computation CLI
+
+This script computes all atoms from the atom library and outputs a wide CSV.
+
+Usage:
+    docker exec ml-dev python -m ml_feature_set.atoms.compute_all \
+        --data ml_feature_set/sample_data/resampled_binance_SOL-5m.csv \
+        --layers A,B \
+        --output /tmp/sol5m_atoms_wide.csv
+"""
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+import pandas as pd
+import time
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def load_ohlcv_data(data_path: str) -> pd.DataFrame:
+    """
+    Load OHLCV data from CSV
+
+    Args:
+        data_path: Path to CSV file
+
+    Returns:
+        DataFrame with OHLCV columns and actual_ready_time index
+
+    Raises:
+        ValueError: If required columns missing
+    """
+    logger.info(f"Loading data from {data_path}")
+
+    df = pd.read_csv(data_path)
+
+    # Check required columns
+    required_cols = ['open', 'high', 'low', 'close', 'volume']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+
+    if missing_cols:
+        raise ValueError(f"Missing required OHLCV columns: {missing_cols}")
+
+    # Handle actual_ready_time column
+    if 'actual_ready_time' not in df.columns:
+        # Try to find a date/time column
+        if 'date' in df.columns:
+            df['actual_ready_time'] = df['date']
+            logger.info("Using 'date' column as actual_ready_time")
+        elif 'timestamp' in df.columns:
+            df['actual_ready_time'] = df['timestamp']
+            logger.info("Using 'timestamp' column as actual_ready_time")
+        else:
+            raise ValueError(
+                "No time column found. Data must have one of: "
+                "'actual_ready_time', 'date', 'timestamp'"
+            )
+
+    # Convert to datetime
+    df['actual_ready_time'] = pd.to_datetime(df['actual_ready_time'])
+
+    # Set index
+    df = df.set_index('actual_ready_time')
+
+    logger.info(f"Loaded {len(df)} rows from {df.index.min()} to {df.index.max()}")
+
+    return df
+
+
+def compute_atoms(
+    df: pd.DataFrame,
+    layers: list,
+    fail_soft: bool = True
+) -> pd.DataFrame:
+    """
+    Compute atoms for specified layers
+
+    Args:
+        df: Input OHLCV DataFrame
+        layers: List of layer IDs (e.g., ['A', 'B'])
+        fail_soft: If True, skip failing atoms; if False, raise on error
+
+    Returns:
+        Wide DataFrame with all computed atoms
+    """
+    logger.info("Loading atom library from formula modules")
+    lib = load_library_from_formulas()
+
+    logger.info(f"Atom library loaded: {len(lib)} total atoms")
+    logger.info(f"Layer breakdown: {lib.count_by_layer()}")
+
+    logger.info(f"Computing atoms for layers: {layers}")
+    atoms_df = lib.compute_all(df, layers=layers, fail_soft=fail_soft)
+
+    logger.info(f"Computation complete: {len(atoms_df.columns)} atoms generated")
+
+    return atoms_df
+
+
+def save_wide_csv(atoms_df: pd.DataFrame, output_path: str):
+    """
+    Save wide CSV with atoms
+
+    Args:
+        atoms_df: DataFrame with computed atoms
+        output_path: Output file path
+    """
+    logger.info(f"Saving wide CSV to {output_path}")
+
+    # Create output directory if needed
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save with index (actual_ready_time)
+    atoms_df.to_csv(output_path)
+
+    logger.info(
+        f"Saved {len(atoms_df)} rows × {len(atoms_df.columns)} columns to {output_path}"
+    )
+
+    # Print summary statistics
+    logger.info("\nAtom Summary:")
+    logger.info(f"  Total atoms: {len(atoms_df.columns)}")
+    logger.info(f"  Atoms with NaNs: {atoms_df.isnull().any().sum()}")
+    logger.info(f"  Mean NaN ratio: {atoms_df.isnull().mean().mean():.2%}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Batch compute atoms from library',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Compute Layer A-B atoms from SOL 5m data
+  python -m ml_feature_set.atoms.compute_all \\
+      --data ml_feature_set/sample_data/resampled_binance_SOL-5m.csv \\
+      --layers A,B \\
+      --output /tmp/sol5m_atoms_wide.csv
+
+  # Compute all layers (A-H) with strict error checking
+  python -m ml_feature_set.atoms.compute_all \\
+      --data data/ohlcv.csv \\
+      --layers A,B,C,D,E,F,G,H \\
+      --output atoms_full.csv \\
+      --no-fail-soft
+        """
+    )
+
+    parser.add_argument(
+        '--data',
+        type=str,
+        required=True,
+        help='Path to input OHLCV CSV file'
+    )
+
+    parser.add_argument(
+        '--layers',
+        type=str,
+        default='A,B',
+        help='Comma-separated list of layers to compute (default: A,B)'
+    )
+
+    parser.add_argument(
+        '--output',
+        type=str,
+        required=True,
+        help='Path to output wide CSV file'
+    )
+
+    parser.add_argument(
+        '--no-fail-soft',
+        action='store_true',
+        help='Raise exception on first atom failure (default: skip failed atoms)'
+    )
+
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Enable verbose logging'
+    )
+
+    args = parser.parse_args()
+
+    # Set log level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    # Parse layers
+    layers = [layer.strip().upper() for layer in args.layers.split(',')]
+    valid_layers = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'}
+    invalid_layers = set(layers) - valid_layers
+
+    if invalid_layers:
+        logger.error(f"Invalid layers: {invalid_layers}")
+        logger.error(f"Valid layers: {sorted(valid_layers)}")
+        sys.exit(1)
+
+    try:
+        start_time = time.time()
+
+        # Load data
+        df = load_ohlcv_data(args.data)
+
+        # Compute atoms
+        atoms_df = compute_atoms(
+            df,
+            layers=layers,
+            fail_soft=not args.no_fail_soft
+        )
+
+        # Save output
+        save_wide_csv(atoms_df, args.output)
+
+        elapsed = time.time() - start_time
+        logger.info(f"\n✓ Completed successfully in {elapsed:.2f} seconds")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"\n✗ Error: {e}", exc_info=args.verbose)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

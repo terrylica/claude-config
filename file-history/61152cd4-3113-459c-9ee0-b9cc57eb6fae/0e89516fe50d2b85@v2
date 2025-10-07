@@ -1,0 +1,85 @@
+#!/bin/bash
+# Final concurrency test: c=5, 10, 15, 20
+# Find exact optimal point
+
+set -e
+
+TEST_DIR="/tmp/cdn_final_test"
+rm -rf "$TEST_DIR"
+mkdir -p "$TEST_DIR"
+
+# Same 6 files
+FILES=(
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202309/allswap-trades-2023-09-15.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202309/allswap-trades-2023-09-16.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202311/allswap-trades-2023-11-10.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202311/allswap-trades-2023-11-11.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202401/allswap-trades-2024-01-15.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202401/allswap-trades-2024-01-16.zip"
+)
+
+echo "============================================"
+echo "Final Concurrency Test: c=5,10,15,20"
+echo "============================================"
+echo ""
+
+download_test() {
+    local conc=$1
+    local dir="$TEST_DIR/c${conc}"
+    mkdir -p "$dir"
+
+    echo "[c=$conc] Starting..."
+    local start=$(date +%s)
+
+    printf '%s\n' "${FILES[@]}" | xargs -P $conc -I {} \
+        bash -c 'curl -sS -o "'$dir'/$(basename {})" "{}"' 2>/dev/null
+
+    local end=$(date +%s)
+    local elapsed=$((end - start))
+    local size=$(du -sm "$dir" | cut -f1)
+    local throughput=$(echo "scale=2; $size / $elapsed" | bc)
+
+    echo "[c=$conc] Done: ${elapsed}s, ${size}MB, ${throughput}MB/s"
+    echo "$conc,$elapsed,$size,$throughput"
+
+    rm -rf "$dir"
+}
+
+echo "concurrency,time_sec,size_mb,throughput_mbps" > "$TEST_DIR/results.csv"
+
+for level in 5 10 15 20; do
+    download_test $level >> "$TEST_DIR/results.csv"
+    sleep 2
+done
+
+echo ""
+echo "============================================"
+echo "RESULTS"
+echo "============================================"
+echo ""
+echo "Concurrency | Time(s) | Throughput | Speedup"
+echo "----------------------------------------------"
+
+while IFS=',' read -r conc time size throughput; do
+    [ "$conc" = "concurrency" ] && continue
+    [ "$conc" = "5" ] && baseline=$time
+    speedup=$(echo "scale=2; $baseline / $time" | bc 2>/dev/null || echo "1.00")
+    printf "%-11s | %-7s | %-10s | %sx\n" "$conc" "$time" "$throughput" "$speedup"
+done < "$TEST_DIR/results.csv"
+
+echo ""
+echo "Finding optimal..."
+best_conc=$(tail -n +2 "$TEST_DIR/results.csv" | sort -t, -k4 -nr | head -1 | cut -d, -f1)
+best_throughput=$(tail -n +2 "$TEST_DIR/results.csv" | sort -t, -k4 -nr | head -1 | cut -d, -f4)
+
+echo "✓ Optimal: c=$best_conc (${best_throughput}MB/s throughput)"
+
+# Estimate for 13 remaining months
+remaining=13
+best_time=$(grep "^$best_conc," "$TEST_DIR/results.csv" | cut -d, -f2)
+est_time=$(echo "scale=0; $remaining * $best_time / 6 * 31 / 60" | bc)
+
+echo ""
+echo "Est. time for 13 months at c=$best_conc: ~${est_time} minutes"
+
+cat "$TEST_DIR/results.csv"

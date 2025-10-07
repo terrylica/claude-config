@@ -1,0 +1,207 @@
+"""Utilities for range bar data processing."""
+
+from datetime import datetime
+from pathlib import Path
+from typing import Tuple
+
+import numpy as np
+import polars as pl
+
+
+class FixedPointConverter:
+    """Convert rangebar CSV fixed-point integers to floats.
+
+    Range bar CSVs store prices/volumes as integers (×1e9) to avoid
+    floating-point precision issues during generation.
+    """
+
+    SCALE_FACTOR = 1e9
+
+    # Columns that need fixed-point conversion
+    PRICE_COLS = ["open", "high", "low", "close", "vwap"]
+    VOLUME_COLS = ["volume", "buy_volume", "sell_volume"]
+    TURNOVER_COLS = ["turnover", "buy_turnover", "sell_turnover"]
+
+    @classmethod
+    def load_csv(cls, path: Path) -> pl.DataFrame:
+        """Load range bar CSV and convert fixed-point columns.
+
+        Args:
+            path: Path to range bar CSV file
+
+        Returns:
+            Polars DataFrame with float-converted columns
+
+        Schema:
+            - Timestamps: open_time, close_time (microseconds → datetime)
+            - Prices: open, high, low, close, vwap (int → float ÷1e9)
+            - Volumes: volume, buy_volume, sell_volume (int → float ÷1e9)
+            - Turnovers: turnover, buy/sell_turnover (int → float ÷1e9)
+            - Counts: trade_count, buy/sell_trade_count (int, no conversion)
+            - IDs: first_id, last_id (int, no conversion)
+        """
+        df = pl.read_csv(path)
+
+        # Convert fixed-point columns to float
+        for col in cls.PRICE_COLS + cls.VOLUME_COLS + cls.TURNOVER_COLS:
+            if col in df.columns:
+                df = df.with_columns(
+                    (pl.col(col) / cls.SCALE_FACTOR).alias(col)
+                )
+
+        # Convert timestamps to datetime
+        df = df.with_columns([
+            (pl.col("open_time") / 1000).cast(pl.Datetime("ms")).alias("open_time"),
+            (pl.col("close_time") / 1000).cast(pl.Datetime("ms")).alias("close_time"),
+        ])
+
+        # Validate temporal ordering
+        assert df["open_time"].is_sorted(), "Data must be sorted by open_time"
+
+        return df
+
+    @classmethod
+    def compute_returns(cls, df: pl.DataFrame) -> pl.DataFrame:
+        """Add return-based features.
+
+        Args:
+            df: Range bar DataFrame with price columns
+
+        Returns:
+            DataFrame with added columns:
+            - bar_return: (close - open) / open
+            - price_change_pct: Same as bar_return (for clarity)
+            - log_return: log(close / open)
+        """
+        df = df.with_columns([
+            ((pl.col("close") - pl.col("open")) / pl.col("open")).alias("bar_return"),
+            ((pl.col("close") - pl.col("open")) / pl.col("open")).alias("price_change_pct"),
+            (pl.col("close") / pl.col("open")).log().alias("log_return"),
+        ])
+        return df
+
+    @classmethod
+    def compute_features(cls, df: pl.DataFrame) -> pl.DataFrame:
+        """Compute additional features for ML.
+
+        Args:
+            df: Range bar DataFrame
+
+        Returns:
+            DataFrame with engineered features:
+            - bar_range_pct: (high - low) / open
+            - close_position: Where close is in [low, high] range (0-1)
+            - volume_imbalance: (buy_volume - sell_volume) / volume
+            - trade_imbalance: (buy_trade_count - sell_trade_count) / trade_count
+            - avg_trade_size: volume / trade_count
+            - price_vs_vwap: (close - vwap) / vwap
+        """
+        df = cls.compute_returns(df)
+
+        df = df.with_columns([
+            # Price action features
+            ((pl.col("high") - pl.col("low")) / pl.col("open")).alias("bar_range_pct"),
+            (
+                (pl.col("close") - pl.col("low")) /
+                (pl.col("high") - pl.col("low") + 1e-10)
+            ).alias("close_position"),
+            ((pl.col("close") - pl.col("vwap")) / pl.col("vwap")).alias("price_vs_vwap"),
+
+            # Volume features
+            (
+                (pl.col("buy_volume") - pl.col("sell_volume")) /
+                (pl.col("volume") + 1e-10)
+            ).alias("volume_imbalance"),
+            (
+                (pl.col("buy_trade_count") - pl.col("sell_trade_count")) /
+                (pl.col("trade_count") + 1e-10)
+            ).alias("trade_imbalance"),
+            (
+                pl.col("volume") / (pl.col("trade_count") + 1e-10)
+            ).alias("avg_trade_size"),
+
+            # Temporal features
+            (pl.col("close_time") - pl.col("open_time")).dt.total_seconds().alias("bar_duration_sec"),
+        ])
+
+        return df
+
+
+def create_splits(
+    df: pl.DataFrame,
+    train_end: str = "2023-12-31",
+    val_end: str = "2024-06-30",
+) -> Tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """Create temporal train/val/test splits.
+
+    Args:
+        df: Range bar DataFrame with open_time column
+        train_end: End date for training set (inclusive)
+        val_end: End date for validation set (inclusive)
+
+    Returns:
+        (train_df, val_df, test_df) tuple
+
+    Split strategy:
+        - Train: 2022-01-01 to 2023-12-31 (2 years)
+        - Val: 2024-01-01 to 2024-06-30 (6 months)
+        - Test: 2024-07-01 to 2025-09-30 (15 months)
+    """
+    train_end_dt = datetime.strptime(train_end, "%Y-%m-%d")
+    val_end_dt = datetime.strptime(val_end, "%Y-%m-%d")
+
+    train_df = df.filter(pl.col("open_time") <= train_end_dt)
+    val_df = df.filter(
+        (pl.col("open_time") > train_end_dt) &
+        (pl.col("open_time") <= val_end_dt)
+    )
+    test_df = df.filter(pl.col("open_time") > val_end_dt)
+
+    print(f"Split sizes:")
+    print(f"  Train: {len(train_df):,} bars ({train_df['open_time'].min()} to {train_df['open_time'].max()})")
+    print(f"  Val:   {len(val_df):,} bars ({val_df['open_time'].min()} to {val_df['open_time'].max()})")
+    print(f"  Test:  {len(test_df):,} bars ({test_df['open_time'].min()} to {test_df['open_time'].max()})")
+
+    return train_df, val_df, test_df
+
+
+def identify_stress_period(
+    df: pl.DataFrame,
+    event_name: str = "terra_luna_crash",
+) -> pl.DataFrame:
+    """Identify and extract crisis periods for stress testing.
+
+    Args:
+        df: Range bar DataFrame
+        event_name: Crisis event identifier
+
+    Returns:
+        DataFrame subset containing the crisis period
+
+    Known stress events:
+        - terra_luna_crash: 2022-05-07 to 2022-05-12 (SOL: $90 → $40)
+        - ftx_collapse: 2022-11-06 to 2022-11-11 (SOL: $35 → $13)
+    """
+    events = {
+        "terra_luna_crash": ("2022-05-07", "2022-05-12"),
+        "ftx_collapse": ("2022-11-06", "2022-11-11"),
+    }
+
+    if event_name not in events:
+        raise ValueError(f"Unknown event: {event_name}. Available: {list(events.keys())}")
+
+    start, end = events[event_name]
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+
+    stress_df = df.filter(
+        (pl.col("open_time") >= start_dt) &
+        (pl.col("open_time") <= end_dt)
+    )
+
+    print(f"Stress period '{event_name}': {len(stress_df):,} bars")
+    if len(stress_df) > 0:
+        print(f"  Price range: ${stress_df['low'].min():.2f} - ${stress_df['high'].max():.2f}")
+        print(f"  Period: {stress_df['open_time'].min()} to {stress_df['open_time'].max()}")
+
+    return stress_df
