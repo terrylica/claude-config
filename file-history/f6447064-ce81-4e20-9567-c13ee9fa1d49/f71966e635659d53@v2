@@ -1,0 +1,136 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+This is a feature generation module for machine learning on resampled candlestick (OHLCV) data. Feature sets are published to AWS CodeArtifact and consumed by the Eon Labs prediction pipeline. The module follows a class-based architecture where each feature set inherits from `FeatureSet` base class.
+
+## Core Architecture
+
+### FeatureSet Base Class Pattern
+
+All custom feature sets must:
+- Be defined in a class named `CustomFeatureSet` that inherits from `FeatureSet`
+- Implement three required components:
+  1. `extract_feature()` - Core feature extraction logic
+  2. `get_source_lookback_length(source_name)` - Define historical data requirements (keep minimal to preserve training data length)
+  3. `data_dependencies` property - Declare data source dependencies with resample factors
+
+### Data Source Architecture
+
+- **Primary source**: OHLCV data with `actual_ready_time` column (simulates data availability delay)
+- **Multi-timeframe**: Use `resample_factors` for different intervals (e.g., `[1, 12]` for 1x and 12x resampling)
+- **Data access methods**:
+  - `get_data_source(source)` - Get complete source dictionary with `data_df`
+  - `get_source_column(column, source)` - Get single column as numpy array
+- **Feature assignment**: Use `set_features_batch(features_dict)` to avoid DataFrame fragmentation
+
+### Critical Implementation Rules
+
+1. **Error handling**: If required data source doesn't exist, raise error immediately - never work around it
+2. **No data leakage**: Never use future data in feature calculation; respect `actual_ready_time`
+3. **Lookback length**: Set to minimum required for feature computation (binary search to optimize if needed)
+4. **Feature normalization**: Typically normalize to [-1, 1] range
+5. **NaN handling**: Use `np.nan_to_num()` or equivalent to handle missing values
+
+## Development Workflow
+
+### Creating a New Feature Set
+
+1. Create file in `ml_feature_set/bundled/` following naming convention: `ohlcv_[type]_sizex_v[N].py`
+2. Reference existing templates: `ohlcv_size79_v1`, `ohlcv_support-resistance_sizex_v2`, `ohlcv_support-resistance-feargreed_sizex_v1`
+3. Implement `CustomFeatureSet` class with required methods
+4. Run validation (see below)
+
+### Validation Process (MANDATORY)
+
+```bash
+python -m ml_feature_set.run_feature_set_validation --feature_set_path "path/to/feature_set.py"
+```
+
+**If errors occur** (must fix until no errors remain):
+1. First check for data leakage (using future data)
+2. Then increase `get_source_lookback_length()` value
+3. Use binary search to find minimum working lookback (acceptable if within 20 steps)
+
+### Submitting to Touchstone Service
+
+After successful validation:
+```bash
+AWS_PROFILE=el-prod python3 util/touchstone/touchstone_submission.py create \
+  --feature_set_git_path <relative/path/to/file.py> \
+  --env prod \
+  --set sources.feature_set_git_branch=<current-branch>
+```
+
+Requires packages from `util/touchstone/requirements.txt`.
+
+## Building and Publishing
+
+### Build Package
+
+```bash
+rm -rf dist build/ *.egg-info
+python -m build
+```
+
+### Local Installation
+
+```bash
+pip install -e ../ml-feature-set  # From another repo
+```
+
+### Publish to AWS CodeArtifact
+
+**Important**: Publishing to prod requires also publishing same version to dev.
+
+```bash
+rm -rf dist build/ *.egg-info
+python3 -m build
+
+export AWS_PROFILE=el-dev  # or el-prod
+aws_account_id=$(aws sts get-caller-identity --query "Account" --output text)
+aws codeartifact login --tool twine --repository el-prediction-pipeline \
+  --domain eonlabs --domain-owner $aws_account_id --region us-west-2
+
+twine upload --verbose --repository codeartifact dist/*
+```
+
+### Install Published Package
+
+```bash
+export AWS_PROFILE=el-dev
+aws_account_id=$(aws sts get-caller-identity --query "Account" --output text)
+aws codeartifact login --tool pip --repository el-prediction-pipeline \
+  --domain eonlabs --domain-owner $aws_account_id --region us-west-2
+
+pip install ml_feature_set
+```
+
+## Development Environment
+
+- Uses VSCode devcontainer (see [common repo docs](https://github.com/Eon-Labs/common/blob/main/environment/dev_container.md))
+- Python 3.10 (locked in Dockerfile)
+- Core dependencies: numpy (1.24.4 locked), numba, scipy, pandas, talipp
+- Technical indicators: TA-Lib (installed via conda-forge in container)
+
+## Testing
+
+Run tests:
+```bash
+pytest
+```
+
+Run validation on specific feature set:
+```bash
+python -m ml_feature_set.run_feature_set_validation --feature_set_path "ml_feature_set/bundled/your_feature_set.py"
+```
+
+## Key Constraints
+
+1. **Language**: Always use English in code and comments
+2. **Lookback optimization**: Balance historical data needs vs training data length
+3. **Version management**: Current version in `pyproject.toml` is 1.1.19
+4. **Python version**: Requires Python >=3.10
+5. **No silent failures**: All errors must propagate, no workarounds in feature extraction

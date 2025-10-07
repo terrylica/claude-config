@@ -1,0 +1,222 @@
+---
+# HMM Memory Optimization Plan
+# Version: 1.0.0
+# Created: 2025-10-06
+# Status: active
+# Context: Fix OOM killer termination at 93.8% in 15m experiment (1,800/1,920 windows)
+
+metadata:
+  incident_date: 2025-10-06T09:54:00Z
+  affected_experiments:
+    - hmm_regime_20251006_15m (killed at 93.8%)
+    - hmm_regime_20251006_1h (not started)
+  system_memory: 38654705664  # 36 GB
+  root_cause_analysis: /tmp/memory_oom_root_cause.md
+
+slos:
+  availability:
+    - no_oom_kills: Experiments must complete without OS-level termination
+    - sequential_execution: No parallel HMM experiments (memory isolation)
+    - explicit_cleanup: All large objects deleted after use
+
+  correctness:
+    - memory_leak_prevention: Garbage collection every 100 windows
+    - array_consistency: Preallocated arrays match DataFrame dimensions
+    - result_integrity: Results saved to disk before memory reclamation
+
+  observability:
+    - memory_tracking: Log RSS memory every 100 windows
+    - gc_diagnostics: Log garbage collection counts
+    - peak_memory_logging: Log max memory reached per experiment
+
+  maintainability:
+    - out_of_box_gc: Use stdlib gc module (no custom memory management)
+    - out_of_box_monitoring: Use psutil for memory metrics
+    - reusable_pattern: Extract memory-safe HMM loop to function
+
+root_cause:
+  primary_90pct:
+    cause: memory_accumulation_no_cleanup
+    evidence:
+      - no_del_statements: Large objects (scaler, kmeans, hmm_model) not deleted
+      - python_gc_lag: Garbage collector cannot keep pace with 1,920 iterations
+      - accumulated_memory: 1,920 windows × 300KB = 5-10 GB peak
+    proof:
+      - abrupt_termination: 93.8% complete, no Python traceback
+      - os_level_kill: SIGKILL from macOS OOM killer
+      - empty_results: No results.json saved (killed before completion)
+
+  secondary_50pct:
+    cause: inefficient_dataframe_assignment
+    evidence:
+      - df_loc_overhead: Each .loc triggers DataFrame reindexing
+      - assignment_count: 1,920 windows × 3 assignments = 5,760 operations
+      - memory_fragmentation: Each operation allocates + copies
+    impact: 2-3 GB additional overhead
+
+  tertiary_100pct:
+    cause: parallel_execution_risk
+    evidence:
+      - 15m_projected: 5-10 GB peak
+      - 1h_projected: 15-25 GB peak
+      - combined_risk: 20-35 GB exceeds 36 GB system capacity
+    mitigation: Sequential execution enforced
+
+fixes:
+  fix_1_explicit_cleanup:
+    priority: mandatory
+    implementation:
+      - add_import: "import gc"
+      - add_del_statements: "del X_window, X_scaled, scaler, kmeans, hmm_model"
+      - add_gc_collect: "if idx % 100 == 0: gc.collect()"
+    impact:
+      memory_reduction: 60-70%
+      before: 5-10 GB peak
+      after: 2-3 GB peak
+    slo_mapping:
+      - availability.explicit_cleanup
+      - correctness.memory_leak_prevention
+
+  fix_2_preallocated_arrays:
+    priority: mandatory
+    implementation:
+      before_pattern: |
+        df['hmm_state'] = np.nan
+        for i in range(n):
+            df.loc[idx, 'hmm_state'] = value  # Expensive
+      after_pattern: |
+        hmm_state_array = np.full(len(df), np.nan)
+        for i in range(n):
+            hmm_state_array[idx] = value  # Fast
+        df['hmm_state'] = hmm_state_array  # Assign once
+    impact:
+      memory_reduction: 30-40%
+      before: 2-3 GB fragmentation
+      after: 0.5-1 GB no fragmentation
+    slo_mapping:
+      - availability.explicit_cleanup
+      - correctness.array_consistency
+
+  fix_3_sequential_execution:
+    priority: mandatory
+    implementation:
+      before: |
+        timeout 1h uv run ... 15m/run_experiment.py &
+        timeout 1h uv run ... 1h/run_experiment.py &  # WRONG
+      after: |
+        timeout 1h uv run ... 15m/run_experiment.py
+        # Wait for exit
+        timeout 1h uv run ... 1h/run_experiment.py
+    impact:
+      memory_isolation: No memory interference between experiments
+      peak_reduction: 50% (no overlap)
+    slo_mapping:
+      - availability.sequential_execution
+      - availability.no_oom_kills
+
+  fix_4_memory_monitoring:
+    priority: recommended
+    implementation:
+      add_import: "import psutil"
+      add_monitoring: |
+        process = psutil.Process()
+        mem_mb = process.memory_info().rss / 1024 / 1024
+        print(f"Memory: {mem_mb:.0f} MB", flush=True)
+    impact:
+      observability: Real-time memory tracking
+      early_warning: Detect leaks before OOM
+    slo_mapping:
+      - observability.memory_tracking
+      - observability.peak_memory_logging
+
+implementation_steps:
+  step_1_update_15m_script:
+    file: experiments/hmm_regime_20251006_15m/run_experiment.py
+    changes:
+      - line_14: "import gc"
+      - line_15: "import psutil"
+      - generate_hmm_features:
+          - add_preallocated_arrays: before loop (lines 131-133)
+          - add_del_statements: after window processing
+          - add_gc_collect: every 100 windows
+          - add_memory_logging: in progress heartbeat
+          - assign_arrays_once: after loop completes
+
+  step_2_update_1h_script:
+    file: experiments/hmm_regime_20251006_1h/run_experiment.py
+    changes: same_as_step_1
+
+  step_3_update_plan_md:
+    files:
+      - experiments/hmm_regime_20251006_15m/PLAN.md
+      - experiments/hmm_regime_20251006_1h/PLAN.md
+    changes:
+      - add_section: "## Memory Optimization (v1.1.0)"
+      - link_reference: ".claude/plans/hmm-memory-optimization.yaml"
+      - document_fixes: List all 4 fixes applied
+
+  step_4_sequential_execution:
+    order:
+      - run_15m: Execute and wait for completion
+      - verify_15m_results: Check results.json exists
+      - run_1h: Execute only after 15m completes
+      - verify_1h_results: Check results.json exists
+    safety:
+      - never_parallel: No & backgrounding for HMM experiments
+      - memory_check: Verify <5GB peak before starting next
+
+expected_impact:
+  memory_usage:
+    15m_experiment:
+      before: 5-10 GB peak (OOM killed at 93.8%)
+      after: 1-2 GB peak (safe completion)
+      reduction: 5x-8x
+    1h_experiment:
+      before: 15-25 GB projected (would OOM)
+      after: 2-4 GB peak (safe completion)
+      reduction: 6x-8x
+
+  success_criteria:
+    - 15m_completes: results.json exists with 20 fold results
+    - 1h_completes: results.json exists with 20 fold results
+    - no_oom_kills: Both experiments complete without termination
+    - memory_peak_lt_5gb: Peak RSS <5GB per experiment logged
+
+verification:
+  memory_leak_check:
+    - monitor_rss: Track RSS memory growth over iterations
+    - expect_flat: Memory should plateau after first 100 windows
+    - log_gc_stats: gc.get_count() should show active collection
+
+  result_integrity:
+    - json_schema: Validate results.json against expected structure
+    - sample_count: Verify n_samples matches expected after dropna
+    - fold_count: Verify 20 folds completed
+
+error_handling:
+  no_fallbacks: true
+  no_retries: true
+  propagate_all: true
+  examples:
+    - if_oom_detected: raise MemoryError("Insufficient memory for HMM processing")
+    - if_array_mismatch: raise ValueError(f"Array length {len(array)} != DataFrame length {len(df)}")
+    - if_gc_disabled: raise RuntimeError("Garbage collection disabled, memory leak risk")
+
+versioning:
+  semver: 1.0.0
+  changelog:
+    - version: 1.0.0
+      date: 2025-10-06
+      changes:
+        - init: Created memory optimization plan
+        - analyzed: OOM kill at 93.8% in 15m experiment
+        - identified: Memory accumulation + inefficient DataFrame assignments
+        - defined: 4 mandatory fixes (cleanup, arrays, sequential, monitoring)
+        - specified: SLOs for availability/correctness/observability/maintainability
+
+references:
+  root_cause_doc: /tmp/memory_oom_root_cause.md
+  affected_experiments:
+    - experiments/hmm_regime_20251006_15m/PLAN.md
+    - experiments/hmm_regime_20251006_1h/PLAN.md
+  parent_plan: .claude/plans/hmm-hybrid-validation.yaml

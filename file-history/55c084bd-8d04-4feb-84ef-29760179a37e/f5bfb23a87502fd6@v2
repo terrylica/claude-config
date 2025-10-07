@@ -1,0 +1,141 @@
+"""
+ATR-Adaptive Laguerre RSI Feature Set
+
+Integrates the atr-adaptive-laguerre package to generate volatility-adaptive momentum features.
+
+Features (27 total):
+- Core RSI: Adaptive RSI with regime classification (bullish/neutral/bearish)
+- Distance metrics: Distance to overbought/oversold/midline levels
+- Signal detection: Crossover signals and regime changes
+- Temporal tracking: Bars since key events
+- Momentum: RSI changes and velocity
+- Statistical: Percentile, z-score, volatility, range
+
+IMPORTANT NOTES:
+1. This implementation works around package limitations by converting DataFrame structure
+2. Performance: O(n) per row due to batch processing - consider lookback optimization
+3. Requires 'atr-adaptive-laguerre>=0.1.2' in dependencies
+"""
+
+import numpy as np
+import pandas as pd
+from ml_feature_set.feature_set import FeatureSet
+
+
+class CustomFeatureSet(FeatureSet):
+    """ATR-Adaptive Laguerre RSI Feature Set"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Initialize indicator (lazy import to avoid hard dependency)
+        self._indicator = None
+
+    def _get_indicator(self):
+        """Lazy initialization of ATR-Adaptive Laguerre RSI indicator"""
+        if self._indicator is None:
+            try:
+                from atr_adaptive_laguerre import (
+                    ATRAdaptiveLaguerreRSI,
+                    ATRAdaptiveLaguerreRSIConfig
+                )
+
+                config = ATRAdaptiveLaguerreRSIConfig(
+                    atr_period=14,
+                    smoothing_period=5,
+                    smoothing_method='ema',
+                    level_up=0.85,
+                    level_down=0.15,
+                    adaptive_offset=0.75
+                )
+                self._indicator = ATRAdaptiveLaguerreRSI(config)
+            except ImportError:
+                raise ImportError(
+                    "atr-adaptive-laguerre package required. Install: pip install atr-adaptive-laguerre>=0.1.2"
+                )
+        return self._indicator
+
+    @property
+    def data_dependencies(self):
+        """Return data source dependencies information"""
+        return [
+            {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+        ]
+
+    def get_source_lookback_length(self, source_name):
+        """
+        Get required historical data length for specific data source.
+
+        Note: Empirically determined. The package requires sufficient data for:
+        - ATR calculation (atr_period=14)
+        - Smoothing (smoothing_period=5)
+        - Statistical features (20-period window)
+
+        Conservative estimate: 50 periods to ensure stability
+        TODO: Binary search to optimize this value
+
+        Args:
+            source_name: Data source name (e.g., ohlcv_1x)
+
+        Returns:
+            Required historical data length
+        """
+        parts = source_name.split("_")
+
+        if len(parts) > 1 and parts[-1].endswith("x"):
+            try:
+                int(parts[-1].replace("x", ""))
+                base_source = "_".join(parts[:-1])
+            except ValueError:
+                base_source = source_name
+        else:
+            base_source = source_name
+
+        if base_source == "ohlcv":
+            # Conservative lookback: max(atr_period=14, stats_window=20) + buffer
+            return 50
+
+        raise ValueError(f"Unsupported data source: {source_name}")
+
+    def extract_feature(self):
+        """Extract ATR-Adaptive Laguerre RSI features"""
+
+        # Get OHLCV data source
+        ohlcv_source = self.get_data_source("ohlcv_1x")
+        df = ohlcv_source["data_df"].copy()
+
+        # Ensure actual_ready_time column exists
+        if "actual_ready_time" not in df.columns:
+            raise ValueError(
+                "Data source missing 'actual_ready_time' column"
+            )
+
+        # Check required OHLCV columns
+        required_columns = ["open", "high", "low", "close", "volume"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                f"Data source missing required columns: {', '.join(missing_columns)}"
+            )
+
+        # WORKAROUND: Package expects 'date' column, but framework provides 'actual_ready_time'
+        # Create temporary DataFrame with 'date' column for package compatibility
+        df_for_package = df.copy()
+        df_for_package['date'] = pd.to_datetime(df_for_package['actual_ready_time'])
+
+        # Get indicator and compute features
+        indicator = self._get_indicator()
+        features_df = indicator.fit_transform_features(df_for_package)
+
+        # Validate output
+        if features_df.shape[0] != df.shape[0]:
+            raise ValueError(
+                f"Feature output length mismatch: expected {df.shape[0]}, got {features_df.shape[0]}"
+            )
+
+        # Normalize column names to avoid conflicts
+        feature_columns = {col: f"atr_laguerre_{col}" for col in features_df.columns}
+        features_df = features_df.rename(columns=feature_columns)
+
+        # Set features using batch method (avoids DataFrame fragmentation)
+        self.set_features_batch(features_df.to_dict('list'))
