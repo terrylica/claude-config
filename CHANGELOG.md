@@ -464,3 +464,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Disable always thinking mode Disable alwaysThinkingEnabled in Claude Code settings to optimize response time and reduce unnecessary processing overhead.
 
+## v2.7.0 (2025-10-06)
+
+### Feat
+
+- **cns**: add configurable Pushover notification sound
+- **cns**: enable dual SSH tunnel and Pushover notifications
+- **cns**: complete Pushover integration with git-based credentials
+- **tools**: add git-cliff release automation templates and AI agent workflow
+- Pushover notification integration with emergency retry system
+- CNS Remote Alert System production implementation
+- implement CNS Remote Alert System with hybrid SSH tunnel architecture
+- add context-bound-planner agent with todo state sync
+- add agent todo management system and workspace sync capability
+- implement zero-tolerance temporal integrity mandate for quantitative finance
+- consolidate quantitative development standards after c9c968a merge
+- add comprehensive quantitative development standards and CCXT mandate
+- integrate comprehensive workspace system improvements
+- **uv**: enforce module-only execution pattern
+- **fdap**: Add Fail-Fast Data Authenticity Precept to user memory
+- **EPMS**: Add Universal Workspace Integration principles
+- **tmux**: add smart detach command with session auto-detection EL-1009
+- **sync**: implement bidirectional sync with official session format
+- **tools**: add Claude session sync utility for cross-platform session management
+- **architecture**: implement CAAP-compliant APCF agent with command delegation
+- **enhancement**: implement sophisticated research-scout with multi-perspective analysis
+- **consolidation**: implement Python QA consolidation with unified quality assurance
+- **architecture**: implement CAAP framework with comprehensive agent standards
+- **infrastructure**: implement bulletproof SAGE sync v2.0 with emergency backup system
+- **infrastructure**: implement SAGE development aliases with universal access pattern and dual-environment workflow integration
+- **qa**: implement comprehensive command validation and Python code quality automation tools
+- **tools**: implement GitHub Flavored Markdown link integrity validation with intelligent auto-fix
+- **automation**: implement comprehensive CNS notification system with asynchronous hook architecture
+- **agents**: implement Python import validation agent with comprehensive static analysis pipeline
+- **commands**: implement command extension documentation consolidation with workflow integration
+- **sync**: implement comprehensive SAGE dual-environment synchronization tool with error handling and validation
+- **tools**: implement SAGE development productivity tool with comprehensive alias system
+- **link-checker**: implement sub-repository ignore functionality with case-insensitive pattern matching
+- **utilities**: implement direct execution utilities with structured documentation framework
+- **gfm-checker**: implement README completeness validation with workspace navigation repairs
+- **infrastructure**: establish organizational repository foundation with migration audit trail
+- **cns**: add configurable volume control for notification audio
+- **cns**: optimize audio timing and enhance dot-folder pronunciation
+- **cns**: update notification sound from Mac IIx to Toy Story audio
+- **tools**: implement automated Python code quality system with ruff integration
+- **cns**: expand documentation architecture and enhance Mac IIx sound notification system
+- **hooks**: implement automated conversation export system with claude-code-exporter integration
+- **tts**: implement ultra-aggressive content filtering with dual-mode clipboard integration
+- **tts**: implement intelligent command detection with content-type differentiation for enhanced audio feedback
+- **tts**: implement separated content-type processing with JSON-driven configuration management
+- **commands**: implement comprehensive command validation infrastructure with auto-fix capabilities
+- **gfm-checker**: implement comprehensive short flag compatibility for command-line interface
+- **commands**: implement comprehensive APCF slash command documentation
+- **tts**: implement Phase 1 modular TTS foundation with comprehensive architecture
+- **agents**: create `research-scout` agent with comprehensive research direction generation
+- **monitoring**: capture GitHub Flavored Markdown link checker session analytics
+- **tooling**: implement GitHub Flavored Markdown link checker with user memory updates
+- **sessions**: organize session data structure and agent todo system management
+- **monitoring**: capture comprehensive session analytics with extended followup trigger data
+- **development**: integrate comprehensive tmux workspace management system
+
+### Fix
+
+- **sage**: update hardcoded paths after directory restructure
+- **command-interface**: resolve flag completeness gap with comprehensive wrapper synchronization
+- **tts**: enhance slash command detection and clipboard filtering for command workflows
+- **tts**: resolve clipboard debug functionality for user content capture and refine command detection accuracy
+- **tts**: correct automation script path after directory reorganization
+- **hooks**: update settings.json paths after automation script reorganization
+
+### Refactor
+
+- implement agent session handoff with todo list continuity
+- externalize extension specifications to YAML files
+- **agents**: rename mhr-refactor to workspace-refactor
+- **agents**: update milestone-commit-logger for workplace agnosticism
+- **exception-only**: implement strict exception-only failure principles across workspace
+- **agents**: restructure agent system and workspace configuration EL-1009
+- **commands**: streamline APCF command for CAAP delegation efficiency
+- **agents**: migrate to official Claude Code agent directory structure
+- **workspace**: implement systematic workspace organization with documentation consolidation architecture
+- **tools**: implement development tool integration research with documentation consolidation
+- **integration**: consolidate cross-platform system integration documentation
+- **docs**: systematic documentation architecture optimization for maintainability
+- **agents**: optimize agent definitions through complexity reduction investigation
+- **tmux**: eliminate complex automation and implement simple session management
+- **automation**: implement cross-platform compatibility for CNS system
+- **automation**: eliminate non-CNS hook system and consolidate to pure CNS architecture
+- **cns**: eliminate TTS legacy contamination and optimize workspace architecture
+- complete TTS to CNS rename - eliminate misleading terminology across entire system
+- **tts**: remove TTS functionality and implement clipboard-only system with glass sound
+- **tts**: simplify clipboard functionality to preserve raw conversation content
+- **config**: streamline APCF documentation in user memory file
+- **agents**: standardize all agent configurations to consistent YAML frontmatter template
+- **automation**: organize scripts into logical subdirectories
+- **structure**: rename scripts directory to tools for clarity
+- **architecture**: implement hierarchical configuration management system
+
+### Perf
+
+- **cns**: implement asynchronous hook architecture to eliminate session delays
