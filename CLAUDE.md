@@ -1,6 +1,16 @@
 # Claude Code User Memory
 
-- Apply neutral, promotional-free language to generated docs/comments and new identifiers only; never alter user text; use SemVer 2.0.0 (init 1.0.0 if stable else 0.1.0); bump MAJOR for breaking, MINOR for additive, PATCH for fixes; update versions consistently across README/docstrings/metadata.
+**Navigation Index**: [`docs/INDEX.md`](docs/INDEX.md) - Hub-and-spoke documentation architecture
+
+**Quick Links**: [Tools](tools/) | [Specifications](specifications/) | [Agents](agents/) | [Commands](commands/) | [Docs](docs/)
+
+---
+
+## Conventions
+
+- Apply neutral, promotional-free language to generated docs/comments and new identifiers only; never alter user text
+- Use SemVer 2.0.0 (init 1.0.0 if stable else 0.1.0); bump MAJOR for breaking, MINOR for additive, PATCH for fixes
+- Update versions consistently across README/docstrings/metadata
 
 ## Planning
 
@@ -28,6 +38,7 @@
 - **Rust Stack**: `cargo`, cross-platform compilation, `cargo nextest run`, `cargo deny check`, coexists with Python
 - **Python Packages**: Prefer `httpx`, `platformdirs`, `orjson`, `ciso8601` over `requests`, `json`, `dateutil`, `arrow`, `maya`
 - **Claude Code Tools**: `Read`, `LS`, `Glob`, `Grep` over MCP
+- **Text Editor**: Helix (https://github.com/helix-editor/helix) - modern modal editor with built-in LSP, tree-sitter syntax highlighting
 - **Analysis**: `Semgrep`, `ast-grep`, `ShellCheck` - **GPU**: `tensorflow-metal`, `jax`, `torch`, `cupy`
 - **PDF Processing**: `mupdf-tools` (`mutool draw -F html`) for born-digital PDFs with clean HTML/block grouping; Poppler `pdftohtml -xml` for exact coordinates or complex column layouts
 - **Finance**: `backtesting.py` ONLY, `rangebar` crate - **Prohibited**: bt, vectorbt, mlfinlab, commercial libs
@@ -54,44 +65,52 @@
 ## Claude Code User Custom Extensions
 
 ### CNS (Conversation Notification System)
-**Specification**: [`.claude/specifications/cns-conversation-notification-system.yaml`](.claude/specifications/cns-conversation-notification-system.yaml)
+**Specification**: [`specifications/cns-conversation-notification-system.yaml`](specifications/cns-conversation-notification-system.yaml)
 
 ### GitHub Flavored Markdown Link Checker
-**Specification**: [`.claude/specifications/gfm-link-checker.yaml`](.claude/specifications/gfm-link-checker.yaml)
+**Specification**: [`specifications/gfm-link-checker.yaml`](specifications/gfm-link-checker.yaml)
+**Tool**: [`gfm-link-checker/`](gfm-link-checker/)
+**Slash Command**: `/gfm-check [path] [--fix]` - validate and auto-fix markdown links
 
 ### Pushover Integration
-**Specification**: [`.claude/specifications/pushover-integration.yaml`](.claude/specifications/pushover-integration.yaml)
+**Specification**: [`specifications/pushover-integration.yaml`](specifications/pushover-integration.yaml)
+**Credentials**: Doppler (`claude-config/dev` → `PUSHOVER_TOKEN`, `PUSHOVER_USER`)
 
-### PyPI Publishing Methods
-**Specification**: [`.claude/specifications/pypi-publishing-methods.yaml`](.claude/specifications/pypi-publishing-methods.yaml)
+### PyPI Publishing
+**Specification**: [`specifications/pypi-publishing-methods.yaml`](specifications/pypi-publishing-methods.yaml)
+**Token Storage**: Doppler (`claude-config/dev` → `PYPI_TOKEN`)
+**Usage**: `doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN"`
+**Token Details**:
+  - Name: `terrylica-entire-account`
+  - ID: `2b59ad01-34b4-4425-b7a0-9ab49046ea4e`
+  - Scope: Entire account (all projects)
+  - Regenerate at: https://pypi.org/manage/account/token/
 
 ### git-cliff Release Automation
-**Full Workflow**: See [`~/.claude/tools/git-cliff/README.md`](tools/git-cliff/README.md)
-**Templates**: `~/.claude/tools/git-cliff/templates/` (cliff.toml, cliff-release-notes.toml, cz.toml.template)
-**Features**: Commitizen + git-cliff, language-agnostic version detection, 125K GitHub limit handling, automated workflow conflict detection
+**Workflow**: [`tools/git-cliff/README.md`](tools/git-cliff/README.md)
+**Templates**: [`tools/git-cliff/templates/`](tools/git-cliff/templates/) - cliff.toml, cliff-release-notes.toml, cz.toml
+**Features**: Commitizen + git-cliff, language-agnostic version detection, 125K GitHub limit handling
 
 ### Process Monitoring (noti)
-**Config**: `~/.config/noti/noti.yaml` (Pushover: apitoken/userkey from keychain, priority=1, sound=vibe20sec)
-**Wrapper**: `~/.local/bin/noti-monitor <PID>` (auto-injects Pushover credentials)
-**Usage**: `nohup noti-monitor <PID> > /tmp/noti.log 2>&1 &`
-**Doc**: [`~/.claude/tools/noti/README.md`](tools/noti/README.md)
+**Wrapper**: `$HOME/.local/bin/noti-monitor <PID>` (auto-injects Pushover credentials)
+**Config**: `~/.config/noti/noti.yaml`
+**Documentation**: [`tools/noti/README.md`](tools/noti/README.md)
 
 ## Credential Management & Security
 
-**Credential Management**: Doppler CLI (`doppler run -- <command>`) for zero-config credential injection
-**Specification**: [`.claude/specifications/doppler-integration.yaml`](.claude/specifications/doppler-integration.yaml)
+**Primary Method**: Doppler CLI for zero-config credential injection
+**Specification**: [`specifications/doppler-integration.yaml`](specifications/doppler-integration.yaml)
+**Project**: `claude-config` (configs: `dev`, `dev_personal`, `stg`, `prd`)
 
-### Pushover Credentials
-**Storage**: Doppler (project: `claude-config`, config: `dev`)
-**Usage**: `doppler run -- <command>` to inject credentials as environment variables
-- `PUSHOVER_TOKEN` - Pushover API application token
-- `PUSHOVER_USER` - Pushover user key
+**Stored Secrets**:
+- `PUSHOVER_TOKEN`, `PUSHOVER_USER` - Pushover notification credentials
+- `PYPI_TOKEN` - PyPI publishing token (entire account scope)
 
-## Terminal Setup
+**Usage Pattern**: `doppler run --project claude-config --config dev -- <command>`
 
-### Ghostty Terminal Emulator
-**Focus Tracking Fix**: Disable DECSET 1004 in `~/.zshrc` after Powerlevel10k instant prompt
-**Terminfo Installation**: Export `xterm-ghostty` terminfo to remote servers, enable TERM forwarding in SSH
-**Dark Theme**: zsh-syntax-highlighting color adjustments for comment visibility
-**Doc**: [`~/.claude/docs/setup/terminal-setup.md`](docs/setup/terminal-setup.md)
+## Terminal & Shell Configuration
+
+**Ghostty Terminal**: [`docs/setup/terminal-setup.md`](docs/setup/terminal-setup.md) - Focus tracking fixes, terminfo, dark theme
+**Shell Functions**: [`shell-functions/`](shell-functions/) - Custom shell utilities
+**Text Editor**: Helix (`hx`) - Modal editor with LSP, tree-sitter
 
