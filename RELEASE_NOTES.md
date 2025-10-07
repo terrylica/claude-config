@@ -7,8 +7,9 @@
 - Enable Claude Code session history tracking
 
 
-
 ### 📝 Other Changes
+
+- Version 2.5.0 → 2.6.0
 
 - Version 2.6.0 → 2.7.0
 

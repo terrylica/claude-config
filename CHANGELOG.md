@@ -300,6 +300,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarify Doppler as exclusive PyPI publishing method - Version 2.0.0 of specification - DopplerTokenMethod marked as ACTIVE METHOD (use exclusively) - Consolidated deprecated methods into DeprecatedMethods section - ~/.pypirc marked as DO NOT USE (tokens expire) - Trusted publishing marked as future consideration - Clear migration note: token already in Doppler
 
+- Add SSH clipboard integration via OSC 52 - Complete setup guide for Claude Code /export over SSH/tmux - Deep dive technical analysis of OSC 52 protocol - Implementation summary and checklist - Updated CLAUDE.md with link farm + progressive disclosure architecture - Cross-reference in terminal-setup.md - Preserve Claude Code session tracking (file-history/, todos/)
+
 
 ### 📝 Other Changes
 
