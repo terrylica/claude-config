@@ -290,6 +290,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **pushover**: Add emergency priority specification and implementation Add complete emergency priority documentation including: - Priority levels with retry/expire requirements - Working curl implementation example - State tracking pattern to prevent duplicates - Update RELEASE_NOTES_SHORT.md for v2.4.0
 
+- **credentials**: Migrate Pushover credentials to Doppler Move Pushover API credentials from CLAUDE.md to Doppler for secure storage and zero-config credential injection. Changes: - Setup Doppler project 'claude-config' with dev config - Store PUSHOVER_TOKEN and PUSHOVER_USER in Doppler secrets - Update CLAUDE.md to reference Doppler storage with usage instructions - Remove hardcoded credentials from version control
+
+- **terminal**: Add Ghostty terminal setup guide and enable session tracking - Add comprehensive Ghostty terminal emulator configuration guide - Document focus tracking fix for SSH sessions (DECSET 1004) - Include tmux configuration, terminfo installation, SSH forwarding - Update CLAUDE.md with terminal setup section reference - Enable Claude Code session history tracking (file-history/ and todos/)
+
 
 ### 📝 Other Changes
 
@@ -425,6 +429,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Version 2.5.0 → 2.6.0
 
+- Version 2.6.0 → 2.7.0
+
 
 ### 🧰 Maintenance
 
@@ -463,4 +469,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clean up session artifacts and IDE lock files - Remove IDE lock files (4 files) - Remove old sessions directory and legacy export - Update agent session state
 
 - Disable always thinking mode Disable alwaysThinkingEnabled in Claude Code settings to optimize response time and reduce unnecessary processing overhead.
+
+- Update release notes and restore thinking mode - Update RELEASE_NOTES_SHORT.md for v2.6.0 release - Re-enable alwaysThinkingEnabled in settings - Add Claude Code runtime artifacts to .gitignore (file-history/, todos/, .ccms-checksums)
+
+- Enable Claude Code session history tracking Remove file-history/ and todos/ from .gitignore to enable session history tracking per user request. Claude Code session history provides valuable context and should be tracked in version control. Changes: - Remove file-history/ and todos/ exclusions from .gitignore - Add current session history files to tracking
 
