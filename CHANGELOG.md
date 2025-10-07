@@ -171,6 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **cns**: Add configurable Pushover notification sound Read sound parameter from CNS config pushover.default_sound, defaulting to 'toy_story' if not specified. Enables consistent notification sounds across both local and remote environments.
 
+- Enable Claude Code session history tracking
+
 
 ### 🏗️ Build System
 
@@ -293,6 +295,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **credentials**: Migrate Pushover credentials to Doppler Move Pushover API credentials from CLAUDE.md to Doppler for secure storage and zero-config credential injection. Changes: - Setup Doppler project 'claude-config' with dev config - Store PUSHOVER_TOKEN and PUSHOVER_USER in Doppler secrets - Update CLAUDE.md to reference Doppler storage with usage instructions - Remove hardcoded credentials from version control
 
 - **terminal**: Add Ghostty terminal setup guide and enable session tracking - Add comprehensive Ghostty terminal emulator configuration guide - Document focus tracking fix for SSH sessions (DECSET 1004) - Include tmux configuration, terminfo installation, SSH forwarding - Update CLAUDE.md with terminal setup section reference - Enable Claude Code session history tracking (file-history/ and todos/)
+
+- Update PyPI token management to use Doppler - Token now stored in Doppler (claude-config/dev/PYPI_TOKEN) - Updated CLAUDE.md with link farm structure - Corrected token ID: 2b59ad01-34b4-4425-b7a0-9ab49046ea4e - Deprecated ~/.pypirc storage (tokens expire) - Added usage pattern for Doppler-based publishing
+
+- Clarify Doppler as exclusive PyPI publishing method - Version 2.0.0 of specification - DopplerTokenMethod marked as ACTIVE METHOD (use exclusively) - Consolidated deprecated methods into DeprecatedMethods section - ~/.pypirc marked as DO NOT USE (tokens expire) - Trusted publishing marked as future consideration - Clear migration note: token already in Doppler
 
 
 ### 📝 Other Changes
@@ -430,6 +436,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Version 2.5.0 → 2.6.0
 
 - Version 2.6.0 → 2.7.0
+
+- Version 2.7.0 → 2.8.0
 
 
 ### 🧰 Maintenance
