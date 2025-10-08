@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# Enhanced GhosttyHelix Launch Script
+# Opens files in Helix editor using Ghostty terminal
+
+# Set PATH to include Homebrew binaries
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+# Function to show error notification
+show_error() {
+    local title="$1"
+    local message="$2"
+    osascript -e "display notification \"$message\" with title \"$title\" sound name \"Basso\""
+}
+
+# Check if Ghostty exists
+if ! command -v ghostty &> /dev/null; then
+    show_error "GhosttyHelix Error" "Ghostty not found in PATH. Please install Ghostty."
+    exit 1
+fi
+
+# Check if Helix exists
+if ! command -v hx &> /dev/null; then
+    show_error "GhosttyHelix Error" "Helix (hx) not found in PATH. Please install Helix editor."
+    exit 1
+fi
+
+# If no arguments, open blank Helix session
+if [ $# -eq 0 ]; then
+    nohup ghostty -e hx >/dev/null 2>&1 &
+    disown
+    exit 0
+fi
+
+# Open each file in a new Ghostty window with Helix
+for file in "$@"; do
+    # Resolve to absolute path if relative
+    if [[ "$file" != /* ]]; then
+        file="$(pwd)/$file"
+    fi
+
+    # Check if file exists (for existing files) or can be created (for new files)
+    if [ -e "$file" ] || [ -w "$(dirname "$file")" ]; then
+        nohup ghostty -e hx "$file" >/dev/null 2>&1 &
+        disown
+    else
+        show_error "GhosttyHelix Error" "Cannot access file: $file"
+    fi
+done

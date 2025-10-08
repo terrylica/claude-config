@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+Standalone test of minimal_reproduce_bug FeatureSet.
+
+This proves the FeatureSet logic works correctly when used directly.
+"""
+
+import sys
+sys.path.insert(0, '/workspace')
+
+import pandas as pd
+import numpy as np
+from datetime import timedelta
+from ml_feature_set.bundled.minimal_reproduce_bug import CustomFeatureSet
+
+# Create simple test data
+print("Creating simple test data...")
+print("="*80)
+
+dates = pd.date_range("2025-01-01", periods=20, freq="1h")
+data = pd.DataFrame({
+    "date": dates,
+    "open": np.arange(100, 120, dtype=float),
+    "high": np.arange(101, 121, dtype=float),
+    "low": np.arange(99, 119, dtype=float),
+    "close": np.arange(100, 120, dtype=float),  # Simple: 100, 101, 102, ..., 119
+    "volume": np.array([1000.0] * 20, dtype=float),
+})
+
+# Add actual_ready_time (data available 2 hours after bar close)
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+print(f"Data rows: {len(data)}")
+print("\nFirst 5 rows:")
+print(data[["date", "close", "actual_ready_time"]].head())
+print()
+
+# Test timestamp: 2025-01-01 10:00:00
+# This corresponds to bar at 2025-01-01 08:00:00 (close=108)
+# actual_ready_time for this bar is 2025-01-01 10:00:00
+
+test_timestamp = pd.to_datetime("2025-01-01 10:00:00")
+print(f"Test timestamp: {test_timestamp}")
+print(f"This timestamp corresponds to bar with close={data[data['actual_ready_time'] == test_timestamp]['close'].iloc[0]}")
+print()
+
+# Create FeatureSet and build full features
+fs = CustomFeatureSet()
+source_data_list = [{
+    "name": "ohlcv_1x",
+    "data_df": data,
+    "interval": "1h",
+    "type": "ohlcv",
+    "resample_factor": 1,
+}]
+full_features, _ = fs.build_features(source_data_list)
+
+# Create prediction FeatureSet (filtered data - mimics validation framework)
+pred_data = data[data["actual_ready_time"] <= test_timestamp].copy()
+print(f"Prediction data (filtered by actual_ready_time <= {test_timestamp}):")
+print(f"  Rows: {len(pred_data)}")
+print(f"  Last close: {pred_data['close'].iloc[-1]}")
+print(f"  Last actual_ready_time: {pred_data['actual_ready_time'].iloc[-1]}")
+print()
+
+fs_pred = CustomFeatureSet()
+pred_source_list = [{
+    "name": "ohlcv_1x",
+    "data_df": pred_data,
+    "interval": "1h",
+    "type": "ohlcv",
+    "resample_factor": 1,
+}]
+pred_features, _ = fs_pred.build_features(pred_source_list)
+
+# Compare features at test timestamp
+match_idx = data[data["actual_ready_time"] == test_timestamp].index[0]
+
+full_value = full_features.iloc[match_idx]["simple_sum_3"]
+pred_value = pred_features.iloc[-1]["simple_sum_3"]
+
+print("RESULTS:")
+print("="*80)
+print(f"Full data feature at {test_timestamp}: {full_value}")
+print(f"Pred data feature at {test_timestamp}: {pred_value}")
+print(f"Difference: {abs(full_value - pred_value):.10f}")
+print()
+
+if abs(full_value - pred_value) < 1e-10:
+    print("✓ PASS - Standalone test works correctly!")
+    print()
+    print("Calculation verification:")
+    print(f"  Last 3 bars available at {test_timestamp}:")
+    available = data[data["actual_ready_time"] <= test_timestamp]
+    last_3_closes = available["close"].iloc[-3:].values
+    print(f"  Close prices: {last_3_closes}")
+    print(f"  Sum: {np.sum(last_3_closes)} (expected: {full_value})")
+else:
+    print("✗ FAIL - Standalone test failed! (unexpected)")
+    print("This indicates a bug in the FeatureSet logic itself")

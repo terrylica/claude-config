@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""
+Compare how actual_ready_time is created: Manual vs Framework
+"""
+import sys
+sys.path.insert(0, '/workspace')
+
+import pandas as pd
+from datetime import timedelta
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+print("ACTUAL_READY_TIME COMPARISON")
+print("="*80)
+print()
+
+# Method 1: Manual (how standalone test does it)
+print("Method 1: Manual Creation (Standalone Test)")
+print("-"*80)
+data_manual = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data_manual["date"] = pd.to_datetime(data_manual["date"])
+data_manual["actual_ready_time"] = data_manual["date"] + timedelta(hours=2)
+print(data_manual[["date", "actual_ready_time"]].head(5))
+print()
+
+# Method 2: Framework (how validation does it)
+print("Method 2: Framework Creation (Validation Framework)")
+print("-"*80)
+
+# Replicate exactly what validation does
+from ml_feature_set.helpers.demo_helpers import sample_data_loader
+
+def custom_data_loader(template):
+    sample_data_paths = ["/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv"]
+    return sample_data_loader(template, sample_data_paths, None)
+
+data_sources = prepare_data_sources_for_feature_set(
+    feature_set_path="/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py",
+    data_loader_func=custom_data_loader,
+    source_to_interval={"ohlcv": "2h"},
+    moving_window_size=30,
+    auto_resample=True,
+    filter_common_time_range=True
+)
+data_framework = data_sources[0]["data_df"].copy()
+
+if "actual_ready_time" in data_framework.columns:
+    print(data_framework[["date", "actual_ready_time"]].head(5))
+    print()
+
+    # Check data source config
+    print("Framework Data Source Config:")
+    print("-"*80)
+    for key in ["name", "interval", "ready_time_offset", "resample_factor"]:
+        val = data_sources[0].get(key, 'NOT SET')
+        print(f"  {key}: {val}")
+    print()
+
+    # Calculate offset
+    offset_manual = data_manual["actual_ready_time"].iloc[0] - data_manual["date"].iloc[0]
+    offset_framework = pd.to_datetime(data_framework["actual_ready_time"].iloc[0]) - pd.to_datetime(data_framework["date"].iloc[0])
+
+    print("Offset Comparison:")
+    print("-"*80)
+    print(f"  Manual offset:    {offset_manual}")
+    print(f"  Framework offset: {offset_framework}")
+    print(f"  Match: {offset_manual == offset_framework}")
+    print()
+
+    # Test specific timestamp from validation Step 3/30
+    test_date = pd.to_datetime("2025-03-17 06:00:00")
+    manual_row = data_manual[data_manual["date"] == test_date]
+    framework_row = data_framework[data_framework["date"] == test_date]
+
+    if not manual_row.empty and not framework_row.empty:
+        manual_ready = manual_row["actual_ready_time"].iloc[0]
+        framework_ready = framework_row["actual_ready_time"].iloc[0]
+
+        print(f"Test Timestamp (Step 3/30 from validation):")
+        print("-"*80)
+        print(f"  Date: {test_date}")
+        print(f"  Manual actual_ready_time:    {manual_ready}")
+        print(f"  Framework actual_ready_time: {framework_ready}")
+        print(f"  Match: {manual_ready == framework_ready}")
+        print()
+
+        if manual_ready != framework_ready:
+            print("❌ FOUND THE ISSUE: actual_ready_time values DON'T MATCH!")
+            diff = pd.to_datetime(framework_ready) - pd.to_datetime(manual_ready)
+            print(f"   Difference: {diff}")
+        else:
+            print("✓ actual_ready_time values MATCH - issue must be elsewhere")
+else:
+    print("❌ Framework did NOT create actual_ready_time column!")
+    print(f"   Columns in framework data: {list(data_framework.columns)}")

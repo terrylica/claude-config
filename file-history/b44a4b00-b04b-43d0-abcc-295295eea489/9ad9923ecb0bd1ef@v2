@@ -1,0 +1,85 @@
+"""
+Minimal FeatureSet to reproduce validation framework bug.
+
+This demonstrates that validation framework produces different results than standalone
+usage, even with identical configuration and simple logic.
+
+The bug: Framework's prediction data filtering doesn't correctly respect actual_ready_time
+"""
+
+import pandas as pd
+import numpy as np
+from ml_feature_set.feature_set import FeatureSet
+
+
+class CustomFeatureSet(FeatureSet):
+    """
+    Minimal feature set that:
+    1. Filters data by actual_ready_time (simulates what atr-adaptive-laguerre does)
+    2. Computes simple feature (sum of last 3 close prices)
+
+    This should work identically in standalone and validation framework,
+    but validation framework produces different results.
+    """
+
+    @property
+    def data_dependencies(self):
+        """Only need OHLCV data at 1x interval"""
+        return [
+            {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+        ]
+
+    def get_source_lookback_length(self, source_name):
+        """Need 10 historical bars for simple calculation"""
+        if source_name.startswith("ohlcv"):
+            return 10
+        raise ValueError(f"Unsupported data source: {source_name}")
+
+    def extract_feature(self):
+        """
+        Extract simple feature that depends on actual_ready_time filtering.
+
+        Feature: sum of last 3 close prices (simple moving sum)
+
+        Key: We filter data by actual_ready_time to simulate what packages like
+        atr-adaptive-laguerre do internally.
+        """
+        # Get OHLCV data
+        ohlcv_source = self.get_data_source("ohlcv_1x")
+        df = ohlcv_source["data_df"].copy()
+
+        # Validate actual_ready_time exists (framework should provide this)
+        if "actual_ready_time" not in df.columns:
+            raise ValueError(
+                "Data source missing 'actual_ready_time' column "
+                "(required by framework for non-anticipative features)"
+            )
+
+        # Sort by actual_ready_time (critical for correct filtering)
+        df = df.sort_values("actual_ready_time").reset_index(drop=True)
+
+        # Initialize feature
+        feature_values = []
+
+        # For each row, compute feature using ONLY data available at that time
+        for i in range(len(df)):
+            current_ready_time = df.loc[i, "actual_ready_time"]
+
+            # Filter: Only use bars where actual_ready_time <= current_ready_time
+            # This simulates what atr-adaptive-laguerre does with availability_column
+            available_data = df[df["actual_ready_time"] <= current_ready_time]
+
+            # Compute simple feature: sum of last 3 close prices
+            if len(available_data) >= 3:
+                last_3_closes = available_data["close"].iloc[-3:].values
+                feature_value = float(np.sum(last_3_closes))
+            else:
+                # Not enough data
+                feature_value = 0.0
+
+            feature_values.append(feature_value)
+
+        # Set feature
+        self.set_features_batch({
+            "simple_sum_3": feature_values,
+        })

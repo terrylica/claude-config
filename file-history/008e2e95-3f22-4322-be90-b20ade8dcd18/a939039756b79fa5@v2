@@ -1,0 +1,230 @@
+# EvolutionaryForest - terrylica Fork
+
+**Fork Status**: Active maintenance fork fixing critical bugs in PyPI v0.2.4
+
+**Original Repository**: https://github.com/hengzhe-zhang/EvolutionaryForest
+**This Fork**: https://github.com/terrylica/EvolutionaryForest
+
+---
+
+## Why This Fork Exists
+
+The **PyPI release v0.2.4** contains critical bugs that prevent usage with modern dependencies:
+1. ❌ **sklearn API incompatibility** - `OneHotEncoder(sparse=)` deprecated
+2. ❌ **Missing objective implementations** - MSE, RMSE, Accuracy not implemented
+3. ❌ **Classification broken** - Shape mismatch errors in all classification objectives
+
+**Result**: Only 2/6 advertised objective functions work out-of-box.
+
+This fork provides **working patches** while maintaining compatibility for production use.
+
+---
+
+## Fixes Applied
+
+### ✅ sklearn OneHotEncoder API (v1.2+)
+```python
+# BEFORE (broken in sklearn 1.2+)
+OneHotEncoder(sparse=False)
+
+# AFTER (compatible)
+OneHotEncoder(sparse_output=False)
+```
+
+**Files patched**:
+- `evolutionary_forest/model/PLTree.py`
+- `evolutionary_forest/forest.py` (PyPI only)
+- `evolutionary_forest/component/archive.py` (PyPI only)
+
+### ✅ Missing Objective Implementations (PyPI v0.2.4 only)
+Added implementations for:
+- **MSE** (Mean Squared Error)
+- **RMSE** (Root Mean Squared Error)
+- **Accuracy** (Classification accuracy)
+
+**Status**: 4/6 objectives working (100% regression, 0% classification)
+
+### ⚠️ Classification Objectives
+**Status**: Still broken due to deeper shape mismatch bugs
+**Error**: `operands could not be broadcast together with shapes (2798,) (1399,)`
+**Recommendation**: Use regression objectives only for production
+
+---
+
+## Installation & Usage
+
+### Option 1: Install from this fork
+```bash
+# Install directly from GitHub
+pip install git+https://github.com/terrylica/EvolutionaryForest.git@fix/objective-functions-sklearn-api
+
+# Or clone and install in editable mode
+git clone https://github.com/terrylica/EvolutionaryForest.git
+cd EvolutionaryForest
+pip install -e .
+```
+
+### Option 2: Patch existing PyPI installation
+```bash
+# Install PyPI version + dependencies
+pip install evolutionary-forest setuptools shap torch 'tpot==0.12.2' pyade skorch 'numpy<2.0'
+
+# Clone this repo for patches
+git clone https://github.com/terrylica/EvolutionaryForest.git
+cd EvolutionaryForest
+
+# Apply automated fixes
+./apply_fixes.sh
+```
+
+---
+
+## Tested Configuration
+
+**Working Objectives** (4/6):
+- ✅ R² (R-squared)
+- ✅ MSE (Mean Squared Error)
+- ✅ MAE (Mean Absolute Error)
+- ✅ RMSE (Root Mean Squared Error)
+
+**Broken Objectives** (2/6):
+- ❌ ZeroOne (shape mismatch)
+- ❌ Accuracy (shape mismatch)
+
+**Test Environment**:
+- Python 3.11
+- numpy < 2.0
+- sklearn 1.2+
+- Real SOLUSDT 5-min OHLCV data (428K bars, 4.1 years)
+
+**Example Test**:
+```python
+from evolutionary_forest.forest import EvolutionaryForestRegressor
+import pandas as pd
+import numpy as np
+
+# Load OHLCV data
+df = pd.read_csv('solusdt_5min.csv')
+X = df[['open', 'high', 'low', 'close', 'volume']].values
+y = df['close'].pct_change().shift(-1).dropna().values
+
+# Train with working objectives
+ef = EvolutionaryForestRegressor(
+    n_gen=10,
+    n_pop=50,
+    gene_num=5,
+    score_func='MSE',  # ✅ Works after patch!
+    normalize=True
+)
+
+ef.fit(X_train, y_train)
+predictions = ef.predict(X_test)
+```
+
+See `tests/test_all_objectives.py` for comprehensive test suite.
+
+---
+
+## Documentation
+
+| File | Description |
+|------|-------------|
+| `docs/fixes/PROBE_REPORT.md` | Complete API probe analysis |
+| `docs/fixes/FIXES_APPLIED.md` | Detailed patch documentation with code diffs |
+| `tests/test_all_objectives.py` | Test suite for all 6 objective functions |
+| `apply_fixes.sh` | Automated patch script |
+
+---
+
+## Upstream vs Fork Divergence
+
+**Important**: The upstream GitHub repo has **heavily refactored** since v0.2.4:
+- Score functions converted to class-based architecture
+- File structure reorganized
+- Different bugs/fixes needed
+
+**This fork targets PyPI v0.2.4** which is what most users install via `pip install`.
+
+---
+
+## Contribution Workflow
+
+### For PyPI v0.2.4 users (most users)
+1. Use this fork's `fix/objective-functions-sklearn-api` branch
+2. All regression objectives working
+3. Avoid classification objectives
+
+### For upstream users (advanced)
+1. Check if upstream main has already fixed these issues
+2. If not, adapt patches to new class-based architecture
+3. Submit PR to upstream
+
+---
+
+## Remotes Configuration
+
+This repository is configured with dual remotes:
+
+```bash
+git remote -v
+# origin    https://github.com/terrylica/EvolutionaryForest.git (push/fetch)
+# upstream  https://github.com/hengzhe-zhang/EvolutionaryForest.git (fetch)
+```
+
+**Workflow**:
+```bash
+# Pull latest from upstream
+git fetch upstream
+git merge upstream/master
+
+# Push fixes to fork
+git push origin fix/objective-functions-sklearn-api
+
+# Eventually submit PR to upstream
+gh pr create --base master --head terrylica:fix/objective-functions-sklearn-api
+```
+
+---
+
+## Production Recommendations
+
+### ✅ Safe to Use
+- **All regression objectives**: R², MSE, MAE, RMSE
+- **OHLCV feature engineering**: Fully tested with real crypto data
+- **Custom scorers**: `sklearn.metrics.make_scorer` for Sharpe ratio, etc.
+
+### ❌ Avoid
+- **Classification objectives**: ZeroOne, Accuracy (broken)
+- **Python 3.13**: Use Python 3.11 (numpy 2.0 compatibility issues)
+- **Latest sklearn without patches**: Requires OneHotEncoder fix
+
+### 📋 Required Dependencies
+```bash
+pip install \
+    evolutionary-forest \
+    setuptools \
+    shap \
+    torch \
+    'tpot==0.12.2' \
+    pyade \
+    skorch \
+    'numpy<2.0' \
+    pandas \
+    scikit-learn
+```
+
+---
+
+## Support & Contact
+
+**Issues with this fork**: https://github.com/terrylica/EvolutionaryForest/issues
+**Upstream issues**: https://github.com/hengzhe-zhang/EvolutionaryForest/issues
+
+**Maintainer**: @terrylica
+**Focus**: Financial OHLCV feature engineering for seq-2-seq models
+
+---
+
+## License
+
+Same as upstream: Original license from hengzhe-zhang/EvolutionaryForest

@@ -1,0 +1,73 @@
+"""
+Parameterized filtering script for iterative threshold refinement.
+
+Usage:
+    python /tmp/screen_redundancy.py 0.8   # Filter at threshold 0.8
+    python /tmp/screen_redundancy.py 0.9   # Filter at threshold 0.9
+    diff /tmp/filtered_correlations_0.8.csv /tmp/filtered_correlations_0.9.csv
+
+SLOs:
+- Availability: 99.9% (validates input file exists, threshold is valid float)
+- Correctness: 100% (deterministic filtering, reproducible results)
+- Observability: Prints filter statistics to stdout
+- Maintainability: Single purpose, ≤50 lines
+
+Error Handling: raise_and_propagate
+"""
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+
+def main() -> None:
+    """
+    Filter correlation edge list by threshold.
+
+    Raises:
+        ValueError: If threshold not provided or invalid
+        FileNotFoundError: If edge list CSV not found
+    """
+    # Parse threshold
+    if len(sys.argv) < 2:
+        raise ValueError(
+            "Usage: python /tmp/screen_redundancy.py <threshold>\n"
+            "Example: python /tmp/screen_redundancy.py 0.8"
+        )
+
+    threshold = float(sys.argv[1])
+
+    if not (0.0 <= threshold <= 1.0):
+        raise ValueError(f"Threshold must be in [0, 1], got {threshold}")
+
+    # Load edge list
+    input_path = Path("/tmp/feature_correlations_edgelist.csv")
+    if not input_path.exists():
+        raise FileNotFoundError(
+            f"Edge list not found: {input_path}\n"
+            "Run /tmp/redundancy_analysis.py first to generate correlation data"
+        )
+
+    edges = pd.read_csv(input_path)
+
+    # Filter by threshold
+    filtered = edges[edges["correlation"].abs() > threshold]
+
+    # Print statistics
+    print(f"Threshold: {threshold}")
+    print(f"Found {len(filtered)} pairs above threshold (out of {len(edges)} total)")
+    print(f"Percentage: {100 * len(filtered) / len(edges):.1f}%")
+
+    # Save filtered results
+    output_path = Path(f"/tmp/filtered_correlations_{threshold}.csv")
+    filtered.to_csv(output_path, index=False)
+    print(f"Saved to {output_path}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise

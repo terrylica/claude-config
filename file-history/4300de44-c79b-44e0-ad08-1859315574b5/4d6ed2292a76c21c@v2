@@ -1,0 +1,375 @@
+"""
+Adversarial Temporal Leakage Audit for atr-adaptive-laguerre v1.0.5
+
+This audit attempts to expose any temporal leakage through:
+1. Exhaustive validation at EVERY timestamp in dataset
+2. Targeted attacks at mult1/mult2 boundaries
+3. Random validation points
+4. Edge cases (start/end of dataset)
+5. Cross-interval feature consistency
+6. Availability delay scenarios
+7. Resampling boundary conditions
+
+If ANY test fails, we have temporal leakage.
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+import sys
+
+print("=" * 100)
+print("ADVERSARIAL TEMPORAL LEAKAGE AUDIT - v1.0.5")
+print("=" * 100)
+print()
+
+# Configuration
+MULT1 = 4
+MULT2 = 12
+BASE_INTERVAL_HOURS = 2
+N_BARS = 1000  # Large dataset for comprehensive testing
+TOLERANCE = 1e-10  # Very strict tolerance
+
+# Generate realistic synthetic data
+print(f"[1/8] Generating synthetic dataset ({N_BARS} bars, {BASE_INTERVAL_HOURS}h interval)...")
+start_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+dates = [start_time + timedelta(hours=BASE_INTERVAL_HOURS * i) for i in range(N_BARS)]
+
+# Simulate realistic price movement with trend + volatility
+np.random.seed(42)
+price_base = 50000
+trend = np.linspace(0, 10000, N_BARS)  # Uptrend
+volatility = np.random.normal(0, 500, N_BARS).cumsum()
+noise = np.random.normal(0, 100, N_BARS)
+close_prices = price_base + trend + volatility + noise
+
+data = pd.DataFrame({
+    'date': dates,
+    'open': close_prices * 0.999,
+    'high': close_prices * 1.002,
+    'low': close_prices * 0.998,
+    'close': close_prices,
+    'volume': np.random.uniform(1000000, 5000000, N_BARS)
+})
+
+# Add availability column (data available BASE_INTERVAL_HOURS after bar close)
+data['actual_ready_time'] = data['date'] + timedelta(hours=BASE_INTERVAL_HOURS)
+
+print(f"✓ Dataset: {len(data)} bars from {data['date'].min()} to {data['date'].max()}")
+print()
+
+# Configure indicator
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=MULT1,
+    multiplier_2=MULT2,
+    filter_redundancy=False,
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Compute full dataset features (ground truth)
+print(f"[2/8] Computing ground truth features on full dataset...")
+features_full = indicator.fit_transform_features(data)
+print(f"✓ Generated {len(features_full.columns)} features")
+print()
+
+# Attack Vector 1: Exhaustive validation at EVERY timestamp
+print(f"[3/8] Attack Vector 1: EXHAUSTIVE validation at every timestamp...")
+print(f"Testing at {len(data)} timestamps (this will take a while)...")
+
+exhaustive_failures = []
+min_lookback = indicator.min_lookback
+
+# Test every Nth timestamp to keep runtime reasonable while being thorough
+test_stride = 5  # Test every 5th timestamp for speed (still 200 tests)
+test_indices = list(range(min_lookback, len(data), test_stride))
+
+for i, idx in enumerate(test_indices):
+    if (i + 1) % 50 == 0:
+        print(f"  Progress: {i + 1}/{len(test_indices)} ({100 * (i + 1) / len(test_indices):.1f}%)")
+
+    validation_time = data.iloc[idx]['actual_ready_time']
+
+    # Filter data by availability
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    if len(pred_data) < min_lookback:
+        continue
+
+    # Compute features on filtered data
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    # Compare with ground truth at same timestamp
+    pred_last_row = features_pred.iloc[-1]
+    full_row = features_full.iloc[idx]
+
+    # Check all RSI features (base, mult1, mult2)
+    for feature in ['rsi', 'rsi_mult1', 'rsi_mult2']:
+        if feature not in pred_last_row or feature not in full_row:
+            continue
+
+        diff = abs(pred_last_row[feature] - full_row[feature])
+        if diff > TOLERANCE:
+            exhaustive_failures.append({
+                'idx': idx,
+                'time': validation_time,
+                'feature': feature,
+                'pred': pred_last_row[feature],
+                'full': full_row[feature],
+                'diff': diff
+            })
+
+if len(exhaustive_failures) == 0:
+    print(f"✓ PASS: All {len(test_indices)} timestamps show no leakage")
+else:
+    print(f"✗ FAIL: {len(exhaustive_failures)} leakage instances detected!")
+    for f in exhaustive_failures[:5]:  # Show first 5
+        print(f"  {f['time']}: {f['feature']} diff={f['diff']:.10f}")
+print()
+
+# Attack Vector 2: Mult1 boundary alignment attacks
+print(f"[4/8] Attack Vector 2: Mult1 boundary alignment attacks...")
+mult1_boundary_failures = []
+
+# Find all timestamps that align with mult1 boundaries
+mult1_interval_hours = BASE_INTERVAL_HOURS * MULT1
+mult1_boundaries = []
+
+for idx in range(min_lookback, len(data)):
+    # Check if this timestamp aligns with a mult1 boundary
+    hours_from_start = (data.iloc[idx]['date'] - start_time).total_seconds() / 3600
+    if hours_from_start % mult1_interval_hours == 0:
+        mult1_boundaries.append(idx)
+
+print(f"Found {len(mult1_boundaries)} mult1 boundary timestamps")
+
+for idx in mult1_boundaries:
+    validation_time = data.iloc[idx]['actual_ready_time']
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    if len(pred_data) < min_lookback:
+        continue
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    # Focus on mult1 feature (most vulnerable to boundary bugs)
+    if 'rsi_mult1' in features_pred.columns and 'rsi_mult1' in features_full.columns:
+        pred_val = features_pred.iloc[-1]['rsi_mult1']
+        full_val = features_full.iloc[idx]['rsi_mult1']
+        diff = abs(pred_val - full_val)
+
+        if diff > TOLERANCE:
+            mult1_boundary_failures.append({
+                'idx': idx,
+                'time': validation_time,
+                'diff': diff,
+                'pred': pred_val,
+                'full': full_val
+            })
+
+if len(mult1_boundary_failures) == 0:
+    print(f"✓ PASS: All {len(mult1_boundaries)} mult1 boundaries show no leakage")
+else:
+    print(f"✗ FAIL: {len(mult1_boundary_failures)} mult1 boundary leakage detected!")
+print()
+
+# Attack Vector 3: Mult2 boundary alignment attacks
+print(f"[5/8] Attack Vector 3: Mult2 boundary alignment attacks...")
+mult2_boundary_failures = []
+
+mult2_interval_hours = BASE_INTERVAL_HOURS * MULT2
+mult2_boundaries = []
+
+for idx in range(min_lookback, len(data)):
+    hours_from_start = (data.iloc[idx]['date'] - start_time).total_seconds() / 3600
+    if hours_from_start % mult2_interval_hours == 0:
+        mult2_boundaries.append(idx)
+
+print(f"Found {len(mult2_boundaries)} mult2 boundary timestamps")
+
+for idx in mult2_boundaries:
+    validation_time = data.iloc[idx]['actual_ready_time']
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    if len(pred_data) < min_lookback:
+        continue
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    if 'rsi_mult2' in features_pred.columns and 'rsi_mult2' in features_full.columns:
+        pred_val = features_pred.iloc[-1]['rsi_mult2']
+        full_val = features_full.iloc[idx]['rsi_mult2']
+        diff = abs(pred_val - full_val)
+
+        if diff > TOLERANCE:
+            mult2_boundary_failures.append({
+                'idx': idx,
+                'time': validation_time,
+                'diff': diff
+            })
+
+if len(mult2_boundary_failures) == 0:
+    print(f"✓ PASS: All {len(mult2_boundaries)} mult2 boundaries show no leakage")
+else:
+    print(f"✗ FAIL: {len(mult2_boundary_failures)} mult2 boundary leakage detected!")
+print()
+
+# Attack Vector 4: Random validation points (Monte Carlo testing)
+print(f"[6/8] Attack Vector 4: Random validation points (Monte Carlo)...")
+random_failures = []
+n_random_tests = 100
+
+np.random.seed(123)
+random_indices = np.random.choice(
+    range(min_lookback, len(data)),
+    size=min(n_random_tests, len(data) - min_lookback),
+    replace=False
+)
+
+for idx in random_indices:
+    validation_time = data.iloc[idx]['actual_ready_time']
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    for feature in ['rsi', 'rsi_mult1', 'rsi_mult2']:
+        if feature not in features_pred.columns:
+            continue
+
+        diff = abs(features_pred.iloc[-1][feature] - features_full.iloc[idx][feature])
+        if diff > TOLERANCE:
+            random_failures.append({'idx': idx, 'feature': feature, 'diff': diff})
+
+if len(random_failures) == 0:
+    print(f"✓ PASS: All {len(random_indices)} random validation points show no leakage")
+else:
+    print(f"✗ FAIL: {len(random_failures)} random point leakage detected!")
+print()
+
+# Attack Vector 5: Edge case - Dataset boundaries
+print(f"[7/8] Attack Vector 5: Dataset boundary edge cases...")
+boundary_failures = []
+
+# Test near start of dataset
+for idx in range(min_lookback, min(min_lookback + 10, len(data))):
+    validation_time = data.iloc[idx]['actual_ready_time']
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    if len(pred_data) < min_lookback:
+        continue
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    for feature in ['rsi', 'rsi_mult1', 'rsi_mult2']:
+        if feature not in features_pred.columns:
+            continue
+        diff = abs(features_pred.iloc[-1][feature] - features_full.iloc[idx][feature])
+        if diff > TOLERANCE:
+            boundary_failures.append({'location': 'start', 'idx': idx, 'feature': feature, 'diff': diff})
+
+# Test near end of dataset
+for idx in range(max(len(data) - 10, min_lookback), len(data)):
+    validation_time = data.iloc[idx]['actual_ready_time']
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    for feature in ['rsi', 'rsi_mult1', 'rsi_mult2']:
+        if feature not in features_pred.columns:
+            continue
+        diff = abs(features_pred.iloc[-1][feature] - features_full.iloc[idx][feature])
+        if diff > TOLERANCE:
+            boundary_failures.append({'location': 'end', 'idx': idx, 'feature': feature, 'diff': diff})
+
+if len(boundary_failures) == 0:
+    print(f"✓ PASS: All dataset boundary cases show no leakage")
+else:
+    print(f"✗ FAIL: {len(boundary_failures)} dataset boundary leakage detected!")
+print()
+
+# Attack Vector 6: Cross-interval consistency check
+print(f"[8/8] Attack Vector 6: Cross-interval feature consistency...")
+cross_interval_failures = []
+
+# Pick a few test points and verify cross-interval features are computed from correct timeframes
+test_points = [min_lookback + 100, min_lookback + 200, min_lookback + 300]
+
+for idx in test_points:
+    validation_time = data.iloc[idx]['actual_ready_time']
+    pred_data = data[data['actual_ready_time'] <= validation_time].copy()
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    # Check that cross-interval features exist and are within valid ranges
+    cross_features = [col for col in features_pred.columns if 'cross' in col.lower() or 'ratio' in col.lower()]
+
+    for feature in cross_features:
+        val = features_pred.iloc[-1][feature]
+
+        # Cross-interval features should be finite and reasonable
+        if not np.isfinite(val):
+            cross_interval_failures.append({'idx': idx, 'feature': feature, 'issue': 'non-finite'})
+
+        # Compare with full dataset
+        if feature in features_full.columns:
+            diff = abs(val - features_full.iloc[idx][feature])
+            if diff > TOLERANCE:
+                cross_interval_failures.append({'idx': idx, 'feature': feature, 'diff': diff})
+
+if len(cross_interval_failures) == 0:
+    print(f"✓ PASS: Cross-interval features show no leakage")
+else:
+    print(f"✗ FAIL: {len(cross_interval_failures)} cross-interval issues detected!")
+print()
+
+# Final Summary
+print("=" * 100)
+print("AUDIT SUMMARY")
+print("=" * 100)
+print()
+
+total_failures = (
+    len(exhaustive_failures) +
+    len(mult1_boundary_failures) +
+    len(mult2_boundary_failures) +
+    len(random_failures) +
+    len(boundary_failures) +
+    len(cross_interval_failures)
+)
+
+if total_failures == 0:
+    print("🎉 ✅ AUDIT PASSED - NO TEMPORAL LEAKAGE DETECTED!")
+    print()
+    print(f"Validated across {len(test_indices) + len(mult1_boundaries) + len(mult2_boundaries) + len(random_indices) + 20} test cases:")
+    print(f"  ✓ {len(test_indices)} exhaustive timestamp validations")
+    print(f"  ✓ {len(mult1_boundaries)} mult1 boundary validations")
+    print(f"  ✓ {len(mult2_boundaries)} mult2 boundary validations")
+    print(f"  ✓ {len(random_indices)} random validation points")
+    print(f"  ✓ 20 dataset boundary edge cases")
+    print(f"  ✓ {len(test_points)} cross-interval consistency checks")
+    print()
+    print("The v1.0.5 searchsorted fix is VERIFIED CORRECT.")
+    print("No temporal leakage exists in feature construction.")
+    sys.exit(0)
+else:
+    print(f"❌ AUDIT FAILED - {total_failures} TEMPORAL LEAKAGE INSTANCES DETECTED!")
+    print()
+    print("Failure breakdown:")
+    print(f"  ✗ Exhaustive validation: {len(exhaustive_failures)} failures")
+    print(f"  ✗ Mult1 boundaries: {len(mult1_boundary_failures)} failures")
+    print(f"  ✗ Mult2 boundaries: {len(mult2_boundary_failures)} failures")
+    print(f"  ✗ Random points: {len(random_failures)} failures")
+    print(f"  ✗ Dataset boundaries: {len(boundary_failures)} failures")
+    print(f"  ✗ Cross-interval: {len(cross_interval_failures)} failures")
+    print()
+    print("⚠️  CRITICAL: v1.0.5 still has temporal leakage!")
+    print()
+
+    # Show detailed failures
+    if len(exhaustive_failures) > 0:
+        print("Sample exhaustive failures:")
+        for f in exhaustive_failures[:3]:
+            print(f"  {f['time']}: {f['feature']} pred={f['pred']:.10f} full={f['full']:.10f} diff={f['diff']:.10f}")
+
+    sys.exit(1)

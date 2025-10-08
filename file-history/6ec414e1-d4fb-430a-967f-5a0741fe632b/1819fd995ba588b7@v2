@@ -1,0 +1,265 @@
+"""
+Test script for v0.2.1 UX improvements.
+
+Tests:
+1. Factory methods work correctly
+2. n_features property returns correct values
+3. feature_mode property returns correct values
+4. min_lookback returns correct values for both modes
+5. Custom date_column works in multi-interval mode
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+# Add src to path for local testing
+import sys
+sys.path.insert(0, '/Users/terryli/eon/atr-adaptive-laguerre/src')
+
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+
+def generate_test_data(n_bars: int, date_column: str = 'date') -> pd.DataFrame:
+    """Generate synthetic OHLCV data for testing."""
+    dates = [datetime(2024, 1, 1) + timedelta(hours=i) for i in range(n_bars)]
+
+    np.random.seed(42)
+    close_prices = 100 + np.cumsum(np.random.randn(n_bars) * 0.5)
+
+    df = pd.DataFrame({
+        date_column: dates,
+        'open': close_prices + np.random.randn(n_bars) * 0.2,
+        'high': close_prices + np.abs(np.random.randn(n_bars)) * 0.5,
+        'low': close_prices - np.abs(np.random.randn(n_bars)) * 0.5,
+        'close': close_prices,
+        'volume': np.random.randint(1000, 10000, n_bars)
+    })
+
+    return df
+
+
+def test_factory_methods():
+    """Test that factory methods create correct configs."""
+    print("=" * 60)
+    print("TEST 1: Factory Methods")
+    print("=" * 60)
+
+    # Test single_interval factory
+    config_single = ATRAdaptiveLaguerreRSIConfig.single_interval()
+    assert config_single.multiplier_1 is None
+    assert config_single.multiplier_2 is None
+    print("✓ single_interval() creates config without multipliers")
+
+    # Test multi_interval factory
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+    assert config_multi.multiplier_1 == 4
+    assert config_multi.multiplier_2 == 12
+    print("✓ multi_interval() creates config with multipliers (4, 12)")
+
+    # Test custom parameters
+    config_custom = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=3,
+        multiplier_2=9,
+        atr_period=20
+    )
+    assert config_custom.multiplier_1 == 3
+    assert config_custom.multiplier_2 == 9
+    assert config_custom.atr_period == 20
+    print("✓ Factory methods accept custom parameters")
+
+    print()
+
+
+def test_n_features_property():
+    """Test that n_features property returns correct values."""
+    print("=" * 60)
+    print("TEST 2: n_features Property")
+    print("=" * 60)
+
+    # Single-interval mode
+    config_single = ATRAdaptiveLaguerreRSIConfig.single_interval()
+    indicator_single = ATRAdaptiveLaguerreRSI(config_single)
+    assert indicator_single.n_features == 27
+    print(f"✓ Single-interval n_features: {indicator_single.n_features}")
+
+    # Multi-interval mode
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+    indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+    assert indicator_multi.n_features == 121
+    print(f"✓ Multi-interval n_features: {indicator_multi.n_features}")
+
+    print()
+
+
+def test_feature_mode_property():
+    """Test that feature_mode property returns correct values."""
+    print("=" * 60)
+    print("TEST 3: feature_mode Property")
+    print("=" * 60)
+
+    # Single-interval mode
+    config_single = ATRAdaptiveLaguerreRSIConfig.single_interval()
+    indicator_single = ATRAdaptiveLaguerreRSI(config_single)
+    assert indicator_single.feature_mode == "single-interval"
+    print(f"✓ Single-interval feature_mode: '{indicator_single.feature_mode}'")
+
+    # Multi-interval mode
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+    indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+    assert indicator_multi.feature_mode == "multi-interval"
+    print(f"✓ Multi-interval feature_mode: '{indicator_multi.feature_mode}'")
+
+    print()
+
+
+def test_min_lookback_property():
+    """Test that min_lookback returns correct values for both modes."""
+    print("=" * 60)
+    print("TEST 4: min_lookback Property")
+    print("=" * 60)
+
+    # Single-interval mode
+    config_single = ATRAdaptiveLaguerreRSIConfig.single_interval(
+        atr_period=14,
+        smoothing_period=5
+    )
+    indicator_single = ATRAdaptiveLaguerreRSI(config_single)
+    expected_single = max(14, 5, 20) + 10  # 30
+    assert indicator_single.min_lookback == expected_single
+    print(f"✓ Single-interval min_lookback: {indicator_single.min_lookback} (expected: {expected_single})")
+
+    # Multi-interval mode
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        atr_period=14,
+        smoothing_period=5
+    )
+    indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+    expected_multi = expected_single * 12  # 360
+    assert indicator_multi.min_lookback == expected_multi
+    print(f"✓ Multi-interval min_lookback: {indicator_multi.min_lookback} (expected: {expected_multi})")
+
+    print()
+
+
+def test_custom_date_column_single():
+    """Test that custom date_column works in single-interval mode."""
+    print("=" * 60)
+    print("TEST 5: Custom date_column (Single-Interval)")
+    print("=" * 60)
+
+    config = ATRAdaptiveLaguerreRSIConfig.single_interval(
+        date_column='actual_ready_time'
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    # Generate data with custom date column
+    df = generate_test_data(100, date_column='actual_ready_time')
+
+    # Should work without error
+    features = indicator.fit_transform_features(df)
+    assert features.shape[0] == 100
+    assert features.shape[1] == 27
+    print(f"✓ Custom date_column 'actual_ready_time' works: {features.shape}")
+
+    print()
+
+
+def test_custom_date_column_multi():
+    """Test that custom date_column works in multi-interval mode."""
+    print("=" * 60)
+    print("TEST 6: Custom date_column (Multi-Interval)")
+    print("=" * 60)
+
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        date_column='actual_ready_time'
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    # Generate sufficient data for multi-interval (need min_lookback rows)
+    required = indicator.min_lookback
+    df = generate_test_data(required + 50, date_column='actual_ready_time')
+
+    # Should work without error
+    features = indicator.fit_transform_features(df)
+    expected_rows = required + 50
+    assert features.shape[0] == expected_rows
+    assert features.shape[1] == 121
+    print(f"✓ Custom date_column 'actual_ready_time' works: {features.shape}")
+
+    print()
+
+
+def test_actual_feature_generation():
+    """Integration test: Verify actual feature generation works end-to-end."""
+    print("=" * 60)
+    print("TEST 7: End-to-End Feature Generation")
+    print("=" * 60)
+
+    # Single-interval
+    config_single = ATRAdaptiveLaguerreRSIConfig.single_interval()
+    indicator_single = ATRAdaptiveLaguerreRSI(config_single)
+    df_single = generate_test_data(100)
+    features_single = indicator_single.fit_transform_features(df_single)
+
+    print(f"✓ Single-interval generated: {features_single.shape} (expected: (100, 27))")
+    assert features_single.shape == (100, 27)
+
+    # Multi-interval
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+    indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+    required_multi = indicator_multi.min_lookback
+    df_multi = generate_test_data(required_multi + 50)
+    features_multi = indicator_multi.fit_transform_features(df_multi)
+
+    expected_multi_rows = required_multi + 50
+    print(f"✓ Multi-interval generated: {features_multi.shape} (expected: ({expected_multi_rows}, 121))")
+    assert features_multi.shape == (expected_multi_rows, 121)
+
+    # Verify column suffixes in multi-interval
+    base_cols = [c for c in features_multi.columns if c.endswith('_base')]
+    mult1_cols = [c for c in features_multi.columns if c.endswith('_mult1')]
+    mult2_cols = [c for c in features_multi.columns if c.endswith('_mult2')]
+    cross_cols = [c for c in features_multi.columns if not any(c.endswith(s) for s in ['_base', '_mult1', '_mult2'])]
+
+    print(f"  - Base features (_base): {len(base_cols)}")
+    print(f"  - Mult1 features (_mult1): {len(mult1_cols)}")
+    print(f"  - Mult2 features (_mult2): {len(mult2_cols)}")
+    print(f"  - Cross-interval features: {len(cross_cols)}")
+
+    print()
+
+
+def main():
+    """Run all tests."""
+    print("\n" + "=" * 60)
+    print("Testing v0.2.1 UX Improvements")
+    print("=" * 60 + "\n")
+
+    try:
+        test_factory_methods()
+        test_n_features_property()
+        test_feature_mode_property()
+        test_min_lookback_property()
+        test_custom_date_column_single()
+        test_custom_date_column_multi()
+        test_actual_feature_generation()
+
+        print("=" * 60)
+        print("ALL TESTS PASSED ✓")
+        print("=" * 60)
+
+    except AssertionError as e:
+        print(f"\n❌ TEST FAILED: {e}")
+        raise
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        raise
+
+
+if __name__ == '__main__':
+    main()

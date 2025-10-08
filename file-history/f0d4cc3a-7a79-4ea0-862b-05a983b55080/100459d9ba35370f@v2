@@ -1,0 +1,367 @@
+# CRITICAL BUG REPORT: v1.0.4 Data Leakage in Mult1 (4x) Interval
+
+**Package**: atr-adaptive-laguerre
+**Version**: v1.0.4
+**Severity**: CRITICAL - Data Leakage
+**Date**: 2025-10-07
+**Status**: ❌ **BLOCKING PRODUCTION DEPLOYMENT**
+
+---
+
+## Executive Summary
+
+v1.0.4 has a **CRITICAL DATA LEAKAGE BUG** in the mult1 (4x) interval that causes validation failures.
+
+**Impact**:
+- ❌ Cannot deploy to production
+- ❌ Fails validation framework (0/30 passed)
+- ❌ Introduces future data into predictions
+
+**Root Cause**: Off-by-one error or boundary condition bug in vectorized `availability_column` filtering for mult1 interval.
+
+**Occurrence**: Intermittent - fails at specific validation points where mult1 resampled bars align with validation times.
+
+---
+
+## Reproduction
+
+### Test Setup
+
+```python
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+import pandas as pd
+
+# Load BTC data
+data = pd.read_csv("resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Configure with availability filtering
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,  # 4x = 8h intervals
+    multiplier_2=12,  # 12x = 24h intervals
+    filter_redundancy=False,
+    availability_column="actual_ready_time"
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Generate features on full dataset
+features_full = indicator.fit_transform_features(data)
+
+# Generate features on prediction dataset (filtered by availability)
+validation_ready_time = pd.to_datetime("2025-03-17 04:00:00")
+pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare at matching timestamp
+match_idx = data[data["actual_ready_time"] == validation_ready_time].index[0]
+mult1_full = features_full.iloc[match_idx]["rsi_mult1"]
+mult1_pred = features_pred.iloc[-1]["rsi_mult1"]
+
+print(f"Mult1 Full:  {mult1_full}")
+print(f"Mult1 Pred:  {mult1_pred}")
+print(f"Difference:  {abs(mult1_full - mult1_pred)}")
+```
+
+### Expected Result
+
+```
+Mult1 Full:  0.7214841779676489
+Mult1 Pred:  0.7214841779676489
+Difference:  0.0000000000
+Status: PASS
+```
+
+### Actual Result (v1.0.4)
+
+```
+Mult1 Full:  0.7214841779676489
+Mult1 Pred:  0.6688954453883094
+Difference:  0.0525887326
+Status: FAIL - DATA LEAKAGE
+```
+
+---
+
+## Test Results
+
+### Multiple Validation Points
+
+| Validation Time | Base (1x) | Mult1 (4x) | Mult2 (12x) | Result |
+|---|---|---|---|---|
+| 2025-03-17 02:00:00 | ✓ PASS | ✗ **FAIL** | ✓ PASS | Data Leakage |
+| 2025-03-17 06:00:00 | ✓ PASS | ✓ PASS | ✓ PASS | OK |
+| 2025-03-18 00:00:00 | ✓ PASS | ✓ PASS | ✓ PASS | OK |
+| 2025-03-19 00:00:00 | ✓ PASS | ✓ PASS | ✓ PASS | OK |
+
+**Pattern**: Mult1 fails at **1 out of 4** validation points (25% failure rate).
+
+**Key Finding**: The failure is **intermittent** and occurs at specific timestamps where mult1 resampled bars align with validation times.
+
+---
+
+## Root Cause Analysis
+
+### Hypothesis: Off-by-One Error in Vectorized Filtering
+
+The v1.0.4 vectorization uses `np.searchsorted()` to map base intervals to resampled intervals:
+
+```python
+# Suspected implementation (from maintainer's description)
+mult1_indices = np.searchsorted(mult1_availability, base_times, side='right') - 1
+result["rsi_mult1"] = features_mult1_all["rsi"].iloc[mult1_indices].values
+```
+
+**Problem**: The `side='right'` with `-1` adjustment may be incorrect when:
+1. A mult1 resampled bar timestamp **exactly matches** a base timestamp
+2. The availability times align in a specific way
+
+### Specific Failing Case
+
+**Validation time**: 2025-03-17 04:00:00 (actual_ready_time)
+
+**Mult1 resampled bars** (every 8h):
+- 2025-03-16 20:00:00 → ready at 2025-03-16 22:00:00 ← Should use this
+- 2025-03-17 04:00:00 → ready at 2025-03-17 06:00:00 ← Should **NOT** use this!
+
+**What should happen**:
+- At validation time 04:00:00, only data up to 04:00:00 is available
+- The mult1 bar at 04:00:00 has ready time 06:00:00
+- This bar should be **excluded** (not available yet)
+- Should use previous bar (20:00:00, ready 22:00:00)
+
+**What actually happens** (suspected):
+- The vectorized code incorrectly includes the 04:00:00 mult1 bar
+- This introduces future data (data leakage)
+- Results in different RSI value
+
+### Why It's Intermittent
+
+The bug only occurs when:
+- A mult1 (8h) resampled bar timestamp **aligns exactly** with the validation timestamp
+- The availability filtering boundary condition is triggered
+
+This explains why 3/4 validation points pass - most timestamps don't align exactly with mult1 bars.
+
+---
+
+## Impact Assessment
+
+### Validation Framework
+
+**Current results**: 0/30 validation points passed
+
+**Why it fails**:
+- Validation framework tests 30 different timestamps
+- At least some of these align with mult1 bars
+- Each failure triggers validation framework rejection
+
+### Production ML Pipeline
+
+**Risk**: CRITICAL
+- Models trained with leaking features will have inflated performance
+- Predictions in production will use correct (non-leaking) features
+- Performance degradation in production vs backtesting
+
+**Example**:
+- Backtest shows 70% accuracy (using leaked future data)
+- Production shows 55% accuracy (no future data available)
+- This discrepancy can cause severe financial losses
+
+---
+
+## Comparison: v1.0.3 vs v1.0.4
+
+| Aspect | v1.0.3 | v1.0.4 |
+|---|---|---|---|
+| **Performance** | 6.29s (500 rows) | 0.575s (500 rows) |
+| **Scaling** | O(n^1.5) | O(n) |
+| **Data Leakage** | ✅ None | ✗ **Mult1 leakage** |
+| **Validation** | 0/30 (slow) | **0/30 (leakage)** |
+| **Production Ready** | ⚠️ Slow but correct | ❌ **Fast but broken** |
+
+**Verdict**: v1.0.4 is a **REGRESSION** from v1.0.3.
+- v1.0.3: Slow but correct
+- v1.0.4: Fast but introduces data leakage
+
+**Recommendation**: **REVERT TO v1.0.3** until this is fixed.
+
+---
+
+## Verification
+
+### Test Case 1: Exact Reproduction
+
+```python
+# This should pass but fails in v1.0.4
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load BTC data
+data = pd.read_csv("resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Configure
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column="actual_ready_time"
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Full features
+features_full = indicator.fit_transform_features(data)
+
+# Prediction features at problematic timestamp
+validation_ready_time = pd.to_datetime("2025-03-17 04:00:00")
+pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare
+match_idx = data[data["actual_ready_time"] == validation_ready_time].index[0]
+diff = abs(features_full.iloc[match_idx]["rsi_mult1"] - features_pred.iloc[-1]["rsi_mult1"])
+
+assert diff < 1e-5, f"Data leakage detected: diff={diff}"
+# This assertion FAILS in v1.0.4
+```
+
+### Test Case 2: Edge Cases
+
+Additional timestamps to test:
+- Times that align with mult1 bars (every 8h)
+- Times that align with mult2 bars (every 24h)
+- Times at dataset boundaries (start/end)
+
+---
+
+## Recommended Fixes
+
+### Option 1: Fix searchsorted Logic (Preferred)
+
+Review the vectorized indexing logic:
+
+```python
+# Current (suspected):
+mult1_indices = np.searchsorted(mult1_availability, base_times, side='right') - 1
+
+# Should be (maybe):
+mult1_indices = np.searchsorted(mult1_availability, base_times, side='left') - 1
+
+# Or:
+mult1_indices = np.searchsorted(mult1_availability, base_times, side='right', inclusive=False)
+```
+
+**Action**: Carefully review how availability filtering is implemented for mult1 specifically.
+
+### Option 2: Add Boundary Condition Handling
+
+```python
+# After computing indices, validate they're correct
+for i, (base_time, mult1_idx) in enumerate(zip(base_times, mult1_indices)):
+    # Ensure mult1 bar at mult1_idx has availability <= base_time
+    if mult1_availability[mult1_idx] > base_time:
+        mult1_idx -= 1  # Use previous bar instead
+        mult1_indices[i] = mult1_idx
+```
+
+### Option 3: Add Comprehensive Tests
+
+```python
+# tests/test_availability_filtering.py
+def test_mult1_no_leakage_at_boundary():
+    """Test that mult1 doesn't leak when validation time aligns with mult1 bar"""
+    # ... test case from reproduction above ...
+
+def test_mult1_no_leakage_multiple_points():
+    """Test mult1 across multiple validation points"""
+    # ... test with 100+ random timestamps ...
+
+def test_all_intervals_no_leakage():
+    """Comprehensive leakage test for all intervals"""
+    # ... test base, mult1, mult2 across entire dataset ...
+```
+
+---
+
+## Timeline
+
+**Discovery**: 2025-10-07 (after extensive testing)
+
+**Previous Status**:
+- v1.0.3: Slow but correct (validation showed context sensitivity, not leakage)
+- v1.0.4: Fast but broken (introduces actual data leakage)
+
+**Current Status**: BLOCKING production deployment
+
+**Required Action**: URGENT fix needed before production use
+
+---
+
+## Additional Context
+
+### Why This Wasn't Caught Initially
+
+Our initial simple tests (synthetic data, random timestamps) passed because:
+- Test data didn't align mult1 bars with validation times
+- Random timestamps have low probability of hitting exact mult1 boundaries
+- The bug is **edge-case specific**
+
+It was only caught by:
+- Running full validation framework with real market data
+- Testing at specific end-of-dataset timestamps
+- Systematic validation across 30 different points
+
+### Why v1.0.3 Was Correct
+
+v1.0.3 used pandas row-by-row operations:
+```python
+for idx in range(len(df)):
+    current_time = df["actual_ready_time"].iloc[idx]
+    available = df[df["actual_ready_time"] <= current_time]
+    # This correctly handles all boundary conditions
+```
+
+While slow, this approach correctly handled all edge cases.
+
+v1.0.4's vectorization introduced the boundary bug.
+
+---
+
+## Conclusion
+
+v1.0.4 has a **CRITICAL DATA LEAKAGE BUG** that makes it **unsuitable for production use**.
+
+**Immediate Actions**:
+1. ❌ **DO NOT deploy v1.0.4 to production**
+2. ⏪ **Revert to v1.0.3** for correctness
+3. 🐛 **Fix the off-by-one error** in mult1 availability filtering
+4. ✅ **Add comprehensive boundary condition tests**
+5. 🔄 **Re-release as v1.0.5** with fix + tests
+
+**We are reverting to v1.0.3 immediately** until this is resolved.
+
+---
+
+## Test Environment
+
+- **Python**: 3.10
+- **pandas**: 2.3.3
+- **numpy**: 2.2.6
+- **atr-adaptive-laguerre**: 1.0.4
+- **Validation framework**: ml-feature-set v1.1.18
+- **Test data**: Binance BTC/USDT 2h bars (32,736 rows, 2017-2025)
+
+---
+
+## Contact
+
+Available for:
+- Additional test cases
+- Debugging assistance
+- Verification of fixes
+- Beta testing of v1.0.5
+
+**Urgency**: CRITICAL - Blocking production deployment

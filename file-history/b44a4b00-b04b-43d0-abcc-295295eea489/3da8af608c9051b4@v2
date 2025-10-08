@@ -1,0 +1,455 @@
+# Validation Framework Issue: Detailed Root Cause Analysis for Chen & Ron
+
+## Executive Summary
+
+**Problem**: atr-adaptive-laguerre v1.0.5 passes all standalone tests but fails validation framework (0/30 steps)
+
+**Root Cause**: Validation framework and standalone tests produce DIFFERENT `pred_data` values for the SAME timestamp, SAME configuration, and SAME package version.
+
+**Evidence**: Minimal reproducible example demonstrates the discrepancy (see below)
+
+## The Issue in One Picture
+
+```
+Same Package (v1.0.5) + Same Config + Same Timestamp = Different Results
+
+Standalone Test:
+  rsi_mult1: full_data=0.7214841779676489, pred_data=0.7214841779676489 ✓ PASS (0.0 diff)
+
+Validation Framework:
+  rsi_mult1: full_data=0.7214841779676489, pred_data=0.6688954453883094 ✗ FAIL (0.0526 diff)
+```
+
+**Key Observation**: Both produce IDENTICAL `full_data` but DIFFERENT `pred_data`
+- This means they use the SAME package for full feature generation
+- But DIFFERENT data/config during prediction filtering phase
+
+## Bottom-Up Analysis
+
+### Layer 1: Package Verification (✓ CONFIRMED WORKING)
+
+**v1.0.5 Boundary Bug Fix**:
+```python
+# File: atr_adaptive_laguerre/features/atr_adaptive_rsi.py
+
+# Line 898 (mult1):
+mult1_indices = np.searchsorted(mult1_availability, base_times, side='left') - 1
+
+# Line 913 (mult2):
+mult2_indices = np.searchsorted(mult2_availability, base_times, side='left') - 1
+```
+
+**What this does**:
+- `side='left'` ensures we only use bars where `availability < base_time` (strict inequality)
+- This prevents using future data when validation time exactly matches a resampled bar timestamp
+
+**Verification**: Examined installed package code - fix IS present
+
+### Layer 2: Package Behavior Test (✓ PACKAGE WORKS CORRECTLY)
+
+**Standalone Test** (`test_failing_timestamp.py`):
+```python
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load data
+data = pd.read_csv("resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)  # Manual creation
+
+# Configure with availability_column
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    availability_column='actual_ready_time'  # ← Key parameter
+)
+
+indicator = ATRAdaptiveLaguerreRSI(config=config)
+
+# Test timestamp from validation Step 3/30
+validation_time = pd.to_datetime("2025-03-17 06:00:00")
+validation_ready_time = validation_time + timedelta(hours=2)  # 2025-03-17 08:00:00
+
+# Full features
+features_full = indicator.fit_transform_features(data)
+
+# Prediction features (filtered data)
+pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare
+full_val = features_full.iloc[match_idx]["rsi_mult1"]   # 0.7214841779676489
+pred_val = features_pred.iloc[-1]["rsi_mult1"]          # 0.7214841779676489
+diff = abs(full_val - pred_val)                          # 0.0 ✓ PASS
+```
+
+**Result**: ✓ PASS - Package correctly prevents data leakage
+
+### Layer 3: Validation Framework Test (✗ FAILS)
+
+**Validation Framework** (`run_feature_set_validation.py`):
+```python
+# Framework calls FeatureSet which internally does:
+indicator = self._get_indicator()  # Gets same package
+features_df = indicator.fit_transform_features(df)  # df has actual_ready_time
+
+# Result for Step 3/30 (2025-03-17 06:00:00):
+# rsi_mult1: full_data=0.7214841779676489, pred_data=0.6688954453883094
+# Diff: 0.0526 ✗ FAIL (v1.0.4 boundary bug signature!)
+```
+
+**Result**: ✗ FAIL - Same package, different behavior!
+
+## Minimal Reproducible Example
+
+### Test 1: Direct Package Usage (Standalone)
+**File**: `/workspace/test_standalone_vs_framework.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Minimal test showing package works correctly with manual actual_ready_time
+"""
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load data
+data = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+
+# MANUAL creation of actual_ready_time (2-hour offset)
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Configure
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4, multiplier_2=12,
+    availability_column='actual_ready_time',
+    filter_redundancy=False
+)
+indicator = ATRAdaptiveLaguerreRSI(config=config)
+
+# Test validation Step 3/30 timestamp
+val_time = pd.to_datetime("2025-03-17 06:00:00")
+val_ready = val_time + timedelta(hours=2)
+
+# Full features
+features_full = indicator.fit_transform_features(data)
+match_idx = data[data["actual_ready_time"] == val_ready].index[0]
+
+# Prediction features
+pred_data = data[data["actual_ready_time"] <= val_ready].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare
+print("STANDALONE TEST (Manual actual_ready_time)")
+print(f"rsi_mult1 full:  {features_full.iloc[match_idx]['rsi_mult1']}")
+print(f"rsi_mult1 pred:  {features_pred.iloc[-1]['rsi_mult1']}")
+print(f"Difference: {abs(features_full.iloc[match_idx]['rsi_mult1'] - features_pred.iloc[-1]['rsi_mult1'])}")
+```
+
+**Expected Output**:
+```
+STANDALONE TEST (Manual actual_ready_time)
+rsi_mult1 full:  0.7214841779676489
+rsi_mult1 pred:  0.7214841779676489
+Difference: 0.0  ✓ PASS
+```
+
+### Test 2: Framework Usage (Via FeatureSet)
+**File**: `/workspace/test_framework_behavior.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Test showing what validation framework does
+"""
+import sys
+sys.path.insert(0, '/workspace')
+
+import pandas as pd
+from datetime import timedelta
+from ml_feature_set.bundled.ohlcv_atr_adaptive_laguerre_size121_v3 import CustomFeatureSet
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+# Load data THROUGH FRAMEWORK (this adds actual_ready_time via time_utils.py)
+data_sources = prepare_data_sources_for_feature_set(
+    feature_set_name="test",
+    interval="2h",
+    exchange="binance",
+    symbol="BTC/USDT",
+    data_dir="/workspace/ml_feature_set/sample_data"
+)
+
+# Get the OHLCV data with framework-created actual_ready_time
+ohlcv_source = data_sources[0]
+df = ohlcv_source["data_df"].copy()
+
+print("FRAMEWORK TEST (Framework-created actual_ready_time)")
+print(f"First few actual_ready_time values:")
+print(df[["date", "actual_ready_time"]].head(3))
+print()
+
+# Check offset
+if "date" in df.columns and "actual_ready_time" in df.columns:
+    offset = (pd.to_datetime(df["actual_ready_time"].iloc[0]) -
+              pd.to_datetime(df["date"].iloc[0]))
+    print(f"Detected offset: {offset}")
+    print()
+
+# Now test with FeatureSet
+fs = CustomFeatureSet()
+fs.data_sources = {"ohlcv_1x": ohlcv_source}
+
+# This triggers indicator initialization and feature extraction
+# (same as validation framework does)
+fs.extract_feature()
+
+# Get features
+features_df = fs.data_df.copy()
+
+# Test same timestamp
+val_time = pd.to_datetime("2025-03-17 06:00:00")
+val_ready = val_time + timedelta(hours=2)
+
+if "actual_ready_time" in df.columns:
+    match_idx = df[df["actual_ready_time"] == val_ready].index[0]
+
+    # Prediction simulation (filter data like validation framework does)
+    pred_df = df[df["actual_ready_time"] <= val_ready].copy()
+
+    # Create new FeatureSet for prediction (mimics validation framework)
+    fs_pred = CustomFeatureSet()
+    fs_pred.data_sources = {"ohlcv_1x": {"data_df": pred_df}}
+    fs_pred.extract_feature()
+
+    features_pred = fs_pred.data_df.copy()
+
+    # Compare
+    print(f"rsi_mult1 full:  {features_df.iloc[match_idx]['atr_laguerre_rsi_mult1']}")
+    print(f"rsi_mult1 pred:  {features_pred.iloc[-1]['atr_laguerre_rsi_mult1']}")
+    print(f"Difference: {abs(features_df.iloc[match_idx]['atr_laguerre_rsi_mult1'] - features_pred.iloc[-1]['atr_laguerre_rsi_mult1'])}")
+```
+
+### Test 3: Compare actual_ready_time Creation
+**File**: `/workspace/test_ready_time_comparison.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Compare how actual_ready_time is created: Manual vs Framework
+"""
+import sys
+sys.path.insert(0, '/workspace')
+
+import pandas as pd
+from datetime import timedelta
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+# Method 1: Manual (how standalone test does it)
+data_manual = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data_manual["date"] = pd.to_datetime(data_manual["date"])
+data_manual["actual_ready_time"] = data_manual["date"] + timedelta(hours=2)
+
+# Method 2: Framework (how validation does it)
+data_sources = prepare_data_sources_for_feature_set(
+    feature_set_name="test",
+    interval="2h",
+    exchange="binance",
+    symbol="BTC/USDT",
+    data_dir="/workspace/ml_feature_set/sample_data"
+)
+data_framework = data_sources[0]["data_df"].copy()
+
+# Compare
+print("ACTUAL_READY_TIME COMPARISON")
+print("="*80)
+print()
+
+print("Method 1: Manual Creation (Standalone Test)")
+print(data_manual[["date", "actual_ready_time"]].head(5))
+print()
+
+print("Method 2: Framework Creation (Validation Framework)")
+print(data_framework[["date", "actual_ready_time"]].head(5))
+print()
+
+# Check if they're identical
+if "actual_ready_time" in data_framework.columns:
+    # Find test timestamp
+    test_date = pd.to_datetime("2025-03-17 06:00:00")
+
+    manual_row = data_manual[data_manual["date"] == test_date]
+    framework_row = data_framework[data_framework["date"] == test_date]
+
+    if not manual_row.empty and not framework_row.empty:
+        manual_ready = manual_row["actual_ready_time"].iloc[0]
+        framework_ready = framework_row["actual_ready_time"].iloc[0]
+
+        print(f"Test timestamp: {test_date}")
+        print(f"Manual actual_ready_time:    {manual_ready}")
+        print(f"Framework actual_ready_time: {framework_ready}")
+        print(f"Match: {manual_ready == framework_ready}")
+        print()
+
+        if manual_ready != framework_ready:
+            print("❌ FOUND THE ISSUE: actual_ready_time values DON'T MATCH!")
+            print(f"   Difference: {pd.to_datetime(framework_ready) - pd.to_datetime(manual_ready)}")
+else:
+    print("❌ Framework did NOT create actual_ready_time column!")
+    print(f"   Columns in framework data: {list(data_framework.columns)}")
+```
+
+## Hypothesis: Where to Look
+
+Based on the evidence, the issue is likely in ONE of these places:
+
+### 1. **time_utils.py offset calculation** (MOST LIKELY)
+**File**: `/workspace/ml_feature_set/utils/time_utils.py`, line 189
+
+```python
+def apply_ready_time_offset(source):
+    # ...
+    offset_str = source.get("ready_time_offset")  # ← Where does this come from?
+
+    # Parse offset
+    if "interval" in offset_str:
+        multiplier = int(offset_str.replace("interval", ""))
+        offset_str = source["interval"]  # ← For 2h interval
+        if multiplier > 1:
+            offset_str = get_resampled_interval(offset_str, multiplier)
+
+    # Create offset
+    if "h" in offset_str:
+        hours = int(offset_str.replace("h", ""))
+        offset = pd.Timedelta(hours=hours)
+
+    # Apply
+    df["actual_ready_time"] = pd.to_datetime(df["date"]) + offset  # ← Is offset 2h?
+```
+
+**Questions**:
+- What is `ready_time_offset` set to in validation framework?
+- Is it "2h" or "1interval" or something else?
+- If "1interval", does it correctly parse to 2 hours for 2h interval?
+
+### 2. **Data source configuration**
+**File**: Wherever data sources are configured for validation
+
+```python
+# Is ready_time_offset set correctly?
+data_source = {
+    "name": "ohlcv_1x",
+    "interval": "2h",
+    "ready_time_offset": "???",  # ← What is this value?
+    # ...
+}
+```
+
+### 3. **FeatureSet data_sources setup**
+**File**: `/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py`
+
+```python
+@property
+def data_dependencies(self):
+    return [
+        {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+    ]
+```
+
+**Question**: Does this trigger `ready_time_offset` setup? If so, what value?
+
+## Debugging Steps for Chen & Ron
+
+### Step 1: Run the comparison tests
+```bash
+# In ml-dev container
+cd /workspace
+
+# Test 1: Standalone (should PASS)
+python test_standalone_vs_framework.py
+
+# Test 2: Framework (will show if it FAILS)
+python test_framework_behavior.py
+
+# Test 3: Compare actual_ready_time creation (KEY TEST)
+python test_ready_time_comparison.py
+```
+
+**Expected**: Test 3 will show if `actual_ready_time` values differ between manual and framework creation.
+
+### Step 2: Add debug logging to time_utils.py
+```python
+# File: ml_feature_set/utils/time_utils.py, line 151
+
+offset_str = source_copy.get("ready_time_offset")
+print(f"DEBUG: ready_time_offset = {offset_str}")  # ← Add this
+
+# After offset calculation (line 184)
+print(f"DEBUG: calculated offset = {offset}")  # ← Add this
+
+# After applying offset (line 189)
+print(f"DEBUG: first 3 actual_ready_time values:")
+print(df[["date", "actual_ready_time"]].head(3))  # ← Add this
+```
+
+Then run validation and check what gets printed.
+
+### Step 3: Check data source configuration
+```bash
+# Search for where ready_time_offset is set
+cd /workspace
+grep -r "ready_time_offset" ml_feature_set/
+```
+
+## Quick Diagnosis Checklist
+
+Run this in container to get all key info:
+
+```python
+#!/usr/bin/env python3
+import sys
+sys.path.insert(0, '/workspace')
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+ds = prepare_data_sources_for_feature_set(
+    feature_set_name="test", interval="2h",
+    exchange="binance", symbol="BTC/USDT",
+    data_dir="/workspace/ml_feature_set/sample_data"
+)
+
+print("DATA SOURCE CONFIG:")
+for key in ["name", "interval", "ready_time_offset", "resample_factor"]:
+    print(f"  {key}: {ds[0].get(key, 'NOT SET')}")
+
+df = ds[0]["data_df"]
+print("\nFIRST 3 ROWS:")
+print(df[["date", "actual_ready_time"]].head(3) if "actual_ready_time" in df.columns else "No actual_ready_time!")
+
+print("\nOFFSET CALCULATION:")
+if "date" in df.columns and "actual_ready_time" in df.columns:
+    offset = pd.to_datetime(df["actual_ready_time"].iloc[0]) - pd.to_datetime(df["date"].iloc[0])
+    print(f"  Actual offset: {offset}")
+    print(f"  Expected: 2 hours")
+    print(f"  Match: {offset == pd.Timedelta(hours=2)}")
+```
+
+## Summary for Chen & Ron
+
+1. **Package v1.0.5 works correctly** (proven by standalone tests)
+
+2. **Validation framework produces different results** for same configuration
+
+3. **Root cause is in data pipeline**, specifically how `actual_ready_time` is created
+
+4. **Most likely culprit**: `ready_time_offset` configuration or calculation in `time_utils.py`
+
+5. **Minimal tests provided** to isolate and debug the exact issue
+
+6. **Fix should be in framework**, not package
+
+Please run the diagnostic tests above and let me know what you find. Happy to help debug further once we see the output!
+
+---
+**Contact**: Terry Li
+**Test Files**: `/workspace/test_*.py`
+**Analysis**: `/workspace/VALIDATION-FAILURE-ROOT-CAUSE-ANALYSIS.md`

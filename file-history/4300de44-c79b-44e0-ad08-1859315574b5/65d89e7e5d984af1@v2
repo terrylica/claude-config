@@ -1,0 +1,86 @@
+"""Debug script to check mult2 RSI history."""
+
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import pandas as pd
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Generate test data
+base_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+n_bars = 1000
+dates = [base_time + timedelta(hours=2 * i) for i in range(n_bars)]
+
+np.random.seed(42)
+price_base = 50000
+trend = np.linspace(0, 5000, n_bars)
+volatility = np.random.normal(0, 200, n_bars).cumsum()
+close_prices = price_base + trend + volatility
+
+data = pd.DataFrame(
+    {
+        "date": dates,
+        "open": close_prices * 0.999,
+        "high": close_prices * 1.002,
+        "low": close_prices * 0.998,
+        "close": close_prices,
+        "volume": np.random.uniform(1000000, 3000000, n_bars),
+        "actual_ready_time": [d + timedelta(hours=2) for d in dates],
+    }
+)
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    availability_column="actual_ready_time",
+    filter_redundancy=False,
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Full data
+features_full = indicator.fit_transform_features(data)
+
+# Sliced data
+validation_idx = 600
+lookback = indicator.min_lookback + 100
+data_sliced = data.iloc[validation_idx - lookback + 1 : validation_idx + 1].reset_index(drop=True)
+features_sliced = indicator.fit_transform_features(data_sliced)
+
+# Compare last 10 mult2 RSI values
+print("\n" + "=" * 80)
+print("MULT2 RSI HISTORY (last 10 available values)")
+print("=" * 80)
+
+# Get the last 10 non-NaN mult2 RSI values from full data
+full_mult2 = features_full["rsi_mult2"].dropna()
+sliced_mult2 = features_sliced["rsi_mult2"].dropna()
+
+print(f"Full mult2 bars: {len(full_mult2)}")
+print(f"Sliced mult2 bars: {len(sliced_mult2)}")
+
+# Find the corresponding positions
+# The last sliced bar should correspond to validation_idx=600 in full data
+# We need to figure out which mult2 bar index in full data corresponds to bar 600
+
+print("\nLast 10 mult2 RSI values:")
+print(f"{'Position':<15} {'Full':<15} {'Sliced':<15} {'Diff':<15}")
+print("-" * 60)
+
+for i in range(min(10, len(sliced_mult2))):
+    offset = i - len(sliced_mult2) + 1  # Negative offset from end
+    sliced_val = sliced_mult2.iloc[-1 + offset] if -offset <= len(sliced_mult2) else np.nan
+
+    # Find corresponding full data index
+    # The last sliced bar is at sliced index -1, which corresponds to full index validation_idx
+    # So offset from end in sliced should map to offset from validation_idx in full
+    full_idx = validation_idx + offset
+    if 0 <= full_idx < len(features_full):
+        full_val = features_full.iloc[full_idx]["rsi_mult2"]
+    else:
+        full_val = np.nan
+
+    if not pd.isna(full_val) and not pd.isna(sliced_val):
+        diff = abs(full_val - sliced_val)
+        status = "✅" if diff < 1e-10 else "❌"
+        print(f"{status} offset={offset:<7} {full_val:<15.8f} {sliced_val:<15.8f} {diff:<15.2e}")
+    else:
+        print(f"⚠️  offset={offset:<7} {str(full_val):<15} {str(sliced_val):<15}")

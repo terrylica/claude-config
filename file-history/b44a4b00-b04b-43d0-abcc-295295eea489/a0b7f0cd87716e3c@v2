@@ -1,0 +1,108 @@
+"""
+Minimal FeatureSet to reproduce validation framework bug - Version 2.
+
+This version simulates what atr-adaptive-laguerre does: it uses a "package-like" function
+that takes an availability_column parameter for filtering.
+
+This should demonstrate the actual bug.
+"""
+
+import pandas as pd
+import numpy as np
+from ml_feature_set.feature_set import FeatureSet
+
+
+def compute_feature_with_availability(df, availability_column=None):
+    """
+    Simulates what atr-adaptive-laguerre package does internally.
+
+    Computes feature using ONLY data where availability_column values are available.
+    This mimics the vectorized filtering that atr-adaptive-laguerre uses.
+    """
+    if availability_column is None:
+        raise ValueError("availability_column is required for non-anticipative features")
+
+    if availability_column not in df.columns:
+        raise ValueError(f"Column '{availability_column}' not found in data")
+
+    # Sort by the date column (not availability_column)
+    df = df.sort_values("date").reset_index(drop=True)
+
+    feature_values = []
+
+    # For each row, compute feature using vectorized availability filtering
+    # This is what atr-adaptive-laguerre does with np.searchsorted
+    for i in range(len(df)):
+        current_time = df.loc[i, "date"]  # Use date column for time reference
+        current_availability = df.loc[i, availability_column]
+
+        # Filter: Only use bars where availability <= current_availability
+        # This simulates atr-adaptive-laguerre's searchsorted logic
+        available_mask = df[availability_column] <= current_availability
+        available_data = df[available_mask]
+
+        # Compute simple feature: sum of last 3 close prices
+        if len(available_data) >= 3:
+            last_3_closes = available_data["close"].iloc[-3:].values
+            feature_value = float(np.sum(last_3_closes))
+        else:
+            feature_value = 0.0
+
+        feature_values.append(feature_value)
+
+    result_df = pd.DataFrame({
+        "package_feature": feature_values
+    })
+
+    return result_df
+
+
+class CustomFeatureSet(FeatureSet):
+    """
+    Minimal feature set that simulates atr-adaptive-laguerre's behavior:
+    - Delegates filtering to a "package" function
+    - Passes availability_column parameter
+
+    This should reproduce the validation framework bug.
+    """
+
+    @property
+    def data_dependencies(self):
+        """Only need OHLCV data at 1x interval"""
+        return [
+            {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+        ]
+
+    def get_source_lookback_length(self, source_name):
+        """Need 10 historical bars"""
+        if source_name.startswith("ohlcv"):
+            return 10
+        raise ValueError(f"Unsupported data source: {source_name}")
+
+    def extract_feature(self):
+        """
+        Extract feature using package-like function with availability_column.
+
+        This simulates how atr-adaptive-laguerre works: we pass the data and
+        availability_column parameter to an external function that handles filtering.
+        """
+        # Get OHLCV data
+        ohlcv_source = self.get_data_source("ohlcv_1x")
+        df = ohlcv_source["data_df"].copy()
+
+        # Validate actual_ready_time exists
+        if "actual_ready_time" not in df.columns:
+            raise ValueError(
+                "Data source missing 'actual_ready_time' column "
+                "(required by framework)"
+            )
+
+        # Call "package" function with availability_column parameter
+        # This is what FeatureSets using atr-adaptive-laguerre do
+        features_df = compute_feature_with_availability(
+            df,
+            availability_column='actual_ready_time'
+        )
+
+        # Set features
+        self.set_features_batch(features_df.to_dict('list'))

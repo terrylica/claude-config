@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""
+Analyze why 2025-03-17 14:00:00 consistently fails validation even with 8000 rows lookback.
+Compare what the package sees with full data vs sliced data.
+"""
+
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load validation data
+sample_data_dir = "/Users/terryli/eon/ml-feature-set/ml_feature_set/sample_data"
+df_full = pd.read_csv(f"{sample_data_dir}/resampled_binance_BTC-2h.csv")
+
+# Add required columns
+df_full['date'] = pd.to_datetime(df_full['date'])
+df_full['actual_ready_time'] = df_full['date'] + timedelta(hours=2)
+
+print("=" * 80)
+print("Analyzing failing timestamp: 2025-03-17 14:00:00")
+print("=" * 80)
+print()
+
+# Configure package
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    availability_column='actual_ready_time',
+    filter_redundancy=True
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Problem timestamp
+test_time = pd.to_datetime("2025-03-17 14:00:00")
+test_idx = df_full[df_full['actual_ready_time'] == test_time].index[0]
+
+print(f"Test timestamp: {test_time}")
+print(f"Test index in full data: {test_idx}")
+print(f"Full data shape: {df_full.shape}")
+print()
+
+# Compute features with full data
+print("Computing features with FULL data...")
+features_full = indicator.fit_transform_features(df_full)
+
+# Show regime features at this timestamp
+regime_cols = [c for c in features_full.columns if 'regime' in c or 'bars_since' in c]
+print(f"\nRegime features at test timestamp (FULL DATA):")
+for col in regime_cols:
+    print(f"  {col}: {features_full.iloc[test_idx][col]}")
+
+# Now test with different lookbacks
+print()
+print("=" * 80)
+print("Testing with SLICED data (different lookbacks)")
+print("=" * 80)
+
+for lookback in [1000, 5000, 10000, 20000]:
+    print(f"\nLookback: {lookback} rows")
+
+    start_idx = test_idx - lookback + 1
+    if start_idx < 0:
+        print("  Skipping (not enough data)")
+        continue
+
+    df_sliced = df_full.iloc[start_idx:test_idx + 1].reset_index(drop=True)
+    print(f"  Sliced data shape: {df_sliced.shape}")
+    print(f"  Time range: {df_sliced['actual_ready_time'].min()} to {df_sliced['actual_ready_time'].max()}")
+
+    # Compute features
+    features_sliced = indicator.fit_transform_features(df_sliced)
+
+    # Compare regime features
+    mismatches = 0
+    for col in regime_cols:
+        ref_val = features_full.iloc[test_idx][col]
+        sliced_val = features_sliced.iloc[-1][col]
+        match = "✓" if abs(ref_val - sliced_val) < 1e-4 else "✗"
+        if abs(ref_val - sliced_val) >= 1e-4:
+            mismatches += 1
+            print(f"  {match} {col}: full={ref_val}, sliced={sliced_val}")
+
+    if mismatches == 0:
+        print(f"  ✓ All {len(regime_cols)} regime features match!")
+    else:
+        print(f"  ✗ {mismatches}/{len(regime_cols)} regime features mismatch")
+
+print()
+print("=" * 80)
+print("CONCLUSION")
+print("=" * 80)
+print()
+print("If mismatches persist even with 20000 rows, the package has a fundamental bug")
+print("where it calculates features differently for sliced data vs full data.")
+print("This makes it unsuitable for rolling window validation / production inference.")

@@ -73,6 +73,83 @@ ZSH_HIGHLIGHT_STYLES[builtin]='fg=cyan'
 ZSH_HIGHLIGHT_STYLES[command]='fg=green'
 ```
 
+## Kitty Terminal Emulator
+
+### Helix Markdown Formatter (Prettier) PATH Issue
+
+**Problem**: Prettier formatter fails in Helix when Kitty is launched from Finder/GUI (markdown files opened by double-click). Error: `A formatter isn't available` or `env: node: No such file or directory`.
+
+**Root Cause**: macOS GUI apps inherit limited PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), excluding Homebrew and user-installed tools. Prettier requires `node` in PATH.
+
+**Solution**: Export PATH in Kitty's configuration.
+
+#### Required Setup
+
+**1. Install Prettier globally**:
+```bash
+npm install -g prettier@latest
+```
+
+**2. Create system symlinks** (ensures tools available regardless of shell config):
+```bash
+sudo ln -sf ~/.nvm/versions/node/v22.17.0/bin/node /usr/local/bin/node
+sudo ln -sf ~/.nvm/versions/node/v22.17.0/bin/prettier /usr/local/bin/prettier
+```
+
+**3. Configure Kitty PATH** (`~/.config/kitty/kitty.conf`):
+
+Add in the `env` section (~line 1658):
+```toml
+# Add /usr/local/bin to PATH for tools like prettier and node
+env PATH=/usr/local/bin:/opt/homebrew/bin:${PATH}
+```
+
+**4. Configure Helix formatter** (`~/.config/helix/languages.toml`):
+```toml
+[[language]]
+name = "markdown"
+formatter = { command = 'prettier', args = ["--parser", "markdown"] }
+auto-format = true
+```
+
+**5. Restart Kitty** (Cmd+Q, reopen) - config changes only apply to new instances.
+
+#### What DOESN'T Work
+
+❌ **Kitty as file handler for `public.data` files** - Kitty's Info.plist claims `public.data` but cannot handle `file://` URLs from macOS Launch Services
+❌ **Absolute paths in Helix config** - Helix caches config; symlinks + PATH export more reliable
+❌ **Shell rc file PATH exports** - Not loaded for GUI-launched apps
+
+#### Verification
+
+```bash
+# In Helix opened via Kitty
+:fmt
+
+# Should format markdown tables without errors
+```
+
+```bash
+# Check Helix health
+hx --health markdown
+# Should show: ✓ prettier
+```
+
+### File Associations
+
+For markdown files opened via double-click to use Kitty+Helix:
+
+```bash
+# Set Kitty as default for markdown
+duti -s net.kovidgoyal.kitty .md all
+duti -s net.kovidgoyal.kitty net.daringfireball.markdown all
+
+# For .txt files
+duti -s net.kovidgoyal.kitty .txt all
+```
+
+**Note**: Requires Kitty configured to open Helix by default. Set `$EDITOR` environment variable in shell config.
+
 ## Troubleshooting
 
 ### Check Current Focus Tracking State

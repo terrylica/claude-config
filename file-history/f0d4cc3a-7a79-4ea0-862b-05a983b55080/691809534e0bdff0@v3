@@ -1,0 +1,156 @@
+"""
+ATR-Adaptive Laguerre RSI Feature Set (v2 - Single-Interval, 27 Features)
+
+Volatility-adaptive momentum indicator using ATR-based Laguerre filter for
+dynamic regime detection and momentum analysis.
+
+Features (27 total):
+- Core RSI & Regime: rsi, regime, regime_bearish, regime_neutral, regime_bullish,
+  regime_changed, bars_in_regime, regime_strength
+- Distance Metrics: dist_overbought, dist_oversold, dist_midline, abs_dist_overbought,
+  abs_dist_oversold
+- Crossover Signals: cross_above_oversold, cross_below_overbought, cross_above_midline,
+  cross_below_midline
+- Temporal Tracking: bars_since_oversold, bars_since_overbought, bars_since_extreme
+- Momentum: rsi_change_1, rsi_change_5, rsi_velocity
+- Statistical: rsi_percentile_20, rsi_zscore_20, rsi_volatility_20, rsi_range_20
+
+Package: atr-adaptive-laguerre>=0.2.1
+Reference: https://pypi.org/project/atr-adaptive-laguerre/
+
+Changelog:
+- v2: Uses v0.2.1+ factory methods (.single_interval()), min_lookback property
+- v1: Initial implementation with workarounds for v0.1.x limitations
+"""
+
+import numpy as np
+import pandas as pd
+from ml_feature_set.feature_set import FeatureSet
+
+
+class CustomFeatureSet(FeatureSet):
+    """ATR-Adaptive Laguerre RSI Feature Set"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._indicator = None
+
+    def _get_indicator(self):
+        """Lazy initialization of ATR-Adaptive Laguerre RSI indicator"""
+        if self._indicator is None:
+            try:
+                from atr_adaptive_laguerre import (
+                    ATRAdaptiveLaguerreRSI,
+                    ATRAdaptiveLaguerreRSIConfig
+                )
+
+                # Use v0.2.1 factory method for single-interval mode (27 features)
+                config = ATRAdaptiveLaguerreRSIConfig.single_interval(
+                    atr_period=14,
+                    smoothing_period=5,
+                    smoothing_method='ema',
+                    level_up=0.85,
+                    level_down=0.15,
+                    adaptive_offset=0.75,
+                    date_column='actual_ready_time'  # Framework column name
+                )
+                self._indicator = ATRAdaptiveLaguerreRSI(config)
+
+                # Validate configuration
+                assert self._indicator.n_features == 27, \
+                    f"Expected 27 features, config will generate {self._indicator.n_features}"
+
+            except ImportError as e:
+                raise ImportError(
+                    "atr-adaptive-laguerre>=0.2.1 required. "
+                    "Install: uv pip install 'atr-adaptive-laguerre>=0.2.1'"
+                ) from e
+        return self._indicator
+
+    @property
+    def data_dependencies(self):
+        """Return data source dependencies information"""
+        return [
+            {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+        ]
+
+    def get_source_lookback_length(self, source_name):
+        """
+        Get required historical data length for specific data source.
+
+        Uses package's min_lookback property (v0.2.0+) for precise requirements.
+
+        Args:
+            source_name: Data source name (e.g., ohlcv_1x)
+
+        Returns:
+            Required historical data length
+        """
+        # Parse source name
+        parts = source_name.split("_")
+
+        if len(parts) > 1 and parts[-1].endswith("x"):
+            try:
+                int(parts[-1].replace("x", ""))
+                base_source = "_".join(parts[:-1])
+            except ValueError:
+                base_source = source_name
+        else:
+            base_source = source_name
+
+        if base_source == "ohlcv":
+            # Use package's min_lookback property (v0.2.1: returns 30 for single-interval)
+            indicator = self._get_indicator()
+            return indicator.min_lookback
+
+        raise ValueError(f"Unsupported data source: {source_name}")
+
+    def extract_feature(self):
+        """Extract ATR-Adaptive Laguerre RSI features"""
+
+        # Get OHLCV data source
+        ohlcv_source = self.get_data_source("ohlcv_1x")
+        df = ohlcv_source["data_df"].copy()
+
+        # Validate framework requirements
+        if "actual_ready_time" not in df.columns:
+            raise ValueError(
+                "Data source missing 'actual_ready_time' column "
+                "(required by ml-feature-set framework)"
+            )
+
+        # Validate OHLCV columns
+        required_columns = ["open", "high", "low", "close", "volume"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                f"Data source missing required columns: {', '.join(missing_columns)}"
+            )
+
+        # Get indicator and compute features
+        # Package v0.2.1+ accepts date_column='actual_ready_time' via config
+        indicator = self._get_indicator()
+        features_df = indicator.fit_transform_features(df)
+
+        # Validate feature count
+        if features_df.shape[1] != 27:
+            raise ValueError(
+                f"Feature count mismatch: expected 27 features, got {features_df.shape[1]}"
+            )
+
+        # Validate output shape
+        if features_df.shape[0] != df.shape[0]:
+            raise ValueError(
+                f"Feature output length mismatch: "
+                f"expected {df.shape[0]}, got {features_df.shape[0]}"
+            )
+
+        # Prefix feature names to avoid conflicts
+        feature_columns = {col: f"atr_laguerre_{col}" for col in features_df.columns}
+        features_df = features_df.rename(columns=feature_columns)
+
+        # Handle NaN values (ensure no missing data for validation)
+        features_df = features_df.fillna(0.0)
+
+        # Set features using batch method (avoids DataFrame fragmentation)
+        self.set_features_batch(features_df.to_dict('list'))

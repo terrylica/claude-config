@@ -1,0 +1,133 @@
+"""Deep dive into mult1 (4x) data leakage issue"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+print("=" * 80)
+print("MULT1 (4x) DATA LEAKAGE - DEEP DIVE")
+print("=" * 80)
+
+# Load real BTC data
+data = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Test multiple validation points
+validation_times = [
+    "2025-03-17 02:00:00",
+    "2025-03-17 06:00:00",
+    "2025-03-18 00:00:00",
+    "2025-03-19 00:00:00",
+]
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column="actual_ready_time"
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Generate features on full dataset
+print("\nGenerating features on full dataset...")
+features_full = indicator.fit_transform_features(data)
+
+print("\n" + "=" * 80)
+print("TESTING MULTIPLE VALIDATION POINTS")
+print("=" * 80)
+
+results = []
+
+for val_time_str in validation_times:
+    validation_time = pd.to_datetime(val_time_str)
+    validation_ready_time = validation_time + timedelta(hours=2)
+
+    # Get prediction data
+    pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+
+    # Generate prediction features
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    # Find matching row
+    matching_row = data[data["actual_ready_time"] == validation_ready_time]
+    if len(matching_row) == 0:
+        continue
+
+    match_idx = matching_row.index[0]
+
+    # Compare core features
+    base_full = features_full.iloc[match_idx]["rsi_base"]
+    base_pred = features_pred.iloc[-1]["rsi_base"]
+    base_diff = abs(base_full - base_pred)
+
+    mult1_full = features_full.iloc[match_idx]["rsi_mult1"]
+    mult1_pred = features_pred.iloc[-1]["rsi_mult1"]
+    mult1_diff = abs(mult1_full - mult1_pred)
+
+    mult2_full = features_full.iloc[match_idx]["rsi_mult2"]
+    mult2_pred = features_pred.iloc[-1]["rsi_mult2"]
+    mult2_diff = abs(mult2_full - mult2_pred)
+
+    print(f"\n{val_time_str}:")
+    print(f"  Base:  diff={base_diff:.10f}  {'PASS' if base_diff < 1e-5 else 'FAIL'}")
+    print(f"  Mult1: diff={mult1_diff:.10f}  {'PASS' if mult1_diff < 1e-5 else 'FAIL'}")
+    print(f"  Mult2: diff={mult2_diff:.10f}  {'PASS' if mult2_diff < 1e-5 else 'FAIL'}")
+
+    results.append({
+        'time': val_time_str,
+        'base_pass': base_diff < 1e-5,
+        'mult1_pass': mult1_diff < 1e-5,
+        'mult2_pass': mult2_diff < 1e-5,
+        'mult1_diff': mult1_diff
+    })
+
+print("\n" + "=" * 80)
+print("SUMMARY")
+print("=" * 80)
+
+base_pass_count = sum(1 for r in results if r['base_pass'])
+mult1_pass_count = sum(1 for r in results if r['mult1_pass'])
+mult2_pass_count = sum(1 for r in results if r['mult2_pass'])
+
+print(f"\nBase:  {base_pass_count}/{len(results)} passed")
+print(f"Mult1: {mult1_pass_count}/{len(results)} passed")
+print(f"Mult2: {mult2_pass_count}/{len(results)} passed")
+
+if mult1_pass_count < len(results):
+    print("\nCRITICAL: Mult1 (4x) has DATA LEAKAGE")
+    print(f"Failing {len(results) - mult1_pass_count}/{len(results)} validation points")
+
+    max_diff = max(r['mult1_diff'] for r in results)
+    print(f"Max difference: {max_diff:.6f}")
+
+    print("\nThis is a CRITICAL BUG in v1.0.4!")
+    print("The availability_column filtering is NOT working for mult1")
+else:
+    print("\nAll validation points pass!")
+
+# Additional diagnostic: Check the resampled mult1 data
+print("\n" + "=" * 80)
+print("DIAGNOSTIC: Mult1 Resampling")
+print("=" * 80)
+
+# Look at last few rows of mult1 resampled data
+validation_time = pd.to_datetime(validation_times[0])
+validation_ready_time = validation_time + timedelta(hours=2)
+
+print(f"\nValidation time: {validation_ready_time}")
+print(f"\nLast 10 rows of actual_ready_time around validation:")
+
+match_idx = data[data["actual_ready_time"] == validation_ready_time].index[0]
+context_data = data.iloc[max(0, match_idx-10):match_idx+1]
+
+print(context_data[['date', 'actual_ready_time', 'close']].to_string())
+
+# Check what mult1 interval (8h) would look like
+print(f"\nMult1 is 4x base interval: 2h * 4 = 8h intervals")
+print(f"Mult1 bars around this time (every 8h):")
+
+mult1_data = data[::4]  # Every 4th row (8h intervals)
+mult1_context = mult1_data.iloc[max(0, match_idx//4 - 3):match_idx//4 + 1]
+print(mult1_context[['date', 'actual_ready_time', 'close']].to_string())

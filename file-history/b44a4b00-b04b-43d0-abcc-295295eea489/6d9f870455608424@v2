@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""
+Quick diagnosis - run this first to see framework configuration
+"""
+import sys
+sys.path.insert(0, '/workspace')
+
+import pandas as pd
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set
+
+print("QUICK FRAMEWORK DIAGNOSIS")
+print("="*80)
+print()
+
+# Get data source as validation framework does
+ds = prepare_data_sources_for_feature_set(
+    feature_set_name="test",
+    interval="2h",
+    exchange="binance",
+    symbol="BTC/USDT",
+    data_dir="/workspace/ml_feature_set/sample_data"
+)
+
+print("1. DATA SOURCE CONFIGURATION:")
+print("-"*80)
+for key in ["name", "interval", "ready_time_offset", "resample_factor"]:
+    val = ds[0].get(key, 'NOT SET')
+    print(f"   {key}: {val}")
+print()
+
+df = ds[0]["data_df"]
+
+print("2. ACTUAL_READY_TIME CHECK:")
+print("-"*80)
+if "actual_ready_time" in df.columns:
+    print("   ✓ actual_ready_time column EXISTS")
+    print()
+    print("   First 3 rows:")
+    print(df[["date", "actual_ready_time"]].head(3).to_string(index=False))
+    print()
+
+    # Calculate offset
+    offset = pd.to_datetime(df["actual_ready_time"].iloc[0]) - pd.to_datetime(df["date"].iloc[0])
+    expected_offset = pd.Timedelta(hours=2)
+
+    print(f"   Calculated offset: {offset}")
+    print(f"   Expected offset:   {expected_offset}")
+    print(f"   Match: {'✓ YES' if offset == expected_offset else '✗ NO'}")
+    print()
+
+    if offset != expected_offset:
+        print("   ❌ ISSUE FOUND: Offset is NOT 2 hours!")
+        print(f"      Difference from expected: {offset - expected_offset}")
+    else:
+        print("   ✓ Offset is correct (2 hours)")
+
+else:
+    print("   ❌ actual_ready_time column MISSING!")
+    print(f"   Available columns: {list(df.columns)}")
+
+print()
+print("3. VALIDATION TIMESTAMP CHECK (Step 3/30):")
+print("-"*80)
+if "actual_ready_time" in df.columns and "date" in df.columns:
+    test_date = pd.to_datetime("2025-03-17 06:00:00")
+    test_row = df[df["date"] == test_date]
+
+    if not test_row.empty:
+        actual_ready = test_row["actual_ready_time"].iloc[0]
+        expected_ready = test_date + pd.Timedelta(hours=2)
+
+        print(f"   Date: {test_date}")
+        print(f"   Framework actual_ready_time: {actual_ready}")
+        print(f"   Expected actual_ready_time:  {expected_ready}")
+        print(f"   Match: {'✓ YES' if actual_ready == expected_ready else '✗ NO'}")
+
+        if actual_ready != expected_ready:
+            print()
+            print("   ❌ VALIDATION TIMESTAMP HAS WRONG actual_ready_time!")
+            print(f"      This explains why validation fails at this timestamp")
+
+print()
+print("="*80)
+print("DIAGNOSIS COMPLETE")
+print()
+print("Next steps:")
+print("1. If offset is wrong: Check ready_time_offset configuration")
+print("2. If offset is correct but validation fails: Run test_ready_time_comparison.py")
+print("3. If both are correct: Issue may be in FeatureSet data filtering logic")

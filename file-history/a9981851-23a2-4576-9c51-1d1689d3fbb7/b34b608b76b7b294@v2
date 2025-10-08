@@ -1,0 +1,195 @@
+# PyPI Account-Wide Token Failure - Diagnostic Plan
+
+## Problem Statement
+
+- ✅ **Project-scoped token ("aal")**: Works perfectly (200 OK)
+- ❌ **Account-wide tokens** (both old and new): Fail with 403 Forbidden
+- ❌ **Pattern**: ALL account-wide tokens fail, ALL project-scoped tokens work
+
+## Root Cause Hypotheses (from research)
+
+### Hypothesis 1: Account-Level Permission Restriction ⭐ **MOST LIKELY**
+**Evidence**:
+- PyPI documentation: "When a user is removed from owner/maintainer status, their API token stops working"
+- Account-wide tokens require Owner role with `manage:project` permission
+- Project-scoped tokens only need `upload` permission
+
+**Diagnostic Steps**:
+1. Check PyPI account settings for any warnings or restrictions
+2. Verify your role on the `atr-adaptive-laguerre` project:
+   - Go to https://pypi.org/project/atr-adaptive-laguerre/
+   - Check "Manage" tab (if accessible)
+   - Verify you're listed as "Owner" (not just "Maintainer")
+3. Check if your account has any security flags or limitations
+4. Look for email verification status
+
+**Fix if confirmed**:
+- If you're only a "Maintainer": Request Owner access or continue using project-scoped tokens
+- If account is flagged: Contact PyPI support to resolve
+- If email unverified: Verify email address
+
+### Hypothesis 2: Token Scope Metadata Corruption
+**Evidence**:
+- GitHub issue #11217: Tokens appear valid in UI but fail with 403
+- Both OLD and NEW account-wide tokens fail (suggests systemic issue, not token age)
+
+**Diagnostic Steps**:
+1. Check token creation details in PyPI UI:
+   - Token scope shows "Entire account (all projects)"
+   - Permissions show "Upload packages"
+   - No warning icons or messages
+2. Try creating account-wide token with different browser/session
+3. Check if account-wide tokens work for OTHER packages (if you have any)
+
+**Fix if confirmed**:
+- Report bug to PyPI support: https://github.com/pypi/support
+- Include evidence: project-scoped works, account-wide fails consistently
+
+### Hypothesis 3: 2FA/Security Enhancement (2024)
+**Evidence**:
+- PyPI enforced 2FA requirement as of January 1, 2024
+- Account-wide tokens may have stricter validation
+
+**Diagnostic Steps**:
+1. Verify 2FA is enabled on your PyPI account
+2. Check if account-wide tokens require additional verification
+3. Try regenerating 2FA codes and creating new account-wide token
+
+**Fix if confirmed**:
+- Enable/re-enable 2FA properly
+- Follow any new account-wide token requirements
+
+### Hypothesis 4: Account Type Limitation
+**Evidence**:
+- Some PyPI accounts have restrictions based on history, verification, etc.
+
+**Diagnostic Steps**:
+1. Check account age and history
+2. Look for any "new account" warnings
+3. Check if you've published packages before `atr-adaptive-laguerre`
+
+**Fix if confirmed**:
+- Wait for account to mature
+- Contact PyPI support for manual review
+- Use project-scoped tokens in the meantime
+
+## Recommended Action Plan
+
+### Phase 1: Quick Diagnostics (5 minutes)
+
+```bash
+# 1. Verify your PyPI account details
+open https://pypi.org/manage/account/
+
+# 2. Check your role on the project
+open https://pypi.org/project/atr-adaptive-laguerre/
+
+# 3. Check account-wide token details
+open https://pypi.org/manage/account/token/
+```
+
+Look for:
+- ⚠️ Any warning banners or messages
+- 📧 Email verification status
+- 🔐 2FA status
+- 👤 Your role on `atr-adaptive-laguerre` (Owner vs Maintainer)
+- ⚙️ Account-wide token permissions and scope
+
+### Phase 2: Test Other Packages (if applicable)
+
+If you have other PyPI packages:
+```bash
+# Try account-wide token on a different package
+uv publish --token "pypi-AgEIcHlwaS..." dist/other-package-*.whl
+```
+
+If it works for other packages → Package-specific issue
+If it fails for all packages → Account-level issue
+
+### Phase 3: Contact PyPI Support (if needed)
+
+If diagnostics don't reveal the issue:
+
+**Where**: https://github.com/pypi/support/issues
+**Title**: "Account-wide tokens return 403, project-scoped tokens work"
+**Include**:
+1. Account username (not email)
+2. Package name: `atr-adaptive-laguerre`
+3. Token IDs (not full tokens):
+   - Account-wide: `41b0e14c-80e9-479a-961e-12821aab2b64` (fails)
+   - Project-scoped: `c1d5867e-0d0e-4d8c-b409-04a8cc58cb40` (works)
+4. Error message: "403 Forbidden: Invalid or non-existent authentication information"
+5. What you've tested (both old and new account-wide tokens fail)
+
+## Workaround: Use Project-Scoped Tokens ✅ **RECOMMENDED**
+
+Since project-scoped tokens work perfectly, this is the **pragmatic solution**:
+
+### Benefits of Project-Scoped Tokens
+1. ✅ **More secure**: Limited blast radius if compromised
+2. ✅ **Actually work**: Proven to work in your environment
+3. ✅ **Best practice**: PyPI recommends them after initial upload
+4. ✅ **Easier to manage**: Clear token-to-package mapping
+
+### Setup for Multiple Packages
+
+```bash
+# Strategy 1: Multiple tokens in Doppler (one per package)
+doppler secrets set PYPI_TOKEN_AAL="pypi-..." --project claude-config --config dev
+doppler secrets set PYPI_TOKEN_PACKAGE2="pypi-..." --project claude-config --config dev
+
+# Strategy 2: Single token, update when switching packages
+doppler secrets set PYPI_TOKEN="pypi-..." --project claude-config --config dev
+
+# Strategy 3: Per-package Doppler configs (advanced)
+doppler secrets set PYPI_TOKEN="pypi-..." --project atr-adaptive-laguerre --config prod
+```
+
+## Current Status Summary
+
+| Component | Status | Action |
+|-----------|--------|--------|
+| **aal token** (project-scoped) | ✅ Working | Keep using this |
+| **accountwideall** (new, account-wide) | ❌ 403 | Investigate or delete |
+| **terrylica-entire-account** (old, account-wide) | ❌ 403 | Delete from PyPI |
+| **publishing** (old) | ❓ Unknown | Delete from PyPI |
+| **Doppler config** | ✅ Working | Already set to use aal token |
+| **bash -c wrapper** | ✅ Documented | Required for Doppler injection |
+
+## Decision Matrix
+
+| If you have... | Then... |
+|----------------|---------|
+| Only 1 package | Use project-scoped token (current setup) ✅ |
+| 2-5 packages | Use project-scoped tokens per package |
+| 6+ packages | Investigate account-wide issue OR use project-scoped tokens |
+| Need to upload new packages often | Worth fixing account-wide issue |
+| Packages are stable (rare uploads) | Project-scoped tokens are fine |
+
+## Final Recommendation
+
+**Short term** (now):
+- Keep using the working **"aal"** project-scoped token
+- Delete unused tokens from PyPI to reduce confusion
+
+**Medium term** (next week):
+- Run diagnostic checks above
+- Determine if account-wide tokens are actually needed
+- Contact PyPI support if needed
+
+**Long term** (ongoing):
+- If you get account-wide working: Update documentation
+- If you stick with project-scoped: Create token management workflow for new packages
+
+## Files Updated
+
+1. `~/.claude/specifications/pypi-publishing-methods.yaml` v2.1.0
+   - Documents current working state (aal token)
+   - Explains bash -c wrapper requirement
+   - Documents account-wide token failures
+
+2. `/tmp/pypi-token-investigation-2025-10-06.md`
+   - Complete test results and findings
+
+3. `/tmp/pypi-token-diagnostic-plan.md` (this file)
+   - Diagnostic steps and recommendations

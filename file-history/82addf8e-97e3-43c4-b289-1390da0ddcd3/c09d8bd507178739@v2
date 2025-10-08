@@ -1,0 +1,99 @@
+"""Verify feature counts and identify constant features from scratch."""
+import numpy as np
+import pandas as pd
+import sys
+sys.path.insert(0, '/Users/terryli/eon/atr-adaptive-laguerre/src')
+
+from atr_adaptive_laguerre.features.atr_adaptive_rsi import (
+    ATRAdaptiveLaguerreRSI,
+    ATRAdaptiveLaguerreRSIConfig,
+)
+
+# Generate realistic data (1000 bars)
+np.random.seed(42)
+n_bars = 1000
+dates = pd.date_range("2024-01-01", periods=n_bars, freq="2h")
+
+# Random walk price
+price = 100 + np.cumsum(np.random.randn(n_bars) * 2)
+data = pd.DataFrame({
+    "date": dates,
+    "open": price,
+    "high": price + np.random.rand(n_bars) * 2,
+    "low": price - np.random.rand(n_bars) * 2,
+    "close": price + np.random.randn(n_bars) * 0.5,
+    "volume": np.random.randint(1000000, 10000000, n_bars),
+})
+
+print("=" * 80)
+print("FEATURE COUNT VERIFICATION")
+print("=" * 80)
+
+# Test 1: Without filtering (should be 121)
+print("\n1. Multi-interval WITHOUT redundancy filtering:")
+config_no_filter = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+)
+indicator_no_filter = ATRAdaptiveLaguerreRSI(config_no_filter)
+features_no_filter = indicator_no_filter.fit_transform_features(data)
+print(f"   Shape: {features_no_filter.shape}")
+print(f"   Features: {features_no_filter.shape[1]}")
+
+# Test 2: With filtering (should be 79 currently)
+print("\n2. Multi-interval WITH redundancy filtering:")
+config_filter = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=True,
+)
+indicator_filter = ATRAdaptiveLaguerreRSI(config_filter)
+features_filter = indicator_filter.fit_transform_features(data)
+print(f"   Shape: {features_filter.shape}")
+print(f"   Features: {features_filter.shape[1]}")
+
+# Identify constant features in the unfiltered set
+print("\n" + "=" * 80)
+print("CONSTANT FEATURES ANALYSIS (filter_redundancy=False)")
+print("=" * 80)
+
+constant_features = []
+for col in features_no_filter.columns:
+    std = features_no_filter[col].std()
+    n_unique = features_no_filter[col].nunique()
+    min_val = features_no_filter[col].min()
+    max_val = features_no_filter[col].max()
+
+    if std == 0 or n_unique == 1:
+        constant_features.append(col)
+        print(f"\n❌ CONSTANT: {col}")
+        print(f"   std={std:.10f}, unique={n_unique}, min={min_val}, max={max_val}")
+
+print(f"\n{'=' * 80}")
+print(f"TOTAL CONSTANT FEATURES: {len(constant_features)}")
+print(f"{'=' * 80}")
+
+# Check if these constants are in the filtered set
+print("\n" + "=" * 80)
+print("CONSTANT FEATURES IN FILTERED SET (filter_redundancy=True)")
+print("=" * 80)
+
+constants_in_filtered = [f for f in constant_features if f in features_filter.columns]
+if constants_in_filtered:
+    print(f"\n⚠️  FOUND {len(constants_in_filtered)} CONSTANT FEATURES IN FILTERED SET:")
+    for f in constants_in_filtered:
+        print(f"   - {f}")
+else:
+    print("\n✅ NO CONSTANT FEATURES IN FILTERED SET")
+
+# Summary
+print("\n" + "=" * 80)
+print("SUMMARY")
+print("=" * 80)
+print(f"Unfiltered features: {features_no_filter.shape[1]}")
+print(f"Filtered features: {features_filter.shape[1]}")
+print(f"Features removed by filter: {features_no_filter.shape[1] - features_filter.shape[1]}")
+print(f"Constant features found: {len(constant_features)}")
+print(f"Constants still in filtered set: {len(constants_in_filtered)}")
+print(f"\nExpected after removing constants: {features_filter.shape[1] - len(constants_in_filtered)}")

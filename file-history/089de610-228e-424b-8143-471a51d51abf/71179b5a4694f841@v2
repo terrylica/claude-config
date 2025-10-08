@@ -1,0 +1,260 @@
+# PyPI Publishing Learnings - 2025-10-06
+
+## What Went Wrong
+
+### 1. **Old Token in Doppler**
+**Problem**: The token stored in Doppler was "terrylica-entire-account" which had expired or been revoked.
+
+**Symptom**: 403 Forbidden errors when publishing:
+```
+error: Failed to publish to https://upload.pypi.org/legacy/
+  Caused by: Upload failed with status code 403 Forbidden.
+  Server says: 403 Invalid or non-existent authentication information.
+```
+
+**Root Cause**: PyPI tokens can expire or be revoked. We had an old token that was no longer valid.
+
+### 2. **Token Scope Confusion**
+**Problem**: Multiple tokens existed on PyPI:
+- "publishing" (created Sep 9, last used Oct 6) - old, expired
+- "terrylica-entire-account" (account-wide) - working but too broad in scope
+- "aal" (project-scoped for atr-adaptive-laguerre) - freshly created, best practice
+
+**What We Did Wrong**: Didn't check PyPI web interface first to see which tokens existed and their status.
+
+**What We Should Have Done**:
+1. Check https://pypi.org/manage/account/token/ FIRST
+2. Verify token "Last used" timestamp
+3. Create project-scoped token if needed
+4. Update Doppler immediately
+
+### 3. **Misdiagnosed Newline Issue**
+**Problem**: I saw a trailing newline (0x0a) when checking the token with `doppler secrets get` and thought it was corrupting the token.
+
+**What I Did Wrong**:
+```bash
+# This shows a newline for DISPLAY purposes
+doppler secrets get PYPI_TOKEN --plain | xxd | tail -1
+# 000000e0: 0a                                       .
+```
+
+I then tried to "fix" it by using `echo -n`, which was unnecessary.
+
+**The Truth**:
+- `doppler secrets get` adds a newline for terminal display formatting
+- `doppler run` passes the ACTUAL value without the newline
+- The token was stored correctly all along
+
+**Proof**:
+```bash
+# Display command adds newline
+doppler secrets get PYPI_TOKEN --plain | wc -c
+# 225 (224 + 1 newline)
+
+# Actual injection is correct
+doppler run -- bash -c 'echo ${#PYPI_TOKEN}'
+# 224 (no newline)
+```
+
+### 4. **Didn't Test Doppler Properly**
+**Problem**: We assumed Doppler was broken and spent time troubleshooting the wrong thing.
+
+**What We Should Have Done**: Test credential injection immediately:
+```bash
+# Step 1: Verify token is in Doppler
+doppler secrets get PYPI_TOKEN --project claude-config --config dev --plain | head -c 50
+
+# Step 2: Test injection works
+doppler run --project claude-config --config dev -- bash -c 'echo Token length: ${#PYPI_TOKEN}'
+
+# Step 3: Test actual publish command
+doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN" dist/package-0.2.1-py3-none-any.whl
+```
+
+This would have revealed the token was expired, not that Doppler was broken.
+
+## What We Learned
+
+### 1. **Project-Scoped Tokens Are Better**
+**Before**: Used account-wide "terrylica-entire-account" token
+**After**: Use project-scoped "aal" token for atr-adaptive-laguerre
+
+**Benefits**:
+- Limits blast radius if token is compromised
+- Easier to audit which token is used for which package
+- More granular permission control
+
+**Best Practice**:
+```bash
+# Token naming: use package abbreviation
+# atr-adaptive-laguerre → "aal"
+# ml-feature-set → "mfs"
+# etc.
+```
+
+### 2. **Doppler Display vs Actual Value**
+**Key Insight**: Display tools often add formatting (newlines, colors, etc.) but the actual stored value is clean.
+
+**How to Verify**:
+```bash
+# ❌ WRONG: This shows display formatting
+doppler secrets get PYPI_TOKEN --plain | xxd | tail -1
+
+# ✅ RIGHT: This shows actual injection
+doppler run -- bash -c 'printf "%s" "$PYPI_TOKEN" | xxd | tail -1'
+```
+
+**Lesson**: Always test credential injection with `doppler run`, not `doppler secrets get`.
+
+### 3. **Token Verification Workflow**
+**Correct Order**:
+1. **Check PyPI web interface** - https://pypi.org/manage/account/token/
+   - Look for "Last used" timestamp
+   - Create new project-scoped token if needed
+2. **Update Doppler** - Use stdin to avoid escaping issues:
+   ```bash
+   echo -n 'pypi-...' | doppler secrets set PYPI_TOKEN --project claude-config --config dev
+   ```
+3. **Verify storage** - Check token is in Doppler:
+   ```bash
+   doppler secrets get PYPI_TOKEN --project claude-config --config dev --plain | head -c 50
+   ```
+4. **Test injection** - Verify Doppler passes token correctly:
+   ```bash
+   doppler run --project claude-config --config dev -- bash -c 'echo ${#PYPI_TOKEN}'
+   # Should show 224 (or similar length)
+   ```
+5. **Test publish** - Try actual publish command:
+   ```bash
+   doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN" dist/*.whl
+   # Should get 200 OK (or 400 if already exists)
+   ```
+
+### 4. **Common 403 Causes**
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| 403 Forbidden | Token expired/revoked | Create new token on PyPI, update Doppler |
+| 403 Forbidden | Wrong token scope | Use project-scoped token, not account-wide |
+| 403 Forbidden | Typo in token | Copy-paste from PyPI "Copy token" button |
+| 403 Forbidden | Package name mismatch | Verify token scope matches package name |
+
+### 5. **Why Direct Token Worked But Doppler Didn't (Initially)**
+**What Happened**:
+```bash
+# Direct token - worked immediately
+uv publish --token "pypi-..." dist/*.whl
+# ✅ 200 OK
+
+# Doppler token - failed
+doppler run -- uv publish --token "$PYPI_TOKEN" dist/*.whl
+# ❌ 403 Forbidden
+```
+
+**Why**: The token in Doppler was old/expired. We were testing with the fresh "aal" token directly, but Doppler still had the old token.
+
+**Solution**: After updating Doppler with the fresh token, both methods worked identically.
+
+### 6. **Testing Strategy**
+**Before** (what we did wrong):
+1. Try to publish
+2. Get error
+3. Guess at the problem
+4. Try various fixes
+5. Repeat
+
+**After** (correct approach):
+1. Check PyPI web interface for token status
+2. Verify token in Doppler
+3. Test credential injection
+4. Test publish with simple command
+5. Only then debug if still failing
+
+## Corrected Workflow
+
+### For Future PyPI Publishing:
+
+1. **Check Token Status** (PyPI web interface)
+   ```bash
+   # Open browser to:
+   open https://pypi.org/manage/account/token/
+   # Look for:
+   # - Token name
+   # - Last used timestamp
+   # - Scope (project vs account)
+   ```
+
+2. **Create New Token If Needed**
+   - Click "Add API token"
+   - Name: Package abbreviation (e.g., "aal")
+   - Scope: "Project" → Select specific package
+   - Permissions: "Upload packages"
+   - Copy token value immediately (only shown once)
+
+3. **Update Doppler** (via stdin to avoid escaping)
+   ```bash
+   echo -n 'pypi-AgEIcHlwaS5vcmcC...' | doppler secrets set PYPI_TOKEN --project claude-config --config dev
+   ```
+
+4. **Verify Everything**
+   ```bash
+   # Check storage
+   doppler secrets get PYPI_TOKEN --project claude-config --config dev --plain | head -c 50
+
+   # Test injection
+   doppler run --project claude-config --config dev -- bash -c 'echo Token length: ${#PYPI_TOKEN}'
+
+   # Test publish (with existing file to avoid uploading)
+   doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN" dist/*.whl
+   ```
+
+5. **Publish** (if verification passed)
+   ```bash
+   # Standard command for all packages
+   doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN"
+   ```
+
+## Key Takeaways
+
+### ✅ What We Did Right
+1. Used Doppler for credential management (not .pypirc)
+2. Created project-scoped token for better security
+3. Verified the fix worked (v0.2.1 published successfully)
+4. Documented the learnings for future reference
+
+### ❌ What We Did Wrong
+1. Didn't check PyPI web interface first
+2. Misdiagnosed newline as the problem
+3. Wasted time "fixing" something that wasn't broken
+4. Didn't test credential injection early enough
+
+### 📝 Documentation Updates Made
+1. Updated `pypi-publishing-methods.yaml` to v2.1.0
+2. Changed active token from "terrylica-entire-account" to "aal"
+3. Added troubleshooting section for newline confusion
+4. Added verification workflow with step-by-step commands
+5. Added best practices for token management
+
+## Final Verification
+
+```bash
+# ✅ v0.2.1 successfully published to PyPI
+curl -s https://pypi.org/pypi/atr-adaptive-laguerre/json | jq -r '.info.version'
+# 0.2.1
+
+# ✅ Doppler credential injection works
+doppler run --project claude-config --config dev -- bash -c 'echo ${#PYPI_TOKEN}'
+# 224
+
+# ✅ Token verified on PyPI
+# Token name: aal
+# Scope: Project "atr-adaptive-laguerre"
+# Last used: 2025-10-06
+```
+
+## Lessons for Future
+
+1. **Always check token status FIRST** - Don't waste time debugging if the token is just expired
+2. **Test credential injection EARLY** - Use `doppler run -- bash -c 'echo $VAR'` to verify
+3. **Don't trust display output** - Test actual injection, not what `secrets get` shows
+4. **Use project-scoped tokens** - Better security, easier auditing
+5. **Document as you go** - Update specs immediately when you learn something new

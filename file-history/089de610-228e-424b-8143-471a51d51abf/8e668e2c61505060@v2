@@ -1,0 +1,622 @@
+# Temporal Leakage Testing - Current State & Enhancement Plan
+
+## Current Testing Coverage (v1.0.6)
+
+### ✅ What We've Tested (624 test cases)
+
+#### 1. Adversarial Audit (462 cases)
+- ✅ Exhaustive timestamp validation (128 tests)
+- ✅ Mult1 boundary attacks (160 tests)
+- ✅ Mult2 boundary attacks (54 tests)
+- ✅ Random validation points (100 tests)
+- ✅ Dataset boundaries (20 tests)
+- ✅ Cross-interval consistency (3 tests)
+
+#### 2. Extreme Edge Cases (162 cases)
+- ✅ Boundary alignment at exact timestamps
+- ✅ Variable availability delays
+- ✅ Minimum data requirements
+- ✅ Searchsorted edge cases
+- ✅ Redundancy filtering interaction
+- ✅ Extreme volatility
+- ✅ Simultaneous mult1/mult2 boundaries
+- ✅ Off-by-one exhaustive (500 positions)
+
+#### 3. Unit Tests (41 tests)
+- ✅ Availability column basic functionality (5 tests)
+- ✅ Feature expander (12 tests)
+- ✅ Redundancy filter (15 tests)
+- ✅ Walk-forward validation (9 tests)
+
+**Total: 624 + 41 = 665 temporal leakage-related tests**
+
+---
+
+## ⚠️ Testing Gaps Identified
+
+### Critical Gaps (High Priority)
+
+#### Gap 1: One-Time vs Permanent Tests
+**Problem**: Adversarial audits were one-time scripts, not in CI/CD
+- 624 test cases exist only in `/tmp/`
+- Not run on every commit
+- Will regress silently if bugs reintroduced
+
+**Risk**: HIGH - Future changes could reintroduce temporal leakage
+
+#### Gap 2: Limited Multiplier Combinations
+**Problem**: Only tested multiplier_1=4, multiplier_2=12
+- Didn't test other combinations: (2,6), (3,9), (5,10), (6,18)
+- Edge case: multiplier_1 == multiplier_2
+- Edge case: multiplier_1 > multiplier_2 (should error?)
+
+**Risk**: MEDIUM - Bugs might exist for specific multiplier combinations
+
+#### Gap 3: Incremental Update Testing
+**Problem**: Limited testing of `.update()` method
+- Only tested basic functionality
+- Didn't verify temporal safety during streaming
+- Didn't test state preservation across updates
+
+**Risk**: MEDIUM - Streaming mode could leak if state corrupted
+
+#### Gap 4: Availability Column Stress Tests
+**Problem**: Limited availability_column scenarios
+- Didn't test: availability going backwards (data errors)
+- Didn't test: large gaps in availability (exchange halts)
+- Didn't test: availability == date (same-bar availability)
+- Didn't test: non-monotonic availability
+
+**Risk**: MEDIUM - Real-world data anomalies could trigger leakage
+
+### Important Gaps (Medium Priority)
+
+#### Gap 5: Property-Based Testing
+**Problem**: No fuzzing or property-based tests
+- Not using hypothesis/pytest for random input generation
+- Missing automated edge case discovery
+- No invariant testing (e.g., "features always non-anticipative")
+
+**Risk**: MEDIUM - Unknown edge cases might exist
+
+#### Gap 6: Large-Scale Validation
+**Problem**: Only tested up to 1K rows
+- Didn't test 10K, 100K, 1M rows
+- Performance characteristics at scale unknown
+- Memory usage patterns unknown
+
+**Risk**: LOW - Likely just performance, but could expose bugs
+
+#### Gap 7: Real-World Data Patterns
+**Problem**: Only tested synthetic data
+- No tests with actual exchange data
+- No tests with market halts, circuit breakers
+- No tests with irregular trading hours
+- No tests with crypto 24/7 vs stock market hours
+
+**Risk**: MEDIUM - Real data has edge cases synthetic doesn't
+
+#### Gap 8: Different Base Intervals
+**Problem**: Only tested 2h base interval
+- Didn't test: 1m, 5m, 15m, 1h, 4h, 1d
+- Resampling edge cases might differ at different scales
+- Datetime arithmetic edge cases (DST, leap seconds)
+
+**Risk**: LOW - Logic should generalize, but untested
+
+### Lower Priority Gaps
+
+#### Gap 9: Stateful Scenarios
+**Problem**: Limited testing of stateful edge cases
+- What if user calls fit_transform() multiple times?
+- What if user mixes fit_transform() and update()?
+- What if user resets state mid-stream?
+
+**Risk**: LOW - Documented use cases work, edge cases unknown
+
+#### Gap 10: Backwards Compatibility
+**Problem**: No tests for version upgrades
+- Can v1.0.6 read v1.0.0 pickled states?
+- Do old configs still work?
+- Migration testing missing
+
+**Risk**: LOW - Not a temporal leakage issue, but UX issue
+
+---
+
+## 📋 Comprehensive Test Enhancement Plan
+
+### Phase 1: Permanence (Week 1) - CRITICAL
+
+**Goal**: Move adversarial tests into permanent test suite
+
+#### Task 1.1: Add Adversarial Regression Tests
+```python
+# tests/test_temporal/test_adversarial_regression.py
+
+class TestAdversarialRegression:
+    """Permanent regression tests from v1.0.5 adversarial audit"""
+
+    @pytest.mark.parametrize("n_bars", [500, 1000])
+    @pytest.mark.parametrize("mult1,mult2", [(4,12), (3,9), (6,18)])
+    def test_exhaustive_temporal_validation(self, n_bars, mult1, mult2):
+        """Test EVERY timestamp for temporal leakage (from adversarial audit)"""
+        # Convert /tmp/adversarial_temporal_audit.py to pytest
+        pass
+
+    def test_mult1_boundary_conditions(self):
+        """Test all mult1 boundary timestamps (160 cases from audit)"""
+        pass
+
+    def test_mult2_boundary_conditions(self):
+        """Test all mult2 boundary timestamps (54 cases from audit)"""
+        pass
+
+    def test_simultaneous_boundaries(self):
+        """Test LCM boundary alignment (from extreme audit)"""
+        pass
+```
+
+**Effort**: 2-3 days
+**Impact**: HIGH - Prevents regression of v1.0.4 bug
+
+#### Task 1.2: Add to CI/CD
+```yaml
+# .github/workflows/test.yml
+- name: Temporal Leakage Regression Tests
+  run: pytest tests/test_temporal/ -v --strict-markers
+```
+
+**Effort**: 1 day
+**Impact**: HIGH - Automated protection
+
+### Phase 2: Property-Based Testing (Week 2) - HIGH PRIORITY
+
+**Goal**: Use hypothesis to discover unknown edge cases
+
+#### Task 2.1: Property-Based Temporal Tests
+```python
+# tests/test_temporal/test_properties.py
+from hypothesis import given, strategies as st
+from hypothesis.extra.pandas import data_frames, column
+
+class TestTemporalProperties:
+    """Property-based tests using hypothesis"""
+
+    @given(
+        n_bars=st.integers(min_value=400, max_value=2000),
+        mult1=st.integers(min_value=2, max_value=20),
+        mult2=st.integers(min_value=2, max_value=20),
+        validation_idx=st.integers(min_value=360, max_value=1900)
+    )
+    def test_temporal_property_always_holds(self, n_bars, mult1, mult2, validation_idx):
+        """Property: Features at idx only use data before idx"""
+        # Generate random OHLCV data
+        # Validate temporal property
+        # Hypothesis will find edge cases automatically
+        pass
+
+    @given(
+        availability_delay=st.integers(min_value=1, max_value=10),
+        data=data_frames([
+            column('close', dtype=float),
+            column('high', dtype=float),
+            column('low', dtype=float),
+        ])
+    )
+    def test_availability_delay_property(self, availability_delay, data):
+        """Property: All delays from 1 to 10 hours preserve temporal safety"""
+        pass
+```
+
+**Effort**: 3-4 days
+**Impact**: HIGH - Discovers unknown bugs
+
+#### Task 2.2: Invariant Tests
+```python
+def test_invariant_features_non_decreasing_index():
+    """Invariant: Features always have non-decreasing index"""
+    pass
+
+def test_invariant_no_future_data():
+    """Invariant: Features[i] computed from data[0:i] only"""
+    pass
+
+def test_invariant_deterministic():
+    """Invariant: Same input → same output (determinism)"""
+    pass
+```
+
+**Effort**: 2 days
+**Impact**: MEDIUM - Codifies assumptions
+
+### Phase 3: Availability Column Stress Tests (Week 3) - HIGH PRIORITY
+
+**Goal**: Test complex real-world availability scenarios
+
+#### Task 3.1: Availability Edge Cases
+```python
+# tests/test_temporal/test_availability_stress.py
+
+class TestAvailabilityStress:
+
+    def test_availability_backwards_time_travel(self):
+        """Test: availability[i+1] < availability[i] (data error)"""
+        # Should either raise error or handle gracefully
+        pass
+
+    def test_availability_large_gaps(self):
+        """Test: 24h gap in availability (exchange halt)"""
+        pass
+
+    def test_availability_equals_date(self):
+        """Test: availability == date (same-bar availability)"""
+        # Edge case: bar available immediately
+        pass
+
+    def test_availability_far_future(self):
+        """Test: availability 1 year in future"""
+        # Edge case: extremely delayed data
+        pass
+
+    def test_availability_duplicates(self):
+        """Test: Multiple bars with same availability time"""
+        # Searchsorted edge case
+        pass
+
+    def test_availability_random_delays(self):
+        """Test: Random delays per bar (1-10 hours)"""
+        # Already partially tested, expand coverage
+        pass
+
+    def test_availability_exchange_halt_recovery(self):
+        """Test: Data resumes after 48h halt"""
+        # Real-world: Binance maintenance, FTX collapse
+        pass
+```
+
+**Effort**: 2-3 days
+**Impact**: HIGH - Real-world robustness
+
+#### Task 3.2: Market Hour Patterns
+```python
+def test_availability_stock_market_hours(self):
+    """Test: 9:30am-4pm weekdays only (US stocks)"""
+    # Weekend gaps, overnight gaps
+    pass
+
+def test_availability_crypto_24_7(self):
+    """Test: 24/7 trading (crypto)"""
+    pass
+
+def test_availability_dst_transitions(self):
+    """Test: Daylight saving time boundaries"""
+    # March/November transitions
+    pass
+```
+
+**Effort**: 2 days
+**Impact**: MEDIUM - Real-world scenarios
+
+### Phase 4: Multiplier Combinations (Week 4) - MEDIUM PRIORITY
+
+**Goal**: Test all reasonable multiplier combinations
+
+#### Task 4.1: Multiplier Matrix Tests
+```python
+# tests/test_temporal/test_multiplier_combinations.py
+
+class TestMultiplierCombinations:
+
+    @pytest.mark.parametrize("mult1,mult2", [
+        (2, 6),
+        (3, 9),
+        (4, 12),
+        (5, 15),
+        (6, 18),
+        (3, 12),
+        (4, 16),
+    ])
+    def test_common_multiplier_combinations(self, mult1, mult2):
+        """Test common multiplier combinations for temporal safety"""
+        pass
+
+    def test_multiplier_equal(self):
+        """Test: mult1 == mult2 (edge case)"""
+        # Should this be allowed? Or error?
+        pass
+
+    def test_multiplier_reversed(self):
+        """Test: mult1 > mult2 (should error)"""
+        # mult1 should be < mult2 for meaningful hierarchy
+        pass
+
+    def test_multiplier_very_large(self):
+        """Test: mult2 = 100 (very large)"""
+        # Extreme lookback requirements
+        pass
+
+    def test_multiplier_lcm_analysis(self):
+        """Test: Various LCM combinations"""
+        # LCM(mult1, mult2) determines boundary alignment frequency
+        pass
+```
+
+**Effort**: 2 days
+**Impact**: MEDIUM - Edge case coverage
+
+### Phase 5: Incremental Update Testing (Week 5) - MEDIUM PRIORITY
+
+**Goal**: Verify streaming mode temporal safety
+
+#### Task 5.1: Incremental Update Temporal Tests
+```python
+# tests/test_temporal/test_incremental_update.py
+
+class TestIncrementalUpdateTemporal:
+
+    def test_update_never_leaks(self):
+        """Test: update() at each timestep matches batch processing"""
+        # For each row i:
+        #   features_batch[i] == update(row_i)
+        pass
+
+    def test_update_state_preservation(self):
+        """Test: State correctly preserved across updates"""
+        pass
+
+    def test_update_vs_batch_equivalence(self):
+        """Test: 1000 updates == 1 batch fit_transform"""
+        pass
+
+    def test_update_after_fit_transform(self):
+        """Test: update() after fit_transform() is consistent"""
+        pass
+
+    def test_update_multi_interval_mode(self):
+        """Test: Multi-interval update() preserves temporal safety"""
+        # More complex than single-interval
+        pass
+```
+
+**Effort**: 2-3 days
+**Impact**: MEDIUM - Streaming mode safety
+
+### Phase 6: Large-Scale Testing (Week 6) - LOWER PRIORITY
+
+**Goal**: Test behavior at production scale
+
+#### Task 6.1: Large Dataset Tests
+```python
+# tests/test_temporal/test_large_scale.py
+
+@pytest.mark.slow
+class TestLargeScale:
+
+    def test_10k_rows_temporal_safety(self):
+        """Test: 10K rows maintain temporal guarantees"""
+        pass
+
+    def test_100k_rows_temporal_safety(self):
+        """Test: 100K rows maintain temporal guarantees"""
+        pass
+
+    @pytest.mark.skipif(not has_enough_memory(), reason="Requires 16GB RAM")
+    def test_1m_rows_temporal_safety(self):
+        """Test: 1M rows maintain temporal guarantees"""
+        pass
+
+    def test_memory_usage_bounded(self):
+        """Test: Memory doesn't leak with large datasets"""
+        pass
+```
+
+**Effort**: 2 days
+**Impact**: LOW - Mostly performance, not leakage
+
+### Phase 7: Real-World Data (Week 7) - MEDIUM PRIORITY
+
+**Goal**: Test with actual exchange data
+
+#### Task 7.1: Real Data Tests
+```python
+# tests/test_temporal/test_real_world_data.py
+
+class TestRealWorldData:
+
+    def test_binance_btcusdt_2h(self):
+        """Test: Real Binance BTCUSDT 2h data (2020-2024)"""
+        # Download via gapless-crypto-data
+        # Test temporal safety on real patterns
+        pass
+
+    def test_ftx_collapse_data(self):
+        """Test: FTX November 2022 collapse data"""
+        # Extreme volatility + exchange halt
+        pass
+
+    def test_covid_crash_march_2020(self):
+        """Test: COVID crash March 2020"""
+        # Extreme volatility, circuit breakers
+        pass
+
+    def test_stock_data_irregular_hours(self):
+        """Test: Stock data with market hours"""
+        # yfinance data for SPY, AAPL
+        pass
+```
+
+**Effort**: 3 days (requires data download/setup)
+**Impact**: MEDIUM - Real-world validation
+
+---
+
+## 🎯 Recommended Implementation Priority
+
+### Immediate (Next Release - v1.0.7)
+
+1. **Phase 1: Permanence** (Week 1)
+   - Move adversarial tests to permanent suite
+   - Add to CI/CD
+   - **Blocks**: v1.0.4 bug regression
+
+2. **Phase 3: Availability Stress** (Week 3)
+   - Critical for production robustness
+   - Real-world data has weird patterns
+   - **Blocks**: Production deployment confidence
+
+### Near-Term (v1.1.0)
+
+3. **Phase 2: Property-Based** (Week 2)
+   - Discover unknown bugs automatically
+   - Hypothesis is powerful for edge cases
+   - **Blocks**: Unknown unknowns
+
+4. **Phase 4: Multiplier Combinations** (Week 4)
+   - Users will try different combinations
+   - Easy to implement
+   - **Blocks**: User-reported bugs
+
+### Medium-Term (v1.2.0)
+
+5. **Phase 5: Incremental Updates** (Week 5)
+   - Important for streaming users
+   - Moderate complexity
+   - **Blocks**: Streaming mode adoption
+
+6. **Phase 7: Real-World Data** (Week 7)
+   - Validate with actual patterns
+   - Builds confidence
+   - **Blocks**: Enterprise adoption
+
+### Long-Term (v2.0.0)
+
+7. **Phase 6: Large-Scale** (Week 6)
+   - Performance testing
+   - Less critical for correctness
+   - **Blocks**: Large-scale deployments
+
+---
+
+## 📊 Test Coverage Metrics
+
+### Current Coverage
+- **Temporal Leakage Tests**: 665 (624 adversarial + 41 unit)
+- **Multiplier Combinations**: 1 (only 4x12)
+- **Availability Scenarios**: 5 basic cases
+- **Real-World Data**: 0
+- **Property-Based**: 0
+- **Large-Scale**: 0 (max 1K rows)
+
+### Target Coverage (After Full Plan)
+- **Temporal Leakage Tests**: 1000+ (permanent regression suite)
+- **Multiplier Combinations**: 20+ combinations
+- **Availability Scenarios**: 30+ edge cases
+- **Real-World Data**: 10+ datasets
+- **Property-Based**: 100+ generated scenarios
+- **Large-Scale**: 100K+ rows validated
+
+---
+
+## 🔧 Implementation Notes
+
+### Testing Infrastructure Needed
+
+1. **CI/CD Enhancement**
+```yaml
+# .github/workflows/test.yml
+jobs:
+  temporal-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Adversarial Regression Tests
+        run: pytest tests/test_temporal/test_adversarial_regression.py -v
+
+      - name: Property-Based Tests
+        run: pytest tests/test_temporal/test_properties.py -v --hypothesis-profile=ci
+
+      - name: Availability Stress Tests
+        run: pytest tests/test_temporal/test_availability_stress.py -v
+```
+
+2. **Test Data Management**
+```python
+# tests/fixtures/temporal_data.py
+@pytest.fixture
+def large_synthetic_dataset():
+    """Generate 100K row synthetic dataset with caching"""
+    # Cache to avoid regenerating each test
+    pass
+
+@pytest.fixture
+def binance_real_data():
+    """Download real Binance data (cached)"""
+    # Use gapless-crypto-data
+    pass
+```
+
+3. **Performance Monitoring**
+```python
+# tests/conftest.py
+@pytest.fixture(autouse=True)
+def track_test_performance(request):
+    """Track test execution time"""
+    # Alert if tests get slower
+    pass
+```
+
+---
+
+## 🎓 Lessons from v1.0.4 Bug
+
+The v1.0.4 boundary bug teaches us:
+
+1. **Boundary conditions are critical** - Test at exact alignments
+2. **Off-by-one errors are subtle** - `side='right'` vs `side='left'`
+3. **Exhaustive testing finds bugs** - 25% failure rate only at boundaries
+4. **Real user data differs** - Synthetic tests didn't catch it initially
+5. **Permanent regression tests matter** - One-time audits aren't enough
+
+---
+
+## 💡 Key Recommendations
+
+### Must-Do (Before Production Use)
+1. ✅ Move adversarial tests to permanent suite (Phase 1)
+2. ✅ Add property-based testing (Phase 2)
+3. ✅ Availability stress tests (Phase 3)
+
+### Should-Do (For Robustness)
+4. ✅ Multiplier combination tests (Phase 4)
+5. ✅ Incremental update tests (Phase 5)
+6. ✅ Real-world data validation (Phase 7)
+
+### Nice-to-Have (For Scale)
+7. ✅ Large-scale tests (Phase 6)
+
+---
+
+## 📈 Success Metrics
+
+### Test Suite Quality Metrics
+- **Coverage**: >95% of temporal logic
+- **Regression Prevention**: v1.0.4 bug cannot recur
+- **CI Time**: <10 minutes for full suite
+- **Flakiness**: <0.1% false positives
+
+### Confidence Metrics
+- **Production Readiness**: All Phase 1-3 tests passing
+- **Enterprise Readiness**: All Phase 1-7 tests passing
+- **Bug Escape Rate**: <1 temporal bug per year
+
+---
+
+## 🚀 Next Steps
+
+1. **Immediate**: Implement Phase 1 (Permanence) - Week 1
+2. **This Sprint**: Implement Phase 3 (Availability Stress) - Week 3
+3. **Next Sprint**: Implement Phase 2 (Property-Based) - Week 2
+4. **Backlog**: Phases 4-7 as capacity allows
+
+**Total Effort**: ~7 weeks for complete implementation
+**Critical Path**: Phases 1-3 (3 weeks) for production readiness

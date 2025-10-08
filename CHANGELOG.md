@@ -300,6 +300,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarify Doppler as exclusive PyPI publishing method - Version 2.0.0 of specification - DopplerTokenMethod marked as ACTIVE METHOD (use exclusively) - Consolidated deprecated methods into DeprecatedMethods section - ~/.pypirc marked as DO NOT USE (tokens expire) - Trusted publishing marked as future consideration - Clear migration note: token already in Doppler
 
+- Add Kitty terminal configuration and session tracking - Add comprehensive Kitty terminal setup guide for Helix+Prettier PATH configuration - Document macOS GUI app PATH limitations and workarounds for markdown formatting - Preserve Claude Code session history tracking (file-history/, todos/) - Update .gitignore to exclude debug/ and ide/ directories - Add Kitty Terminal reference to CLAUDE.md terminal configuration section This commit addresses markdown auto-formatting issues in Helix when Kitty is launched from Finder/GUI by documenting the PATH export solution and required system symlinks.
+
 
 ### 📝 Other Changes
 

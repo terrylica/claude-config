@@ -1,0 +1,323 @@
+"""
+Tail Risk Feature IC (Information Coefficient) Validation
+
+Validates that tail risk features provide incremental predictive value beyond
+their source features by comparing Information Coefficients on out-of-sample data.
+
+Methodology:
+- Out-of-sample: 2025-01-01 to 2025-09-30 (not used in correlation analysis)
+- IC = Spearman correlation between feature[t] and forward_return[t+1]
+- Compare tail risk feature IC vs source feature IC
+- IC gain > +5% indicates incremental value
+
+SLOs:
+- Availability: 100% (all inputs validated)
+- Correctness: 100% (scipy Spearman reference implementation)
+- Observability: Structured CSV/JSON outputs
+- Maintainability: Single-responsibility functions
+
+Error Handling: raise_and_propagate
+- ValueError on missing data or validation failures
+"""
+
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import gapless_crypto_data as gcd
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, '/Users/terryli/eon/atr-adaptive-laguerre/src')
+
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+from atr_adaptive_laguerre.validation import calculate_information_coefficient
+
+
+# Tail risk features and their source features
+FEATURE_PAIRS = {
+    "rsi_shock_1bar_base": ["rsi_change_1_base"],
+    "rsi_shock_5bar_base": ["rsi_change_5_base"],
+    "extreme_regime_persistence_base": ["bars_in_regime_base", "regime_base"],
+    "rsi_volatility_spike_base": ["rsi_volatility_20_base"],
+    "rsi_acceleration_base": ["rsi_change_1_base", "rsi_velocity_base"],
+    "tail_risk_score_base": [],  # Composite, no direct source
+}
+
+
+def load_out_of_sample_data(
+    symbol: str = "BTCUSDT",
+    interval: str = "2h",
+    start_date: str = "2025-01-01",
+    end_date: str = "2025-09-30",
+) -> pd.DataFrame:
+    """
+    Load out-of-sample OHLCV data.
+
+    Args:
+        symbol: Trading pair
+        interval: Timeframe
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+
+    Returns:
+        OHLCV DataFrame
+
+    Raises:
+        ValueError: If data loading fails or insufficient data
+    """
+    print(f"[load_data] Fetching {symbol} {interval} from {start_date} to {end_date}")
+    df = gcd.download(symbol, timeframe=interval, start=start_date, end=end_date)
+
+    if df is None or df.empty:
+        raise ValueError(f"No data loaded for {symbol}")
+
+    if len(df) < 500:
+        raise ValueError(f"Insufficient data: {len(df)} bars (need ≥500)")
+
+    # Ensure 'date' column exists (gcd.download returns date as index)
+    if 'date' not in df.columns:
+        df = df.reset_index()
+        if 'index' in df.columns:
+            df = df.rename(columns={'index': 'date'})
+
+    print(f"[load_data] Loaded {len(df)} bars")
+    return df
+
+
+def extract_features_with_prices(
+    df_ohlcv: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """
+    Extract 139 features and prices.
+
+    Args:
+        df_ohlcv: OHLCV DataFrame
+
+    Returns:
+        Tuple of (features DataFrame, prices Series)
+
+    Raises:
+        ValueError: If feature extraction fails
+    """
+    print("[extract] Extracting 139 features (filter_redundancy=False)")
+
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        filter_redundancy=False,
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    features = indicator.fit_transform_features(df_ohlcv)
+
+    if features.shape[1] != 139:
+        raise ValueError(f"Expected 139 features, got {features.shape[1]}")
+
+    # Drop NaN rows (warmup period)
+    features_clean = features.dropna()
+    n_dropped = len(features) - len(features_clean)
+    print(f"[extract] {len(features_clean)} rows ({n_dropped} dropped for warmup)")
+
+    # Get corresponding prices
+    prices = df_ohlcv["close"].iloc[-len(features_clean):].reset_index(drop=True)
+
+    return features_clean, prices
+
+
+def calculate_feature_ic(
+    feature: pd.Series,
+    prices: pd.Series,
+    forward_periods: int = 1,
+) -> float:
+    """
+    Calculate IC for a single feature.
+
+    Args:
+        feature: Feature values
+        prices: Price series
+        forward_periods: Look-ahead periods
+
+    Returns:
+        IC value (Spearman correlation)
+
+    Raises:
+        ValueError: If IC calculation fails
+    """
+    try:
+        ic = calculate_information_coefficient(
+            feature=feature,
+            prices=prices,
+            forward_periods=forward_periods,
+        )
+        return ic
+    except Exception as e:
+        raise ValueError(f"IC calculation failed: {e}")
+
+
+def compute_ic_comparisons(
+    features: pd.DataFrame,
+    prices: pd.Series,
+    output_dir: Path,
+) -> pd.DataFrame:
+    """
+    Compute IC for tail risk features and their source features.
+
+    Args:
+        features: Feature DataFrame
+        prices: Price series
+        output_dir: Directory to save outputs
+
+    Returns:
+        DataFrame with IC comparison results
+
+    Raises:
+        ValueError: If any required feature is missing
+    """
+    print("[ic] Computing IC for tail risk features and source features")
+
+    results = []
+
+    for tail_feat, source_feats in FEATURE_PAIRS.items():
+        print(f"\n[ic] Analyzing {tail_feat}")
+
+        # Calculate IC for tail risk feature
+        if tail_feat not in features.columns:
+            print(f"[ic] WARNING: {tail_feat} not found, skipping")
+            continue
+
+        tail_ic = calculate_feature_ic(features[tail_feat], prices)
+        print(f"[ic]   Tail risk IC: {tail_ic:.4f}")
+
+        # Calculate IC for source features
+        source_ics = {}
+        for source_feat in source_feats:
+            if source_feat not in features.columns:
+                print(f"[ic]   WARNING: Source feature {source_feat} not found")
+                continue
+
+            source_ic = calculate_feature_ic(features[source_feat], prices)
+            source_ics[source_feat] = source_ic
+            print(f"[ic]   Source {source_feat} IC: {source_ic:.4f}")
+
+        # Find best source IC
+        if source_ics:
+            best_source_feat = max(source_ics, key=lambda k: abs(source_ics[k]))
+            best_source_ic = source_ics[best_source_feat]
+            ic_gain_pct = ((abs(tail_ic) - abs(best_source_ic)) / max(abs(best_source_ic), 1e-6)) * 100
+        else:
+            best_source_feat = None
+            best_source_ic = np.nan
+            ic_gain_pct = np.nan
+
+        # Determine action
+        if np.isnan(ic_gain_pct):
+            action = "KEEP"  # No source to compare
+            reason = "No source feature (composite)"
+        elif ic_gain_pct > 5.0:
+            action = "KEEP"
+            reason = f"IC gain: +{ic_gain_pct:.1f}% (adds predictive value)"
+        elif ic_gain_pct < -5.0:
+            action = "DROP"
+            reason = f"IC loss: {ic_gain_pct:.1f}% (worse than source)"
+        else:
+            action = "INVESTIGATE"
+            reason = f"IC gain: {ic_gain_pct:+.1f}% (marginal)"
+
+        results.append({
+            "tail_risk_feature": tail_feat,
+            "tail_ic": tail_ic,
+            "abs_tail_ic": abs(tail_ic),
+            "best_source_feature": best_source_feat,
+            "source_ic": best_source_ic,
+            "abs_source_ic": abs(best_source_ic) if not np.isnan(best_source_ic) else np.nan,
+            "ic_gain_pct": ic_gain_pct,
+            "action": action,
+            "reason": reason,
+        })
+
+    df_results = pd.DataFrame(results)
+
+    # Save to CSV
+    output_path = output_dir / "tail_risk_ic_comparison.csv"
+    df_results.to_csv(output_path, index=False)
+    print(f"\n[ic] Saved results to {output_path}")
+
+    return df_results
+
+
+def print_ic_summary(df_results: pd.DataFrame):
+    """Print IC validation summary."""
+    print("\n" + "=" * 80)
+    print("IC VALIDATION SUMMARY")
+    print("=" * 80)
+    print("\nCriteria: Keep if IC gain > +5%, Drop if IC gain < -5%\n")
+    print(df_results.to_string(index=False))
+    print("\n" + "=" * 80)
+
+    # Action counts
+    action_counts = df_results["action"].value_counts()
+    print(f"\nActions: {action_counts.to_dict()}")
+    print(f"Features to KEEP: {action_counts.get('KEEP', 0)}")
+    print(f"Features to INVESTIGATE: {action_counts.get('INVESTIGATE', 0)}")
+    print(f"Features to DROP: {action_counts.get('DROP', 0)}")
+
+
+def main():
+    """Main execution."""
+    print("=" * 80)
+    print("TAIL RISK FEATURE IC VALIDATION")
+    print("=" * 80)
+
+    output_dir = Path("/tmp")
+
+    # Load out-of-sample data
+    symbol = "BTCUSDT"
+    interval = "2h"
+    start_date = "2025-01-01"
+    end_date = "2025-09-30"
+
+    print(f"\n[main] Loading out-of-sample data: {symbol} {interval}")
+    print(f"[main] Date range: {start_date} to {end_date}")
+
+    df_ohlcv = load_out_of_sample_data(symbol, interval, start_date, end_date)
+
+    # Extract features and prices
+    print(f"\n[main] Extracting features")
+    features, prices = extract_features_with_prices(df_ohlcv)
+
+    # Compute IC comparisons
+    print(f"\n[main] Computing IC comparisons")
+    df_results = compute_ic_comparisons(features, prices, output_dir)
+
+    # Print summary
+    print_ic_summary(df_results)
+
+    # Save metadata
+    metadata = {
+        "analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "symbol": symbol,
+        "interval": interval,
+        "date_range": f"{start_date} to {end_date}",
+        "total_bars": len(features),
+        "n_features": features.shape[1],
+        "forward_periods": 1,
+        "ic_threshold_keep": 5.0,
+        "results": df_results.to_dict(orient="records"),
+    }
+
+    metadata_path = output_dir / "tail_risk_ic_metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    print(f"\n[main] Metadata saved to {metadata_path}")
+    print("\n" + "=" * 80)
+    print("IC VALIDATION COMPLETE")
+    print("=" * 80)
+
+    return df_results
+
+
+if __name__ == "__main__":
+    main()

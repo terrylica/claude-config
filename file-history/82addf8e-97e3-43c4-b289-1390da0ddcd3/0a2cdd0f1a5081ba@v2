@@ -1,0 +1,207 @@
+# Tail Risk Feature Validation - Implementation Status
+
+**Date:** 2025-10-08
+**Version Target:** 1.0.10
+
+## ✅ Completed Tasks
+
+### 1. IC Validation (Complete)
+- ✅ Created `/tmp/validate_tail_risk_ic.py` - IC validation script
+- ✅ Ran IC validation on out-of-sample data (2025-01-01 to 2025-09-30)
+- ✅ Generated results in `/tmp/tail_risk_ic_comparison.csv`
+- ✅ Generated metadata in `/tmp/tail_risk_ic_metadata.json`
+
+**Results:**
+- **DROP**: `rsi_shock_5bar` (-70.1% IC loss), `rsi_acceleration` (-34.9% IC loss)
+- **KEEP**: `rsi_shock_1bar` (+18.6% IC gain), `rsi_volatility_spike` (+40.7% IC gain), `extreme_regime_persistence`, `tail_risk_score`
+
+### 2. Code Updates (Complete)
+- ✅ Updated `src/atr_adaptive_laguerre/features/feature_expander.py`:
+  - Removed `rsi_shock_5bar` and `rsi_acceleration` from `_extract_tail_risk()`
+  - Updated `tail_risk_score` formula (weights: 0.4, 0.3, 0.3)
+  - Updated docstrings (4 features instead of 6, 31 features per interval)
+  - Updated class docstring (31 features total)
+
+- ✅ Updated `tests/test_features/test_feature_expander.py`:
+  - Updated `test_tail_risk_features()` - removed assertions for dropped features
+  - Updated `test_all_features_non_anticipative()` - 133 features instead of 139
+  - Updated docstrings throughout (31 + 133 features)
+
+### 3. Test Verification (Complete)
+- ✅ All updated tests passing:
+  - `TestFeatureExpander::test_tail_risk_features` ✓
+  - `TestFullFeaturePipeline::test_all_features_non_anticipative` ✓
+
+### 4. Validation Documentation (Complete)
+- ✅ Created `/tmp/tail_risk_validation_summary.md` - comprehensive validation report
+
+---
+
+## 🚧 Remaining Tasks
+
+### 1. Update Feature Count Documentation
+**File:** `src/atr_adaptive_laguerre/features/atr_adaptive_rsi.py`
+
+**Required Changes:**
+```python
+# Line 92: Update redundancy filtering description
+description="Apply redundancy filtering (reduces 133→85 features, |ρ|>0.9 removed)"
+
+# Line 136: Update single-interval docstring
+"Create single-interval configuration (31 features)."
+
+# Line 175-184: Update multi-interval docstring
+"Create multi-interval configuration (85 features by default)."
+"Default: Redundancy filtering enabled (removes 48 features with |ρ| > 0.9, outputs 85 features)."
+"Set filter_redundancy=False to get all 133 features."
+
+# Line 194: Update parameter description
+"filter_redundancy: Apply redundancy filtering (default: True, outputs 85 features)"
+
+# Line 203-211: Update examples
+">>> # Default: redundancy filtering enabled (85 features)"
+">>> # Disable filtering to get all 133 features"
+
+# Line 278-283: Update warning message
+"Using single-interval mode (31 features). "
+"For multi-timeframe analysis with 85 features including 40 cross-interval "
+
+# Line 688: Update feature count comment
+"or 133 features (31 × 3 intervals + 40 cross-interval) if multipliers provided."
+```
+
+### 2. Update Redundancy Filter
+**File:** `src/atr_adaptive_laguerre/features/redundancy_filter.py`
+
+**Add to REDUNDANT_FEATURES list:**
+```python
+# Tail risk features (removed after IC validation 2025-10-08)
+"rsi_shock_5bar_base",
+"rsi_shock_5bar_mult1",
+"rsi_shock_5bar_mult2",
+"rsi_acceleration_base",
+"rsi_acceleration_mult1",
+"rsi_acceleration_mult2",
+```
+
+**Update docstring:**
+- Change "Removes 48 highly correlated features" to "Removes 54 highly correlated features"
+- Update feature counts: 139 → 91 becomes 133 → 85 (actually 133 → 79 if we add 6 features to redundancy list)
+
+**Note:** Need to recalculate filtered count based on actual redundancy list size.
+
+### 3. Version Bump
+**Files to update:**
+- `src/atr_adaptive_laguerre/__init__.py`: Change `__version__ = "1.0.9"` to `"1.0.10"`
+- `pyproject.toml`: Update version field
+
+### 4. CHANGELOG Update
+**File:** `CHANGELOG.md`
+
+**Add new entry:**
+```markdown
+## [1.0.10] - 2025-10-08
+
+### Changed
+- Refined tail risk features based on IC validation (out-of-sample: 2025-01-01 to 2025-09-30)
+- Removed `rsi_shock_5bar` (-70.1% IC loss vs source feature)
+- Removed `rsi_acceleration` (-34.9% IC loss vs source feature)
+- Updated `tail_risk_score` formula with reweighted components (0.4, 0.3, 0.3)
+- Feature count: 139 → 133 (unfiltered), 91 → 85 (filtered)
+- Per-interval features: 33 → 31
+
+### Validated
+- Confirmed IC gains for `rsi_shock_1bar` (+18.6%) and `rsi_volatility_spike` (+40.7%)
+- Validated non-anticipative guarantee for 31-feature pipeline
+- All tests passing with updated feature counts
+
+### Validation
+- Out-of-sample IC validation: 3,276 bars (BTCUSDT 2h, 2025-01-01 to 2025-09-30)
+- Methodology: Spearman correlation between feature[t] and forward_return[t+1]
+- Decision threshold: IC gain > +5% to KEEP, < -5% to DROP
+```
+
+### 5. Run Full Test Suite
+```bash
+uv run python -m pytest tests/ -v --cov=src/atr_adaptive_laguerre
+```
+
+Ensure all tests pass with updated counts.
+
+### 6. Publish to PyPI
+```bash
+# Build package
+uv build
+
+# Publish (using Doppler for credentials)
+doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN"
+```
+
+---
+
+## 📊 Feature Count Summary
+
+| Configuration | Before (v1.0.9) | After (v1.0.10) | Change |
+|---------------|-----------------|-----------------|---------|
+| Single-interval | 33 | 31 | -2 |
+| Multi-interval (unfiltered) | 139 | 133 | -6 |
+| Multi-interval (filtered) | 91 | 85 | -6 |
+| Redundant features | 48 | 54 | +6 |
+
+**Per-Interval Breakdown:**
+- Base features: 31 (was 33)
+- ×3 intervals: 93 (was 99)
+- Cross-interval: 40 (unchanged)
+- **Total unfiltered: 133** (was 139)
+
+---
+
+## 📁 Validation Artifacts
+
+**Created Files:**
+1. `/tmp/validate_tail_risk_ic.py` - IC validation script
+2. `/tmp/validate_tail_risk_orthogonality.py` - Correlation analysis script (optional)
+3. `/tmp/tail_risk_ic_comparison.csv` - IC validation results
+4. `/tmp/tail_risk_ic_metadata.json` - Validation metadata
+5. `/tmp/tail_risk_validation_summary.md` - Comprehensive validation report
+6. `/tmp/feature_validation_implementation_status.md` - This document
+
+**Modified Files:**
+1. `src/atr_adaptive_laguerre/features/feature_expander.py` ✓
+2. `tests/test_features/test_feature_expander.py` ✓
+3. `src/atr_adaptive_laguerre/features/atr_adaptive_rsi.py` (pending)
+4. `src/atr_adaptive_laguerre/features/redundancy_filter.py` (pending)
+5. `src/atr_adaptive_laguerre/__init__.py` (pending)
+6. `pyproject.toml` (pending)
+7. `CHANGELOG.md` (pending)
+
+---
+
+## ⚠️ Important Notes
+
+1. **IC Validation is Conclusive**: The out-of-sample IC validation provides strong evidence for dropping 2 features. Correlation analysis (still running) would provide additional confirmation but is not required for decision-making.
+
+2. **Feature Count Calculation**:
+   - 31 features/interval × 3 intervals = 93
+   - +40 cross-interval features
+   - =133 total unfiltered features
+
+3. **Filtered Count**: After adding 6 removed features to redundancy list:
+   - 133 total - 54 redundant = **79 features** (filtered)
+   - **UPDATE**: Need to verify if calculation should be 85 or 79 by checking actual redundancy filter behavior
+
+4. **Tests**: All feature extraction tests currently passing with updated counts.
+
+---
+
+## 🎯 Next Steps
+
+1. Complete documentation updates in `atr_adaptive_rsi.py`
+2. Update redundancy filter with removed features
+3. Verify filtered feature count (79 or 85?)
+4. Version bump to 1.0.10
+5. Update CHANGELOG.md
+6. Run full test suite
+7. Publish to PyPI
+
+**Estimated Time**: 30-45 minutes to complete remaining tasks

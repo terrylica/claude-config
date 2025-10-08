@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""
+Minimal test showing package works correctly with manual actual_ready_time
+"""
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load data
+data = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+
+# MANUAL creation of actual_ready_time (2-hour offset)
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Configure
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4, multiplier_2=12,
+    availability_column='actual_ready_time',
+    filter_redundancy=False
+)
+indicator = ATRAdaptiveLaguerreRSI(config=config)
+
+# Test validation Step 3/30 timestamp
+val_time = pd.to_datetime("2025-03-17 06:00:00")
+val_ready = val_time + timedelta(hours=2)
+
+# Full features
+features_full = indicator.fit_transform_features(data)
+match_idx = data[data["actual_ready_time"] == val_ready].index[0]
+
+# Prediction features
+pred_data = data[data["actual_ready_time"] <= val_ready].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare
+print("STANDALONE TEST (Manual actual_ready_time)")
+print("="*80)
+print(f"Validation time: {val_time}")
+print(f"Validation ready time: {val_ready}")
+print()
+print(f"rsi_mult1 full:  {features_full.iloc[match_idx]['rsi_mult1']}")
+print(f"rsi_mult1 pred:  {features_pred.iloc[-1]['rsi_mult1']}")
+diff = abs(features_full.iloc[match_idx]['rsi_mult1'] - features_pred.iloc[-1]['rsi_mult1'])
+print(f"Difference: {diff:.15f}")
+print()
+print(f"Result: {'✓ PASS' if diff < 1e-10 else '✗ FAIL'}")

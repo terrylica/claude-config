@@ -1,0 +1,120 @@
+"""
+Test to reproduce the critical bug: sliced data with reset index produces wrong features.
+
+Bug report: Features calculated on sliced+reset data differ from full data,
+even with 20000-row lookback.
+"""
+
+from datetime import datetime, timedelta, timezone
+
+import numpy as np
+import pandas as pd
+
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+
+def test_index_reset_bug():
+    """
+    Reproduce bug: sliced data with reset index produces different features than full data.
+    """
+    # Generate test data (1000 bars)
+    base_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+    n_bars = 1000
+    dates = [base_time + timedelta(hours=2 * i) for i in range(n_bars)]
+    close_prices = np.linspace(50000, 51000, n_bars)
+
+    data = pd.DataFrame(
+        {
+            "date": dates,
+            "open": close_prices * 0.999,
+            "high": close_prices * 1.001,
+            "low": close_prices * 0.998,
+            "close": close_prices,
+            "volume": np.full(n_bars, 1000000.0),
+            "actual_ready_time": [d + timedelta(hours=2) for d in dates],
+        }
+    )
+
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        availability_column="actual_ready_time",
+        filter_redundancy=True,
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    # Compute features on FULL data
+    features_full = indicator.fit_transform_features(data)
+
+    # Validation index (middle of dataset with sufficient lookback)
+    validation_idx = 500
+
+    # Method 1: Slice with iloc + reset_index (USER'S PRODUCTION CODE)
+    lookback = indicator.min_lookback + 100  # Use 460 rows for safety
+    data_sliced = data.iloc[validation_idx - lookback + 1 : validation_idx + 1].reset_index(
+        drop=True
+    )
+    features_sliced = indicator.fit_transform_features(data_sliced)
+
+    # Compare features at validation point
+    print(f"\nTesting at validation_idx={validation_idx} with lookback={lookback}")
+    print(f"Full data shape: {data.shape}, Features: {features_full.shape}")
+    print(f"Sliced data shape: {data_sliced.shape}, Features: {features_sliced.shape}")
+
+    # Check specific problematic features from bug report
+    problem_features = [
+        "bars_since_oversold_mult1",
+        "bars_since_extreme_mult1",
+        "regime_mult2",
+        "regime_bearish_mult2",
+        "regime_neutral_mult2",
+        "bars_since_overbought_mult2",
+        "bars_since_extreme_mult2",
+        "regime_agreement_count",
+        "regime_stability_score",
+        "bars_since_alignment",
+    ]
+
+    print("\n" + "=" * 80)
+    print("COMPARING FEATURES: Full Data vs Sliced+Reset Data")
+    print("=" * 80)
+
+    mismatches = []
+    for feature in problem_features:
+        if feature not in features_full.columns:
+            print(f"⚠️  {feature:40s} - NOT FOUND in features")
+            continue
+
+        full_val = features_full.iloc[validation_idx][feature]
+        sliced_val = features_sliced.iloc[-1][feature]  # Last row of sliced data
+
+        match = "✅" if abs(full_val - sliced_val) < 1e-10 else "❌"
+        diff = full_val - sliced_val
+
+        print(f"{match} {feature:40s}: Full={full_val:8.2f}  Sliced={sliced_val:8.2f}  Diff={diff:8.2f}")
+
+        if abs(diff) > 1e-10:
+            mismatches.append(
+                {
+                    "feature": feature,
+                    "full": full_val,
+                    "sliced": sliced_val,
+                    "diff": diff,
+                }
+            )
+
+    print("\n" + "=" * 80)
+    if mismatches:
+        print(f"❌ BUG CONFIRMED: {len(mismatches)}/{len(problem_features)} features differ!")
+        print(f"\nMismatched features:")
+        for m in mismatches:
+            print(f"  - {m['feature']}: diff={m['diff']:.2f}")
+        return False
+    else:
+        print(f"✅ NO BUG: All {len(problem_features)} features match!")
+        return True
+
+
+if __name__ == "__main__":
+    success = test_index_reset_bug()
+    exit(0 if success else 1)

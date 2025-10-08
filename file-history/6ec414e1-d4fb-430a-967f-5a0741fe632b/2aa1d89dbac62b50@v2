@@ -1,0 +1,525 @@
+"""
+Feature Redundancy Analysis for ATR-Adaptive Laguerre RSI
+
+SLOs:
+- Availability: 99.9% (validates all inputs, explicit errors)
+- Correctness: 100% (reproducible outputs, scipy/pandas reference implementations)
+- Observability: Full type hints, structured logging, timestamped outputs
+- Maintainability: Single-responsibility functions, ≤80 lines per function
+
+Error Handling: raise_and_propagate
+- ValueError on missing data, invalid configs, feature count mismatches
+- AssertionError on IC validation failures
+"""
+
+import json
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import networkx as nx
+import numpy as np
+import pandas as pd
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
+
+
+def load_ohlcv_data(
+    symbol: str,
+    base_interval: str,
+    end_date: str,
+    duration_years: int,
+    output_dir: Path,
+) -> pd.DataFrame:
+    """
+    Load OHLCV data from gapless-crypto-data.
+
+    Args:
+        symbol: Trading pair (e.g., "BTCUSDT")
+        base_interval: Timeframe (e.g., "2h")
+        end_date: End date in YYYY-MM-DD format
+        duration_years: Number of years to look back
+        output_dir: Directory to save intermediate Parquet files
+
+    Returns:
+        DataFrame with OHLCV data
+
+    Raises:
+        ValueError: If symbol not found or date range has gaps
+        ValueError: If insufficient data returned
+    """
+    import gapless_crypto_data as gcd
+
+    # Calculate start date
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    start_dt = end_dt - timedelta(days=duration_years * 365)
+    start_date = start_dt.strftime("%Y-%m-%d")
+
+    print(f"[load_ohlcv_data] Fetching {symbol} {base_interval} from {start_date} to {end_date}")
+
+    # Download data using gapless-crypto-data
+    df = gcd.download(symbol, timeframe=base_interval, start=start_date, end=end_date)
+
+    if df is None or len(df) == 0:
+        raise ValueError(
+            f"No data returned for {symbol} {base_interval} from {start_date} to {end_date}"
+        )
+
+    # Validate date range
+    df_start = df["date"].min().strftime("%Y-%m-%d")
+    df_end = df["date"].max().strftime("%Y-%m-%d")
+    print(f"[load_ohlcv_data] Retrieved {len(df)} rows from {df_start} to {df_end}")
+
+    # Save to Parquet
+    output_path = output_dir / f"ohlcv_{symbol}.parquet"
+    df.to_parquet(output_path, compression="zstd", index=False)
+    print(f"[load_ohlcv_data] Saved to {output_path}")
+
+    return df
+
+
+def extract_features(
+    df_ohlcv: pd.DataFrame,
+    symbol: str,
+    multiplier_1: int,
+    multiplier_2: int,
+    output_dir: Path,
+) -> pd.DataFrame:
+    """
+    Extract 121 multi-interval features.
+
+    Args:
+        df_ohlcv: OHLCV DataFrame
+        symbol: Trading pair (for logging)
+        multiplier_1: First higher interval multiplier
+        multiplier_2: Second higher interval multiplier
+        output_dir: Directory to save feature Parquet
+
+    Returns:
+        DataFrame with 121 features
+
+    Raises:
+        ValueError: If feature count != 121
+        ValueError: If insufficient data for min_lookback
+    """
+    from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+    # Create multi-interval config
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=multiplier_1, multiplier_2=multiplier_2
+    )
+
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    print(f"[extract_features] Extracting features for {symbol}")
+    print(f"[extract_features] Feature mode: {indicator.feature_mode}, n_features: {indicator.n_features}")
+    print(f"[extract_features] Min lookback: {indicator.min_lookback}")
+
+    # Validate sufficient data
+    if len(df_ohlcv) < indicator.min_lookback:
+        raise ValueError(
+            f"Insufficient data: {len(df_ohlcv)} rows provided, {indicator.min_lookback} required for {symbol}"
+        )
+
+    # Extract features
+    features = indicator.fit_transform_features(df_ohlcv)
+
+    # Validate feature count
+    if features.shape[1] != 121:
+        raise ValueError(
+            f"Feature count mismatch for {symbol}: expected 121, got {features.shape[1]}"
+        )
+
+    # Drop rows with NaN (initial lookback period)
+    features_clean = features.dropna()
+    print(f"[extract_features] Extracted {features_clean.shape[1]} features, {features_clean.shape[0]} rows")
+
+    # Save to Parquet
+    output_path = output_dir / f"features_{symbol}.parquet"
+    features_clean.to_parquet(output_path, compression="zstd")
+    print(f"[extract_features] Saved to {output_path}")
+
+    return features_clean
+
+
+def compute_correlation_edge_list(
+    features: pd.DataFrame, threshold: float, output_dir: Path
+) -> pd.DataFrame:
+    """
+    Compute Spearman correlation and convert to edge list.
+
+    Args:
+        features: Feature DataFrame
+        threshold: Minimum |correlation| to include
+        output_dir: Directory to save CSV
+
+    Returns:
+        Edge list DataFrame with columns: feature_1, feature_2, correlation
+
+    Raises:
+        ValueError: If correlation matrix contains NaN after dropping constant columns
+    """
+    print(f"[compute_correlation] Computing Spearman correlation matrix")
+
+    # Drop constant columns (zero variance) before correlation
+    constant_cols = features.columns[features.std() == 0].tolist()
+    if constant_cols:
+        print(f"[compute_correlation] Dropping {len(constant_cols)} constant columns: {constant_cols}")
+        features = features.drop(columns=constant_cols)
+
+    # Compute Spearman correlation
+    corr_matrix = features.corr(method="spearman")
+
+    # Validate no NaN (should be clean after dropping constants)
+    if corr_matrix.isna().any().any():
+        raise ValueError(
+            f"Correlation matrix contains NaN values after dropping constant columns. "
+            f"Remaining NaN count: {corr_matrix.isna().sum().sum()}"
+        )
+
+    # Convert to edge list
+    edges = corr_matrix.stack().reset_index()
+    edges.columns = ["feature_1", "feature_2", "correlation"]
+
+    # Remove self-correlations
+    edges = edges[edges["feature_1"] != edges["feature_2"]]
+
+    # Filter by threshold
+    edges = edges[edges["correlation"].abs() > threshold]
+
+    # Sort by absolute correlation (descending)
+    edges = edges.assign(abs_corr=edges["correlation"].abs()).sort_values(
+        "abs_corr", ascending=False
+    ).drop(columns=["abs_corr"])
+
+    print(f"[compute_correlation] Found {len(edges)} pairs above threshold {threshold}")
+
+    # Save to CSV
+    output_path = output_dir / "feature_correlations_edgelist.csv"
+    edges.to_csv(output_path, index=False)
+    print(f"[compute_correlation] Saved to {output_path}")
+
+    return edges
+
+
+def extract_cluster_assignments(
+    features: pd.DataFrame, cluster_distance_threshold: float, output_dir: Path
+) -> pd.DataFrame:
+    """
+    Hierarchical clustering with Ward linkage, extract flat clusters.
+
+    Args:
+        features: Feature DataFrame
+        cluster_distance_threshold: Cut height for flat clusters (1 - threshold)
+        output_dir: Directory to save CSV
+
+    Returns:
+        DataFrame with columns: feature, cluster_id
+
+    Raises:
+        ValueError: If clustering fails
+    """
+    print(f"[cluster_assignments] Computing hierarchical clustering")
+
+    # Drop constant columns (zero variance) before correlation
+    constant_cols = features.columns[features.std() == 0].tolist()
+    if constant_cols:
+        print(f"[cluster_assignments] Dropping {len(constant_cols)} constant columns: {constant_cols}")
+        features = features.drop(columns=constant_cols)
+
+    # Compute distance matrix from Spearman correlation
+    corr_matrix = features.corr(method="spearman")
+    distance = 1 - corr_matrix.abs()
+
+    # Hierarchical clustering with Ward linkage
+    linkage_matrix = linkage(squareform(distance), method="ward")
+
+    # Extract flat clusters
+    clusters = fcluster(linkage_matrix, t=cluster_distance_threshold, criterion="distance")
+
+    # Create DataFrame
+    cluster_assignments = pd.DataFrame({
+        "feature": features.columns,
+        "cluster_id": clusters
+    }).sort_values("cluster_id")
+
+    n_clusters = cluster_assignments["cluster_id"].nunique()
+    print(f"[cluster_assignments] Created {n_clusters} clusters")
+
+    # Save to CSV
+    output_path = output_dir / "feature_clusters.csv"
+    cluster_assignments.to_csv(output_path, index=False)
+    print(f"[cluster_assignments] Saved to {output_path}")
+
+    return cluster_assignments
+
+
+def compute_graph_metrics(edges: pd.DataFrame, output_dir: Path) -> dict[str, Any]:
+    """
+    Compute NetworkX graph metrics.
+
+    Args:
+        edges: Edge list DataFrame
+        output_dir: Directory to save JSON
+
+    Returns:
+        Dictionary with graph metrics
+
+    Raises:
+        ValueError: If graph creation fails
+    """
+    print(f"[graph_metrics] Building correlation network")
+
+    # Create graph from edge list
+    G = nx.from_pandas_edgelist(
+        edges,
+        source="feature_1",
+        target="feature_2",
+        edge_attr="correlation"
+    )
+
+    # Compute metrics
+    metrics = {
+        "connected_components": [list(c) for c in nx.connected_components(G)],
+        "degree_centrality": nx.degree_centrality(G),
+        "clustering_coefficient": nx.clustering(G)
+    }
+
+    print(f"[graph_metrics] Found {len(metrics['connected_components'])} connected components")
+
+    # Save to JSON
+    output_path = output_dir / "graph_metrics.json"
+    with open(output_path, "w") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"[graph_metrics] Saved to {output_path}")
+
+    return metrics
+
+
+def generate_redundancy_decisions(
+    edges: pd.DataFrame,
+    high_threshold: float,
+    medium_threshold: float,
+    output_dir: Path,
+) -> pd.DataFrame:
+    """
+    Generate actionable decision table for redundant pairs.
+
+    Args:
+        edges: Edge list DataFrame
+        high_threshold: Threshold for DROP action (|ρ| > high_threshold)
+        medium_threshold: Threshold for REVIEW action
+        output_dir: Directory to save CSV
+
+    Returns:
+        Decision table DataFrame
+
+    Raises:
+        ValueError: If no redundant pairs found
+    """
+    print(f"[redundancy_decisions] Generating decision table")
+
+    decisions = []
+
+    for _, row in edges.iterrows():
+        feature_1 = row["feature_1"]
+        feature_2 = row["feature_2"]
+        corr = row["correlation"]
+        abs_corr = abs(corr)
+
+        if abs_corr > high_threshold:
+            action = "DROP"
+            # Simple heuristic: drop feature_2 (alphabetically later)
+            drop_feature = max(feature_1, feature_2)
+            keep_feature = min(feature_1, feature_2)
+            reason = f"High correlation (|ρ| = {abs_corr:.3f}) - auto-drop"
+        elif abs_corr > medium_threshold:
+            action = "REVIEW"
+            drop_feature = None
+            keep_feature = None
+            reason = f"Medium correlation (|ρ| = {abs_corr:.3f}) - manual review required"
+        else:
+            continue
+
+        decisions.append({
+            "feature_1": feature_1,
+            "feature_2": feature_2,
+            "correlation": corr,
+            "action": action,
+            "drop_feature": drop_feature,
+            "keep_feature": keep_feature,
+            "reason": reason
+        })
+
+    if len(decisions) == 0:
+        raise ValueError(f"No redundant pairs found above threshold {medium_threshold}")
+
+    decisions_df = pd.DataFrame(decisions)
+
+    print(f"[redundancy_decisions] DROP: {len(decisions_df[decisions_df['action'] == 'DROP'])}")
+    print(f"[redundancy_decisions] REVIEW: {len(decisions_df[decisions_df['action'] == 'REVIEW'])}")
+
+    # Save to CSV
+    output_path = output_dir / "redundancy_decisions.csv"
+    decisions_df.to_csv(output_path, index=False)
+    print(f"[redundancy_decisions] Saved to {output_path}")
+
+    return decisions_df
+
+
+def save_metadata(
+    config: dict[str, Any],
+    n_features_before: int,
+    n_features_after: int,
+    n_redundant_pairs: int,
+    output_dir: Path,
+) -> None:
+    """
+    Save analysis metadata to JSON.
+
+    Args:
+        config: Analysis configuration
+        n_features_before: Feature count before removal
+        n_features_after: Feature count after removal
+        n_redundant_pairs: Number of redundant pairs found
+        output_dir: Directory to save JSON
+    """
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "config": config,
+        "n_features_before": n_features_before,
+        "n_features_after": n_features_after,
+        "n_redundant_pairs": n_redundant_pairs
+    }
+
+    output_path = output_dir / "redundancy_analysis_metadata.json"
+    with open(output_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    print(f"[save_metadata] Saved to {output_path}")
+
+
+def main() -> None:
+    """
+    Main orchestration function for redundancy analysis.
+    """
+    # Configuration
+    config = {
+        "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        "base_interval": "2h",
+        "end_date": "2025-09-30",
+        "duration_years": 3,
+        "multiplier_1": 4,
+        "multiplier_2": 12,
+        "thresholds": {
+            "correlation_filter": 0.7,
+            "high_redundancy": 0.9,
+            "medium_redundancy": 0.7,
+            "cluster_distance": 0.3
+        }
+    }
+
+    output_dir = Path("/tmp")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"=== Feature Redundancy Analysis ===")
+    print(f"Config: {json.dumps(config, indent=2)}")
+    print()
+
+    # Step 1: Load OHLCV data
+    print("=== Step 1: Load OHLCV Data ===")
+    dfs_ohlcv = {}
+    for symbol in config["symbols"]:
+        dfs_ohlcv[symbol] = load_ohlcv_data(
+            symbol,
+            config["base_interval"],
+            config["end_date"],
+            config["duration_years"],
+            output_dir
+        )
+    print()
+
+    # Step 2: Extract features
+    print("=== Step 2: Extract Features ===")
+    dfs_features = {}
+    for symbol in config["symbols"]:
+        dfs_features[symbol] = extract_features(
+            dfs_ohlcv[symbol],
+            symbol,
+            config["multiplier_1"],
+            config["multiplier_2"],
+            output_dir
+        )
+    print()
+
+    # Step 3: Use features from first symbol for redundancy analysis
+    # (Feature redundancy structure is symbol-independent)
+    print("=== Step 3: Select Features for Analysis ===")
+    analysis_symbol = config["symbols"][0]
+    all_features = dfs_features[analysis_symbol]
+    print(f"Using {analysis_symbol} features: {all_features.shape[0]} rows, {all_features.shape[1]} columns")
+    print(f"Rationale: Feature redundancy structure is symbol-independent")
+    print()
+
+    # Step 4: Compute correlation edge list
+    print("=== Step 4: Correlation Analysis ===")
+    edges = compute_correlation_edge_list(
+        all_features,
+        config["thresholds"]["correlation_filter"],
+        output_dir
+    )
+    print()
+
+    # Step 5: Extract cluster assignments
+    print("=== Step 5: Hierarchical Clustering ===")
+    cluster_assignments = extract_cluster_assignments(
+        all_features,
+        config["thresholds"]["cluster_distance"],
+        output_dir
+    )
+    print()
+
+    # Step 6: Compute graph metrics
+    print("=== Step 6: Graph Analysis ===")
+    graph_metrics = compute_graph_metrics(edges, output_dir)
+    print()
+
+    # Step 7: Generate redundancy decisions
+    print("=== Step 7: Redundancy Decisions ===")
+    decisions = generate_redundancy_decisions(
+        edges,
+        config["thresholds"]["high_redundancy"],
+        config["thresholds"]["medium_redundancy"],
+        output_dir
+    )
+    print()
+
+    # Step 8: Save metadata
+    print("=== Step 8: Save Metadata ===")
+    features_to_drop = decisions[decisions["action"] == "DROP"]["drop_feature"].unique()
+    n_features_after = all_features.shape[1] - len(features_to_drop)
+
+    save_metadata(
+        config,
+        all_features.shape[1],
+        n_features_after,
+        len(edges),
+        output_dir
+    )
+    print()
+
+    # Summary
+    print("=== Analysis Complete ===")
+    print(f"Total features: {all_features.shape[1]}")
+    print(f"Redundant pairs: {len(edges)}")
+    print(f"Features to drop: {len(features_to_drop)}")
+    print(f"Features after removal: {n_features_after}")
+    print(f"\nOutputs saved to: {output_dir}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise

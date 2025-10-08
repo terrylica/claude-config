@@ -1,0 +1,106 @@
+"""Test that availability_column parameter fixes data leakage"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Create test data
+start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+timestamps = [start_time + timedelta(hours=2*i) for i in range(400)]
+
+data = pd.DataFrame({
+    'date': timestamps,
+    'actual_ready_time': timestamps,  # No delay for simplicity
+    'open': [100 + 5*np.sin(i/10) for i in range(400)],
+    'high': [105 + 5*np.sin(i/10) for i in range(400)],
+    'low': [95 + 5*np.sin(i/10) for i in range(400)],
+    'close': [100 + 5*np.sin(i/10) for i in range(400)],
+    'volume': [1000000] * 400
+})
+
+print("=" * 80)
+print("AVAILABILITY_COLUMN FIX TEST")
+print("=" * 80)
+
+# Configure with availability_column
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,  # Get all 121 features
+    availability_column='actual_ready_time'  # NEW PARAMETER
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"\nConfig: availability_column='actual_ready_time'")
+print(f"Features: {indicator.n_features}")
+print(f"Min lookback: {indicator.min_lookback}")
+
+# Full data features
+print("\nCalculating features with full dataset (400 bars)...")
+features_full = indicator.fit_transform_features(data)
+
+# Validation point
+validation_idx = 380
+validation_time = timestamps[validation_idx]
+
+print(f"\n{'=' * 80}")
+print(f"VALIDATION POINT: Row {validation_idx}, Time {validation_time}")
+print(f"{'=' * 80}")
+
+# Prediction data (only past data)
+pred_data = data.iloc[:validation_idx + 1].copy()
+print(f"\nCalculating features with prediction dataset ({len(pred_data)} bars)...")
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare critical features
+full_rsi_base = features_full.iloc[validation_idx]['rsi_base']
+full_rsi_mult1 = features_full.iloc[validation_idx]['rsi_mult1']
+full_rsi_mult2 = features_full.iloc[validation_idx]['rsi_mult2']
+
+pred_rsi_base = features_pred.iloc[-1]['rsi_base']
+pred_rsi_mult1 = features_pred.iloc[-1]['rsi_mult1']
+pred_rsi_mult2 = features_pred.iloc[-1]['rsi_mult2']
+
+print(f"\nFull data features at row {validation_idx}:")
+print(f"  rsi_base: {full_rsi_base:.6f}")
+print(f"  rsi_mult1: {full_rsi_mult1:.6f}")
+print(f"  rsi_mult2: {full_rsi_mult2:.6f}")
+
+print(f"\nPrediction features at validation point:")
+print(f"  rsi_base: {pred_rsi_base:.6f}")
+print(f"  rsi_mult1: {pred_rsi_mult1:.6f}")
+print(f"  rsi_mult2: {pred_rsi_mult2:.6f}")
+
+print(f"\n{'=' * 80}")
+print("LEAKAGE DETECTION")
+print(f"{'=' * 80}")
+
+diff_base = abs(full_rsi_base - pred_rsi_base)
+diff_mult1 = abs(full_rsi_mult1 - pred_rsi_mult1)
+diff_mult2 = abs(full_rsi_mult2 - pred_rsi_mult2)
+
+print(f"\nBase interval (1x):")
+print(f"  Difference: {diff_base:.10f}")
+print(f"  Status: {'✓ PASS' if diff_base < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+print(f"\nMultiplier 1 (4x):")
+print(f"  Difference: {diff_mult1:.10f}")
+print(f"  Status: {'✓ PASS' if diff_mult1 < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+print(f"\nMultiplier 2 (12x):")
+print(f"  Difference: {diff_mult2:.10f}")
+print(f"  Status: {'✓ PASS' if diff_mult2 < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+print(f"\n{'=' * 80}")
+print("VERDICT")
+print(f"{'=' * 80}")
+
+if diff_mult1 < 1e-5 and diff_mult2 < 1e-5:
+    print("\n✓ DATA LEAKAGE FIXED!")
+    print("The availability_column parameter successfully prevents data leakage.")
+    print("Multi-interval mode is now safe for production ML use.")
+else:
+    print("\n✗ DATA LEAKAGE STILL EXISTS")
+    print("The fix did not work as expected.")
+    print(f"Differences: base={diff_base:.6f}, mult1={diff_mult1:.6f}, mult2={diff_mult2:.6f}")

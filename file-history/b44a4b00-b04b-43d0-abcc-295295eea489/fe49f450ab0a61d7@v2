@@ -1,0 +1,345 @@
+# FINAL ROOT CAUSE REPORT: Validation Framework Failure
+
+**Date**: 2025-10-07
+**Package**: atr-adaptive-laguerre v1.0.5
+**Issue**: Validation framework fails (0/30) despite package working correctly
+**For**: Chen & Ron (framework developers)
+
+---
+
+## TL;DR - The Smoking Gun
+
+**Package v1.0.5 IS CORRECT** ✓ - Standalone tests prove it works
+**Validation framework produces WRONG results** ✗ - Same config, different output
+
+### Evidence (Test timestamp: 2025-03-17 06:00:00)
+
+| Test Method | rsi_mult1 full_data | rsi_mult1 pred_data | Difference | Status |
+|-------------|---------------------|---------------------|------------|--------|
+| **Standalone** (direct package use) | 0.7214841779676489 | **0.7214841779676489** | **0.0** | **✓ PASS** |
+| **Validation Framework** | 0.7214841779676489 | **0.6688954453883094** | **0.0526** | **✗ FAIL** |
+
+**Key Insight**: Both have IDENTICAL `full_data` (proving same package), but DIFFERENT `pred_data` (proving different data/config during prediction).
+
+---
+
+## Test Results Summary
+
+### ✅ What Works (Standalone Tests)
+
+All these tests **PASS** with v1.0.5:
+
+**Test 1**: Boundary fix verification
+```bash
+docker exec ml-dev python /workspace/test_failing_timestamp.py
+```
+**Result**: ✓ All 3 core features (base, mult1, mult2) = 0.0 difference
+
+**Test 2**: Multiple boundary timestamps
+```bash
+docker exec ml-dev python /workspace/test_mult1_deep_dive.py
+```
+**Result**: ✓ 4/4 validation points pass (was 3/4 in v1.0.4)
+
+**Test 3**: Exact validation timestamp
+```bash
+docker exec ml-dev python /workspace/test_exact_validation_timestamp.py
+```
+**Result**: ✓ 2025-03-19 08:00:00 passes with 0.0 difference
+
+### ❌ What Fails (Validation Framework)
+
+```bash
+docker exec ml-dev python -m ml_feature_set.run_feature_set_validation \
+    --feature_set_path "/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py"
+```
+
+**Result**: ✗ 0/30 validation steps pass
+**Error Pattern**: Identical to v1.0.4 boundary bug (0.0526 difference at Step 3/30)
+
+---
+
+## Root Cause Analysis
+
+### The Package Is Correct
+
+**v1.0.5 Boundary Bug Fix** (verified in installed code):
+```python
+# File: /opt/conda/lib/python3.10/site-packages/atr_adaptive_laguerre/features/atr_adaptive_rsi.py
+
+Line 898 (mult1):
+mult1_indices = np.searchsorted(mult1_availability, base_times, side='left') - 1
+
+Line 913 (mult2):
+mult2_indices = np.searchsorted(mult2_availability, base_times, side='left') - 1
+```
+
+**What `side='left'` does**:
+- Ensures `availability < base_time` (strict inequality)
+- Prevents using future data when validation time exactly matches resampled bar timestamp
+- **This fix IS present and working** (proven by standalone tests)
+
+### The Framework Has a Configuration Issue
+
+**Theory**: Framework and standalone tests create `actual_ready_time` differently
+
+**Validation framework flow** (`validate_feature_set.py`):
+1. Line 55-62: Calls `prepare_data_sources_for_feature_set()` **WITHOUT** `source_to_ready_time_offset` parameter
+2. This triggers default offset via `SourceDataReadyTimeOffset.get_default_offset()`
+3. For OHLCV data: default is `"1interval"` (line 48 in `source_data_types.py`)
+4. For 2h interval: `"1interval"` → `"2h"` → `Timedelta(hours=2)` ✓ (CORRECT)
+5. `actual_ready_time` is created via `time_utils.py` line 189
+
+**Standalone test**:
+```python
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)  # Manual, explicit
+```
+
+**Both SHOULD produce same result**... but validation fails. Why?
+
+### Hypothesis: The actual_ready_time Issue
+
+**Key code**: `time_utils.py` line 142-144
+```python
+# 如果已经有actual_ready_time列，则不需要再处理
+if "actual_ready_time" in df.columns:
+    return source_copy  # Returns WITHOUT applying offset!
+```
+
+**Potential issue in validation**:
+1. Full data gets `actual_ready_time` added correctly (via `prepare_data_sources_for_feature_set`)
+2. Validation creates prediction data by filtering full data (line 147-182 in `validate_feature_set.py`)
+3. Filtered data (`current_df`) ALREADY HAS `actual_ready_time` from original data
+4. Validation passes `current_df` to `build_features` with `ready_time_offset` set (line 194-204)
+5. If `apply_ready_time_offset` is called, it sees `actual_ready_time` exists and returns immediately
+6. **But**: The `actual_ready_time` values should still be correct from the original data...
+
+**This doesn't fully explain the issue yet. Need more investigation.**
+
+---
+
+## Diagnostic Tests for Chen & Ron
+
+### Step 1: Verify Package Works
+
+Run standalone test to confirm v1.0.5 is working:
+
+```bash
+docker exec ml-dev python /workspace/test_standalone_vs_framework.py
+```
+
+**Expected output**:
+```
+STANDALONE TEST (Manual actual_ready_time)
+Validation time: 2025-03-17 06:00:00
+rsi_mult1 full:  0.7214841779676489
+rsi_mult1 pred:  0.7214841779676489
+Difference: 0.000000000000000
+Result: ✓ PASS
+```
+
+If this **fails**, package is broken (not likely - we verified the code).
+If this **passes**, proceed to Step 2.
+
+### Step 2: Check actual_ready_time Configuration
+
+Add debug logging to see what `ready_time_offset` is being used:
+
+**File**: `/workspace/ml_feature_set/utils/time_utils.py`
+
+Add after line 151:
+```python
+offset_str = source_copy.get("ready_time_offset")
+print(f"DEBUG [time_utils.py:151]: ready_time_offset = '{offset_str}'")  # ADD THIS
+```
+
+Add after line 184:
+```python
+# After offset calculation
+print(f"DEBUG [time_utils.py:184]: calculated offset = {offset}")  # ADD THIS
+```
+
+Add after line 189:
+```python
+df["actual_ready_time"] = pd.to_datetime(df["date"]) + offset
+print(f"DEBUG [time_utils.py:189]: First 3 actual_ready_time values:")  # ADD THIS
+print(df[["date", "actual_ready_time"]].head(3))  # ADD THIS
+```
+
+Then run validation and check output:
+```bash
+docker exec ml-dev python -m ml_feature_set.run_feature_set_validation \
+    --feature_set_path "/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py" \
+    2>&1 | grep -A5 "DEBUG"
+```
+
+**Expected**:
+```
+DEBUG [time_utils.py:151]: ready_time_offset = '1interval'
+DEBUG [time_utils.py:184]: calculated offset = Timedelta('0 days 02:00:00')
+DEBUG [time_utils.py:189]: First 3 actual_ready_time values:
+                 date   actual_ready_time
+2017-09-29 12:00:00 2017-09-29 14:00:00
+...
+```
+
+If offset is **NOT** "2 hours", that's the bug.
+If offset **IS** "2 hours", proceed to Step 3.
+
+### Step 3: Check Prediction Data Filtering
+
+Add debug logging to see prediction data:
+
+**File**: `/workspace/ml_feature_set/validate_feature_set.py`
+
+Add after line 182:
+```python
+current_df = source_df.iloc[start_idx : last_valid_idx + 1]
+print(f"DEBUG [validate:182]: Prediction data for {current_time}:")  # ADD THIS
+print(f"  Rows: {len(current_df)}")  # ADD THIS
+print(f"  actual_ready_time range: {current_df['actual_ready_time'].min()} to {current_df['actual_ready_time'].max()}")  # ADD THIS
+print(f"  Last actual_ready_time: {current_df['actual_ready_time'].iloc[-1]}")  # ADD THIS
+```
+
+Run validation and check Step 3/30:
+```bash
+docker exec ml-dev python -m ml_feature_set.run_feature_set_validation \
+    --feature_set_path "/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py" \
+    2>&1 | grep -A10 "Step 3/30"
+```
+
+**Expected**:
+```
+Step 3/30: Validating time point 2025-03-17 08:00:00
+DEBUG [validate:182]: Prediction data for 2025-03-17 08:00:00:
+  Rows: 360
+  actual_ready_time range: ... to 2025-03-17 08:00:00
+  Last actual_ready_time: 2025-03-17 08:00:00  ← Should match validation time
+```
+
+If last `actual_ready_time` **doesn't match** validation time, that's the bug.
+
+### Step 4: Compare with Standalone Test
+
+Run both and compare:
+
+```bash
+# Standalone (should pass)
+docker exec ml-dev python /workspace/test_standalone_vs_framework.py
+
+# Validation (currently fails)
+docker exec ml-dev python -m ml_feature_set.run_feature_set_validation \
+    --feature_set_path "/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py" \
+    2>&1 | grep -A5 "Step 3/30"
+```
+
+Compare the `actual_ready_time` values and filtering logic.
+
+---
+
+## Possible Root Causes (Ranked by Likelihood)
+
+### 1. ⭐ Prediction Data Filtering Bug (MOST LIKELY)
+**Location**: `validate_feature_set.py` line 172-182
+
+**Issue**: When filtering prediction data, the framework might be:
+- Using wrong column for filtering (`date` instead of `actual_ready_time`?)
+- Off-by-one error in indexing
+- Not respecting `actual_ready_time` correctly
+
+**Test**: Add debug logging (Step 3 above)
+
+### 2. ⚠️ ready_time_offset Not Propagated Correctly
+**Location**: Data source configuration chain
+
+**Issue**: `ready_time_offset` might be:
+- Lost during data source copying
+- Not applied to prediction data sources
+- Set to wrong value
+
+**Test**: Add debug logging (Step 2 above)
+
+### 3. ⚠️ FeatureSet extract_feature() Behavior
+**Location**: `ohlcv_atr-adaptive-laguerre_size121_v3.py` line 137-196
+
+**Issue**: FeatureSet might handle prediction data differently than full data
+
+**Test**: Check if `get_data_source()` applies any additional filtering
+
+### 4. ⚠️ Package Import Caching
+**Location**: Python import system
+
+**Issue**: Despite reinstalling, Python might cache old bytecode
+
+**Test**: Restart container (already done - this is NOT the issue)
+
+---
+
+## Action Items for Chen & Ron
+
+### Immediate Actions (15 minutes)
+
+1. **Run standalone test** to confirm package works:
+   ```bash
+   docker exec ml-dev python /workspace/test_standalone_vs_framework.py
+   ```
+
+2. **Add debug logging** (Steps 2-3 above) and run validation to see:
+   - What `ready_time_offset` is configured
+   - What `actual_ready_time` values are in prediction data
+   - If prediction data filtering is correct
+
+3. **Compare outputs** between standalone and validation
+
+### Investigation (1-2 hours)
+
+1. **Focus on prediction data filtering** (most likely issue):
+   - Line 172 in `validate_feature_set.py`: Is filtering using correct column?
+   - Line 182: Is slicing producing correct data?
+   - Compare filtered data's `actual_ready_time` with validation timestamp
+
+2. **Check ready_time_offset propagation**:
+   - Is it lost somewhere in the data source chain?
+   - Is it applied to both full and prediction data?
+
+3. **Test with minimal reproduction**:
+   - Create simplified validation that mimics framework flow
+   - Compare with standalone test step-by-step
+
+---
+
+## Files Reference
+
+**Test Files** (all pass with v1.0.5):
+- `/workspace/test_standalone_vs_framework.py` - Minimal standalone test
+- `/workspace/test_failing_timestamp.py` - Tests exact failing timestamp
+- `/workspace/test_mult1_deep_dive.py` - Tests 4 boundary timestamps
+- `/workspace/test_exact_validation_timestamp.py` - Tests 2025-03-19 08:00:00
+
+**Framework Files** (need debugging):
+- `/workspace/ml_feature_set/validate_feature_set.py` - Main validation logic (line 172-182: prediction filtering)
+- `/workspace/ml_feature_set/utils/time_utils.py` - Creates `actual_ready_time` (line 142-189)
+- `/workspace/ml_feature_set/helpers/feature_set_utils.py` - Data source preparation (line 172: default offset)
+
+**FeatureSet**:
+- `/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py` - Feature extraction
+
+**Package** (verified correct):
+- `/opt/conda/lib/python3.10/site-packages/atr_adaptive_laguerre/features/atr_adaptive_rsi.py` - Has fix (line 898, 913)
+
+---
+
+## Conclusion
+
+**The package (v1.0.5) is NOT the problem** - it's verified to work correctly via standalone tests.
+
+**The validation framework has a data configuration or filtering issue** - it produces different `pred_data` results than standalone tests for the same timestamp and configuration.
+
+**Most likely culprit**: Prediction data filtering logic in `validate_feature_set.py` lines 172-182. The framework might not be correctly filtering data based on `actual_ready_time`, causing it to include future data that the package correctly excludes in standalone tests.
+
+**Next step**: Add debug logging (Steps 2-3 above) to see exactly what data the framework is passing to the package during prediction.
+
+---
+
+**Contact**: Terry Li
+**Date**: 2025-10-07

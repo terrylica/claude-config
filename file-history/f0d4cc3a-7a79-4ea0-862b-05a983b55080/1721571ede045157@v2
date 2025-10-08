@@ -1,0 +1,111 @@
+"""Test mult2 (12x) for potential data leakage"""
+
+import pandas as pd
+import numpy as np
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+print("=" * 80)
+print("MULT2 (12x) LEAKAGE TEST - v1.0.5")
+print("=" * 80)
+
+# Load real BTC data
+data = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Test the failing validation time from framework
+validation_time = pd.to_datetime("2025-03-17 02:00:00")
+validation_ready_time = validation_time + timedelta(hours=2)
+
+print(f"\nValidation time: {validation_time}")
+print(f"Validation ready time: {validation_ready_time}")
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column="actual_ready_time"
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Full features
+print("\nGenerating features on full dataset...")
+features_full = indicator.fit_transform_features(data)
+
+# Prediction features
+print(f"Filtering data by availability <= {validation_ready_time}...")
+pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+print(f"Prediction data: {len(pred_data)} rows")
+
+print("\nGenerating features on prediction dataset...")
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Find matching row
+matching_row = data[data["actual_ready_time"] == validation_ready_time]
+match_idx = matching_row.index[0]
+
+print(f"\nMatching index: {match_idx}")
+
+# Compare ALL core RSI features
+print("\n" + "=" * 80)
+print("CORE RSI FEATURES COMPARISON")
+print("=" * 80)
+
+core_features = [
+    ("rsi_base", "Base (1x) RSI"),
+    ("rsi_mult1", "Mult1 (4x) RSI"),
+    ("rsi_mult2", "Mult2 (12x) RSI")
+]
+
+for feature, name in core_features:
+    full_val = features_full.iloc[match_idx][feature]
+    pred_val = features_pred.iloc[-1][feature]
+    diff = abs(full_val - pred_val)
+    pct_diff = (diff / max(abs(full_val), abs(pred_val), 1e-10)) * 100
+
+    status = "PASS" if diff < 1e-5 else "FAIL"
+
+    print(f"\n{name}:")
+    print(f"  Full:        {full_val:.15f}")
+    print(f"  Prediction:  {pred_val:.15f}")
+    print(f"  Difference:  {diff:.15f}")
+    print(f"  % Diff:      {pct_diff:.2f}%")
+    print(f"  Status:      {status}")
+
+    if diff >= 1e-5:
+        print(f"  LEAKAGE DETECTED!")
+
+print("\n" + "=" * 80)
+print("DIAGNOSTIC: Mult2 Resampling")
+print("=" * 80)
+
+# Check mult2 timestamps
+print(f"\nMult2 is 12x base interval: 2h * 12 = 24h intervals")
+print(f"\nLast 5 mult2 bars (24h intervals):")
+
+mult2_data = data[::12]  # Every 12th row
+last_mult2 = mult2_data.iloc[-5:]
+print(last_mult2[['date', 'actual_ready_time', 'close']].to_string())
+
+print(f"\nValidation ready time: {validation_ready_time}")
+print(f"Is validation time a mult2 boundary? {validation_time.hour % 24 == 0}")
+
+print("\n" + "=" * 80)
+print("CONCLUSION")
+print("=" * 80)
+
+base_diff = abs(features_full.iloc[match_idx]["rsi_base"] - features_pred.iloc[-1]["rsi_base"])
+mult1_diff = abs(features_full.iloc[match_idx]["rsi_mult1"] - features_pred.iloc[-1]["rsi_mult1"])
+mult2_diff = abs(features_full.iloc[match_idx]["rsi_mult2"] - features_pred.iloc[-1]["rsi_mult2"])
+
+if base_diff < 1e-5 and mult1_diff < 1e-5 and mult2_diff < 1e-5:
+    print("\nALL CORE FEATURES PASS - No data leakage!")
+else:
+    print("\nSOME FEATURES FAIL:")
+    if base_diff >= 1e-5:
+        print(f"  - Base: FAIL ({base_diff:.6f})")
+    if mult1_diff >= 1e-5:
+        print(f"  - Mult1: FAIL ({mult1_diff:.6f})")
+    if mult2_diff >= 1e-5:
+        print(f"  - Mult2: FAIL ({mult2_diff:.6f})")

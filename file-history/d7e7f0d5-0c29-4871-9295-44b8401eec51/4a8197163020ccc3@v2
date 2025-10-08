@@ -1,0 +1,167 @@
+# Doppler Method Research - 2025-10-07
+
+## Question
+"What is the most idiomatic way to use Doppler with PyPI publishing?"
+
+## Investigation Results
+
+### Three Approaches Tested
+
+| Method | Command | Result | Status |
+|--------|---------|--------|--------|
+| **--command flag** | `doppler run --command='uv publish --token "$VAR"'` | 400 (auth success) | ✅ **RECOMMENDED** |
+| **bash -c wrapper** | `doppler run -- bash -c 'uv publish --token "$VAR"'` | 400 (auth success) | ✅ Works, but less idiomatic |
+| **Direct execution** | `doppler run -- uv publish --token "$VAR"` | 403 (auth failed) | ❌ FAILS |
+
+### Why Direct Execution Fails
+
+```bash
+# Without --command or bash -c:
+doppler run -- uv publish --token "$PYPI_TOKEN"
+
+# What happens:
+1. Your shell sees the command line
+2. Shell immediately expands $PYPI_TOKEN (empty in current shell)
+3. Doppler receives: uv publish --token ""
+4. PyPI rejects empty token → 403 Forbidden
+```
+
+### The Official Doppler Pattern: `--command` Flag
+
+According to [Doppler documentation](https://docs.doppler.com/docs/cli):
+
+**When using `--command` flag:**
+- Doppler automatically detects shell from `$SHELL` environment variable
+- Supports: sh, bash, zsh, dash, fish, ksh, tcsh, csh
+- Falls back to `sh` for alternative shells
+- Variable expansion happens AFTER Doppler injects secrets
+
+**Example:**
+```bash
+doppler run --project claude-config --config dev --command='uv publish --token "$PYPI_TOKEN"'
+```
+
+**Benefits:**
+- ✅ Official Doppler documentation pattern
+- ✅ Auto-detects user's preferred shell
+- ✅ Cleaner syntax than `bash -c`
+- ✅ Portable across different shells
+- ✅ Handles shell operators (&&, ||, ;)
+
+### Alternative: `bash -c` Wrapper
+
+**When to use:**
+```bash
+doppler run -- bash -c 'uv publish --token "$PYPI_TOKEN"'
+```
+
+**Use cases:**
+- When you specifically need bash syntax
+- When you want fresh shell environment (no user's .bashrc)
+- Legacy scripts already using this pattern
+
+**Trade-offs:**
+- Performance hit from spawning subshell
+- Non-interactive shell (doesn't read ~/.bashrc unless -i specified)
+- Forces bash even if user prefers zsh/fish
+
+### Updated Recommendations
+
+**For PyPI publishing:**
+
+```bash
+# atr-adaptive-laguerre
+doppler run --project claude-config --config dev --command='uv publish --token "$PYPI_TOKEN"'
+
+# gapless-crypto-data
+doppler run --project claude-config --config dev --command='uv publish --token "$PYPI_TOKEN_GCD"'
+```
+
+**For testing token injection:**
+
+```bash
+# Verify token length (should be 221-224)
+doppler run --project claude-config --config dev --command='echo ${#PYPI_TOKEN}'
+
+# Verify token starts correctly
+doppler run --project claude-config --config dev --command='echo $PYPI_TOKEN | head -c 50'
+```
+
+### Multiple Commands Example
+
+The `--command` flag also handles multiple commands:
+
+```bash
+doppler run --command="./build && ./test && ./deploy"
+```
+
+This is where `--command` really shines - you can chain multiple commands with shell operators.
+
+### Comparison to Other Tools
+
+**uv publish** can also use environment variables directly:
+
+```bash
+# Environment variables (without Doppler)
+export UV_PUBLISH_USERNAME=__token__
+export UV_PUBLISH_PASSWORD=pypi-...
+uv publish
+
+# With Doppler --command flag
+doppler run --command='uv publish --token "$PYPI_TOKEN"'
+```
+
+**twine upload** pattern:
+
+```bash
+# With Doppler --command flag
+doppler run --command='twine upload --username __token__ --password "$PYPI_TOKEN" dist/*'
+```
+
+## Key Findings
+
+1. **`--command` is the official Doppler-recommended method** for running commands that need environment variable expansion
+
+2. **`bash -c` still works** but is less idiomatic and has performance/portability trade-offs
+
+3. **Direct execution ALWAYS fails** when variables are used as command arguments because shell expansion happens before Doppler injection
+
+4. **Documentation was incorrect** - We initially documented `bash -c` as the required pattern, but `--command` is the proper Doppler way
+
+## Documentation Updates
+
+Updated `/Users/terryli/.claude/specifications/pypi-publishing-methods.yaml` to v2.4.0:
+
+- Changed all examples from `bash -c` to `--command` flag
+- Added comparison table of three methods
+- Documented when to use each approach
+- Updated best practices to reflect official Doppler pattern
+
+## Sources
+
+- [Doppler CLI Guide](https://docs.doppler.com/docs/cli)
+- [Doppler Accessing Secrets](https://docs.doppler.com/docs/accessing-secrets)
+- [Doppler Multiple Commands](https://docs.doppler.com/docs/multiple-commands)
+- Tested on macOS with uv 0.8.24, Doppler CLI latest
+
+## Verification
+
+All three methods tested with actual PyPI tokens:
+
+```bash
+# Test 1: --command flag (PASS)
+$ doppler run --command='uv publish --token "$PYPI_TOKEN_GCD" dist/gapless_crypto_data-2.15.1-py3-none-any.whl'
+Uploading... → 400 File already exists (auth successful)
+
+# Test 2: bash -c wrapper (PASS)
+$ doppler run -- bash -c 'uv publish --token "$PYPI_TOKEN_GCD" dist/gapless_crypto_data-2.15.1-py3-none-any.whl'
+Uploading... → 400 File already exists (auth successful)
+
+# Test 3: Direct execution (FAIL)
+$ doppler run -- uv publish --token "$PYPI_TOKEN_GCD" dist/gapless_crypto_data-2.15.1-py3-none-any.whl
+Uploading... → 403 Invalid authentication (token was empty)
+```
+
+## Conclusion
+
+**Use `--command` flag** - it's the official, idiomatic, portable, and performant way to use Doppler with commands that need environment variable arguments.

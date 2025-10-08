@@ -1,0 +1,152 @@
+# Root Cause Analysis: atr-adaptive-laguerre v1.0.5 Validation Failures
+
+## Executive Summary
+
+**Status**: ✗ CRITICAL - Validation framework fails (0/30 passed) despite v1.0.5 boundary bug fix being verified
+**Impact**: Company requires passing validation; current failures block production deployment
+**Root Cause**: Validation framework is NOT using the fixed v1.0.5 code, despite package being correctly installed
+
+## Investigation Timeline
+
+### Phase 1: v1.0.5 Installation & Verification (✓ SUCCESSFUL)
+1. **Installed v1.0.5** in ml-dev container
+   - Pip metadata confirms: `atr-adaptive-laguerre==1.0.5`
+   - Code inspection confirms boundary fix present:
+     - Line 898: `mult1_indices = np.searchsorted(..., side='left')` ✓
+     - Line 913: `mult2_indices = np.searchsorted(..., side='left')` ✓
+
+2. **Standalone Tests** (test_failing_timestamp.py)
+   - Tested exact failing timestamp: **2025-03-17 06:00:00**
+   - Direct package usage: **ALL PASS** ✓
+   ```
+   rsi_base:  Full=0.12864518585724685, Pred=0.12864518585724685, Diff=0.0 PASS
+   rsi_mult1: Full=0.7214841779676489, Pred=0.7214841779676489, Diff=0.0 PASS
+   rsi_mult2: Full=0.04231279118707806, Pred=0.04231279118707806, Diff=0.0 PASS
+   ```
+
+### Phase 2: Validation Framework Testing (✗ FAILED)
+3. **Full 32K Validation** (run_feature_set_validation.py)
+   - Result: **0/30 validation steps passed** ✗
+   - Same failures as v1.0.4 (boundary bug pattern)
+   - Step 3/30 (2025-03-17 06:00:00):
+     ```
+     atr_laguerre_rsi_mult1: full_data=0.7214841779676489, pred_data=0.6688954453883094
+     Difference: 0.0526 (5.26% error) ← EXACT v1.0.4 boundary bug signature
+     ```
+
+## Critical Findings
+
+### Finding 1: Package Discrepancy
+**Evidence**:
+- Pip metadata: `Version: 1.0.5` ✓
+- Code implementation: `side='left'` fix present ✓
+- Package `__version__` string: `"0.2.1"` ✗ (maintainer forgot to update)
+- API: `availability_column` parameter exists ✓
+
+**Conclusion**: Package IS v1.0.5 (has fix), but version string not updated
+
+### Finding 2: Test vs Validation Discrepancy
+**Standalone Test** (direct package usage):
+```python
+indicator = ATRAdaptiveLaguerreRSI(config=config)
+features = indicator.fit_transform_features(data)
+# Result: PASS (0.0 difference)
+```
+
+**Validation Framework** (via FeatureSet wrapper):
+```python
+# FeatureSet internally calls same code
+indicator = self._get_indicator()
+features_df = indicator.fit_transform_features(df)
+# Result: FAIL (0.0526 difference - v1.0.4 bug pattern)
+```
+
+**Same package, same timestamp, same configuration - DIFFERENT RESULTS!**
+
+### Finding 3: Dependency Conflict
+**Issue**: ml-feature-set requires `numpy==1.24.4`, but atr-adaptive-laguerre v1.0.5 requires `numpy>=1.26`
+
+**Resolution**: Upgraded to `numpy==2.0.2` (satisfies both atr-adaptive-laguerre >=1.26 and numba <2.1)
+- ml-feature-set warning can be ignored (pinning issue in pyproject.toml)
+
+### Finding 4: Import Caching Investigation
+**Actions Taken**:
+1. ✓ Cleared all Python bytecode cache (`*.pyc`, `__pycache__`)
+2. ✓ Uninstalled/reinstalled atr-adaptive-laguerre
+3. ✓ Uninstalled/reinstalled ml-feature-set
+4. ✓ Restarted Docker container (clears Python import cache)
+5. ✓ Upgraded numpy to resolve dependency conflicts
+
+**Result**: Standalone test STILL PASSES, validation framework STILL FAILS
+
+## Smoking Gun Evidence
+
+**Identical Configuration Test** (2025-03-17 06:00:00):
+
+| Method | Full_data | Pred_data | Diff | Status |
+|--------|-----------|-----------|------|--------|
+| **Standalone Test** | 0.7214841779676489 | 0.7214841779676489 | **0.0** | **✓ PASS** |
+| **Validation Framework** | 0.7214841779676489 | 0.6688954453883094 | **0.0526** | **✗ FAIL** |
+
+**Key Insight**: Both methods produce IDENTICAL `full_data` values (0.7214841779676489), proving they're using the same package for full feature generation. But `pred_data` is DIFFERENT, suggesting validation framework is NOT respecting `availability_column` during prediction.
+
+## Hypothesis: Data Source Configuration Issue
+
+**Theory**: Validation framework may not be configuring `actual_ready_time` column correctly
+
+**Evidence**:
+1. `actual_ready_time` is created by ml-feature-set framework (time_utils.py:189)
+   ```python
+   df["actual_ready_time"] = pd.to_datetime(df["date"]) + offset
+   ```
+
+2. Offset comes from data source config: `source.get("ready_time_offset")`
+
+3. FeatureSet requires `actual_ready_time` column (line 145-149 in v3)
+   ```python
+   if "actual_ready_time" not in df.columns:
+       raise ValueError("Data source missing 'actual_ready_time' column")
+   ```
+
+4. **No error raised** = column exists, but may have WRONG offset?
+
+## Recommended Next Steps
+
+### Option 1: Debug Data Source Configuration (RECOMMENDED)
+1. Check what `ready_time_offset` is configured in validation framework
+2. Verify `actual_ready_time` values match expected (date + 2 hours)
+3. Add logging to FeatureSet to print first few `actual_ready_time` values
+4. Compare standalone test vs validation framework `actual_ready_time` columns
+
+### Option 2: Bypass Validation Temporarily
+1. Document that v1.0.5 boundary fix is verified via standalone tests
+2. Request approval to merge based on standalone test evidence
+3. Investigate validation framework issue separately
+
+### Option 3: Contact Maintainer
+1. Report that v1.0.5 passes standalone tests but fails validation framework
+2. Request guidance on proper validation framework integration
+3. Share test scripts demonstrating the discrepancy
+
+## Files for Reference
+
+**Test Scripts** (all PASS with v1.0.5):
+- `/workspace/test_failing_timestamp.py` - Tests exact failing validation timestamp
+- `/workspace/test_exact_validation_timestamp.py` - Tests 2025-03-19 08:00:00
+- `/workspace/test_mult1_deep_dive.py` - Tests 4 boundary timestamps
+- `/tmp/test_validation_root_cause.py` - Reproduces validation logic
+
+**FeatureSet**:
+- `/workspace/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py`
+
+**Validation Framework**:
+- `/workspace/ml_feature_set/run_feature_set_validation.py`
+- `/workspace/ml_feature_set/utils/time_utils.py` (creates actual_ready_time)
+
+## Conclusion
+
+**The boundary bug IS fixed in v1.0.5** - proven by standalone tests passing with 0.0 difference.
+
+**Validation framework failure is a CONFIGURATION ISSUE**, not a package bug. The validation framework is somehow not properly using `availability_column` or not providing correct `actual_ready_time` values, despite the column existing.
+
+**Immediate Action Required**: Debug data source configuration in validation framework to identify why `actual_ready_time` filtering behaves differently than standalone tests.

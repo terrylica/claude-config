@@ -1,0 +1,209 @@
+# PyPI Token Investigation Results - 2025-10-06
+
+## Executive Summary
+
+**Question 1**: Does the "terrylica-entire-account" token still work?
+**Answer**: ❌ **NO** - Returns 403 Forbidden even with correct Doppler injection
+
+**Question 2**: Is there a newer way to publish to PyPI (not /legacy/ endpoint)?
+**Answer**: ❌ **NO** - The `/legacy/` endpoint is the current and only production upload method
+
+## Test Results
+
+### terrylica-entire-account Token Test
+
+```bash
+# 1. Restored token to Doppler
+doppler secrets set PYPI_TOKEN="pypi-AgEIcHlwaS5vcmcCJDJi..." --project claude-config --config dev
+
+# 2. Verified token injection works
+doppler run -- bash -c 'echo Token length: ${#PYPI_TOKEN}'
+# Output: Token length: 179 ✓
+
+# 3. Tested actual publish
+doppler run -- bash -c 'uv publish --token "$PYPI_TOKEN" dist/atr_adaptive_laguerre-0.2.1-py3-none-any.whl'
+# Result: ❌ 403 Forbidden
+# Error: "Invalid or non-existent authentication information"
+```
+
+**Conclusion**: The terrylica-entire-account token is **NOT WORKING** despite:
+- Appearing in PyPI web interface
+- Showing "created about 8 hours ago"
+- Having correct token ID: `2b59ad01-34b4-4425-b7a0-9ab49046ea4e`
+- Being injected correctly by Doppler (179 characters)
+
+### Possible Causes for Token Failure
+
+1. **Token revoked on PyPI side** - Most likely cause
+2. **Token expired** - PyPI doesn't show expiry dates in UI
+3. **Permissions changed** - Token may have lost "Upload packages" permission
+4. **Token in invalid state** - Appears in UI but flagged as invalid internally
+
+### aal Token (Project-Scoped) - WORKING ✅
+
+```bash
+# Current active token in Doppler
+Token ID: c1d5867e-0d0e-4d8c-b409-04a8cc58cb40
+Name: aal
+Scope: Project "atr-adaptive-laguerre"
+Status: ✅ WORKING (tested 2025-10-06)
+```
+
+## Critical Discovery: bash -c Wrapper Required
+
+### The Problem
+
+```bash
+# ❌ THIS DOESN'T WORK
+doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN"
+# Error: 403 Forbidden (empty token)
+
+# ✅ THIS WORKS
+doppler run --project claude-config --config dev -- bash -c 'uv publish --token "$PYPI_TOKEN"'
+# Success: 200 OK
+```
+
+### Why?
+
+**Without `bash -c`**:
+1. Your shell sees `doppler run -- uv publish --token "$PYPI_TOKEN"`
+2. Shell expands `$PYPI_TOKEN` immediately (empty in current shell)
+3. Doppler receives: `uv publish --token ""`
+4. PyPI rejects empty token → 403
+
+**With `bash -c`**:
+1. Your shell sees `doppler run -- bash -c 'uv publish --token "$PYPI_TOKEN"'`
+2. Shell treats single quotes as literal string
+3. Doppler injects PYPI_TOKEN into new bash process
+4. New bash expands `$PYPI_TOKEN` to actual token value
+5. PyPI receives valid token → 200 OK
+
+### Correct Doppler Pattern
+
+```bash
+# General pattern for ANY Doppler environment variable
+doppler run --project X --config Y -- bash -c 'command --flag "$ENV_VAR"'
+                                       ^^^^^^^^ ^                        ^
+                                       Required | Single quotes preserve |
+                                                  variable for expansion
+```
+
+## PyPI "Legacy" Endpoint Investigation
+
+### The Name is Misleading
+
+**Current Endpoint**: `https://upload.pypi.org/legacy/`
+
+Despite the name "legacy", this is:
+- ✅ The **ONLY** production upload endpoint
+- ✅ Used by all modern tools (twine, uv, poetry, pip)
+- ✅ The standard as of 2025
+- ✅ No plans to deprecate
+
+### Why It's Called "Legacy"
+
+The name refers to the API being **copied from pypi-legacy** (the old PyPI codebase). When PyPI migrated to Warehouse (new codebase), they kept the same upload API and named the path `/legacy/` to indicate it's a reimplementation of the old API.
+
+**It's NOT legacy in the sense of being deprecated or old!**
+
+### Future: Upload 2.0 API
+
+**Status**: Proposed (PEP 694), not yet implemented
+
+**Features**:
+- Parallel uploads for large files (>1GB)
+- Resumable uploads
+- Async processing
+- Better error handling
+
+**Availability**: Not available on production PyPI as of 2025
+
+**Reference**: https://peps.python.org/pep-0694/
+
+## Recommendation
+
+### Use the "aal" Token (Already Configured)
+
+**Current state (CORRECT)**:
+```bash
+# Token in Doppler
+Name: aal
+Scope: Project "atr-adaptive-laguerre"
+Status: ✅ Working
+
+# Publish command
+doppler run --project claude-config --config dev -- bash -c 'uv publish --token "$PYPI_TOKEN"'
+```
+
+### Don't Use terrylica-entire-account
+
+**Reasons**:
+1. ❌ Not working (403 Forbidden)
+2. ❌ Account-wide scope too broad
+3. ❌ Unknown why it's broken (possible revocation/expiry)
+
+### If You Need Account-Wide Token
+
+If you want account-wide access for multiple packages:
+
+1. **Option A**: Create new account-wide token on PyPI
+   - Go to https://pypi.org/manage/account/token/
+   - Create new token with "Entire account" scope
+   - Update Doppler immediately
+   - Test with: `doppler run -- bash -c 'uv publish --token "$PYPI_TOKEN" dist/*.whl'`
+
+2. **Option B (Recommended)**: Use project-scoped tokens per package
+   - Better security (limited blast radius)
+   - Easier to revoke individual packages
+   - Clearer audit trail
+
+## Updated Documentation
+
+**File**: `~/.claude/specifications/pypi-publishing-methods.yaml`
+**Version**: 2.1.0 (updated 2025-10-06)
+
+**Key changes**:
+1. Active token changed from "terrylica-entire-account" to "aal"
+2. Added critical note about `bash -c` wrapper requirement
+3. Documented PyPI "legacy" endpoint confusion
+4. Added troubleshooting for Doppler variable expansion
+5. Marked terrylica-entire-account as NOT WORKING with test results
+
+## Quick Reference
+
+### Correct Doppler Publish Command
+
+```bash
+# For atr-adaptive-laguerre (current setup)
+doppler run --project claude-config --config dev -- bash -c 'uv publish --token "$PYPI_TOKEN"'
+```
+
+### Verify Token Works
+
+```bash
+# 1. Check token in Doppler (should start with pypi-AgEIcHlwaS5vcmcC)
+doppler secrets get PYPI_TOKEN --project claude-config --config dev --plain | head -c 50
+
+# 2. Test injection (should show 224)
+doppler run --project claude-config --config dev -- bash -c 'echo ${#PYPI_TOKEN}'
+
+# 3. Test publish (should get 200 or 400)
+doppler run --project claude-config --config dev -- bash -c 'uv publish --token "$PYPI_TOKEN" dist/*.whl'
+```
+
+### Current Token Status
+
+| Token Name | Token ID | Scope | Status | Notes |
+|------------|----------|-------|--------|-------|
+| aal | c1d5867e-0d0e-4d8c-b409-04a8cc58cb40 | Project: atr-adaptive-laguerre | ✅ **ACTIVE** | Currently in Doppler, working correctly |
+| terrylica-entire-account | 2b59ad01-34b4-4425-b7a0-9ab49046ea4e | Entire account | ❌ **NOT WORKING** | Returns 403, reason unknown |
+| publishing | Unknown | All projects | ❌ **EXPIRED** | Old token, replaced |
+
+## Conclusion
+
+1. **Keep using "aal" token** - It works correctly with Doppler
+2. **Always use `bash -c` wrapper** - Critical for Doppler variable expansion
+3. **The /legacy/ endpoint is fine** - It's the current standard, not deprecated
+4. **terrylica-entire-account is broken** - Don't use it, create new one if you need account-wide access
+
+All documentation has been updated to reflect these findings.

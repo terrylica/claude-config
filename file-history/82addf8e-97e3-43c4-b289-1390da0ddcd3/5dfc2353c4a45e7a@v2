@@ -1,0 +1,575 @@
+# Black Swan Event Detection: Roadmap & Solutions
+
+## Executive Summary
+
+**Current Status**: Your library has 6 "black swan" features that never trigger (always 0) in typical datasets.
+
+**The Paradox**: True black swans are **unpredictable by definition** (Taleb), but we can detect:
+1. **Increased tail risk** (conditions that make black swans more likely)
+2. **Regime changes** (market structure shifts)
+3. **Extreme volatility spikes** (realized black swan events)
+4. **Distribution anomalies** (statistical outliers)
+
+**Recommendation**: Build a **tiered detection system** from "low hanging fruit" to advanced methods.
+
+---
+
+## What You Currently Have (v1.0.8)
+
+### ❌ Removed (Always Zero)
+- `all_intervals_bearish` - Perfect 3-way regime alignment
+- `all_intervals_neutral` - Perfect 3-way neutral state
+- `all_intervals_crossed_overbought/oversold` - Simultaneous crossing
+- `cascade_crossing_up/down` - Sequential 3-bar cascade
+- `gradient_up` - Reversed smoothing hierarchy
+
+**Problem**: Too specific, require exact conditions that never occur.
+
+### ✅ Kept (73 Features)
+- Regime indicators (bearish, neutral, bullish per interval)
+- RSI spreads across intervals
+- Momentum patterns
+- Volatility measures (via ATR)
+
+**Gap**: No dedicated tail risk or extreme event detection.
+
+---
+
+## Low-Hanging Fruit: Off-the-Shelf Solutions
+
+### Tier 1: Zero-Code Integration (Immediate)
+
+#### 1. **VIX-Style Volatility Index** (2-4 hours)
+**What**: Measure realized volatility vs historical baseline
+**Why**: Spikes 2-3σ above mean signal increased tail risk
+**Library**: None needed - compute from existing ATR
+
+```python
+# Pseudo-code (add to your feature expander)
+def extract_tail_risk_features(self, rsi: pd.Series, atr: pd.Series) -> pd.DataFrame:
+    """Extract VIX-style tail risk indicators."""
+
+    # 1. ATR Z-Score (volatility regime)
+    atr_mean = atr.rolling(100).mean()
+    atr_std = atr.rolling(100).std()
+    atr_zscore = (atr - atr_mean) / atr_std
+
+    # 2. Volatility Spike Detection
+    vol_spike = (atr_zscore > 2.0).astype(int)  # 2σ threshold
+    vol_extreme_spike = (atr_zscore > 3.0).astype(int)  # 3σ threshold
+
+    # 3. RSI Rate of Change (momentum extremes)
+    rsi_roc_1 = rsi.diff(1).abs()
+    rsi_roc_5 = rsi.diff(5).abs()
+
+    # Extreme RSI moves (>0.3 in 1 bar, >0.5 in 5 bars)
+    rsi_shock_1bar = (rsi_roc_1 > 0.3).astype(int)
+    rsi_shock_5bar = (rsi_roc_5 > 0.5).astype(int)
+
+    # 4. Tail Risk Score (composite)
+    tail_risk_score = (
+        (atr_zscore > 1.5).astype(float) * 0.3 +  # Elevated vol
+        (atr_zscore > 2.0).astype(float) * 0.3 +  # High vol
+        rsi_shock_1bar.astype(float) * 0.2 +       # Fast move
+        rsi_shock_5bar.astype(float) * 0.2         # Sustained move
+    )
+
+    return pd.DataFrame({
+        'atr_zscore': atr_zscore,
+        'volatility_spike': vol_spike,
+        'volatility_extreme_spike': vol_extreme_spike,
+        'rsi_shock_1bar': rsi_shock_1bar,
+        'rsi_shock_5bar': rsi_shock_5bar,
+        'tail_risk_score': tail_risk_score,
+    })
+```
+
+**Output**: 6 new features detecting volatility spikes and momentum shocks
+
+---
+
+#### 2. **SKEW-Style Distribution Asymmetry** (4-6 hours)
+**What**: Measure RSI distribution skewness in rolling window
+**Why**: High positive skew = market pricing in crash risk
+**Library**: `scipy.stats` (already installed)
+
+```python
+from scipy import stats
+
+def extract_distribution_features(self, rsi: pd.Series, window: int = 20) -> pd.DataFrame:
+    """Extract statistical distribution features (SKEW-style)."""
+
+    # 1. Rolling Skewness
+    rsi_skew = rsi.rolling(window).apply(lambda x: stats.skew(x), raw=True)
+
+    # 2. Rolling Kurtosis (tail heaviness)
+    rsi_kurtosis = rsi.rolling(window).apply(lambda x: stats.kurtosis(x), raw=True)
+
+    # 3. Distribution Extremes
+    high_positive_skew = (rsi_skew > 1.0).astype(int)  # Right tail risk
+    high_negative_skew = (rsi_skew < -1.0).astype(int)  # Left tail risk
+    fat_tails = (rsi_kurtosis > 3.0).astype(int)  # Leptokurtic (fat tails)
+
+    # 4. Jarque-Bera Test (normality deviation)
+    def jarque_bera_stat(x):
+        if len(x) < 8:
+            return 0
+        jb_stat, _ = stats.jarque_bera(x)
+        return jb_stat
+
+    jb_stat = rsi.rolling(window).apply(jarque_bera_stat, raw=True)
+    distribution_abnormal = (jb_stat > 10).astype(int)  # Non-normal distribution
+
+    return pd.DataFrame({
+        'rsi_skew_20': rsi_skew,
+        'rsi_kurtosis_20': rsi_kurtosis,
+        'high_positive_skew': high_positive_skew,
+        'high_negative_skew': high_negative_skew,
+        'fat_tails': fat_tails,
+        'distribution_abnormal': distribution_abnormal,
+    })
+```
+
+**Output**: 6 new features detecting distribution anomalies
+
+---
+
+### Tier 2: Library Integration (1-2 days)
+
+#### 3. **pyextremes - Extreme Value Theory** ⭐ RECOMMENDED
+**What**: Statistical modeling of tail events
+**Why**: Industry-standard EVT framework
+**Library**: `pip install pyextremes`
+
+```python
+from pyextremes import get_extremes, get_return_periods
+
+def extract_evt_features(self, returns: pd.Series, window: int = 100) -> pd.DataFrame:
+    """Extract Extreme Value Theory features using pyextremes."""
+
+    results = []
+
+    for i in range(window, len(returns)):
+        # Get window
+        window_data = returns.iloc[i-window:i]
+
+        try:
+            # Extract extremes (top 10% threshold)
+            extremes = get_extremes(window_data, method="POT", threshold=0.9)
+
+            # Calculate statistics
+            n_extremes = len(extremes)
+            extreme_freq = n_extremes / window
+
+            # Current value's extremeness
+            current_val = abs(returns.iloc[i])
+            is_extreme = 1 if current_val > window_data.quantile(0.95) else 0
+
+            results.append({
+                'extreme_event_count': n_extremes,
+                'extreme_frequency': extreme_freq,
+                'is_current_extreme': is_extreme,
+            })
+        except:
+            results.append({
+                'extreme_event_count': 0,
+                'extreme_frequency': 0,
+                'is_current_extreme': 0,
+            })
+
+    # Pad beginning with zeros
+    padding = [{'extreme_event_count': 0, 'extreme_frequency': 0, 'is_current_extreme': 0}] * window
+    all_results = padding + results
+
+    return pd.DataFrame(all_results)
+```
+
+**Output**: 3 new features detecting statistical extremes
+
+**Pros**:
+- ✅ Industry-standard EVT implementation
+- ✅ Minimal configuration (smart defaults)
+- ✅ Production-ready
+
+**Cons**:
+- Requires sufficient history (100+ bars)
+- Computationally expensive (rolling window)
+
+---
+
+#### 4. **PyOD - Anomaly Detection** ⭐ RECOMMENDED
+**What**: 40+ anomaly detection algorithms
+**Why**: ML-based outlier detection
+**Library**: `pip install pyod`
+
+```python
+from pyod.models.knn import KNN
+from pyod.models.iforest import IForest
+from pyod.models.lof import LOF
+
+def extract_anomaly_features(self, features_df: pd.DataFrame, window: int = 100) -> pd.DataFrame:
+    """Extract anomaly scores using PyOD."""
+
+    # Select features for anomaly detection
+    feature_cols = ['rsi_base', 'rsi_mult1', 'rsi_mult2',
+                    'rsi_velocity_base', 'rsi_change_5_base']
+    X = features_df[feature_cols].fillna(0).values
+
+    # Initialize models
+    models = {
+        'knn': KNN(n_neighbors=5),
+        'iforest': IForest(contamination=0.1),
+        'lof': LOF(n_neighbors=10),
+    }
+
+    anomaly_scores = pd.DataFrame(index=features_df.index)
+
+    for name, model in models.items():
+        scores = []
+        for i in range(window, len(X)):
+            # Fit on window
+            model.fit(X[i-window:i])
+            # Score current point
+            score = model.decision_function([X[i]])[0]
+            scores.append(score)
+
+        # Pad beginning
+        padded_scores = [0] * window + scores
+        anomaly_scores[f'anomaly_{name}'] = padded_scores
+
+        # Binary flag (top 5% anomalous)
+        threshold = np.percentile(scores, 95)
+        anomaly_scores[f'is_anomaly_{name}'] = (anomaly_scores[f'anomaly_{name}'] > threshold).astype(int)
+
+    return anomaly_scores
+```
+
+**Output**: 6 new features (3 scores + 3 binary flags)
+
+**Pros**:
+- ✅ 40+ algorithms available
+- ✅ Unsupervised (no labels needed)
+- ✅ Detects novel patterns
+
+**Cons**:
+- Computationally expensive
+- Requires tuning for each algorithm
+
+---
+
+### Tier 3: Advanced Methods (1-2 weeks)
+
+#### 5. **Hidden Markov Model - Regime Detection**
+**What**: Detect latent market regimes (bull/bear/volatile/calm)
+**Why**: Regime shifts often precede black swans
+**Library**: `pip install hmmlearn`
+
+```python
+from hmmlearn import hmm
+
+def detect_regime_changes(self, features_df: pd.DataFrame, n_regimes: int = 4) -> pd.DataFrame:
+    """Detect market regime changes using HMM."""
+
+    # Features for regime detection
+    X = features_df[['rsi_base', 'rsi_volatility_20_base', 'regime_strength_base']].fillna(0).values
+
+    # Train HMM
+    model = hmm.GaussianHMM(n_components=n_regimes, covariance_type="full", n_iter=100)
+    model.fit(X)
+
+    # Predict regimes
+    regime_labels = model.predict(X)
+    regime_probs = model.predict_proba(X)
+
+    # Regime transition detection
+    regime_changed = np.concatenate([[0], (np.diff(regime_labels) != 0).astype(int)])
+
+    # Regime uncertainty (entropy of probability distribution)
+    regime_entropy = -np.sum(regime_probs * np.log(regime_probs + 1e-10), axis=1)
+
+    return pd.DataFrame({
+        'market_regime': regime_labels,
+        'regime_changed': regime_changed,
+        'regime_uncertainty': regime_entropy,
+        'regime_prob_0': regime_probs[:, 0],
+        'regime_prob_1': regime_probs[:, 1],
+        'regime_prob_2': regime_probs[:, 2],
+        'regime_prob_3': regime_probs[:, 3],
+    })
+```
+
+**Output**: 8 new features detecting regime shifts
+
+**Pros**:
+- ✅ Captures latent market states
+- ✅ Probabilistic (uncertainty quantification)
+- ✅ Proven in quant finance
+
+**Cons**:
+- Requires hyperparameter tuning
+- Model training overhead
+- Interpretability challenges
+
+---
+
+## Practical Implementation Roadmap
+
+### Phase 1: Quick Wins (Week 1)
+
+**Goal**: Add 12 tail risk features with zero external dependencies
+
+**Tasks**:
+1. ✅ Implement VIX-style volatility features (6 features)
+2. ✅ Implement SKEW-style distribution features (6 features)
+3. ✅ Update `feature_expander.py` to include new methods
+4. ✅ Add tests in `tests/test_features/test_tail_risk.py`
+5. ✅ Version bump to 1.1.0
+
+**Output**: 73 → 85 features (+12 tail risk)
+
+**Code changes**:
+```python
+# In feature_expander.py
+def expand_features(self, rsi: pd.Series) -> pd.DataFrame:
+    """Expand RSI into 39 features (27 base + 12 tail risk)."""
+
+    regimes = self._extract_regimes(rsi)
+    thresholds = self._extract_thresholds(rsi)
+    crossings = self._extract_crossings(rsi)
+    temporal = self._extract_temporal(rsi)
+    roc = self._extract_roc(rsi)
+    statistics = self._extract_statistics(rsi)
+
+    # NEW: Tail risk features
+    tail_risk = self._extract_tail_risk(rsi, atr)  # +6
+    distribution = self._extract_distribution(rsi)  # +6
+
+    return pd.concat([
+        pd.DataFrame({"rsi": rsi}),
+        regimes, thresholds, crossings, temporal, roc, statistics,
+        tail_risk, distribution,
+    ], axis=1)
+```
+
+---
+
+### Phase 2: EVT Integration (Week 2)
+
+**Goal**: Add statistical extreme value detection
+
+**Tasks**:
+1. ✅ Install `pyextremes`
+2. ✅ Implement EVT feature extractor (3 features)
+3. ✅ Benchmark performance (rolling window overhead)
+4. ✅ Add configuration for EVT thresholds
+5. ✅ Version bump to 1.2.0
+
+**Output**: 85 → 88 features (+3 EVT)
+
+**Considerations**:
+- EVT requires 100+ bar history (skip early bars)
+- Computationally expensive (cache results if possible)
+- May need separate "extreme_event_mode" config flag
+
+---
+
+### Phase 3: ML Anomaly Detection (Week 3-4)
+
+**Goal**: Add unsupervised anomaly detection
+
+**Tasks**:
+1. ✅ Install `pyod`
+2. ✅ Implement multi-algorithm anomaly detector (6 features)
+3. ✅ Add optional "anomaly_detection" flag to config
+4. ✅ Optimize for streaming (incremental fitting)
+5. ✅ Version bump to 1.3.0
+
+**Output**: 88 → 94 features (+6 anomaly)
+
+**Considerations**:
+- PyOD is heavy (optional dependency)
+- Model training adds latency (use only if needed)
+- Consider ensemble approach (voting across algorithms)
+
+---
+
+### Phase 4: Regime Detection (Future)
+
+**Goal**: HMM-based regime change detection
+
+**Tasks**:
+1. ✅ Install `hmmlearn`
+2. ✅ Implement regime detector (8 features)
+3. ✅ Train model on historical data
+4. ✅ Add model persistence (save/load)
+5. ✅ Version bump to 2.0.0 (major: adds stateful models)
+
+**Output**: 94 → 102 features (+8 regime)
+
+**Considerations**:
+- **Stateful** (requires model training/persistence)
+- Breaking change (adds dependencies on trained models)
+- May need separate `RegimeDetector` class
+
+---
+
+## Recommended Priority: "Quick Wins First"
+
+### Start Here (Day 1):
+
+1. **VIX-style volatility features** (Tier 1, #1)
+   - Zero dependencies
+   - 2-4 hours implementation
+   - Proven effective (VIX is industry standard)
+
+2. **SKEW-style distribution features** (Tier 1, #2)
+   - `scipy` already installed
+   - 4-6 hours implementation
+   - Captures tail risk directly
+
+**Why**: Gets you 12 tail risk features in < 1 day, no new dependencies.
+
+### Follow-Up (Week 2):
+
+3. **pyextremes EVT** (Tier 2, #3)
+   - Lightweight library
+   - Statistical rigor (EVT is proven)
+   - 1-2 days integration
+
+**Why**: Adds formal extreme value theory with minimal overhead.
+
+### Advanced (Week 3+):
+
+4. **PyOD anomaly detection** (Tier 2, #4)
+   - Heavy library (40+ algorithms)
+   - ML-based (more powerful)
+   - 1-2 weeks optimization
+
+**Why**: Most powerful, but requires tuning and infrastructure.
+
+---
+
+## Alternative: Ensemble "Black Swan Score"
+
+Instead of many features, create **one composite score**:
+
+```python
+def calculate_black_swan_score(self, features: pd.DataFrame) -> pd.Series:
+    """
+    Composite black swan risk score (0-1).
+
+    Combines:
+    - Volatility spike (ATR z-score)
+    - Distribution anomaly (skew, kurtosis)
+    - Momentum shock (RSI rate of change)
+    - Regime uncertainty (multi-interval divergence)
+    """
+
+    # 1. Volatility component (0-0.25)
+    atr_z = features['atr_zscore'].clip(-3, 3) / 3  # Normalize to [-1, 1]
+    vol_score = ((atr_z + 1) / 2) * 0.25  # Scale to [0, 0.25]
+
+    # 2. Distribution component (0-0.25)
+    skew_extreme = (features['rsi_skew_20'].abs() > 1.0).astype(float)
+    kurt_extreme = (features['rsi_kurtosis_20'] > 3.0).astype(float)
+    dist_score = (skew_extreme * 0.15 + kurt_extreme * 0.10)
+
+    # 3. Momentum component (0-0.25)
+    shock_1 = features['rsi_shock_1bar'].astype(float)
+    shock_5 = features['rsi_shock_5bar'].astype(float)
+    momentum_score = (shock_1 * 0.15 + shock_5 * 0.10)
+
+    # 4. Regime component (0-0.25)
+    # Divergence: base bullish but mult2 bearish = instability
+    regime_divergence = (
+        (features['regime_base'] == 2) &
+        (features['regime_mult2'] == 0)
+    ).astype(float)
+    regime_score = regime_divergence * 0.25
+
+    # Composite score
+    black_swan_score = vol_score + dist_score + momentum_score + regime_score
+
+    return black_swan_score.clip(0, 1)
+```
+
+**Pros**:
+- ✅ Single interpretable score
+- ✅ No new dependencies
+- ✅ Minimal code (< 50 lines)
+
+**Cons**:
+- Less granular than 12+ separate features
+- Weights are arbitrary (need validation)
+
+---
+
+## Validation Strategy
+
+### Backtest on Historical Black Swans:
+
+1. **COVID Crash** (Mar 2020)
+   - BTC: $10,500 → $3,800 (-64% in 2 days)
+   - Test: Did indicators spike before/during crash?
+
+2. **FTX Collapse** (Nov 2022)
+   - BTC: $21,000 → $15,500 (-26% in 1 week)
+   - Test: Did regime detection catch the shift?
+
+3. **Luna/UST Implosion** (May 2022)
+   - LUNA: $80 → $0.0001 (-99.9% in 3 days)
+   - Test: Did volatility indicators trigger?
+
+4. **GME Short Squeeze** (Jan 2021)
+   - GME: $20 → $480 (+2300% in 2 weeks)
+   - Test: Did momentum shocks detect?
+
+### Success Metrics:
+
+- **Precision**: When indicator triggers, was there actually a black swan?
+- **Recall**: Did it catch all major black swans in history?
+- **Lead Time**: How many bars warning before event?
+- **False Positive Rate**: How often does it cry wolf?
+
+**Target**: 70%+ recall, <10% false positive rate, 5+ bars lead time
+
+---
+
+## Summary: Recommended Action Plan
+
+### Immediate (This Week):
+1. ✅ Implement VIX-style volatility features (6 features) - **4 hours**
+2. ✅ Implement SKEW-style distribution features (6 features) - **6 hours**
+3. ✅ Add composite "black_swan_score" (1 feature) - **2 hours**
+4. ✅ Version bump to 1.1.0, publish - **1 hour**
+
+**Total**: ~13 hours, +13 features (73 → 86)
+
+### Short-Term (Next 2 Weeks):
+5. ✅ Integrate `pyextremes` for EVT (3 features) - **1-2 days**
+6. ✅ Backtest on historical black swans - **2-3 days**
+7. ✅ Version bump to 1.2.0, publish - **1 hour**
+
+**Total**: ~1 week, +3 features (86 → 89)
+
+### Long-Term (Future):
+8. 🔄 Evaluate `PyOD` for anomaly detection (6 features) - **1-2 weeks**
+9. 🔄 Consider HMM regime detection (8 features) - **2-3 weeks**
+10. 🔄 Research topological data analysis (TDA) - **TBD**
+
+---
+
+## Key Takeaway
+
+**You can't predict black swans, but you CAN detect:**
+1. ✅ **Elevated tail risk** (conditions making them more likely)
+2. ✅ **Volatility spikes** (realized extreme events)
+3. ✅ **Distribution anomalies** (statistical outliers)
+4. ✅ **Regime shifts** (structural changes)
+
+**Start with Tier 1** (VIX + SKEW features) - they're proven, require no dependencies, and you can implement them TODAY.
+
+**Question**: Which implementation would you like to start with?
+- Option A: VIX-style volatility features (fastest)
+- Option B: Composite black_swan_score (simplest)
+- Option C: Full Tier 1 (VIX + SKEW, 12 features)

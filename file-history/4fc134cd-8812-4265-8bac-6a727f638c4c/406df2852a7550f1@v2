@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""
+Root Cause Analysis: mult2 (12x interval) Validation Failures
+
+Systematically investigate why mult2 features fail validation while
+package's own validation passes.
+"""
+
+import sys
+sys.path.insert(0, '/workspace')
+
+import pandas as pd
+import numpy as np
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load actual validation data
+print("=" * 80)
+print("ROOT CAUSE ANALYSIS: mult2 (12x interval) Validation Failures")
+print("=" * 80)
+print()
+
+# Load the same data that validation uses
+sample_data_dir = "/workspace/ml_feature_set/sample_data"
+df_full = pd.read_csv(f"{sample_data_dir}/resampled_binance_BTC-2h.csv")
+
+# Add actual_ready_time (2 hours after timestamp for 2h interval)
+df_full['timestamp'] = pd.to_datetime(df_full['timestamp'])
+df_full['actual_ready_time'] = df_full['timestamp'] + timedelta(hours=2)
+df_full['date'] = df_full['actual_ready_time']  # Package requires 'date' column
+
+print(f"Full dataset: {len(df_full)} rows")
+print(f"Time range: {df_full['actual_ready_time'].min()} to {df_full['actual_ready_time'].max()}")
+print()
+
+# Configure package
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    availability_column='actual_ready_time',
+    filter_redundancy=True
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"Package config:")
+print(f"  min_lookback: {indicator.min_lookback}")
+print(f"  n_features: {indicator.n_features}")
+print(f"  multiplier_1: {config.multiplier_1}")
+print(f"  multiplier_2: {config.multiplier_2}")
+print()
+
+# Test the exact timestamp from validation Step 30/30
+test_time = pd.to_datetime("2025-03-19 12:00:00")
+print(f"Testing timestamp: {test_time}")
+print()
+
+# Find index in full data
+test_idx = df_full[df_full['actual_ready_time'] == test_time].index[0]
+print(f"Test timestamp index in full data: {test_idx}")
+print(f"Full data shape: {df_full.shape}")
+print()
+
+# Build features with full data
+print("=" * 80)
+print("STEP 1: Full Data Features")
+print("=" * 80)
+features_full = indicator.fit_transform_features(df_full)
+print(f"Features shape: {features_full.shape}")
+print()
+
+# Get mult2 features at test_idx
+mult2_cols = [c for c in features_full.columns if 'mult2' in c]
+print(f"mult2 features ({len(mult2_cols)}):")
+for col in mult2_cols[:5]:  # Show first 5
+    print(f"  {col}: {features_full.iloc[test_idx][col]}")
+print(f"  ... and {len(mult2_cols) - 5} more")
+print()
+
+# Now simulate validation framework's prediction data
+print("=" * 80)
+print("STEP 2: Prediction Data (Simulating Framework)")
+print("=" * 80)
+
+# Calculate lookback (this is what framework does)
+lookback_length = indicator.min_lookback  # 360
+print(f"Lookback length: {lookback_length}")
+
+# Find last valid index (data <= test_time)
+last_valid_idx = (df_full['actual_ready_time'] <= test_time).sum() - 1
+print(f"Last valid index (data <= test_time): {last_valid_idx}")
+
+# Calculate start index
+start_idx = last_valid_idx - lookback_length + 1
+print(f"Start index: {start_idx}")
+
+if start_idx < 0:
+    print(f"ERROR: Insufficient data! start_idx={start_idx} < 0")
+    sys.exit(1)
+
+# Slice data for prediction (CRITICAL: This is what framework does)
+df_pred = df_full.iloc[start_idx : last_valid_idx + 1].copy()
+print(f"Prediction data shape: {df_pred.shape}")
+print(f"Prediction time range: {df_pred['actual_ready_time'].min()} to {df_pred['actual_ready_time'].max()}")
+print()
+
+# CRITICAL: Check if indices are preserved or reset
+print(f"Prediction data indices: {df_pred.index[:5].tolist()} ... {df_pred.index[-5:].tolist()}")
+print()
+
+# Test with original indices (CURRENT BEHAVIOR)
+print("=" * 80)
+print("STEP 3: Test WITHOUT reset_index (Current Framework Behavior)")
+print("=" * 80)
+df_pred_no_reset = df_pred.copy()
+features_pred_no_reset = indicator.fit_transform_features(df_pred_no_reset)
+print(f"Features shape: {features_pred_no_reset.shape}")
+print()
+
+print("Comparing mult2 features (last row of pred vs test_idx of full):")
+for col in mult2_cols[:5]:
+    full_val = features_full.iloc[test_idx][col]
+    pred_val = features_pred_no_reset.iloc[-1][col]
+    diff = abs(full_val - pred_val)
+    match = "✓" if diff < 1e-4 else "✗"
+    print(f"  {col}:")
+    print(f"    Full: {full_val:.6f}")
+    print(f"    Pred: {pred_val:.6f}")
+    print(f"    Diff: {diff:.6f} {match}")
+print()
+
+# Test with reset_index (PROPOSED FIX)
+print("=" * 80)
+print("STEP 4: Test WITH reset_index (Potential Fix)")
+print("=" * 80)
+df_pred_reset = df_pred.copy().reset_index(drop=True)
+print(f"Reset indices: {df_pred_reset.index[:5].tolist()} ... {df_pred_reset.index[-5:].tolist()}")
+features_pred_reset = indicator.fit_transform_features(df_pred_reset)
+print(f"Features shape: {features_pred_reset.shape}")
+print()
+
+print("Comparing mult2 features (last row of pred vs test_idx of full):")
+for col in mult2_cols[:5]:
+    full_val = features_full.iloc[test_idx][col]
+    pred_val = features_pred_reset.iloc[-1][col]
+    diff = abs(full_val - pred_val)
+    match = "✓" if diff < 1e-4 else "✗"
+    print(f"  {col}:")
+    print(f"    Full: {full_val:.6f}")
+    print(f"    Pred: {pred_val:.6f}")
+    print(f"    Diff: {diff:.6f} {match}")
+print()
+
+# Test all mult2 features
+print("=" * 80)
+print("STEP 5: Comprehensive mult2 Feature Comparison")
+print("=" * 80)
+
+mismatches_no_reset = 0
+mismatches_reset = 0
+
+for col in mult2_cols:
+    full_val = features_full.iloc[test_idx][col]
+    pred_no_reset_val = features_pred_no_reset.iloc[-1][col]
+    pred_reset_val = features_pred_reset.iloc[-1][col]
+
+    diff_no_reset = abs(full_val - pred_no_reset_val)
+    diff_reset = abs(full_val - pred_reset_val)
+
+    if diff_no_reset >= 1e-4:
+        mismatches_no_reset += 1
+    if diff_reset >= 1e-4:
+        mismatches_reset += 1
+
+print(f"mult2 features: {len(mult2_cols)} total")
+print(f"Without reset_index: {mismatches_no_reset} mismatches")
+print(f"With reset_index: {mismatches_reset} mismatches")
+print()
+
+# Also check mult1 features
+mult1_cols = [c for c in features_full.columns if 'mult1' in c]
+mismatches_mult1_no_reset = 0
+mismatches_mult1_reset = 0
+
+for col in mult1_cols:
+    full_val = features_full.iloc[test_idx][col]
+    pred_no_reset_val = features_pred_no_reset.iloc[-1][col]
+    pred_reset_val = features_pred_reset.iloc[-1][col]
+
+    diff_no_reset = abs(full_val - pred_no_reset_val)
+    diff_reset = abs(full_val - pred_reset_val)
+
+    if diff_no_reset >= 1e-4:
+        mismatches_mult1_no_reset += 1
+    if diff_reset >= 1e-4:
+        mismatches_mult1_reset += 1
+
+print(f"mult1 features: {len(mult1_cols)} total")
+print(f"Without reset_index: {mismatches_mult1_no_reset} mismatches")
+print(f"With reset_index: {mismatches_mult1_reset} mismatches")
+print()
+
+# Base features
+base_cols = [c for c in features_full.columns if 'base' in c]
+mismatches_base_no_reset = 0
+mismatches_base_reset = 0
+
+for col in base_cols:
+    full_val = features_full.iloc[test_idx][col]
+    pred_no_reset_val = features_pred_no_reset.iloc[-1][col]
+    pred_reset_val = features_pred_reset.iloc[-1][col]
+
+    diff_no_reset = abs(full_val - pred_no_reset_val)
+    diff_reset = abs(full_val - pred_reset_val)
+
+    if diff_no_reset >= 1e-4:
+        mismatches_base_no_reset += 1
+    if diff_reset >= 1e-4:
+        mismatches_base_reset += 1
+
+print(f"base features: {len(base_cols)} total")
+print(f"Without reset_index: {mismatches_base_no_reset} mismatches")
+print(f"With reset_index: {mismatches_base_reset} mismatches")
+print()
+
+# Summary
+print("=" * 80)
+print("ROOT CAUSE ANALYSIS SUMMARY")
+print("=" * 80)
+print()
+print("HYPOTHESIS: Package expects 0-based DataFrame indices")
+print()
+print("Test Results:")
+print(f"  mult2 (12x): {mismatches_no_reset} mismatches → {mismatches_reset} with reset_index")
+print(f"  mult1 (4x):  {mismatches_mult1_no_reset} mismatches → {mismatches_mult1_reset} with reset_index")
+print(f"  base (1x):   {mismatches_base_no_reset} mismatches → {mismatches_base_reset} with reset_index")
+print()
+
+if mismatches_reset == 0 and mismatches_mult1_reset == 0 and mismatches_base_reset == 0:
+    print("✓ ROOT CAUSE CONFIRMED: DataFrame index preservation causes validation failures")
+    print("✓ SOLUTION: reset_index(drop=True) before passing to package")
+else:
+    print("✗ reset_index does NOT fix the issue - deeper investigation needed")
+    print()
+    print("Additional investigation required:")
+    print("  1. Check package's internal resampling logic")
+    print("  2. Verify availability_column handling for mult2")
+    print("  3. Inspect package source code for mult2 calculation")

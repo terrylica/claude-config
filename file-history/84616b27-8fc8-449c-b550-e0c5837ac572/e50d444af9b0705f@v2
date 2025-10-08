@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""
+Standalone validation test for ohlcv_atr-adaptive-laguerre_size27_v2.py
+
+Tests the FeatureSet implementation without full project environment resolution.
+"""
+
+import sys
+import os
+import numpy as np
+import pandas as pd
+from datetime import datetime, timezone
+
+# Add project to path
+sys.path.insert(0, '/Users/terryli/eon/ml-feature-set')
+
+print("=" * 80)
+print("ATR-Adaptive Laguerre FeatureSet Validation Test")
+print("=" * 80)
+print()
+
+# Import the FeatureSet
+print("1. Loading FeatureSet module...")
+from ml_feature_set.bundled.ohlcv_atr_adaptive_laguerre_size27_v2 import CustomFeatureSet
+
+# Create synthetic OHLCV data
+print("2. Creating synthetic OHLCV test data...")
+np.random.seed(42)
+n = 100
+dates = pd.date_range('2024-01-01', periods=n, freq='1h')
+
+# Generate realistic OHLC price action
+base_price = 100.0
+close_prices = base_price + np.cumsum(np.random.randn(n) * 0.5)
+open_prices = close_prices + np.random.randn(n) * 0.2
+high_prices = np.maximum(open_prices, close_prices) + np.abs(np.random.randn(n) * 0.3)
+low_prices = np.minimum(open_prices, close_prices) - np.abs(np.random.randn(n) * 0.3)
+volumes = np.random.randint(1000, 10000, n).astype(float)
+
+df = pd.DataFrame({
+    'actual_ready_time': dates,  # Framework column name
+    'open': open_prices,
+    'high': high_prices,
+    'low': low_prices,
+    'close': close_prices,
+    'volume': volumes
+})
+
+print(f"   Generated {len(df)} OHLCV rows")
+print(f"   Columns: {list(df.columns)}")
+print()
+
+# Test FeatureSet initialization
+print("3. Testing FeatureSet initialization...")
+try:
+    feature_set = CustomFeatureSet()
+    print("   ✓ FeatureSet initialized successfully")
+except Exception as e:
+    print(f"   ✗ FAILED: {e}")
+    sys.exit(1)
+
+# Test data dependencies
+print("4. Checking data dependencies...")
+deps = feature_set.data_dependencies
+print(f"   Dependencies: {deps}")
+assert deps[0]['source'] == 'ohlcv', "Expected ohlcv source"
+assert deps[0]['resample_factors'] == [1], "Expected resample_factors=[1]"
+print("   ✓ Data dependencies correct")
+print()
+
+# Test min_lookback
+print("5. Testing min_lookback property...")
+try:
+    lookback = feature_set.get_source_lookback_length('ohlcv_1x')
+    print(f"   min_lookback: {lookback}")
+    assert isinstance(lookback, int), "Lookback should be integer"
+    assert lookback > 0, "Lookback should be positive"
+    assert lookback == 30, "Expected lookback=30 from package v0.2.0"
+    print("   ✓ min_lookback property working correctly")
+except Exception as e:
+    print(f"   ✗ FAILED: {e}")
+    sys.exit(1)
+print()
+
+# Test feature extraction
+print("6. Testing feature extraction...")
+try:
+    # Prepare source data list (mimics framework structure)
+    source_data_list = [{
+        "name": "ohlcv_1x",
+        "data_df": df,
+        "interval": "1h",
+        "type": "price",
+        "resample_factor": 1,
+        "source_descriptor": "test-data"
+    }]
+
+    # Build features
+    features_df = feature_set.build_features(source_data_list)
+
+    print(f"   Features generated: {features_df.shape}")
+    print(f"   Feature count: {feature_set.feature_count}")
+    print(f"   Expected: 27 features")
+
+    # Validate output
+    assert features_df.shape[0] == len(df), "Feature rows should match input rows"
+    assert feature_set.feature_count == 27, f"Expected 27 features, got {feature_set.feature_count}"
+
+    # Check feature names
+    feature_cols = list(features_df.columns)
+    print(f"   Sample features: {feature_cols[:5]}...")
+
+    # Validate all features start with prefix
+    assert all(col.startswith('atr_laguerre_') for col in feature_cols), \
+        "All features should have 'atr_laguerre_' prefix"
+
+    # Check for NaN values
+    nan_count = features_df.isna().sum().sum()
+    assert nan_count == 0, f"Features should not contain NaN values, found {nan_count}"
+
+    # Validate feature value ranges (RSI should be in [0,1] range)
+    if 'atr_laguerre_rsi' in feature_cols:
+        rsi_values = features_df['atr_laguerre_rsi'].values
+        assert np.all((rsi_values >= 0) & (rsi_values <= 1)), \
+            f"RSI values should be in [0,1] range, got [{rsi_values.min():.3f}, {rsi_values.max():.3f}]"
+        print(f"   ✓ RSI range valid: [{rsi_values.min():.6f}, {rsi_values.max():.6f}]")
+
+    print("   ✓ Feature extraction successful!")
+
+except Exception as e:
+    print(f"   ✗ FAILED: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+print()
+print("=" * 80)
+print("✓ ALL TESTS PASSED - FeatureSet v2 is production-ready!")
+print("=" * 80)
+print()
+print("Feature Set Details:")
+print(f"  - Package: atr-adaptive-laguerre v0.2.0+")
+print(f"  - Features: 27 (volatility-adaptive momentum indicators)")
+print(f"  - Min lookback: 30 periods")
+print(f"  - Output shape: {features_df.shape}")
+print(f"  - No NaN values: ✓")
+print(f"  - Framework compatible: ✓")
