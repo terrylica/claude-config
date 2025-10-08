@@ -1,0 +1,326 @@
+# atr-adaptive-laguerre v0.2.1 - Update Summary
+
+**Date**: 2025-10-07
+**Package**: atr-adaptive-laguerre
+**Version**: 0.2.1 (released same day as feedback!)
+
+---
+
+## 🎉 Maintainer Response: Outstanding!
+
+The package maintainer implemented **3 out of 4 critical UX improvements** within hours of receiving feedback. This level of responsiveness is exceptional!
+
+---
+
+## ✅ What Was Fixed in v0.2.1
+
+### 1. Factory Methods (CRITICAL - Fixed ✅)
+
+**Before (v0.2.0)**:
+```python
+# No obvious way to know 121 features exist
+config = ATRAdaptiveLaguerreRSIConfig(atr_period=14, smoothing_period=5)
+indicator = ATRAdaptiveLaguerreRSI(config)
+result = indicator.fit_transform_features(df)  # Gets 27 features, no hint of 121
+```
+
+**After (v0.2.1)**:
+```python
+# Crystal clear intent!
+config_single = ATRAdaptiveLaguerreRSIConfig.single_interval()  # 27 features
+config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval()    # 121 features
+
+# Immediately discoverable
+indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+```
+
+**Impact**: Junior developers will now immediately find multi-interval mode!
+
+---
+
+### 2. `n_features` Property (CRITICAL - Fixed ✅)
+
+**Before (v0.2.0)**:
+```python
+# No way to know how many features you'll get
+indicator = ATRAdaptiveLaguerreRSI(config)
+result = indicator.fit_transform_features(df)
+print(result.shape)  # Surprise! Could be 27 or 121
+```
+
+**After (v0.2.1)**:
+```python
+# Immediately visible
+indicator_single = ATRAdaptiveLaguerreRSI(config_single)
+print(indicator_single.n_features)  # 27
+
+indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+print(indicator_multi.n_features)   # 121
+```
+
+**Impact**: No more surprises! Users know what they'll get before calling `fit_transform_features()`.
+
+---
+
+### 3. `min_lookback` for Multi-Interval (HIGH - Fixed ✅)
+
+**Before (v0.2.0)**:
+```python
+config = ATRAdaptiveLaguerreRSIConfig(multiplier_1=4, multiplier_2=12)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(indicator.min_lookback)  # 30 ← WRONG! Multi-interval needs 360!
+
+# User provides 100 rows, gets runtime error
+result = indicator.fit_transform_features(df_100_rows)
+# ValueError: Insufficient data: 100 rows provided, 360 required
+```
+
+**After (v0.2.1)**:
+```python
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(indicator.min_lookback)  # 360 ← CORRECT!
+
+# User provides correct amount from the start
+df_400_rows = get_data(n=indicator.min_lookback + 40)
+result = indicator.fit_transform_features(df_400_rows)  # ✓ Works!
+```
+
+**Impact**: No more runtime errors from insufficient data!
+
+---
+
+## ⚠️ Still Needs Work
+
+### 4. `date_column` in Multi-Interval (MEDIUM - Partial Fix ⚠️)
+
+**Status**: Works for single-interval, edge case issue in multi-interval
+
+**Current Behavior**:
+```python
+# Single-interval: WORKS ✅
+config = ATRAdaptiveLaguerreRSIConfig.single_interval(date_column='actual_ready_time')
+df = pd.DataFrame({'actual_ready_time': dates, ...})
+result = indicator.fit_transform_features(df)  # ✓ Works!
+
+# Multi-interval: EDGE CASE ⚠️
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(date_column='actual_ready_time')
+df = pd.DataFrame({'actual_ready_time': dates, ...})
+result = indicator.fit_transform_features(df)  # ✗ ValueError: duplicate keys
+```
+
+**Workaround** (still needed for multi-interval):
+```python
+df['date'] = df['actual_ready_time']  # Duplicate column
+result = indicator.fit_transform_features(df)  # ✓ Works
+```
+
+**Priority**: P2 (Low) - Workaround is simple, but consistency would be nice
+
+---
+
+## Usage Guide: v0.2.1 Best Practices
+
+### Single-Interval (27 Features)
+
+```python
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+import pandas as pd
+
+# Clear factory method
+config = ATRAdaptiveLaguerreRSIConfig.single_interval(
+    atr_period=14,
+    smoothing_period=5,
+    date_column='actual_ready_time'  # ✓ Works for single-interval
+)
+
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Introspection
+print(f"Mode: single-interval")
+print(f"Features: {indicator.n_features}")  # 27
+print(f"Min lookback: {indicator.min_lookback}")  # 30
+
+# Generate features
+df = pd.DataFrame({
+    'actual_ready_time': dates,  # ✓ Uses date_column config
+    'open': [...], 'high': [...], 'low': [...], 'close': [...], 'volume': [...]
+})
+
+features = indicator.fit_transform_features(df)  # (n, 27)
+```
+
+### Multi-Interval (121 Features)
+
+```python
+# Clear factory method
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,   # 4x interval
+    multiplier_2=12,  # 12x interval
+    atr_period=14,
+    smoothing_period=5
+)
+
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Introspection
+print(f"Mode: multi-interval")
+print(f"Features: {indicator.n_features}")  # 121
+print(f"Min lookback: {indicator.min_lookback}")  # 360
+
+# Generate features
+df = pd.DataFrame({
+    'date': dates,                # ⚠️ Still required for multi-interval
+    'actual_ready_time': dates,   # Framework compatibility
+    'open': [...], 'high': [...], 'low': [...], 'close': [...], 'volume': [...]
+})
+
+# Ensure sufficient data
+assert len(df) >= indicator.min_lookback, f"Need {indicator.min_lookback} rows, got {len(df)}"
+
+features = indicator.fit_transform_features(df)  # (n, 121)
+
+# Feature breakdown
+# - Base (_base): 27 features
+# - Mult1 (_mult1): 28 features (4x timeframe, forward-filled)
+# - Mult2 (_mult2): 29 features (12x timeframe, forward-filled)
+# - Cross (no suffix): 37 features (regime alignment, divergence, momentum patterns)
+```
+
+---
+
+## Integration: ml-feature-set Framework
+
+### Single-Interval FeatureSet
+
+**File**: `ohlcv_atr-adaptive-laguerre_size27_v2.py`
+
+```python
+class CustomFeatureSet(FeatureSet):
+    def _get_indicator(self):
+        config = ATRAdaptiveLaguerreRSIConfig.single_interval(
+            date_column='actual_ready_time'  # ✓ Framework compatible
+        )
+        return ATRAdaptiveLaguerreRSI(config)
+
+    def get_source_lookback_length(self, source_name):
+        return self._get_indicator().min_lookback  # 30
+```
+
+### Multi-Interval FeatureSet (NEW!)
+
+**File**: `ohlcv_atr-adaptive-laguerre_size121_v3.py`
+
+```python
+class CustomFeatureSet(FeatureSet):
+    def _get_indicator(self):
+        config = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+        indicator = ATRAdaptiveLaguerreRSI(config)
+
+        # Validate
+        assert indicator.n_features == 121
+        return indicator
+
+    def get_source_lookback_length(self, source_name):
+        return self._get_indicator().min_lookback  # 360
+
+    def extract_feature(self):
+        df = self.get_data_source("ohlcv_1x")["data_df"].copy()
+
+        # Workaround: add 'date' column for multi-interval
+        if 'date' not in df.columns:
+            df['date'] = pd.to_datetime(df['actual_ready_time'])
+
+        features_df = self._get_indicator().fit_transform_features(df)
+        # ... (121 features)
+```
+
+---
+
+## Performance Impact
+
+| Metric | v0.2.0 | v0.2.1 | Improvement |
+|--------|--------|--------|-------------|
+| Feature discoverability | Low | High | ✅ Factory methods |
+| Lookback accuracy | Wrong | Correct | ✅ 30 vs 360 |
+| Runtime errors | Frequent | Rare | ✅ Better validation |
+| Code clarity | Medium | High | ✅ Clear intent |
+| Integration time | High | Low | ✅ Fewer gotchas |
+
+---
+
+## Migration Guide: v0.2.0 → v0.2.1
+
+### Update Single-Interval Code
+
+**Before**:
+```python
+config = ATRAdaptiveLaguerreRSIConfig(
+    atr_period=14,
+    smoothing_period=5,
+    date_column='actual_ready_time'
+)
+```
+
+**After** (recommended):
+```python
+config = ATRAdaptiveLaguerreRSIConfig.single_interval(
+    atr_period=14,
+    smoothing_period=5,
+    date_column='actual_ready_time'
+)
+```
+
+### Update Multi-Interval Code
+
+**Before**:
+```python
+config = ATRAdaptiveLaguerreRSIConfig(
+    atr_period=14,
+    smoothing_period=5,
+    multiplier_1=4,
+    multiplier_2=12
+)
+
+# Had to guess lookback
+min_lookback = 50  # Wrong guess!
+```
+
+**After** (recommended):
+```python
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    smoothing_period=5
+)
+
+indicator = ATRAdaptiveLaguerreRSI(config)
+min_lookback = indicator.min_lookback  # 360 (correct!)
+```
+
+---
+
+## Thank You Notes
+
+To the `atr-adaptive-laguerre` maintainer:
+
+**Thank you for the incredible responsiveness!** Implementing 3 critical UX improvements within hours of feedback is exceptional. The v0.2.1 improvements will help many developers:
+
+✅ **Factory methods** make multi-interval mode discoverable
+✅ **`n_features` property** prevents surprises
+✅ **Correct `min_lookback`** eliminates runtime errors
+
+These changes dramatically improve the developer experience. The package is now production-ready with excellent UX!
+
+---
+
+**Summary**: v0.2.1 is a major UX improvement. Upgrade recommended for all users.
+
+**Files Updated**:
+- `ohlcv_atr-adaptive-laguerre_size121_v3.py` - New multi-interval FeatureSet using v0.2.1 API
+- `ohlcv_atr-adaptive-laguerre_size27_v2.py` - Existing single-interval (still works)
+
+**Installation**: `uv pip install 'atr-adaptive-laguerre>=0.2.1'`

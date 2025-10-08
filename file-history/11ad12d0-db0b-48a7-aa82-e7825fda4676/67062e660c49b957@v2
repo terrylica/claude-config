@@ -1,0 +1,463 @@
+# atr-adaptive-laguerre Package - UX/API Feedback for Improvement
+
+**Date**: 2025-10-06
+**From**: Engineering Lead, Eon Labs ML Feature Pipeline
+**Package Version**: 0.2.0
+**Subject**: API Discoverability Issues - Even Experienced Developers Miss Critical Features
+
+---
+
+## Executive Summary
+
+The `atr-adaptive-laguerre` package has excellent technical implementation, but **critical UX issues prevent users from discovering that 121 features exist**. During integration, an experienced engineer with API probing expertise initially concluded only 27 features were available, missing the multi-interval mode entirely.
+
+**Impact**: Junior developers will definitely miss this. The API needs better discoverability.
+
+---
+
+## Issue #1: No Obvious Way to Discover 121 Features Exist
+
+### Problem
+
+When calling the most obvious API:
+
+```python
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+config = ATRAdaptiveLaguerreRSIConfig(atr_period=14, smoothing_period=5)
+indicator = ATRAdaptiveLaguerreRSI(config)
+result = indicator.fit_transform_features(df)
+
+print(result.shape)  # (100, 27) ← User thinks this is all there is!
+```
+
+**Nothing in the API tells the user:**
+- That 121 features are available
+- That `multiplier_1` and `multiplier_2` unlock 94 more features
+- What these multipliers do
+- Why you'd want them
+
+### Root Cause
+
+The config signature is:
+
+```python
+class ATRAdaptiveLaguerreRSIConfig(BaseModel):
+    atr_period: int = 14
+    smoothing_period: int = 5
+    smoothing_method: str = 'ema'
+    level_up: float = 0.85
+    level_down: float = 0.15
+    adaptive_offset: float = 0.75
+    multiplier_1: Optional[int] = None  # ← Hidden feature unlock!
+    multiplier_2: Optional[int] = None  # ← Hidden feature unlock!
+    date_column: str = 'date'
+```
+
+**Problems:**
+1. `multiplier_1/2` names don't suggest they unlock 121 features
+2. `Optional[int] = None` suggests these are minor optional tweaks
+3. No docstring explaining the dramatic difference (27 vs 121 features)
+4. No type hints suggesting recommended values
+
+### Recommended Fixes
+
+#### Fix 1A: Explicit Factory Methods (Recommended)
+
+```python
+@classmethod
+def single_interval(
+    cls,
+    atr_period: int = 14,
+    smoothing_period: int = 5,
+    date_column: str = 'date',
+    **kwargs
+) -> 'ATRAdaptiveLaguerreRSIConfig':
+    """
+    Create single-interval configuration (27 features).
+
+    Features: Base RSI, regime classification, crossings, momentum, statistics.
+    Lookback: ~30 periods
+
+    Returns:
+        Config for 27-feature output
+    """
+    return cls(
+        atr_period=atr_period,
+        smoothing_period=smoothing_period,
+        date_column=date_column,
+        **kwargs
+    )
+
+@classmethod
+def multi_interval(
+    cls,
+    multiplier_1: int = 4,
+    multiplier_2: int = 12,
+    atr_period: int = 14,
+    smoothing_period: int = 5,
+    date_column: str = 'date',
+    **kwargs
+) -> 'ATRAdaptiveLaguerreRSIConfig':
+    """
+    Create multi-interval configuration (121 features).
+
+    Features:
+    - Base interval (27): All single-interval features with _base suffix
+    - Multiplier 1 (28): Features at {multiplier_1}x timeframe with _mult1 suffix
+    - Multiplier 2 (29): Features at {multiplier_2}x timeframe with _mult2 suffix
+    - Cross-interval (37): Regime alignment, divergence, momentum patterns
+
+    Lookback: ~360 periods (calculated as max(multiplier_2 * min_lookback * 1.5))
+
+    Args:
+        multiplier_1: First interval multiplier (e.g., 4 = 4x base timeframe)
+        multiplier_2: Second interval multiplier (e.g., 12 = 12x base timeframe)
+
+    Returns:
+        Config for 121-feature output
+
+    Example:
+        >>> # For 1h base data: generates features at 1h, 4h, 12h intervals
+        >>> config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        ...     multiplier_1=4,  # 4h
+        ...     multiplier_2=12  # 12h
+        ... )
+        >>> indicator = ATRAdaptiveLaguerreRSI(config)
+        >>> features = indicator.fit_transform_features(df)  # (n, 121)
+    """
+    return cls(
+        atr_period=atr_period,
+        smoothing_period=smoothing_period,
+        multiplier_1=multiplier_1,
+        multiplier_2=multiplier_2,
+        date_column=date_column,
+        **kwargs
+    )
+```
+
+**Usage becomes obvious:**
+
+```python
+# Clear intent: single-interval
+config = ATRAdaptiveLaguerreRSIConfig.single_interval()  # 27 features
+
+# Clear intent: multi-interval
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval()  # 121 features
+```
+
+#### Fix 1B: Add `n_features` Property (Easy Addition)
+
+```python
+class ATRAdaptiveLaguerreRSI:
+    @property
+    def n_features(self) -> int:
+        """Number of features this configuration will generate"""
+        if self.config.multiplier_1 and self.config.multiplier_2:
+            return 121  # Multi-interval: 27*3 + 40 cross-interval
+        return 27  # Single-interval
+
+    @property
+    def feature_mode(self) -> str:
+        """Feature generation mode"""
+        if self.config.multiplier_1 and self.config.multiplier_2:
+            return "multi-interval"
+        return "single-interval"
+```
+
+**Usage:**
+
+```python
+indicator = ATRAdaptiveLaguerreRSI(config)
+print(f"Mode: {indicator.feature_mode}, Features: {indicator.n_features}")
+# "Mode: single-interval, Features: 27" ← User immediately sees they're missing features!
+```
+
+---
+
+## Issue #2: `min_lookback` Doesn't Reflect Multi-Interval Requirements
+
+### Problem
+
+```python
+config = ATRAdaptiveLaguerreRSIConfig(multiplier_1=4, multiplier_2=12)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(indicator.min_lookback)  # → 30 ← WRONG! Multi-interval needs 360!
+```
+
+User provides 100 rows based on `min_lookback=30`, then gets:
+
+```
+ValueError: Insufficient data for multi-interval mode: 100 rows provided, 360 required
+```
+
+**Why this is confusing:**
+- The property exists for single-interval but lies for multi-interval
+- Users trust `.min_lookback` to tell them how much data to provide
+- Error only appears at runtime, not during config
+
+### Recommended Fix
+
+```python
+@property
+def min_lookback(self) -> int:
+    """
+    Minimum required historical periods for this configuration.
+
+    Single-interval: ~30 periods (max(atr_period, smoothing_period, 20))
+    Multi-interval: ~360 periods (ensures sufficient data after resampling)
+
+    Returns:
+        Minimum rows required in input DataFrame
+    """
+    base_lookback = max(
+        self.config.atr_period,
+        self.config.smoothing_period,
+        20  # Statistical features window
+    )
+
+    if self.config.multiplier_1 and self.config.multiplier_2:
+        # Multi-interval needs enough data to fill resampled intervals
+        max_multiplier = max(self.config.multiplier_1, self.config.multiplier_2)
+        return int(max_multiplier * base_lookback * 1.5)
+
+    return base_lookback
+```
+
+Now `.min_lookback` actually tells the truth!
+
+---
+
+## Issue #3: `date_column` Config Doesn't Work for Multi-Interval
+
+### Problem
+
+```python
+config = ATRAdaptiveLaguerreRSIConfig(
+    multiplier_1=4,
+    multiplier_2=12,
+    date_column='actual_ready_time'  # ← User thinks this should work
+)
+
+df = pd.DataFrame({
+    'actual_ready_time': dates,
+    'open': [...], 'high': [...], 'low': [...], 'close': [...], 'volume': [...]
+})
+
+indicator = ATRAdaptiveLaguerreRSI(config)
+result = indicator.fit_transform_features(df)
+# ValueError: df missing required OHLCV columns: {'date'}  ← Huh?!
+```
+
+**Why this is confusing:**
+- Config parameter `date_column='actual_ready_time'` was explicitly set
+- Single-interval mode respects this parameter
+- Multi-interval mode ignores it and hardcodes 'date'
+- No warning, just a runtime error
+
+### Recommended Fix
+
+**File**: `atr_adaptive_laguerre/features/multi_interval.py`
+
+```python
+class MultiIntervalProcessor:
+    def __init__(
+        self,
+        multiplier_1: int,
+        multiplier_2: int,
+        date_column: str = 'date'  # ← Accept parameter
+    ):
+        self.multiplier_1 = multiplier_1
+        self.multiplier_2 = multiplier_2
+        self.date_column = date_column
+
+    def _validate_ohlcv(self, df: pd.DataFrame) -> None:
+        """Validate OHLCV DataFrame structure"""
+        required = {self.date_column, 'open', 'high', 'low', 'close', 'volume'}
+        # ... use self.date_column instead of hardcoded 'date'
+```
+
+And pass it through from config:
+
+```python
+# In ATRAdaptiveLaguerreRSI.fit_transform_features()
+processor = MultiIntervalProcessor(
+    self.config.multiplier_1,
+    self.config.multiplier_2,
+    date_column=self.config.date_column  # ← Pass through
+)
+```
+
+---
+
+## Issue #4: No Clear Documentation of Feature Breakdown
+
+### Problem
+
+User gets a DataFrame with 121 columns. No easy way to understand:
+- Which 27 are base features?
+- Which 28 are multiplier_1 features?
+- Which 29 are multiplier_2 features?
+- Which 37 are cross-interval features?
+
+### Recommended Fix
+
+Add a class method for feature metadata:
+
+```python
+@classmethod
+def get_feature_info(cls, config: ATRAdaptiveLaguerreRSIConfig) -> dict:
+    """
+    Get feature metadata for configuration.
+
+    Returns:
+        {
+            'mode': 'single-interval' | 'multi-interval',
+            'total_features': int,
+            'breakdown': {
+                'base': {'count': int, 'suffix': str, 'description': str},
+                'mult1': {...},  # Only if multi-interval
+                'mult2': {...},  # Only if multi-interval
+                'cross': {...}   # Only if multi-interval
+            },
+            'feature_names': List[str]
+        }
+    """
+    if config.multiplier_1 and config.multiplier_2:
+        return {
+            'mode': 'multi-interval',
+            'total_features': 121,
+            'breakdown': {
+                'base': {
+                    'count': 27,
+                    'suffix': '_base',
+                    'description': 'Base interval features'
+                },
+                'mult1': {
+                    'count': 28,
+                    'suffix': '_mult1',
+                    'description': f'{config.multiplier_1}x interval features (forward-filled)'
+                },
+                'mult2': {
+                    'count': 29,
+                    'suffix': '_mult2',
+                    'description': f'{config.multiplier_2}x interval features (forward-filled)'
+                },
+                'cross': {
+                    'count': 37,
+                    'suffix': '',
+                    'description': 'Cross-interval interactions'
+                }
+            },
+            'feature_names': [
+                # Base
+                'rsi_base', 'regime_base', ...,
+                # Mult1
+                'rsi_mult1', 'regime_mult1', ...,
+                # Mult2
+                'rsi_mult2', 'regime_mult2', ...,
+                # Cross
+                'all_intervals_bullish', 'regime_agreement_count', ...
+            ]
+        }
+    else:
+        return {
+            'mode': 'single-interval',
+            'total_features': 27,
+            'breakdown': {
+                'base': {
+                    'count': 27,
+                    'suffix': '',
+                    'description': 'Single interval features'
+                }
+            },
+            'feature_names': [
+                'rsi', 'regime', 'regime_bearish', ...
+            ]
+        }
+```
+
+**Usage:**
+
+```python
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval()
+info = ATRAdaptiveLaguerreRSI.get_feature_info(config)
+
+print(f"Mode: {info['mode']}")
+print(f"Total features: {info['total_features']}")
+for group, details in info['breakdown'].items():
+    print(f"  {group}: {details['count']} features - {details['description']}")
+```
+
+---
+
+## Summary of Issues
+
+| Issue | Severity | Impact | Fix Complexity |
+|-------|----------|--------|----------------|
+| No obvious way to discover 121 features | **CRITICAL** | Users miss 94 features | Medium (factory methods) |
+| `min_lookback` lies for multi-interval | **HIGH** | Runtime errors, wasted debugging | Low (logic update) |
+| `date_column` ignored in multi-interval | **MEDIUM** | Inconsistent behavior | Low (parameter passing) |
+| No feature breakdown metadata | **LOW** | Poor DX, hard to debug | Medium (new method) |
+
+---
+
+## Recommended Priority
+
+1. **[P0]** Add factory methods (`single_interval()`, `multi_interval()`) or `n_features` property
+2. **[P0]** Fix `min_lookback` to return correct value for multi-interval
+3. **[P1]** Make `date_column` work for multi-interval mode
+4. **[P2]** Add `get_feature_info()` class method
+
+---
+
+## Why This Matters
+
+**Current User Journey** (Confusing):
+```python
+# User tries obvious approach
+config = ATRAdaptiveLaguerreRSIConfig(atr_period=14)
+indicator = ATRAdaptiveLaguerreRSI(config)
+result = indicator.fit_transform_features(df)
+# Gets 27 features, thinks that's all there is ❌
+
+# Somehow discovers multiplier_1/2 exist...
+config = ATRAdaptiveLaguerreRSIConfig(multiplier_1=4, multiplier_2=12)
+# Uses min_lookback=30, gets error saying need 360 ❌
+# Provides 360 rows with date_column='actual_ready_time', gets error saying need 'date' ❌
+# Finally duplicates column to 'date', gets 121 features ✓ (after 3 failures!)
+```
+
+**Improved User Journey** (Obvious):
+```python
+# Clear factory method
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval()  # 121 features
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Correct lookback from the start
+print(indicator.min_lookback)  # 360 ✓
+
+# date_column works consistently
+df['date'] = df['actual_ready_time']  # OR just configure date_column ✓
+result = indicator.fit_transform_features(df)  # (n, 121) ✓
+```
+
+---
+
+## Conclusion
+
+The package has excellent technical quality, but the API makes critical features hard to discover. **Even experienced engineers missed that 121 features exist.**
+
+These UX improvements will help:
+- Junior developers find multi-interval mode
+- Reduce integration time
+- Prevent runtime errors from incorrect lookback
+- Make behavior consistent across modes
+
+Thank you for considering this feedback!
+
+---
+
+**Contact**: Engineering Lead, Eon Labs
+**Integration Status**: Production-ready FeatureSet implementations delivered (both 27 and 121-feature versions)

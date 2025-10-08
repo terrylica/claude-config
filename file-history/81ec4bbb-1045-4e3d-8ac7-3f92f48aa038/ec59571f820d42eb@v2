@@ -1,0 +1,64 @@
+"""Test the exact timestamp failing in validation framework"""
+
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+print("Testing timestamp 2025-03-19 08:00:00 (from validation framework)")
+print("=" * 80)
+
+# Load data
+data = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+# Exact timestamp from validation failure
+validation_time = pd.to_datetime("2025-03-19 08:00:00")
+validation_ready_time = validation_time + timedelta(hours=2)
+
+print(f"\nValidation time: {validation_time}")
+print(f"Validation ready time: {validation_ready_time}")
+
+# Same config as FeatureSet
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column="actual_ready_time"
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Generate features
+features_full = indicator.fit_transform_features(data)
+
+pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Find matching row
+matching_row = data[data["actual_ready_time"] == validation_ready_time]
+if len(matching_row) == 0:
+    print("ERROR: No matching row!")
+    exit(1)
+
+match_idx = matching_row.index[0]
+
+# Compare
+print(f"\nCore RSI Features:")
+print("-" * 80)
+
+for feature in ["rsi_base", "rsi_mult1", "rsi_mult2"]:
+    full_val = features_full.iloc[match_idx][feature]
+    pred_val = features_pred.iloc[-1][feature]
+    diff = abs(full_val - pred_val)
+
+    print(f"\n{feature}:")
+    print(f"  Full:  {full_val}")
+    print(f"  Pred:  {pred_val}")
+    print(f"  Diff:  {diff:.15f}")
+    print(f"  {'PASS' if diff < 1e-5 else 'FAIL'}")
+
+print("\n" + "=" * 80)
+print("Validation framework expected these values:")
+print("  rsi_mult2 full_data:  0.2193883857778071")
+print("  rsi_mult2 pred_data:  0.23660150345539047")
+print("\nDoes our test match the framework?")

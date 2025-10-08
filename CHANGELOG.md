@@ -300,9 +300,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarify Doppler as exclusive PyPI publishing method - Version 2.0.0 of specification - DopplerTokenMethod marked as ACTIVE METHOD (use exclusively) - Consolidated deprecated methods into DeprecatedMethods section - ~/.pypirc marked as DO NOT USE (tokens expire) - Trusted publishing marked as future consideration - Clear migration note: token already in Doppler
 
-- Add SSH clipboard integration via OSC 52 - Complete setup guide for Claude Code /export over SSH/tmux - Deep dive technical analysis of OSC 52 protocol - Implementation summary and checklist - Updated CLAUDE.md with link farm + progressive disclosure architecture - Cross-reference in terminal-setup.md - Preserve Claude Code session tracking (file-history/, todos/)
-
 - Add Kitty terminal configuration and session tracking - Add comprehensive Kitty terminal setup guide for Helix+Prettier PATH configuration - Document macOS GUI app PATH limitations and workarounds for markdown formatting - Preserve Claude Code session history tracking (file-history/, todos/) - Update .gitignore to exclude debug/ and ide/ directories - Add Kitty Terminal reference to CLAUDE.md terminal configuration section This commit addresses markdown auto-formatting issues in Helix when Kitty is launched from Finder/GUI by documenting the PATH export solution and required system symlinks.
+
+- Add SSH clipboard integration via OSC 52 - Complete setup guide for Claude Code /export over SSH/tmux - Deep dive technical analysis of OSC 52 protocol - Implementation summary and checklist - Updated CLAUDE.md with link farm + progressive disclosure architecture - Cross-reference in terminal-setup.md - Preserve Claude Code session tracking (file-history/, todos/)
 
 
 ### 📝 Other Changes
@@ -443,6 +443,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Version 2.7.0 → 2.8.0
 
+- Version 2.7.0 → 2.8.0
+
+- Merge origin/main with Kitty terminal documentation
+
 
 ### 🧰 Maintenance
 
@@ -485,4 +489,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update release notes and restore thinking mode - Update RELEASE_NOTES_SHORT.md for v2.6.0 release - Re-enable alwaysThinkingEnabled in settings - Add Claude Code runtime artifacts to .gitignore (file-history/, todos/, .ccms-checksums)
 
 - Enable Claude Code session history tracking Remove file-history/ and todos/ from .gitignore to enable session history tracking per user request. Claude Code session history provides valuable context and should be tracked in version control. Changes: - Remove file-history/ and todos/ exclusions from .gitignore - Add current session history files to tracking
+
+- Preserve session history and update file path conventions - Preserve Claude Code session history (213 files: file-history/, todos/) - Add file path convention for Ghostty Cmd+click compatibility - Update CLAUDE.md with absolute path formatting requirement
 

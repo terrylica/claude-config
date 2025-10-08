@@ -1,0 +1,138 @@
+#!/bin/bash
+# Creates macOS Quick Action to open file paths in Kitty+Helix
+
+SERVICE_NAME="Open in Kitty Helix"
+SERVICE_DIR="$HOME/Library/Services"
+SERVICE_PATH="$SERVICE_DIR/${SERVICE_NAME}.workflow"
+
+# Create the workflow bundle structure
+mkdir -p "$SERVICE_PATH/Contents"
+
+# Create Info.plist
+cat > "$SERVICE_PATH/Contents/Info.plist" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Open in Kitty Helix</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>runWorkflowAsService</string>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSTextContent</key>
+				<string>NSStringPboardType</string>
+			</dict>
+			<key>NSSendTypes</key>
+			<array>
+				<string>NSStringPboardType</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleIdentifier</key>
+	<string>com.apple.Automator.Open_in_Kitty_Helix</string>
+	<key>CFBundleName</key>
+	<string>Open in Kitty Helix</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+</dict>
+</plist>
+EOF
+
+# Create document.wflow
+cat > "$SERVICE_PATH/Contents/document.wflow" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMApplicationBuild</key>
+	<string>521</string>
+	<key>AMApplicationVersion</key>
+	<string>2.10</string>
+	<key>AMDocumentVersion</key>
+	<string>2</string>
+	<key>actions</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<dict>
+				<key>AMActionVersion</key>
+				<string>2.0.3</string>
+				<key>AMApplication</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>ActionBundlePath</key>
+				<string>/System/Library/Automator/Run Shell Script.action</string>
+				<key>ActionName</key>
+				<string>Run Shell Script</string>
+				<key>ActionParameters</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<string>#!/bin/bash
+# Receives selected text as file path and opens in Kitty with Helix
+
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+# Read input (selected text)
+while read filepath; do
+    # Expand tilde and resolve path
+    filepath="${filepath/#\~/$HOME}"
+    filepath="$(eval echo "$filepath")"
+
+    # Check if file exists
+    if [ -f "$filepath" ]; then
+        # Open in Kitty with Helix
+        /Applications/kitty.app/Contents/MacOS/kitty -e /opt/homebrew/bin/hx "$filepath" &gt; /dev/null 2&gt;&amp;1 &amp;
+    elif [ -d "$filepath" ]; then
+        # If directory, open Kitty in that directory
+        /Applications/kitty.app/Contents/MacOS/kitty --directory="$filepath" &gt; /dev/null 2&gt;&amp;1 &amp;
+    else
+        # Show error
+        osascript -e "display notification \"File not found: $filepath\" with title \"Open in Kitty Helix\""
+    fi
+done
+</string>
+					<key>CheckedForUserDefaultShell</key>
+					<true/>
+					<key>inputMethod</key>
+					<integer>0</integer>
+					<key>shell</key>
+					<string>/bin/bash</string>
+					<key>source</key>
+					<string></string>
+				</dict>
+			</dict>
+		</dict>
+	</array>
+	<key>connectors</key>
+	<dict/>
+	<key>workflowMetaData</key>
+	<dict>
+		<key>serviceInputTypeIdentifier</key>
+		<string>com.apple.Automator.text</string>
+		<key>serviceOutputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>serviceProcessesInput</key>
+		<integer>0</integer>
+		<key>workflowTypeIdentifier</key>
+		<string>com.apple.Automator.servicesMenu</string>
+	</dict>
+</dict>
+</plist>
+EOF
+
+echo "✓ Created Quick Action: $SERVICE_PATH"
+echo ""
+echo "To activate:"
+echo "1. Restart any open applications"
+echo "2. Select a file path in Ghostty (or any app)"
+echo "3. Right-click → Services → 'Open in Kitty Helix'"
+echo ""
+echo "Optional: Assign keyboard shortcut in System Settings → Keyboard → Keyboard Shortcuts → Services"
