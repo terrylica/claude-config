@@ -1,0 +1,349 @@
+# Configuration Reference - Victor's Funding Rate Arbitrage Strategy
+
+**Purpose:** Comprehensive reference for all configurable parameters across the three scripts
+
+---
+
+## `funding_arb_strat_1.py` - Portfolio Backtester Configuration
+
+### File Paths
+```python
+CSV_PATH = "okx_funding_arb_1y.csv"          # Input: historical funding data
+OUT_CSV  = "okx_funding_arb_portfolio_v8.csv"  # Output: backtest results
+OUT_PNG  = "okx_funding_arb_portfolio_v8.png"  # Output: equity curve chart
+```
+
+### Backtest Parameters
+```python
+INITIAL_EQUITY = 1.0     # Starting capital (normalized to 1.0)
+START_DATE = None        # Filter start (None = use all available data)
+END_DATE   = None        # Filter end (None = use all available data)
+```
+
+**Usage:**
+```python
+START_DATE = "2024-01-01"  # ISO format: YYYY-MM-DD
+END_DATE   = "2024-12-31"
+```
+
+---
+
+### Fee Schedule (VIP-7 Tier)
+```python
+SPOT_MAKER = -0.00005   # -0.005% (rebate)
+SPOT_TAKER =  0.00020   # +0.020%
+PERP_MAKER = -0.00005   # -0.005% (rebate)
+PERP_TAKER =  0.00020   # +0.020%
+MAKER_RATIO = 0.60      # 60% maker, 40% taker execution assumption
+```
+
+**OKX Fee Tiers:**
+| VIP Level | Maker   | Taker  |
+|-----------|---------|--------|
+| VIP-0     | 0.02%   | 0.05%  |
+| VIP-1     | 0.015%  | 0.04%  |
+| VIP-7     | -0.005% | 0.02%  |
+
+**Recommendation:** Validate actual VIP tier before live trading
+
+---
+
+### Portfolio Rules
+```python
+TOP_K = 5              # Number of symbols to hold simultaneously
+MAX_W = 0.50           # Maximum weight per symbol (50%)
+MIN_W = 0.05           # Minimum weight per symbol (5%)
+REBALANCE = "8h"       # Rebalancing frequency: "8h" or "daily"
+MIN_HOLD_HOURS = 24.0  # Minimum holding period after any executed change (hours)
+HURDLE_BPS = 3.0       # Minimum advantage to consider rebalancing (basis points)
+BAND = 0.05            # No-trade band around current weights (±5%)
+```
+
+**Parameter Tuning Guide:**
+
+#### `TOP_K` (Top-K Selection)
+- **Lower (3):** More concentrated, higher individual conviction
+- **Higher (7-10):** More diversified, smoother returns
+- **Recommended range:** 3-7
+
+#### `MAX_W` (Maximum Weight)
+- **Lower (30-40%):** More diversification, lower concentration risk
+- **Higher (50-70%):** More aggressive, higher concentration risk
+- **Current:** 50% (matches Victor's spec)
+
+#### `MIN_W` (Minimum Weight)
+- **Lower (2-3%):** Allows more symbols at edges
+- **Higher (7-10%):** Forces meaningful positions only
+- **Current:** 5% (ensures 20+ positions max with MIN_W alone)
+
+#### `REBALANCE` (Cadence)
+- **"8h":** Aligns with OKX's 3x daily funding settlements
+- **"daily":** Lower turnover, less responsive to changes
+- **Recommendation:** Keep "8h" for maximum funding capture
+
+#### `MIN_HOLD_HOURS` (Minimum Hold Period)
+- **Lower (12h):** More responsive, higher turnover
+- **Higher (48h):** More sticky, lower turnover
+- **Current:** 24h (balanced)
+- **Rule:** Must be ≥ REBALANCE interval
+
+#### `HURDLE_BPS` (Advantage Hurdle)
+- **Lower (1-2 bps):** More frequent rebalances, higher turnover
+- **Higher (5-10 bps):** Fewer rebalances, lower turnover
+- **Current:** 3 bps (conservative)
+- **Calibration:** Should exceed typical bid-ask spread
+
+#### `BAND` (No-Trade Band)
+- **Narrower (2-3%):** More precise tracking, higher turnover
+- **Wider (7-10%):** Fewer small adjustments, lower turnover
+- **Current:** 5% (standard range)
+
+---
+
+### Progress Reporting
+```python
+PROGRESS_EVERY = 200  # Print progress every N snapshots
+```
+
+---
+
+## `pull_funding_arb_hist.py` - Data Downloader Configuration
+
+### API Settings
+```python
+BASE_URL = "https://www.okx.com"
+REQUEST_LIMIT = 400    # Max rows per API request (OKX limit)
+SLEEP_SEC = 0.15       # Delay between API calls (rate limiting)
+MAX_MONTHS = 3         # Maximum lookback (OKX API limitation)
+```
+
+**Rate Limiting:**
+- OKX public endpoints: ~20 requests/2 seconds
+- `SLEEP_SEC = 0.15` → ~6.67 req/sec → well under limit
+
+---
+
+### Symbol Universe
+```python
+SYMBOLS = [
+    "BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "SUI", "LTC", "AVAX", "ADA",
+    "WLFI", "PUMP", "XPL", "LINK", "WLD", "FIL", "BCH", "AAVE", "UNI", "TON",
+    # ... (full list in script)
+]
+```
+
+**To add new symbols:**
+1. Check if symbol exists on OKX as `SYMBOL-USDT-SWAP`
+2. Add to `SYMBOLS` list
+3. Re-run data downloader
+
+---
+
+### Credential Management
+⚠️ **CRITICAL:** See [AUDIT_REPORT.md](AUDIT_REPORT.md) §1
+
+**Current (INSECURE):**
+```python
+OKX_API_KEY = os.getenv("7abc4982-7def-4151-b4e8-775617b8e0cf")  # ❌ WRONG
+```
+
+**Recommended (Using Doppler):**
+```bash
+# Set up Doppler secrets
+doppler secrets set OKX_API_KEY="your_key_here"
+doppler secrets set OKX_API_SECRET="your_secret_here"
+doppler secrets set OKX_API_PASSPHRASE="your_passphrase_here"
+
+# Run script with Doppler
+doppler run -- python pull_funding_arb_hist.py
+```
+
+**Code update:**
+```python
+OKX_API_KEY = os.getenv("OKX_API_KEY")
+OKX_API_SECRET = os.getenv("OKX_API_SECRET")
+OKX_API_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE")
+```
+
+---
+
+## `next_funding_rate.py` - Real-Time Signal Generator Configuration
+
+### Strategy Controls
+```python
+HURDLE_APR_PCT = float(os.getenv("HURDLE_APR_PCT", "5.0"))  # Minimum net APR to trade (%)
+```
+
+**Customization via environment:**
+```bash
+HURDLE_APR_PCT=10.0 python next_funding_rate.py  # Require 10% APR
+```
+
+---
+
+### Leverage Parameters
+```python
+L_SPOT_LEVERAGE = 12.0                          # Spot leverage assumption (12x)
+BORROWED_SHARE = 12/13  # ≈ 0.92308 (92.31%)   # Portion financed with borrowed capital
+EQUITY_SHARE   = 1/13   # ≈ 0.07692 (7.69%)    # Portion from own equity
+```
+
+**Leverage Scenarios:**
+
+| Leverage | Equity Share | Borrowed Share | ROE Multiplier |
+|----------|--------------|----------------|----------------|
+| 1x       | 100%         | 0%             | 1.0x           |
+| 5x       | 16.67%       | 83.33%         | 6.0x           |
+| 10x      | 9.09%        | 90.91%         | 11.0x          |
+| 12x      | 7.69%        | 92.31%         | 13.0x          |
+| 20x      | 4.76%        | 95.24%         | 21.0x          |
+
+**To change leverage:**
+```python
+L_SPOT_LEVERAGE = 5.0  # Use 5x leverage instead
+# BORROWED_SHARE and EQUITY_SHARE auto-calculate
+```
+
+---
+
+### Financing Costs
+
+#### Positive Funding (Long Spot + Short Perp)
+```python
+USE_EXTERNAL_BTC_LOAN = True        # Use external BTC lending market
+EXTERNAL_BTC_LOAN_APR = 0.025       # 2.5% annual for BTC loans
+
+USE_USDT_FINANCING = False          # Use OKX USDT margin
+USDT_BORROW_APR = 0.040             # 4.0% annual for USDT margin
+```
+
+**Decision tree:**
+1. If `symbol == "BTC"` and `USE_EXTERNAL_BTC_LOAN == True` → 2.5% APR
+2. Else if `USE_USDT_FINANCING == True` → 4.0% APR
+3. Else → 0% (assume self-financed)
+
+#### Negative Funding (Short Spot + Long Perp)
+```python
+VIP7_BORROW_APR = {
+    "BTC": 0.010,   # 1.00%
+    "ETH": 0.025,   # 2.50%
+    "DOT": 0.050,   # 5.00%
+    "ATH": 0.64,    # 64% (likely data error - verify!)
+    "ATOM": 0.090,  # 9.00%
+    "IP": 0.050,    # 5.00%
+}
+DEFAULT_COIN_BORROW_APR = 0.010  # 1.00% for unlisted coins
+```
+
+**To update borrow rates:**
+1. Check OKX's VIP-7 coin borrow rates (updated monthly)
+2. Update `VIP7_BORROW_APR` dictionary
+3. Rerun signal generator
+
+---
+
+### Order Book Depth
+```python
+ORDERBOOK_DEPTH = 400  # Number of levels to fetch for impact price calculation
+```
+
+**Impact on estimation:**
+- Higher depth → more accurate large-order impact modeling
+- Lower depth → faster API responses
+
+---
+
+### Network Configuration
+```python
+REQUEST_TIMEOUT = 10   # HTTP timeout (seconds)
+RETRIES = 3            # Number of retry attempts per request
+```
+
+---
+
+## 🎛️ Parameter Tuning Workflow
+
+### 1. **Conservative Settings** (Low Risk, Low Return)
+```python
+# funding_arb_strat_1.py
+TOP_K = 7
+MAX_W = 0.30
+MIN_W = 0.05
+HURDLE_BPS = 5.0
+BAND = 0.07
+MIN_HOLD_HOURS = 48.0
+
+# next_funding_rate.py
+HURDLE_APR_PCT = 10.0
+L_SPOT_LEVERAGE = 5.0
+```
+
+### 2. **Balanced Settings** (Victor's Current)
+```python
+# funding_arb_strat_1.py
+TOP_K = 5
+MAX_W = 0.50
+MIN_W = 0.05
+HURDLE_BPS = 3.0
+BAND = 0.05
+MIN_HOLD_HOURS = 24.0
+
+# next_funding_rate.py
+HURDLE_APR_PCT = 5.0
+L_SPOT_LEVERAGE = 12.0
+```
+
+### 3. **Aggressive Settings** (High Risk, High Return)
+```python
+# funding_arb_strat_1.py
+TOP_K = 3
+MAX_W = 0.70
+MIN_W = 0.10
+HURDLE_BPS = 1.0
+BAND = 0.03
+MIN_HOLD_HOURS = 12.0
+
+# next_funding_rate.py
+HURDLE_APR_PCT = 3.0
+L_SPOT_LEVERAGE = 20.0
+```
+
+---
+
+## 🔬 Sensitivity Testing Script (Recommended)
+
+```python
+# sensitivity_test.py
+import pandas as pd
+from itertools import product
+
+# Define parameter ranges
+TOP_K_RANGE = [3, 5, 7]
+MAX_W_RANGE = [0.30, 0.50, 0.70]
+HURDLE_BPS_RANGE = [1.0, 3.0, 5.0]
+
+results = []
+for top_k, max_w, hurdle in product(TOP_K_RANGE, MAX_W_RANGE, HURDLE_BPS_RANGE):
+    # Modify config
+    # Run backtest
+    # Collect results
+    results.append({
+        'top_k': top_k,
+        'max_w': max_w,
+        'hurdle_bps': hurdle,
+        'final_equity': final_eq,
+        'sharpe': sharpe,
+        'turnover': turnover
+    })
+
+pd.DataFrame(results).to_csv('sensitivity_analysis.csv', index=False)
+```
+
+---
+
+## 📚 References
+
+- **OKX API Documentation:** https://www.okx.com/docs-v5/en/
+- **OKX Fee Schedule:** https://www.okx.com/fees
+- **Victor's Strategy Spec:** See [VICTOR_STRATEGY_OVERVIEW.md](VICTOR_STRATEGY_OVERVIEW.md)
+- **Audit Report:** See [AUDIT_REPORT.md](AUDIT_REPORT.md)

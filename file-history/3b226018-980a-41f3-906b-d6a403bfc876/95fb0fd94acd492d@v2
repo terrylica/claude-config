@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""
+Atom Integrity Tester
+
+Tests individual atoms from ml_feature_set.atoms library for correctness and sensibility.
+
+Usage:
+    uv run --active python /tmp/test_atom.py <atom_name>
+
+Examples:
+    uv run --active python /tmp/test_atom.py returns
+    uv run --active python /tmp/test_atom.py rolling_mean_20
+    uv run --active python /tmp/test_atom.py hour_of_day_sin
+"""
+
+import sys
+import os
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+# Add project root to path (so imports work)
+project_root = Path(__file__).parent.parent / 'eon' / 'ml-feature-set'
+if not project_root.exists():
+    # Try alternative path structure
+    project_root = Path.cwd()
+
+sys.path.insert(0, str(project_root))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def load_test_data():
+    """Load SOL 5m sample data"""
+    data_path = project_root / 'ml_feature_set' / 'sample_data' / 'resampled_binance_SOL-5m.csv'
+
+    if not data_path.exists():
+        # Try relative to cwd
+        data_path = Path('ml_feature_set/sample_data/resampled_binance_SOL-5m.csv')
+
+    if not data_path.exists():
+        raise FileNotFoundError(f"Cannot find SOL 5m data at {data_path}")
+
+    print(f"Loading data from: {data_path}")
+    df = pd.read_csv(data_path)
+
+    # Prepare data
+    if 'actual_ready_time' not in df.columns:
+        if 'date' in df.columns:
+            df['actual_ready_time'] = pd.to_datetime(df['date'])
+        else:
+            raise ValueError("No time column found in data")
+    else:
+        df['actual_ready_time'] = pd.to_datetime(df['actual_ready_time'])
+
+    df = df.set_index('actual_ready_time')
+
+    print(f"Loaded {len(df)} rows from {df.index.min()} to {df.index.max()}\n")
+    return df
+
+
+def check_sensibility(result: pd.Series, atom_name: str) -> dict:
+    """
+    Run sensibility checks on atom result
+
+    Returns:
+        dict with check results
+    """
+    checks = {
+        'all_nan': result.isna().all(),
+        'nan_ratio': result.isna().sum() / len(result),
+        'all_zero': (result == 0).all(),
+        'all_constant': result.nunique() == 1,
+        'has_inf': np.isinf(result).any(),
+        'value_range': (result.min(), result.max()) if result.notna().any() else (np.nan, np.nan),
+        'std': result.std() if result.notna().any() else np.nan,
+        'mean': result.mean() if result.notna().any() else np.nan,
+    }
+
+    return checks
+
+
+def print_report(atom, result, checks):
+    """Print detailed test report"""
+    print("=" * 70)
+    print(f"ATOM TEST REPORT: {atom.name}")
+    print("=" * 70)
+
+    # Atom metadata
+    print(f"\n📋 METADATA")
+    print(f"   Layer:        {atom.layer}")
+    print(f"   Library:      {atom.library}")
+    print(f"   Status:       {atom.status}")
+    print(f"   Lookback:     {atom.lookback} bars")
+    print(f"   Dependencies: {atom.dependencies if atom.dependencies else 'None'}")
+    print(f"   Description:  {atom.description}")
+
+    # Result statistics
+    print(f"\n📊 STATISTICS")
+    print(f"   Total values: {len(result)}")
+    print(f"   Non-null:     {result.notna().sum()} ({result.notna().sum() / len(result) * 100:.1f}%)")
+    print(f"   Null (NaN):   {result.isna().sum()} ({checks['nan_ratio'] * 100:.1f}%)")
+    print(f"   Unique vals:  {result.nunique()}")
+    print(f"   Mean:         {checks['mean']:.6f}" if not np.isnan(checks['mean']) else "   Mean:         N/A")
+    print(f"   Std:          {checks['std']:.6f}" if not np.isnan(checks['std']) else "   Std:          N/A")
+    print(f"   Min:          {checks['value_range'][0]:.6f}" if not np.isnan(checks['value_range'][0]) else "   Min:          N/A")
+    print(f"   Max:          {checks['value_range'][1]:.6f}" if not np.isnan(checks['value_range'][1]) else "   Max:          N/A")
+
+    # Sample values
+    print(f"\n📈 SAMPLE VALUES")
+    print(f"   First 10:")
+    first_10 = result.head(10)
+    for idx, val in first_10.items():
+        print(f"      {idx}: {val:.6f}" if not pd.isna(val) else f"      {idx}: NaN")
+
+    print(f"\n   Last 10:")
+    last_10 = result.tail(10)
+    for idx, val in last_10.items():
+        print(f"      {idx}: {val:.6f}" if not pd.isna(val) else f"      {idx}: NaN")
+
+    # Sensibility checks
+    print(f"\n🔍 SENSIBILITY CHECKS")
+    issues = []
+
+    if checks['all_nan']:
+        print(f"   ❌ All values are NaN")
+        issues.append("all_nan")
+    elif checks['nan_ratio'] > 0.5:
+        print(f"   ⚠️  High NaN ratio: {checks['nan_ratio'] * 100:.1f}%")
+        issues.append("high_nan")
+    elif checks['nan_ratio'] > 0:
+        print(f"   ✓ NaN ratio acceptable: {checks['nan_ratio'] * 100:.1f}%")
+    else:
+        print(f"   ✓ No NaN values")
+
+    if checks['all_zero']:
+        print(f"   ⚠️  All values are zero")
+        issues.append("all_zero")
+    else:
+        print(f"   ✓ Non-zero values present")
+
+    if checks['all_constant']:
+        print(f"   ⚠️  All values are constant")
+        issues.append("all_constant")
+    else:
+        print(f"   ✓ Values vary (unique count: {result.nunique()})")
+
+    if checks['has_inf']:
+        print(f"   ❌ Contains infinity values")
+        issues.append("has_inf")
+    else:
+        print(f"   ✓ No infinity values")
+
+    # Value range sanity
+    vmin, vmax = checks['value_range']
+    if not (np.isnan(vmin) or np.isnan(vmax)):
+        value_span = vmax - vmin
+        if value_span == 0:
+            print(f"   ⚠️  No variation in values")
+        elif abs(vmax) > 1e10 or abs(vmin) > 1e10:
+            print(f"   ⚠️  Extreme values detected: [{vmin:.2e}, {vmax:.2e}]")
+            issues.append("extreme_values")
+        else:
+            print(f"   ✓ Value range reasonable: [{vmin:.6f}, {vmax:.6f}]")
+
+    # Final verdict
+    print(f"\n🏁 VERDICT")
+    if not issues:
+        print(f"   ✅ PASS - Atom looks good!")
+        return True
+    elif 'all_nan' in issues or 'has_inf' in issues:
+        print(f"   ❌ FAIL - Critical issues: {', '.join(issues)}")
+        return False
+    else:
+        print(f"   ⚠️  WARN - Minor issues: {', '.join(issues)}")
+        return True
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python /tmp/test_atom.py <atom_name>")
+        print("\nAvailable atoms:")
+        lib = load_library_from_formulas()
+        for layer in ['A', 'B']:
+            atoms = lib.get_atoms_by_layer(layer)
+            if atoms:
+                print(f"\n  Layer {layer} ({len(atoms)} atoms):")
+                for atom in atoms[:10]:  # Show first 10
+                    print(f"    - {atom.name}")
+                if len(atoms) > 10:
+                    print(f"    ... and {len(atoms) - 10} more")
+        sys.exit(1)
+
+    atom_name = sys.argv[1]
+
+    # Load library
+    print("Loading atom library...")
+    lib = load_library_from_formulas()
+    print(f"Library loaded: {len(lib)} total atoms\n")
+
+    # Get atom
+    atom = lib.get_atom(atom_name)
+    if atom is None:
+        print(f"❌ Atom '{atom_name}' not found in library")
+        print(f"\nAvailable atoms: {len(lib)} total")
+        print(f"Layer counts: {lib.count_by_layer()}")
+        sys.exit(1)
+
+    # Load data
+    try:
+        df = load_test_data()
+    except Exception as e:
+        print(f"❌ Failed to load test data: {e}")
+        sys.exit(1)
+
+    # Compute atom
+    print(f"Computing atom: {atom_name}...")
+    try:
+        result = atom.compute(df)
+    except Exception as e:
+        print(f"\n❌ COMPUTATION FAILED")
+        print(f"   Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+    # Run checks
+    checks = check_sensibility(result, atom_name)
+
+    # Print report
+    passed = print_report(atom, result, checks)
+
+    # Exit code
+    sys.exit(0 if passed else 1)
+
+
+if __name__ == '__main__':
+    main()

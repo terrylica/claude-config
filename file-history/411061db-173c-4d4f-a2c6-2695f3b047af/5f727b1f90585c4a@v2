@@ -1,0 +1,136 @@
+#!/bin/bash
+# Test optimal download concurrency for OKX CDN
+# Tests different parallel job counts to find sweet spot
+
+set -e
+
+TEST_DIR="/tmp/swap_concurrency_test"
+RESULTS_FILE="/tmp/concurrency_test_results.txt"
+
+# Test with 4 months we haven't downloaded yet (2023-07 to 2023-10)
+TEST_MONTHS=("2023 7" "2023 8" "2023 9" "2023 10")
+
+echo "=================================="
+echo "OKX CDN Concurrency Test"
+echo "=================================="
+echo "Testing concurrency levels: 1, 2, 4, 6"
+echo "Test dataset: 4 months (2023-07 to 2023-10)"
+echo "Output: $RESULTS_FILE"
+echo ""
+
+# Clear previous results
+> "$RESULTS_FILE"
+
+# Function to download with specific concurrency
+test_concurrency() {
+    local concurrency=$1
+    local test_dir="$TEST_DIR/test_c${concurrency}"
+
+    echo ""
+    echo "=== Testing concurrency=$concurrency ==="
+
+    # Clean test directory
+    rm -rf "$test_dir"
+    mkdir -p "$test_dir"
+
+    # Start timer
+    local start_time=$(date +%s)
+
+    # Download function
+    download_month() {
+        local year=$1
+        local month=$2
+        local output_dir="$3/raw_ticks_swap/$year"
+
+        mkdir -p "$output_dir"
+
+        cd /Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis
+        uv run --active python scripts/download_month.py $year $month \
+            --ticks --market-type swap --data-dir "$3" \
+            2>&1 | grep -vE "^DEBUG|Unnecessary package" | grep -E "(✓|Saved|ERROR)"
+    }
+
+    export -f download_month
+
+    # Run downloads in parallel
+    if [ $concurrency -eq 1 ]; then
+        # Sequential
+        for month_pair in "${TEST_MONTHS[@]}"; do
+            download_month $month_pair "$test_dir"
+        done
+    else
+        # Parallel using xargs
+        printf '%s\n' "${TEST_MONTHS[@]}" | \
+            xargs -P $concurrency -n 2 bash -c 'download_month "$@" "'"$test_dir"'"' _
+    fi
+
+    # End timer
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
+
+    # Calculate throughput
+    local total_size=$(du -sm "$test_dir" | cut -f1)
+    local throughput=$(echo "scale=2; $total_size / $elapsed" | bc)
+
+    echo ""
+    echo "Results for concurrency=$concurrency:"
+    echo "  Time: ${elapsed}s"
+    echo "  Size: ${total_size}MB"
+    echo "  Throughput: ${throughput}MB/s"
+
+    # Log results
+    echo "$concurrency,$elapsed,$total_size,$throughput" >> "$RESULTS_FILE"
+
+    # Cleanup
+    rm -rf "$test_dir"
+}
+
+# Test different concurrency levels
+echo "concurrency,time_sec,size_mb,throughput_mbps" > "$RESULTS_FILE"
+
+test_concurrency 1
+test_concurrency 2
+test_concurrency 4
+test_concurrency 6
+
+# Analyze results
+echo ""
+echo "=================================="
+echo "CONCURRENCY TEST RESULTS"
+echo "=================================="
+echo ""
+cat "$RESULTS_FILE"
+echo ""
+
+# Find optimal concurrency (highest throughput)
+echo "Analysis:"
+echo ""
+
+# Parse results and find best
+best_concurrency=$(tail -n +2 "$RESULTS_FILE" | sort -t, -k4 -nr | head -1 | cut -d, -f1)
+best_throughput=$(tail -n +2 "$RESULTS_FILE" | sort -t, -k4 -nr | head -1 | cut -d, -f4)
+best_time=$(tail -n +2 "$RESULTS_FILE" | sort -t, -k4 -nr | head -1 | cut -d, -f2)
+
+echo "✓ Optimal concurrency: $best_concurrency jobs"
+echo "✓ Best throughput: ${best_throughput}MB/s"
+echo "✓ Time for 4 months: ${best_time}s"
+echo ""
+
+# Estimate for full 21-month download
+remaining_months=15  # 21 total - 6 already downloaded
+estimated_time=$(echo "scale=0; $best_time * $remaining_months / 4" | bc)
+estimated_min=$(echo "scale=0; $estimated_time / 60" | bc)
+
+echo "Estimated time for remaining 15 months: ${estimated_min} minutes"
+echo ""
+echo "Recommendation:"
+if [ "$best_concurrency" -eq 1 ]; then
+    echo "  Sequential download is optimal (no benefit from parallelization)"
+    echo "  Continue with current download process"
+else
+    echo "  Use concurrency=$best_concurrency for optimal speed"
+    echo "  Switch to parallel download to save ~$(echo "scale=0; (15*19 - $estimated_min)" | bc) minutes"
+fi
+
+echo ""
+echo "Results saved to: $RESULTS_FILE"

@@ -1,0 +1,127 @@
+# run2 Label Smoothing Evaluation - FAILED
+
+**Date**: 2025-10-05
+**Status**: ✗ SLO Violation (Conformal Coverage Gap)
+**Experiment**: run2_label_smoothing_0.3
+**Approach**: Training-time label smoothing (α=0.3)
+
+## Executive Summary
+
+Label smoothing α=0.3 **degraded** model calibration:
+- ECE increased 90.7% (0.0464 → 0.0885)
+- Conformal coverage worse (57.8% → 56.9%)
+- Prediction sets remain size 1.00 (overconfidence persists)
+- Accuracy dropped 1.7% (0.5973 → 0.5872)
+
+**Verdict**: Label smoothing inappropriate for this model/dataset combination.
+
+## Test Set Metrics (EVAL-001)
+
+| Metric | run1 (baseline) | run2 (α=0.3) | Change |
+|--------|-----------------|--------------|--------|
+| Accuracy | 0.5973 | 0.5872 | -1.7% |
+| Precision | 0.5973 | 0.5876 | -1.6% |
+| Recall | 0.5973 | 0.5872 | -1.7% |
+| F1 | 0.5973 | 0.5865 | -1.8% |
+| ECE | 0.0464 | 0.0885 | **+90.7%** ⚠️ |
+| Regime Accuracy Mean | 0.5973 | 0.5871 | -1.7% |
+| Regime Accuracy Std | 0.0733 | 0.0625 | -14.7% |
+| Anomaly Mean | 0.007045 | 0.006001 | -14.8% |
+| Anomaly Std | 0.039251 | 0.038552 | -1.8% |
+
+**SLO Compliance**:
+- ✓ Accuracy > 0.33 (random baseline): 0.5872 > 0.33
+
+## Conformal Calibration (EVAL-002)
+
+| Metric | run1 (baseline) | run2 (α=0.3) | Change |
+|--------|-----------------|--------------|--------|
+| Target Coverage | 90.0% | 90.0% | - |
+| Empirical Coverage | 57.8% | 56.9% | -0.9% |
+| Coverage Gap | 32.2% | 33.1% | **+0.9%** ⚠️ |
+| Quantile Threshold | 0.5639 | 0.5931 | +5.2% |
+| Avg Set Size | 1.00 | 1.00 | 0% |
+| Median Set Size | 1.0 | 1.0 | 0% |
+
+**SLO Violation**:
+- ✗ Coverage gap: 33.1% >> 5% tolerance (CRITICAL)
+- Prediction sets size 1.00 (extreme overconfidence)
+
+## Root Cause Analysis
+
+### Why Label Smoothing Failed
+
+1. **Uniform Penalty Counterproductive**
+   - Label smoothing penalizes correct predictions uniformly: `(1-α)·δ_y + α/K`
+   - Model already well-calibrated on easy examples (ECE=0.0464 is low)
+   - Smoothing degraded calibration on these examples
+
+2. **Dataset Characteristics**
+   - Class 1 (sideways): 0 samples (binary classification in practice)
+   - Label smoothing allocates mass to non-existent class
+   - Wasted probability mass → worse calibration
+
+3. **Overconfidence Location Mismatch**
+   - Overconfidence occurs at decision boundaries (hard examples)
+   - Label smoothing penalizes all predictions equally
+   - Need targeted method focusing on hard/uncertain examples
+
+4. **ECE vs Conformal Coverage Mismatch**
+   - ECE measures binned calibration accuracy
+   - Conformal coverage requires uncertainty quantification in tails
+   - Low ECE ≠ good conformal coverage
+
+### Evidence
+
+**Before (run1)**:
+- ECE: 0.0464 (well-calibrated on average)
+- Coverage: 57.8% (but prediction sets size 1.0)
+- Model confident on easy examples, overconfident on hard examples
+
+**After (run2, α=0.3)**:
+- ECE: 0.0885 (worse calibration overall)
+- Coverage: 56.9% (marginally worse)
+- Model less confident on easy examples (harm), still overconfident on hard examples (no fix)
+
+## Next Steps
+
+### train-003: Focal Loss (REQUIRED)
+
+**Approach**: Focal loss with γ=2.0
+```
+L_focal = -(1-p_t)^γ log(p_t)
+```
+
+**Rationale**:
+- Down-weights easy examples: `(1-p_t)^2 ≈ 0` when `p_t ≈ 1`
+- Up-weights hard examples: `(1-p_t)^2 ≈ 1` when `p_t ≈ 0.5`
+- No uniform penalty on correct predictions
+- Proven effective for imbalanced datasets (Lin et al. ICCV 2017)
+
+**Expected Outcome**:
+- Improved calibration on decision boundaries
+- Larger prediction sets (multi-class uncertainty)
+- ECE < 0.10
+- Conformal coverage gap < 5%
+
+**Estimated Effort**: 5-9 hours (4h training + 1-2h validation + debugging)
+
+### Alternative: Ensemble Methods (if focal loss fails)
+
+**Approach**: Train 5 models with different seeds
+- Ensemble averaging for prediction
+- Prediction variance as uncertainty
+- Estimated effort: 20-30 hours
+
+## References
+
+- Lin et al. (ICCV 2017): "Focal Loss for Dense Object Detection"
+- Müller et al. (2019): "When Does Label Smoothing Help?"
+- Guo et al. (ICML 2017): "On Calibration of Modern Neural Networks"
+
+## Artifacts
+
+- Model: `research/ml_ood/experiments/run2_label_smoothing_0.3/final_model.pt`
+- Checkpoints: `research/ml_ood/experiments/run2_label_smoothing_0.3/checkpoint_epoch*.pt`
+- Logs: `/tmp/eval_run2.log`
+- Training config: 50 epochs, batch=256, lr=1e-4, label_smoothing=0.3

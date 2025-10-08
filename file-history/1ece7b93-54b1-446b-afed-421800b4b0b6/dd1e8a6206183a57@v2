@@ -1,0 +1,360 @@
+"""
+OKX 1-Minute Bar Price Provider.
+
+This module provides a price provider that works with pre-aggregated 1-minute bar data
+stored in a modular year-based directory structure.
+
+Key features:
+- Loads from modular structure: data/1min_bars/YYYY/MM.parquet
+- Pre-aggregated OHLCV bars with VWAP, buy/sell volume, trade counts
+- Fast filtering via Parquet predicate pushdown
+- Compatible interface with TickPriceProvider
+"""
+
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Literal
+from datetime import datetime, timedelta
+from collections import OrderedDict
+
+import pandas as pd
+import numpy as np
+
+from .utils import normalize_symbol, validate_date_range
+
+logger = logging.getLogger(__name__)
+
+# Type hints for price methods
+PriceMethod = Literal["vwap", "close", "open", "high", "low", "typical"]
+
+
+class BarPriceProvider:
+    """
+    Price provider that works with pre-aggregated 1-minute bars.
+
+    This provider loads 1-minute OHLCV bars from the modular directory structure
+    and returns prices for backtesting.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> provider = BarPriceProvider(
+        ...     bar_data_dir=Path("data/1min_bars"),
+        ...     symbols=["BTC-USDT", "ETH-USDT"]
+        ... )
+        >>>
+        >>> # Get VWAP prices for October 2023
+        >>> prices = provider.get_prices(
+        ...     symbols=["BTC-USDT"],
+        ...     start_date="2023-10-01",
+        ...     end_date="2023-10-31",
+        ...     freq="8h",
+        ...     method="vwap"
+        ... )
+    """
+
+    def __init__(
+        self,
+        bar_data_dir: Path,
+        symbols: Optional[List[str]] = None,
+        market_type: str = "spot",
+        max_cache_size: int = 50,
+    ):
+        """
+        Initialize 1-min bar price provider.
+
+        Args:
+            bar_data_dir: Directory containing 1-min bars (modular: YYYY/MM.parquet)
+            symbols: Optional list of symbols to preload (improves query performance)
+            market_type: "spot" or "swap"
+            max_cache_size: Maximum number of (year, month, symbols) combinations to cache (default: 50)
+        """
+        self.bar_data_dir = Path(bar_data_dir)
+        self.symbols = symbols or []
+        self.market_type = market_type
+        self.max_cache_size = max_cache_size
+        self._cache = OrderedDict()  # LRU cache for loaded monthly data
+
+        if not self.bar_data_dir.exists():
+            raise ValueError(f"Bar data directory not found: {self.bar_data_dir}")
+
+    def _get_month_file(self, year: int, month: int) -> Path:
+        """Get path to monthly bar file in modular structure."""
+        return self.bar_data_dir / str(year) / f"{month:02d}.parquet"
+
+    def _get_months_in_range(self, start_date: str, end_date: str) -> List[tuple]:
+        """Get list of (year, month) tuples covering the date range."""
+        start = pd.to_datetime(start_date)
+        end = pd.to_datetime(end_date)
+
+        months = []
+        current = start.replace(day=1)
+        end_month = end.replace(day=1)
+
+        while current <= end_month:
+            months.append((current.year, current.month))
+            current += pd.DateOffset(months=1)
+
+        return months
+
+    def _load_month(self, year: int, month: int, symbols: List[str]) -> pd.DataFrame:
+        """
+        Load 1-min bars for a specific month and symbols with LRU caching.
+
+        Implements cache eviction to prevent unbounded memory growth in long-running backtests.
+        """
+        cache_key = (year, month, tuple(sorted(symbols)))
+
+        # Cache hit: move to end (most recently used)
+        if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
+            return self._cache[cache_key]
+
+        month_file = self._get_month_file(year, month)
+
+        if not month_file.exists():
+            logger.warning(f"Month file not found: {month_file}")
+            return pd.DataFrame()
+
+        # Load with symbol filtering
+        df = pd.read_parquet(month_file)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+
+        if symbols:
+            df = df[df['symbol'].isin(symbols)]
+
+        # Evict oldest entry if cache is full (LRU eviction)
+        if len(self._cache) >= self.max_cache_size:
+            oldest_key = next(iter(self._cache))
+            evicted_df = self._cache.pop(oldest_key)
+            del evicted_df  # Explicit cleanup to help GC
+            logger.debug(f"Cache full ({self.max_cache_size} entries), evicted: {oldest_key}")
+
+        # Add to cache
+        self._cache[cache_key] = df
+        return df
+
+    def get_prices(
+        self,
+        symbols: List[str],
+        start_date: str,
+        end_date: str,
+        freq: str = "1min",
+        method: PriceMethod = "vwap",
+    ) -> pd.DataFrame:
+        """
+        Get prices for symbols in date range, resampled to specified frequency.
+
+        Args:
+            symbols: List of symbols to query
+            start_date: Start date (ISO format)
+            end_date: End date (ISO format)
+            freq: Resampling frequency (e.g., "1min", "5min", "1h", "8h")
+            method: Price extraction method:
+                - "vwap": Volume-weighted average price (default)
+                - "close": Closing price
+                - "open": Opening price
+                - "high": Highest price
+                - "low": Lowest price
+                - "typical": (high + low + close) / 3
+
+        Returns:
+            DataFrame with columns: [timestamp, symbol, price]
+        """
+        validate_date_range(start_date, end_date)
+
+        # For 1-min bars, floor timestamps to minute boundaries
+        # This handles cases where exact timestamps (e.g., 00:00:01) don't align with bar times (00:00:00)
+        if freq == "1min":
+            start_dt = pd.to_datetime(start_date, utc=True).floor('1min')
+            end_dt = pd.to_datetime(end_date, utc=True).floor('1min')
+            start_date = start_dt.isoformat()
+            end_date = end_dt.isoformat()
+
+        # Normalize symbols
+        symbols = [normalize_symbol(s, self.market_type) for s in symbols]
+
+        # Get months covering the date range
+        months = self._get_months_in_range(start_date, end_date)
+
+        # Load and concatenate data from all months
+        dfs = []
+        for year, month in months:
+            df = self._load_month(year, month, symbols)
+            if not df.empty:
+                dfs.append(df)
+
+        if not dfs:
+            logger.warning(f"No data found for {symbols} in {start_date} to {end_date}")
+            return pd.DataFrame(columns=['timestamp', 'symbol', 'price'])
+
+        df = pd.concat(dfs, ignore_index=True)
+
+        # Filter to exact date range
+        start_dt = pd.to_datetime(start_date, utc=True)
+        end_dt = pd.to_datetime(end_date, utc=True)
+        df = df[(df['timestamp'] >= start_dt) & (df['timestamp'] <= end_dt)]
+
+        # If requesting 1-min data, no resampling needed
+        if freq == "1min":
+            if method == "vwap":
+                result = df[['timestamp', 'symbol', 'vwap']].copy()
+                result.columns = ['timestamp', 'symbol', 'price']
+            elif method == "close":
+                result = df[['timestamp', 'symbol', 'close']].copy()
+                result.columns = ['timestamp', 'symbol', 'price']
+            elif method == "open":
+                result = df[['timestamp', 'symbol', 'open']].copy()
+                result.columns = ['timestamp', 'symbol', 'price']
+            elif method == "high":
+                result = df[['timestamp', 'symbol', 'high']].copy()
+                result.columns = ['timestamp', 'symbol', 'price']
+            elif method == "low":
+                result = df[['timestamp', 'symbol', 'low']].copy()
+                result.columns = ['timestamp', 'symbol', 'price']
+            elif method == "typical":
+                result = df[['timestamp', 'symbol', 'high', 'low', 'close']].copy()
+                result['price'] = (result['high'] + result['low'] + result['close']) / 3
+                result = result[['timestamp', 'symbol', 'price']]
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            return result.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
+
+        # Resample to requested frequency
+        resampled_dfs = []
+
+        for symbol in symbols:
+            symbol_df = df[df['symbol'] == symbol].copy()
+            if symbol_df.empty:
+                continue
+
+            symbol_df = symbol_df.set_index('timestamp').sort_index()
+
+            # Resample OHLCV data
+            resampled = symbol_df.resample(freq).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum',
+                'vwap': lambda x: np.average(x, weights=symbol_df.loc[x.index, 'volume']) if len(x) > 0 else np.nan
+            })
+
+            resampled = resampled.dropna()
+
+            if method == "vwap":
+                prices = resampled['vwap']
+            elif method == "close":
+                prices = resampled['close']
+            elif method == "open":
+                prices = resampled['open']
+            elif method == "high":
+                prices = resampled['high']
+            elif method == "low":
+                prices = resampled['low']
+            elif method == "typical":
+                prices = (resampled['high'] + resampled['low'] + resampled['close']) / 3
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            symbol_prices = pd.DataFrame({
+                'timestamp': prices.index,
+                'symbol': symbol,
+                'price': prices.values
+            })
+
+            resampled_dfs.append(symbol_prices)
+
+        if not resampled_dfs:
+            return pd.DataFrame(columns=['timestamp', 'symbol', 'price'])
+
+        result = pd.concat(resampled_dfs, ignore_index=True)
+        return result.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
+
+    def get_candles(
+        self,
+        symbols: List[str],
+        start_date: str,
+        end_date: str,
+        freq: str = "1min"
+    ) -> pd.DataFrame:
+        """
+        Get OHLCV candles for symbols in date range.
+
+        Args:
+            symbols: List of symbols to query
+            start_date: Start date (ISO format)
+            end_date: End date (ISO format)
+            freq: Resampling frequency (e.g., "1min", "5min", "1h")
+
+        Returns:
+            DataFrame with columns: [timestamp, symbol, open, high, low, close, volume, vwap]
+        """
+        validate_date_range(start_date, end_date)
+
+        # For 1-min bars, floor timestamps to minute boundaries
+        if freq == "1min":
+            start_dt = pd.to_datetime(start_date, utc=True).floor('1min')
+            end_dt = pd.to_datetime(end_date, utc=True).floor('1min')
+            start_date = start_dt.isoformat()
+            end_date = end_dt.isoformat()
+
+        # Normalize symbols
+        symbols = [normalize_symbol(s, self.market_type) for s in symbols]
+
+        # Get months covering the date range
+        months = self._get_months_in_range(start_date, end_date)
+
+        # Load and concatenate data from all months
+        dfs = []
+        for year, month in months:
+            df = self._load_month(year, month, symbols)
+            if not df.empty:
+                dfs.append(df)
+
+        if not dfs:
+            logger.warning(f"No data found for {symbols} in {start_date} to {end_date}")
+            return pd.DataFrame(columns=['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'vwap'])
+
+        df = pd.concat(dfs, ignore_index=True)
+
+        # Filter to exact date range
+        start_dt = pd.to_datetime(start_date, utc=True)
+        end_dt = pd.to_datetime(end_date, utc=True)
+        df = df[(df['timestamp'] >= start_dt) & (df['timestamp'] <= end_dt)]
+
+        # If requesting 1-min candles, no resampling needed
+        if freq == "1min":
+            return df[['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'vwap']].sort_values(['symbol', 'timestamp']).reset_index(drop=True)
+
+        # Resample to requested frequency
+        resampled_dfs = []
+
+        for symbol in symbols:
+            symbol_df = df[df['symbol'] == symbol].copy()
+            if symbol_df.empty:
+                continue
+
+            symbol_df = symbol_df.set_index('timestamp').sort_index()
+
+            # Resample OHLCV data
+            resampled = symbol_df.resample(freq).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum',
+                'vwap': lambda x: np.average(x, weights=symbol_df.loc[x.index, 'volume']) if len(x) > 0 else np.nan
+            })
+
+            resampled = resampled.dropna()
+            resampled['symbol'] = symbol
+            resampled = resampled.reset_index()
+
+            resampled_dfs.append(resampled)
+
+        if not resampled_dfs:
+            return pd.DataFrame(columns=['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'vwap'])
+
+        result = pd.concat(resampled_dfs, ignore_index=True)
+        return result[['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'vwap']].sort_values(['symbol', 'timestamp']).reset_index(drop=True)

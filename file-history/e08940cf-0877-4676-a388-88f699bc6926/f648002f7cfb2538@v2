@@ -1,0 +1,235 @@
+"""Regime-stratified sampler for OOD-robust training."""
+
+from collections import defaultdict
+from typing import Dict, Iterator
+
+import numpy as np
+import torch
+from torch.utils.data import Sampler
+
+
+class RegimeStratifiedSampler(Sampler):
+    """Stratified sampler ensuring balanced representation across regimes.
+
+    Prevents overfitting to dominant market regimes by ensuring each batch
+    contains diverse volatility/trend/volume conditions.
+
+    Strategy:
+        1. Group samples by regime (e.g., volatility quintile)
+        2. Sample uniformly from each regime
+        3. Create balanced batches with representatives from all regimes
+    """
+
+    def __init__(
+        self,
+        dataset,
+        batch_size: int,
+        regime_type: str = "volatility_regime",
+        replacement: bool = True,
+        shuffle: bool = True,
+    ):
+        """Initialize stratified sampler.
+
+        Args:
+            dataset: RangeBarDataset with regime labels
+            batch_size: Batch size for training
+            regime_type: Which regime to stratify on:
+                - "volatility_regime": Volatility quintiles (default)
+                - "trend_regime": Trend classification
+                - "volume_regime": Volume terciles
+            replacement: Sample with replacement (enables infinite iteration)
+            shuffle: Shuffle samples within each regime
+        """
+        super().__init__(dataset)
+
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.regime_type = regime_type
+        self.replacement = replacement
+        self.shuffle = shuffle
+
+        # Group indices by regime
+        self.regime_indices = self._build_regime_groups()
+
+        # Compute number of batches
+        if replacement:
+            # Infinite sampling
+            self.num_batches = len(dataset) // batch_size
+        else:
+            # Finite sampling
+            self.num_batches = min(
+                len(indices) for indices in self.regime_indices.values()
+            ) * len(self.regime_indices) // batch_size
+
+        print(f"RegimeStratifiedSampler initialized:")
+        print(f"  Regime type: {regime_type}")
+        print(f"  Batches per epoch: {self.num_batches}")
+        for regime_id, indices in self.regime_indices.items():
+            print(f"  Regime {regime_id}: {len(indices):,} samples")
+
+    def _build_regime_groups(self) -> Dict[int, list[int]]:
+        """Group dataset indices by regime.
+
+        Returns:
+            Dict mapping regime_id → list of dataset indices
+        """
+        regime_indices = defaultdict(list)
+
+        # Map regime type to tensor index
+        regime_idx_map = {
+            "volatility_regime": 0,
+            "trend_regime": 1,
+            "volume_regime": 2,
+        }
+
+        if self.regime_type not in regime_idx_map:
+            raise ValueError(f"Unknown regime_type: {self.regime_type}")
+
+        regime_idx = regime_idx_map[self.regime_type]
+
+        # Group indices
+        for dataset_idx in range(len(self.dataset)):
+            sample = self.dataset[dataset_idx]
+            regime_id = sample["regime"][regime_idx].item()
+            regime_indices[regime_id].append(dataset_idx)
+
+        return dict(regime_indices)
+
+    def __iter__(self) -> Iterator[int]:
+        """Iterate over stratified samples.
+
+        Yields:
+            Dataset indices in regime-balanced order
+        """
+        # Create regime samplers
+        regime_samplers = {}
+        for regime_id, indices in self.regime_indices.items():
+            if self.shuffle:
+                indices = np.random.permutation(indices).tolist()
+
+            regime_samplers[regime_id] = indices
+
+        # Generate batches
+        for _ in range(self.num_batches * self.batch_size):
+            # Sample uniformly from regimes
+            regime_id = np.random.choice(list(regime_samplers.keys()))
+
+            if self.replacement:
+                # Sample with replacement
+                idx = np.random.choice(regime_samplers[regime_id])
+            else:
+                # Sample without replacement
+                if len(regime_samplers[regime_id]) == 0:
+                    # Refill regime sampler
+                    regime_samplers[regime_id] = self.regime_indices[regime_id].copy()
+                    if self.shuffle:
+                        np.random.shuffle(regime_samplers[regime_id])
+
+                idx = regime_samplers[regime_id].pop()
+
+            yield idx
+
+    def __len__(self) -> int:
+        """Number of samples per epoch."""
+        return self.num_batches * self.batch_size
+
+
+class BalancedRegimeBatchSampler(Sampler):
+    """Batch sampler with guaranteed regime diversity within each batch.
+
+    More sophisticated than RegimeStratifiedSampler - ensures each batch
+    contains samples from ALL regimes (not just uniform regime sampling).
+    """
+
+    def __init__(
+        self,
+        dataset,
+        batch_size: int,
+        regime_type: str = "volatility_regime",
+        drop_last: bool = True,
+    ):
+        """Initialize balanced batch sampler.
+
+        Args:
+            dataset: RangeBarDataset with regime labels
+            batch_size: Batch size (must be divisible by number of regimes)
+            regime_type: Which regime to balance
+            drop_last: Drop incomplete final batch
+        """
+        super().__init__(dataset)
+
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.regime_type = regime_type
+        self.drop_last = drop_last
+
+        # Build regime groups
+        self.regime_indices = self._build_regime_groups()
+        self.n_regimes = len(self.regime_indices)
+
+        # Validate batch size
+        if batch_size % self.n_regimes != 0:
+            raise ValueError(
+                f"batch_size ({batch_size}) must be divisible by "
+                f"n_regimes ({self.n_regimes})"
+            )
+
+        self.samples_per_regime = batch_size // self.n_regimes
+
+        # Compute number of batches
+        min_regime_size = min(len(indices) for indices in self.regime_indices.values())
+        self.num_batches = min_regime_size // self.samples_per_regime
+
+        print(f"BalancedRegimeBatchSampler initialized:")
+        print(f"  Regimes: {self.n_regimes}")
+        print(f"  Samples per regime per batch: {self.samples_per_regime}")
+        print(f"  Batches per epoch: {self.num_batches}")
+
+    def _build_regime_groups(self) -> Dict[int, list[int]]:
+        """Group dataset indices by regime."""
+        regime_indices = defaultdict(list)
+
+        regime_idx_map = {
+            "volatility_regime": 0,
+            "trend_regime": 1,
+            "volume_regime": 2,
+        }
+        regime_idx = regime_idx_map[self.regime_type]
+
+        for dataset_idx in range(len(self.dataset)):
+            sample = self.dataset[dataset_idx]
+            regime_id = sample["regime"][regime_idx].item()
+            regime_indices[regime_id].append(dataset_idx)
+
+        return dict(regime_indices)
+
+    def __iter__(self) -> Iterator[list[int]]:
+        """Iterate over balanced batches.
+
+        Yields:
+            Lists of dataset indices forming balanced batches
+        """
+        # Shuffle indices within each regime
+        shuffled_regimes = {
+            regime_id: np.random.permutation(indices).tolist()
+            for regime_id, indices in self.regime_indices.items()
+        }
+
+        # Create batches
+        for batch_idx in range(self.num_batches):
+            batch_indices = []
+
+            # Sample from each regime
+            for regime_id in sorted(shuffled_regimes.keys()):
+                start_idx = batch_idx * self.samples_per_regime
+                end_idx = start_idx + self.samples_per_regime
+                batch_indices.extend(shuffled_regimes[regime_id][start_idx:end_idx])
+
+            # Shuffle within batch
+            np.random.shuffle(batch_indices)
+
+            yield batch_indices
+
+    def __len__(self) -> int:
+        """Number of batches per epoch."""
+        return self.num_batches

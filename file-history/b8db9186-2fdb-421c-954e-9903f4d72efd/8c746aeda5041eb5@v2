@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""
+Migrate existing flat data structure to modular year-based structure.
+
+OLD STRUCTURE:
+  data/okx_ticks/202310.parquet
+  data/okx_ticks/202506.parquet
+  data/funding_rates_202310.parquet
+
+NEW STRUCTURE:
+  data/raw_ticks/2023/10.parquet
+  data/raw_ticks/2025/06.parquet
+  data/funding_rates/2023/10.parquet
+"""
+
+import shutil
+from pathlib import Path
+import re
+
+
+def parse_filename(filename: str) -> tuple[int, int] | None:
+    """Extract (year, month) from filename like '202310.parquet' or 'funding_rates_202506.parquet'."""
+
+    # Try direct YYYYMM.parquet
+    match = re.search(r'(\d{4})(\d{2})\.parquet', filename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    # Try funding_rates_YYYYMM.parquet
+    match = re.search(r'funding_rates_(\d{4})(\d{2})\.parquet', filename)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    return None
+
+
+def migrate_directory(old_dir: Path, new_base_dir: Path, description: str):
+    """Migrate files from flat structure to year-based structure."""
+
+    if not old_dir.exists():
+        print(f"⚠️  Skipping {description}: {old_dir} doesn't exist")
+        return
+
+    files = list(old_dir.glob("*.parquet"))
+    if not files:
+        print(f"⚠️  Skipping {description}: No parquet files found")
+        return
+
+    print(f"\n{'='*80}")
+    print(f"Migrating {description}")
+    print(f"{'='*80}")
+    print(f"Source: {old_dir}")
+    print(f"Dest: {new_base_dir}")
+    print(f"Files: {len(files)}")
+
+    migrated = 0
+
+    for old_file in sorted(files):
+        parsed = parse_filename(old_file.name)
+
+        if parsed is None:
+            print(f"  ⚠️  Skipping {old_file.name} (can't parse date)")
+            continue
+
+        year, month = parsed
+
+        # Create year directory
+        year_dir = new_base_dir / str(year)
+        year_dir.mkdir(parents=True, exist_ok=True)
+
+        # New filename: just month
+        new_file = year_dir / f"{month:02d}.parquet"
+
+        if new_file.exists():
+            print(f"  ⚠️  Skipping {old_file.name} → {new_file} (exists)")
+            continue
+
+        # Copy file
+        shutil.copy2(old_file, new_file)
+        print(f"  ✓ {old_file.name} → {new_file.relative_to(Path('data'))}")
+        migrated += 1
+
+    print(f"\nMigrated: {migrated}/{len(files)} files")
+
+
+def main():
+    print("="*80)
+    print("MIGRATE TO MODULAR STRUCTURE")
+    print("="*80)
+    print("\nThis will reorganize your data into year-based folders.")
+    print("Original files will be preserved (safe operation).")
+    print()
+
+    data_dir = Path("data")
+
+    # Create new structure
+    (data_dir / "raw_ticks").mkdir(exist_ok=True)
+    (data_dir / "funding_rates").mkdir(exist_ok=True)
+    (data_dir / "1min_bars").mkdir(exist_ok=True)
+
+    # Migrate tick data
+    migrate_directory(
+        old_dir=data_dir / "okx_ticks",
+        new_base_dir=data_dir / "raw_ticks",
+        description="Tick Data"
+    )
+
+    # Migrate funding rates
+    migrate_directory(
+        old_dir=data_dir,
+        new_base_dir=data_dir / "funding_rates",
+        description="Funding Rates"
+    )
+
+    # Migrate 1-min bars if they exist
+    migrate_directory(
+        old_dir=data_dir / "okx_1min_bars",
+        new_base_dir=data_dir / "1min_bars",
+        description="1-Min Bars"
+    )
+
+    # Summary
+    print("\n" + "="*80)
+    print("MIGRATION COMPLETE")
+    print("="*80)
+
+    # Show new structure
+    print("\nNew structure:")
+    for year_dir in sorted((data_dir / "raw_ticks").glob("*")):
+        if year_dir.is_dir():
+            months = sorted(year_dir.glob("*.parquet"))
+            print(f"  raw_ticks/{year_dir.name}/: {len(months)} months")
+
+    for year_dir in sorted((data_dir / "funding_rates").glob("*")):
+        if year_dir.is_dir():
+            months = sorted(year_dir.glob("*.parquet"))
+            print(f"  funding_rates/{year_dir.name}/: {len(months)} months")
+
+    print("\n" + "="*80)
+    print("NEXT STEPS")
+    print("="*80)
+    print("\n1. Verify new structure:")
+    print("   ls -lh data/raw_ticks/2023/")
+    print("   ls -lh data/raw_ticks/2025/")
+    print("\n2. After verification, delete old files:")
+    print("   rm -rf data/okx_ticks/")
+    print("   rm data/funding_rates_*.parquet")
+    print("   rm -rf data/okx_1min_bars/")
+    print("\n3. Download missing months (2023-01 to 2025-08):")
+    print("   python scripts/download_range.py --start 2023-01 --end 2025-08 --ticks")
+
+
+if __name__ == "__main__":
+    main()

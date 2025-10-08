@@ -1,0 +1,344 @@
+"""
+Streaming parser for OKX aggregate trade data.
+
+This module provides VWAP (Volume-Weighted Average Price) computation from
+aggtrades data using a streaming approach that minimizes memory usage.
+
+Key features:
+- Chunk-based processing (process 100k rows at a time)
+- Configurable resampling frequency (default: 8H for funding arbitrage)
+- Timestamp alignment with funding intervals
+- Symbol filtering and normalization
+"""
+
+import logging
+from typing import List, Optional
+
+import numpy as np
+import pandas as pd
+
+from .utils import normalize_symbol, denormalize_symbol
+
+logger = logging.getLogger(__name__)
+
+
+def parse_aggtrades_chunk(
+    chunk_df: pd.DataFrame,
+    market_type: str = "spot"
+) -> pd.DataFrame:
+    """
+    Parse and clean a chunk of OKX aggtrades data.
+
+    Expected input columns:
+    - instrument_name: Symbol (e.g., "BTC-USDT")
+    - trade_id: Unique trade ID
+    - side: "buy" or "sell"
+    - size: Trade quantity
+    - price: Execution price
+    - created_time: Timestamp in milliseconds since epoch
+
+    Args:
+        chunk_df: Raw aggtrades DataFrame chunk
+        market_type: "spot" or "swap"
+
+    Returns:
+        Cleaned DataFrame with additional columns:
+        - timestamp: Parsed datetime (UTC)
+        - symbol: Normalized symbol
+        - trade_value: price * size
+
+    Examples:
+        >>> raw_chunk = pd.DataFrame({
+        ...     'instrument_name': ['BTC-USDT', 'ETH-USDT'],
+        ...     'trade_id': [1, 2],
+        ...     'side': ['buy', 'sell'],
+        ...     'size': [0.5, 10.0],
+        ...     'price': [45000.0, 2500.0],
+        ...     'created_time': [1696118400000, 1696118401000]
+        ... })
+        >>> parsed = parse_aggtrades_chunk(raw_chunk)
+        >>> parsed[['timestamp', 'symbol', 'price', 'trade_value']]
+    """
+    # Make a copy to avoid modifying input
+    df = chunk_df.copy()
+
+    # Parse timestamp (milliseconds to datetime)
+    df["timestamp"] = pd.to_datetime(df["created_time"], unit="ms", utc=True)
+
+    # Extract base symbol from instrument_name
+    # For spot: "BTC-USDT" → "BTC"
+    # For swap: "BTC-USDT-SWAP" → "BTC"
+    if market_type == "spot":
+        df["symbol"] = df["instrument_name"].str.extract(r"^([A-Z0-9]+)-USDT$")[0]
+    elif market_type == "swap":
+        df["symbol"] = df["instrument_name"].str.extract(r"^([A-Z0-9]+)-USDT-SWAP$")[0]
+    else:
+        raise ValueError(f"Unknown market_type: {market_type}")
+
+    # Drop rows with invalid symbols (couldn't parse)
+    df = df.dropna(subset=["symbol"])
+
+    # Calculate trade value (price * quantity)
+    df["trade_value"] = df["price"] * df["size"]
+
+    # Select relevant columns
+    df = df[["timestamp", "symbol", "price", "size", "trade_value", "side"]]
+
+    return df
+
+
+class StreamingVWAPAggregator:
+    """
+    Streaming VWAP aggregator that processes chunks and computes VWAP at intervals.
+
+    This class accumulates aggtrades chunks in memory and computes VWAP when finalized.
+    Memory-efficient design: only stores aggregated data, not raw trades.
+
+    Attributes:
+        resample_freq: Resampling frequency (e.g., "8H", "1H", "1D")
+        market_type: "spot" or "swap"
+        accumulator: List of parsed chunks (freed after finalize())
+
+    Examples:
+        >>> aggregator = StreamingVWAPAggregator(resample_freq="8H")
+        >>>
+        >>> # Process chunks as they arrive
+        >>> for chunk in download_chunks():
+        ...     aggregator.process_chunk(chunk)
+        >>>
+        >>> # Compute final VWAP
+        >>> vwap_df = aggregator.finalize()
+        >>> print(vwap_df.head())
+    """
+
+    def __init__(
+        self,
+        resample_freq: str = "8H",
+        market_type: str = "spot",
+        symbols_filter: Optional[List[str]] = None,
+    ):
+        """
+        Initialize VWAP aggregator.
+
+        Args:
+            resample_freq: Pandas frequency string (e.g., "8H", "1H", "1D")
+            market_type: "spot" or "swap"
+            symbols_filter: Optional list of symbols to include (e.g., ["BTC", "ETH"])
+        """
+        self.resample_freq = resample_freq
+        self.market_type = market_type
+        self.symbols_filter = symbols_filter
+        self.accumulator = []  # List of parsed DataFrames
+        self.total_chunks_processed = 0
+        self.total_rows_processed = 0
+
+        logger.info(
+            f"Initialized StreamingVWAPAggregator: "
+            f"freq={resample_freq}, market={market_type}, "
+            f"filter={len(symbols_filter) if symbols_filter else 'none'}"
+        )
+
+    def process_chunk(self, raw_chunk_df: pd.DataFrame) -> None:
+        """
+        Process a single chunk of raw aggtrades data.
+
+        This method is called repeatedly by the downloader for each CSV chunk.
+
+        Args:
+            raw_chunk_df: Raw aggtrades DataFrame chunk from OKX CSV
+        """
+        if raw_chunk_df.empty:
+            logger.warning("Received empty chunk, skipping")
+            return
+
+        # Parse and clean chunk
+        parsed_chunk = parse_aggtrades_chunk(raw_chunk_df, market_type=self.market_type)
+
+        # Apply symbol filter if specified
+        if self.symbols_filter:
+            parsed_chunk = parsed_chunk[parsed_chunk["symbol"].isin(self.symbols_filter)]
+
+        if parsed_chunk.empty:
+            logger.debug(f"Chunk filtered to 0 rows (filter: {self.symbols_filter})")
+            return
+
+        # Accumulate
+        self.accumulator.append(parsed_chunk)
+        self.total_chunks_processed += 1
+        self.total_rows_processed += len(parsed_chunk)
+
+        logger.debug(
+            f"Processed chunk {self.total_chunks_processed}: "
+            f"{len(parsed_chunk):,} rows, "
+            f"total: {self.total_rows_processed:,}"
+        )
+
+    def finalize(self) -> pd.DataFrame:
+        """
+        Compute VWAP from accumulated chunks.
+
+        This method should be called after all chunks have been processed.
+        It concatenates all chunks, resamples to the specified frequency,
+        and computes VWAP for each (timestamp, symbol) pair.
+
+        Returns:
+            DataFrame with columns:
+            - timestamp: Period end time (e.g., 2023-10-01 08:00:00 for [00:00, 08:00) window)
+            - symbol: Base symbol (e.g., "BTC")
+            - vwap: Volume-weighted average price
+            - volume: Total trading volume in base currency
+            - num_trades: Number of trades in window
+            - avg_trade_size: Average trade size
+
+        Raises:
+            ValueError: If no chunks were processed
+        """
+        if not self.accumulator:
+            raise ValueError("No chunks to process. Call process_chunk() first.")
+
+        logger.info(
+            f"Finalizing VWAP computation: {self.total_chunks_processed} chunks, "
+            f"{self.total_rows_processed:,} total rows"
+        )
+
+        # Concatenate all chunks
+        all_trades = pd.concat(self.accumulator, ignore_index=True)
+
+        # Free memory
+        self.accumulator = []
+
+        # Set timestamp as index for resampling
+        all_trades = all_trades.set_index("timestamp").sort_index()
+
+        logger.info(f"Computing VWAP with freq={self.resample_freq}")
+
+        # Group by (resampled timestamp, symbol) and compute VWAP
+        vwap_df = (
+            all_trades.groupby([pd.Grouper(freq=self.resample_freq), "symbol"])
+            .apply(self._compute_vwap_for_group, include_groups=False)
+            .reset_index()
+        )
+
+        # Rename resampled timestamp column
+        vwap_df = vwap_df.rename(columns={"timestamp": "timestamp"})
+
+        # Drop rows with NaN VWAP (no trades in window)
+        vwap_df = vwap_df.dropna(subset=["vwap"])
+
+        logger.info(
+            f"VWAP computation complete: {len(vwap_df):,} periods, "
+            f"{vwap_df['symbol'].nunique()} unique symbols"
+        )
+
+        return vwap_df
+
+    @staticmethod
+    def _compute_vwap_for_group(group: pd.DataFrame) -> pd.Series:
+        """
+        Compute VWAP and other metrics for a single (timestamp, symbol) group.
+
+        Args:
+            group: DataFrame of trades for one (timestamp, symbol) pair
+
+        Returns:
+            Series with VWAP metrics
+        """
+        if group.empty or group["size"].sum() == 0:
+            return pd.Series(
+                {
+                    "vwap": np.nan,
+                    "volume": 0.0,
+                    "num_trades": 0,
+                    "avg_trade_size": np.nan,
+                }
+            )
+
+        # VWAP = sum(price * quantity) / sum(quantity)
+        total_value = group["trade_value"].sum()
+        total_volume = group["size"].sum()
+        vwap = total_value / total_volume if total_volume > 0 else np.nan
+
+        return pd.Series(
+            {
+                "vwap": vwap,
+                "volume": total_volume,
+                "num_trades": len(group),
+                "avg_trade_size": total_volume / len(group) if len(group) > 0 else np.nan,
+            }
+        )
+
+    def reset(self) -> None:
+        """
+        Reset accumulator (useful for processing multiple months sequentially).
+        """
+        self.accumulator = []
+        self.total_chunks_processed = 0
+        self.total_rows_processed = 0
+        logger.info("Aggregator reset")
+
+
+def compute_vwap_from_df(
+    trades_df: pd.DataFrame,
+    resample_freq: str = "8H",
+    timestamp_col: str = "timestamp",
+    symbol_col: str = "symbol",
+    price_col: str = "price",
+    size_col: str = "size",
+) -> pd.DataFrame:
+    """
+    Compute VWAP from a DataFrame of trades (convenience function).
+
+    This is a simpler alternative to StreamingVWAPAggregator when you already
+    have all trades in a single DataFrame.
+
+    Args:
+        trades_df: DataFrame with trade data
+        resample_freq: Resampling frequency
+        timestamp_col: Name of timestamp column
+        symbol_col: Name of symbol column
+        price_col: Name of price column
+        size_col: Name of size/quantity column
+
+    Returns:
+        VWAP DataFrame
+
+    Examples:
+        >>> trades = pd.DataFrame({
+        ...     'timestamp': pd.date_range('2023-10-01', periods=100, freq='1T'),
+        ...     'symbol': ['BTC'] * 100,
+        ...     'price': np.random.uniform(44000, 46000, 100),
+        ...     'size': np.random.uniform(0.1, 1.0, 100)
+        ... })
+        >>> vwap = compute_vwap_from_df(trades, resample_freq="1H")
+        >>> print(vwap)
+    """
+    df = trades_df.copy()
+
+    # Calculate trade value
+    df["trade_value"] = df[price_col] * df[size_col]
+
+    # Set timestamp as index
+    df = df.set_index(timestamp_col).sort_index()
+
+    # Group by (resampled timestamp, symbol) and compute VWAP
+    vwap_df = (
+        df.groupby([pd.Grouper(freq=resample_freq), symbol_col])
+        .apply(
+            lambda g: pd.Series(
+                {
+                    "vwap": g["trade_value"].sum() / g[size_col].sum()
+                    if g[size_col].sum() > 0
+                    else np.nan,
+                    "volume": g[size_col].sum(),
+                    "num_trades": len(g),
+                }
+            ),
+            include_groups=False,
+        )
+        .reset_index()
+    )
+
+    # Drop NaN VWAP
+    vwap_df = vwap_df.dropna(subset=["vwap"])
+
+    return vwap_df

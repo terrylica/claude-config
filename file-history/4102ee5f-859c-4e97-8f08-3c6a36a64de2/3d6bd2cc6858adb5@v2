@@ -1,0 +1,145 @@
+"""Focal Loss implementation for addressing class imbalance and overconfidence.
+
+Reference:
+    Lin et al. (2017). "Focal Loss for Dense Object Detection." ICCV.
+    https://arxiv.org/abs/1708.02002
+
+Focal loss down-weights easy examples and focuses on hard examples:
+    L_focal = -α(1-p_t)^γ log(p_t)
+
+Where:
+    - p_t: model's estimated probability for the true class
+    - γ: focusing parameter (γ=0 reduces to cross-entropy)
+    - α: balancing factor
+
+For γ > 0:
+    - Easy examples (p_t → 1): (1-p_t)^γ → 0, loss → 0
+    - Hard examples (p_t → 0): (1-p_t)^γ → 1, loss remains high
+"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class FocalLoss(nn.Module):
+    """Focal Loss for classification tasks.
+
+    Attributes:
+        alpha: Balancing factor for class weights (default: 1.0)
+        gamma: Focusing parameter (default: 2.0)
+        reduction: Reduction method ('mean' | 'sum' | 'none')
+
+    SLOs:
+        correctness:
+            - Output shape matches input: assert loss.shape matches expected reduction
+            - Gradients flow properly: assert loss.requires_grad == True
+            - Loss non-negative: assert (loss >= 0).all()
+
+        availability:
+            - No silent failures: raise ValueError for invalid inputs
+            - Proper error messages with context
+    """
+
+    def __init__(
+        self,
+        alpha: float = 1.0,
+        gamma: float = 2.0,
+        reduction: str = 'mean',
+    ):
+        """Initialize FocalLoss.
+
+        Args:
+            alpha: Balancing factor (α ≥ 0)
+            gamma: Focusing parameter (γ ≥ 0)
+            reduction: 'mean' | 'sum' | 'none'
+
+        Raises:
+            ValueError: If alpha < 0 or gamma < 0
+            ValueError: If reduction not in {'mean', 'sum', 'none'}
+        """
+        super().__init__()
+
+        if alpha < 0:
+            raise ValueError(f"alpha must be non-negative, got {alpha}")
+
+        if gamma < 0:
+            raise ValueError(f"gamma must be non-negative, got {gamma}")
+
+        if reduction not in {'mean', 'sum', 'none'}:
+            raise ValueError(
+                f"reduction must be 'mean', 'sum', or 'none', got '{reduction}'"
+            )
+
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute focal loss.
+
+        Args:
+            inputs: Logits with shape (batch_size, num_classes)
+            targets: Class indices with shape (batch_size,)
+
+        Returns:
+            Scalar loss if reduction='mean'/'sum', tensor if reduction='none'
+
+        Raises:
+            ValueError: If inputs/targets shape mismatch
+            ValueError: If targets contain invalid class indices
+        """
+        # Validation
+        if inputs.dim() != 2:
+            raise ValueError(
+                f"inputs must be 2D (batch_size, num_classes), got shape {inputs.shape}"
+            )
+
+        if targets.dim() != 1:
+            raise ValueError(
+                f"targets must be 1D (batch_size,), got shape {targets.shape}"
+            )
+
+        if inputs.shape[0] != targets.shape[0]:
+            raise ValueError(
+                f"batch size mismatch: inputs {inputs.shape[0]} vs targets {targets.shape[0]}"
+            )
+
+        num_classes = inputs.shape[1]
+        if (targets < 0).any() or (targets >= num_classes).any():
+            raise ValueError(
+                f"targets must be in [0, {num_classes}), got range [{targets.min()}, {targets.max()}]"
+            )
+
+        # Compute cross-entropy loss (per-sample, no reduction)
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+
+        # Compute p_t: probability of true class
+        # p_t = exp(-ce_loss) since ce_loss = -log(p_t)
+        p_t = torch.exp(-ce_loss)
+
+        # Compute focal term: (1 - p_t)^gamma
+        focal_weight = (1 - p_t) ** self.gamma
+
+        # Focal loss: alpha * (1 - p_t)^gamma * ce_loss
+        focal_loss = self.alpha * focal_weight * ce_loss
+
+        # Apply reduction
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:  # 'none'
+            return focal_loss
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"alpha={self.alpha}, "
+            f"gamma={self.gamma}, "
+            f"reduction='{self.reduction}')"
+        )

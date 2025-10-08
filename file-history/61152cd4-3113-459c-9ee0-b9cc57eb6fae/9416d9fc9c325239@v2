@@ -1,0 +1,308 @@
+# Technical Audit Report: Victor's Funding Rate Arbitrage Strategy
+
+**Auditor:** Terry Li (Engineering Lead)
+**Subject:** Victor Hogrefre (CBO) - OKX Funding Rate Arbitrage Strategy
+**Audit Date:** September 30, 2025
+**Scripts Reviewed:**
+- `funding_arb_strat_1.py` (v8)
+- `pull_funding_arb_hist.py` (v8)
+- `next_funding_rate.py` (v2.3)
+
+---
+
+## Executive Summary
+
+Victor's funding rate arbitrage strategy demonstrates exceptional backtest results (7,708% APY, Sharpe 19.48) over a 94-day period. The code is well-structured with sophisticated rebalancing logic and fee modeling. However, **critical security issues and implementation discrepancies require immediate attention before production deployment.**
+
+**Overall Assessment:** ⚠️ **CONDITIONAL APPROVAL** - Strategy logic is sound, but security and configuration issues must be resolved.
+
+---
+
+## 🔴 CRITICAL ISSUES (Must Fix Before Production)
+
+### 1. **Hardcoded API Credentials in Source Code**
+**File:** `pull_funding_arb_hist.py` (lines 72-74)
+**Severity:** 🔴 **CRITICAL SECURITY VULNERABILITY**
+
+```python
+OKX_API_KEY = os.getenv("7abc4982-7def-4151-b4e8-775617b8e0cf")
+OKX_API_SECRET = os.getenv("8B557B7D8F48C150624C868028161EB3")
+OKX_API_PASSPHRASE = os.getenv("KNs36Tx7FW97XwY!")
+```
+
+**Issues:**
+- API key, secret, and passphrase are passed as **literal strings** to `os.getenv()` instead of environment variable names
+- This means the code will never actually retrieve credentials from the environment
+- If the intention was to use env vars, the correct usage should be:
+  ```python
+  OKX_API_KEY = os.getenv("OKX_API_KEY")  # Retrieves value of $OKX_API_KEY
+  OKX_API_SECRET = os.getenv("OKX_API_SECRET")
+  OKX_API_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE")
+  ```
+- **Exposed credentials:** These appear to be actual API credentials that are now committed to git history
+
+**Recommendation:**
+```bash
+# 1. Immediately rotate/invalidate these API credentials on OKX
+# 2. Remove from git history (use git-filter-repo or BFG Repo-Cleaner)
+# 3. Implement proper credential management (see user's Doppler spec in ~/.claude/CLAUDE.md)
+# 4. Update code to use Doppler CLI or proper env vars
+```
+
+**Proper implementation:**
+```python
+# Using Doppler (per user's specifications)
+# Run script as: doppler run -- python pull_funding_arb_hist.py
+
+OKX_API_KEY = os.getenv("OKX_API_KEY")
+OKX_API_SECRET = os.getenv("OKX_API_SECRET")
+OKX_API_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE")
+
+if not all([OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE]):
+    print("WARNING: OKX API credentials not found. Running in public-only mode.")
+```
+
+---
+
+### 2. **Weight Constraint Discrepancy**
+**File:** `funding_arb_strat_1.py` (line 40)
+**Severity:** 🟡 **HIGH** (Configuration Mismatch)
+
+**Victor's Chat Specification:**
+> "Weights: min 5%, max 50% per symbol; sum to 100%."
+
+**Code Comment (line 9):**
+> "MAX_W = 0.70 (no symbol > 70%)"
+
+**Actual Code Value (line 40):**
+```python
+MAX_W = 0.50     # max 70%  ← Comment is WRONG
+```
+
+**Analysis:**
+- The actual value `0.50` (50%) matches Victor's specification
+- The comment `# max 70%` is **incorrect** and misleading
+- This could cause confusion during future modifications
+
+**Recommendation:**
+```python
+MAX_W = 0.50     # max 50% per symbol (per strategy spec)
+```
+
+---
+
+## 🟡 HIGH-PRIORITY OBSERVATIONS
+
+### 3. **Backtest Period Anomaly**
+**Finding:** 94-day backtest shows 7,708% APY (19.48 Sharpe)
+
+**Questions for Victor:**
+1. **Time period validation:**
+   - Specified dates are in the **future** (2025-06-25 → 2025-09-27)
+   - Was this a typo? Should it be 2024?
+   - Or is this a forward-looking simulation using projected rates?
+
+2. **Return decomposition:**
+   - What % of returns came from positive vs. negative funding?
+   - How many rebalances were executed vs. skipped due to gates?
+   - Turnover statistics?
+
+3. **Market regime:**
+   - Were funding rates unusually volatile during this period?
+   - How does performance compare across different market conditions?
+
+**Recommendation:** Request detailed backtest breakdown and sensitivity analysis.
+
+---
+
+### 4. **Data Limitation Acknowledgment**
+**File:** `pull_funding_arb_hist.py` (lines 5-12)
+
+Victor correctly documents that OKX's public API only provides **3 months** of historical data:
+
+```python
+# The OKX REST endpoint **Get funding rate history** only returns
+# **up to three months** of data total.
+```
+
+**Implication for 94-day backtest:**
+- ✅ Falls within 3-month API window - data is valid
+- ⚠️ Cannot extend backtest further without bulk historical data
+
+**Recommendation:** For longer-term validation, suggest:
+- Download OKX's bulk historical funding rate CSV (available from 2021)
+- Implement the optional CSV importer Victor mentioned (line 205-211)
+
+---
+
+### 5. **Fee Model Assumptions**
+**Finding:** Assumes 60% maker execution rate
+
+```python
+MAKER_RATIO = 0.60  # 60% maker, 40% taker
+```
+
+**Questions:**
+1. **Validation:** Is 60/40 maker/taker ratio realistic for this strategy?
+   - Market-neutral arbitrage typically uses limit orders (high maker ratio)
+   - But funding arbitrage requires precise timing at settlement
+   - What's the actual execution analysis from Victor's research?
+
+2. **VIP-7 tier:** Does the account actually have VIP-7 status?
+   - Requires $50M+ in 30-day trading volume
+   - Or $10M+ in holdings
+   - Confirm eligibility before assuming VIP-7 fees
+
+3. **Slippage:** Fee model doesn't include slippage
+   - Especially important for large positions
+   - Consider adding slippage assumptions
+
+**Recommendation:**
+- Validate maker ratio through exchange execution reports
+- Add slippage buffer (e.g., 2-5 bps) to fee model
+- Test strategy with VIP-0 fees to understand fee sensitivity
+
+---
+
+### 6. **Leverage Model Inconsistency**
+**Finding:** `next_funding_rate.py` uses 12x leverage, but `funding_arb_strat_1.py` doesn't
+
+**`next_funding_rate.py` (lines 50-53):**
+```python
+L_SPOT_LEVERAGE = 12.0
+BORROWED_SHARE = 12/13 ≈ 0.92308  # 92.3% borrowed
+EQUITY_SHARE   = 1/13  ≈ 0.07692  # 7.7% equity
+```
+
+**`funding_arb_strat_1.py`:**
+- No leverage modeling
+- Assumes 1:1 notional matching (unlevered)
+
+**Questions:**
+1. Are these two scripts modeling **different strategies**?
+   - Portfolio backtester: Unlevered absolute value strategy?
+   - Real-time signal: Leveraged implementation?
+
+2. How do backtested returns scale with leverage?
+   - 7,708% APY on 1x leverage → ~100,000% APY on 12x?
+   - Or does backtester already assume leverage implicitly?
+
+**Recommendation:** Clarify leverage assumptions and reconcile the two implementations.
+
+---
+
+## 🟢 POSITIVE FINDINGS (Well-Implemented)
+
+### 7. **Sophisticated Rebalancing Logic**
+✅ **Excellent implementation** of multi-gate rebalancing:
+- Min-hold period prevents overtrading
+- Hurdle filter ensures meaningful edges
+- Value-vs-cost gate prevents negative-value trades
+- No-trade bands reduce noise
+
+**Code Quality:** Clean, readable, well-documented
+
+---
+
+### 8. **Deterministic Weight Allocation**
+✅ **Robust allocator** (`capped_topk_weights_minmax` function):
+- Handles edge cases (fewer than k symbols, min/max constraint conflicts)
+- Deterministic and reproducible
+- Proper normalization to sum=1
+
+---
+
+### 9. **Comprehensive Fee Modeling**
+✅ **Sophisticated fee calculation**:
+- Blended maker/taker fees
+- Turnover-based scaling
+- Both spot and perp legs accounted for
+- VIP-7 tier properly modeled
+
+---
+
+### 10. **Premium-Index Tracking** (next_funding_rate.py)
+✅ **Advanced estimation logic**:
+- Weighted moving average of recent premium samples
+- Fallback to current premium if no history
+- Proper interest rate adjustment
+- Multiple API endpoint fallbacks
+
+---
+
+## 📊 VALIDATION RECOMMENDATIONS
+
+### Before Production Deployment:
+
+1. **Security Audit:**
+   - [ ] Rotate compromised API credentials
+   - [ ] Implement Doppler credential management
+   - [ ] Add `.env` to `.gitignore` (already done)
+   - [ ] Scan git history for leaked secrets
+
+2. **Backtest Validation:**
+   - [ ] Clarify actual backtest period (2024 vs 2025?)
+   - [ ] Run walk-forward analysis (out-of-sample testing)
+   - [ ] Stress test with different market regimes
+   - [ ] Compare results to buy-and-hold funding capture
+
+3. **Parameter Sensitivity:**
+   - [ ] Test different TOP_K values (3, 5, 7, 10)
+   - [ ] Test different MIN_W/MAX_W constraints
+   - [ ] Test different rebalancing cadences
+   - [ ] Test fee sensitivity (VIP-0 through VIP-7)
+
+4. **Implementation Reconciliation:**
+   - [ ] Clarify leverage assumptions
+   - [ ] Align fee models between scripts
+   - [ ] Document expected turnover and frequency
+
+5. **Live Testing:**
+   - [ ] Paper trade for 2-4 weeks
+   - [ ] Compare live execution to backtest assumptions
+   - [ ] Validate maker/taker ratios
+   - [ ] Measure actual slippage
+
+---
+
+## 🎯 RECOMMENDED NEXT STEPS
+
+### Immediate (This Week):
+1. **Rotate OKX API credentials** (exposed in git)
+2. Fix weight constraint comment mismatch
+3. Implement Doppler credential management
+4. Clarify backtest period with Victor
+
+### Short-term (Next 2 Weeks):
+1. Extended backtest validation (different periods)
+2. Parameter sensitivity analysis
+3. Leverage model reconciliation
+4. Paper trading setup
+
+### Before Live Deployment:
+1. Legal/compliance review of arbitrage strategy
+2. Exchange account VIP tier confirmation
+3. Risk management system integration
+4. Kill-switch and monitoring implementation
+
+---
+
+## CONCLUSION
+
+Victor's strategy demonstrates strong theoretical foundations and impressive backtest results. The code quality is high, with sophisticated rebalancing logic and fee modeling. However, **immediate security remediation is required** before any production deployment.
+
+The strategy's extraordinarily high returns (7,708% APY) warrant additional scrutiny:
+- Validate across longer time periods
+- Test under different market regimes
+- Confirm results with independent data sources
+- Implement robust risk management before live trading
+
+**Recommendation:** Proceed with production development contingent on:
+1. Security issues resolved
+2. Extended validation completed
+3. Paper trading successful
+
+---
+
+**Auditor Signature:** Terry Li
+**Date:** September 30, 2025

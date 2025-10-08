@@ -1,0 +1,212 @@
+# v1.10 Production Deployment - Session Log
+
+**Date:** 2025-10-03
+**Status:** Phase 1 In Progress
+**Objective:** Deploy real perpetual price integration (Option 1)
+
+---
+
+## Session Progress
+
+### Completed
+
+1. **Modified download script** (`/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/download_month.py`)
+   - Added `--market-type` parameter (choices: spot, swap)
+   - Modified `download_ticks_month()` to support SWAP data via `msg_type="allswap"`
+   - Separate output directories: `raw_ticks/` (SPOT) vs `raw_ticks_swap/` (SWAP)
+   - Updated docstring with usage examples
+
+2. **Created batch download script** (`/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/download_swap_21months.sh`)
+   - Downloads 21 months: 2023-01 to 2024-12
+   - Fail-fast error handling (`set -e`)
+   - Progress tracking and timing
+   - Storage verification at completion
+
+3. **Created progress monitor** (`/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/check_swap_download_progress.sh`)
+   - Check download process status
+   - List downloaded files by year
+   - Show total storage usage
+   - Quick progress overview
+
+4. **Started Phase 1 download**
+   - Background process ID: 389137
+   - Log file: `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/swap_download_phase1.log`
+   - Command: `./scripts/download_swap_21months.sh`
+   - Started: 2025-10-03 12:56 UTC
+
+5. **Updated deployment documentation** (`/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/V2_PRODUCTION_DEPLOYMENT.md`)
+   - Marked Pre-Deployment tasks complete
+   - Added Phase 1 start timestamp and process details
+   - Documented log file locations
+
+---
+
+## Current Status
+
+### Phase 1: SWAP Data Download (IN PROGRESS)
+**Estimated completion:** 2-3 hours from start (ETA: ~15:00-16:00 UTC)
+**Storage target:** ~32 GB raw ticks
+**Months:** 21 (2023-01 to 2024-12)
+
+**Progress:** 0/21 months downloaded (download in progress for 2023-01)
+
+**Monitoring:**
+```bash
+# Quick status check
+./scripts/check_swap_download_progress.sh
+
+# Real-time log monitoring
+tail -f swap_download_phase1.log | grep -vE "^DEBUG|Unnecessary"
+
+# Check background process
+ps aux | grep download_swap_21months
+```
+
+---
+
+## Error Handling
+
+**SLO Compliance:**
+- Correctness: Each month must contain SWAP symbols (verified post-download)
+- Availability: All 21 months must download successfully (fail-fast on error)
+- Observability: Progress logged to `swap_download_phase1.log`
+- Maintainability: Out-of-the-box solution using existing `download_month.py`
+
+**Failure Mode:**
+- Script exits immediately on first download failure (`set -e`)
+- Error logged with month identifier
+- No retry logic - manual intervention required
+
+---
+
+## Next Steps (Automated)
+
+After Phase 1 completes automatically:
+
+### Phase 2: Aggregate SWAP Data
+**Command:**
+```bash
+for year in 2023 2024; do
+  for month in {1..12}; do
+    uv run --active python scripts/aggregate_month.py $year $month \
+      --data-dir data/ \
+      --input-dir raw_ticks_swap \
+      --output-dir 1min_bars_swap
+  done
+done
+```
+
+**Estimated time:** 30-45 minutes
+**Output:** `data/1min_bars_swap/{year}/{month}.parquet`
+**Storage:** ~7 GB aggregated bars
+
+### Phase 3: Full Backtest (v1.10)
+**Command:**
+```bash
+uv run --active python v1.10-modular.py \
+  --start 2023-01-01 \
+  --end 2025-08-31 \
+  --capital 1000000 \
+  2>&1 | tee backtest_v1.10_full.log
+```
+
+**Estimated time:** 5-10 minutes
+**Output:** `results/v1.10-modular-20230101-20250831.parquet`
+
+### Phase 4: Results Comparison
+**Load and compare v1.9 vs v1.10:**
+```python
+import pandas as pd
+
+v19 = pd.read_parquet('results/v1.9-modular-20230101-20250831.parquet')
+v110 = pd.read_parquet('results/v1.10-modular-20230101-20250831.parquet')
+
+# SLO validation
+market_pnl_v110 = v110['total_spot_pnl'] + v110['total_perp_pnl']
+assert market_pnl_v110.std() > 0, "Correctness SLO violation"
+
+# Performance comparison
+print(f"v1.9 APY:  {v19_apy:.2f}%")
+print(f"v1.10 APY: {v110_apy:.2f}%")
+print(f"Basis risk impact: {v110_apy - v19_apy:.2f} pp")
+```
+
+### Phase 5: Documentation Update
+Update `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/INVESTIGATION_FINDINGS.md` with:
+- Production results (APY, basis risk quantification)
+- SLO compliance status
+- Market P&L variance confirmation
+
+---
+
+## File Locations
+
+### Implementation
+- **Backtester:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/v1.10-modular.py`
+- **Specification:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/V2_REAL_PERP_SPEC.md`
+- **Deployment Plan:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/V2_PRODUCTION_DEPLOYMENT.md`
+
+### Scripts
+- **Download (single month):** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/download_month.py`
+- **Download (21 months):** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/download_swap_21months.sh`
+- **Progress monitor:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/scripts/check_swap_download_progress.sh`
+
+### Logs
+- **Phase 1 log:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/swap_download_phase1.log`
+- **Session log:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/V2_DEPLOYMENT_SESSION.md` (this file)
+
+### Data
+- **SPOT bars (existing):** `data/1min_bars/{year}/{month}.parquet`
+- **SWAP ticks (new):** `data/raw_ticks_swap/{year}/{month}.parquet`
+- **SWAP bars (pending):** `data/1min_bars_swap/{year}/{month}.parquet`
+
+---
+
+## Implementation Notes
+
+### Out-of-the-Box Solutions Used
+- Existing `download_month.py` extended with `--market-type` parameter
+- Existing `aggregate_month.py` works as-is (market-type agnostic)
+- Existing `BarPriceProvider` interface unchanged (v1.10 drop-in replacement)
+
+### Fail-Fast Error Handling
+- No retry logic in download script
+- No fallback to synthetic prices in backtester
+- ValueError raised on missing perp data
+- Synthetic calculation detector in P&L calculation
+
+### SLO Tracking
+- Correctness: Market P&L variance > 0 (real hedging)
+- Availability: 99% data coverage target
+- Observability: Basis metrics in 100% of trades
+- Maintainability: Version-tracked specification documents
+
+---
+
+## Expected Results
+
+### v1.9 (Synthetic Baseline)
+- Market P&L: std = $0.00 (synthetic by construction)
+- APY: ~2.26% (32 months)
+- Basis risk: Ignored
+
+### v1.10 (Real Perpetual Prices)
+- Market P&L: std = $500-$2,000 (real basis fluctuation)
+- APY: ~1.9-2.2% (reduction due to basis risk)
+- Basis risk: Tracked in basis_entry_bps, basis_exit_bps columns
+
+### Difference (v1.10 - v1.9)
+- APY impact: -0.5 to -2.0 pp
+- Market P&L: Random walk around $0 mean
+- Positive periods: 40-60% (vs 0% synthetic)
+
+---
+
+## Version History
+
+### 2025-10-03 12:56 UTC - Phase 1 Started
+- Modified download script with --market-type parameter
+- Created batch download script for 21 months
+- Started SWAP data download in background
+- Updated deployment documentation
+- Created progress monitoring tools

@@ -1,0 +1,205 @@
+"""
+Correlation Filter Feasibility Test
+
+Test 4: Correlation-based iterative filtering (VIF alternative)
+
+SLOs:
+- Correctness: Use pandas.DataFrame.corr() (out-of-box)
+- Availability: Complete within 30 seconds
+- Observability: Log times, iterations, convergence
+- Maintainability: Raise on error (no silent failures)
+"""
+
+import pandas as pd
+import numpy as np
+import time
+import json
+from pathlib import Path
+
+# Paths
+WORKSPACE = Path("/Users/terryli/eon/ml-feature-set")
+ATOMS_CSV = WORKSPACE / "experiments/orthogonality_filtering_20251003/results/raw/atoms_full.csv"
+FEATURES_48 = WORKSPACE / "experiments/orthogonality_filtering_20251003/results/raw/features_corr_0.9.txt"
+
+
+def load_data():
+    """Load 48-feature dataset"""
+    if not ATOMS_CSV.exists():
+        raise FileNotFoundError(f"Atom dataset not found: {ATOMS_CSV}")
+
+    if not FEATURES_48.exists():
+        raise FileNotFoundError(f"Feature list not found: {FEATURES_48}")
+
+    atoms_df = pd.read_csv(ATOMS_CSV, index_col=0, parse_dates=True)
+
+    with open(FEATURES_48) as f:
+        kept_features = [line.strip() for line in f if line.strip()]
+
+    missing = set(kept_features) - set(atoms_df.columns)
+    if missing:
+        raise ValueError(f"Features missing from dataset: {missing}")
+
+    X = atoms_df[kept_features].copy()
+
+    # SLO: Correctness - No NaN values
+    if X.isna().any().any():
+        raise ValueError("Dataset contains NaN values")
+
+    return X
+
+
+def test_correlation_filter(X, threshold=0.85, max_iterations=50):
+    """
+    Test 4: Iterative correlation-based filtering
+
+    Algorithm:
+    1. Calculate correlation matrix
+    2. Find max pairwise |r|
+    3. If max |r| > threshold:
+       - Remove feature with highest average |r|
+       - Repeat
+    4. Stop when max |r| <= threshold
+    """
+    print("="*70)
+    print(f"TEST 4: Correlation-Based Filtering (Threshold={threshold})")
+    print("="*70)
+
+    X_filtered = X.copy()
+    removed = []
+    iteration = 0
+
+    start = time.time()
+
+    # Initial correlation matrix
+    corr_time_start = time.time()
+    corr_matrix = X_filtered.corr()
+    corr_time = time.time() - corr_time_start
+    print(f"Initial correlation matrix: {corr_time:.3f}s")
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        # SLO: Availability - Must have at least 2 features
+        if len(X_filtered.columns) < 2:
+            print("\nOnly 1 feature left, stopping")
+            break
+
+        # Recalculate correlation (pandas out-of-box)
+        corr = X_filtered.corr()
+
+        # Get upper triangle (exclude diagonal, avoid duplicates)
+        upper_tri = corr.where(
+            np.triu(np.ones(corr.shape), k=1).astype(bool)
+        )
+
+        # Find max pairwise |r|
+        max_corr = upper_tri.abs().max().max()
+
+        # Check convergence
+        if max_corr <= threshold:
+            print(f"\n✓ Converged! Max |r|={max_corr:.4f} <= {threshold}")
+            break
+
+        # Find feature with highest average |r|
+        # (Upper triangle only to avoid double counting)
+        avg_corr = upper_tri.abs().mean(skipna=True)
+        remove_feature = avg_corr.idxmax()
+        remove_avg_corr = avg_corr[remove_feature]
+
+        print(f"Iteration {iteration:2d}: Remove '{remove_feature}' "
+              f"(avg |r|={remove_avg_corr:.4f}, max |r|={max_corr:.4f})")
+
+        removed.append({
+            'feature': remove_feature,
+            'avg_correlation': remove_avg_corr,
+            'max_correlation': max_corr,
+            'iteration': iteration
+        })
+
+        X_filtered = X_filtered.drop(columns=[remove_feature])
+
+    elapsed = time.time() - start
+    converged = (iteration < max_iterations) and (max_corr <= threshold if iteration > 0 else False)
+
+    print(f"\nCorrelation filtering summary:")
+    print(f"  Time: {elapsed:.2f}s")
+    print(f"  Iterations: {iteration}")
+    print(f"  Features removed: {len(removed)}")
+    print(f"  Features remaining: {len(X_filtered.columns)}")
+    print(f"  Converged: {'Yes' if converged else 'No'}")
+
+    if len(X_filtered.columns) > 0 and len(X_filtered.columns) <= 10:
+        print(f"\nRemaining features:")
+        for f in X_filtered.columns:
+            print(f"  - {f}")
+
+    return {
+        "time_seconds": elapsed,
+        "iterations": iteration,
+        "features_removed": len(removed),
+        "features_remaining": len(X_filtered.columns),
+        "converged": converged,
+        "initial_corr_time": corr_time,
+        "removed_features": removed,
+        "remaining_features": list(X_filtered.columns)
+    }
+
+
+def main():
+    """Execute correlation filter test"""
+    print("Correlation Filter Feasibility Test")
+    print("="*70)
+
+    # Load data
+    print("\nLoading data...")
+    X = load_data()
+    print(f"Dataset: {len(X)} rows × {len(X.columns)} features")
+
+    results = {}
+
+    # Test correlation filter
+    try:
+        results['test_4_correlation_filter'] = test_correlation_filter(X, threshold=0.85)
+    except Exception as e:
+        print(f"\n❌ TEST 4 FAILED: {e}")
+        results['test_4_correlation_filter'] = {"error": str(e)}
+        raise  # SLO: Observability - Propagate error
+
+    # Verdict
+    print("\n" + "="*70)
+    print("VERDICT: Correlation Filter Feasibility")
+    print("="*70)
+
+    corr_time = results['test_4_correlation_filter']['time_seconds']
+
+    if corr_time < 5:
+        print(f"✅ VERY FAST: {corr_time:.2f}s (< 5s)")
+        feasible = True
+    elif corr_time < 30:
+        print(f"✅ FAST: {corr_time:.2f}s (< 30s)")
+        feasible = True
+    elif corr_time < 60:
+        print(f"⚠️  MARGINAL: {corr_time:.2f}s (< 1 min)")
+        feasible = True
+    else:
+        print(f"❌ TOO SLOW: {corr_time:.2f}s (> 1 min)")
+        feasible = False
+
+    results['verdict'] = {
+        "correlation_filter_feasible": feasible,
+        "time_seconds": corr_time,
+        "recommended": feasible
+    }
+
+    # Save results
+    output_file = Path("/tmp/vif_feasibility_test/correlation_test_results.json")
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\n✓ Results saved to: {output_file}")
+
+    return results
+
+
+if __name__ == '__main__':
+    results = main()

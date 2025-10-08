@@ -1,0 +1,211 @@
+"""Market regime detection for stratified sampling."""
+
+from typing import Literal
+
+import numpy as np
+import polars as pl
+
+
+class RegimeDetector:
+    """Detect market regimes for OOD-robust training.
+
+    Identifies distinct market conditions (volatility, trend, volume)
+    to enable regime-stratified sampling and evaluation.
+    """
+
+    def __init__(self, lookback_window: int = 24):
+        """Initialize regime detector.
+
+        Args:
+            lookback_window: Number of bars for rolling statistics
+        """
+        self.lookback_window = lookback_window
+
+    def detect_volatility_regime(
+        self,
+        df: pl.DataFrame,
+        n_regimes: int = 5,
+    ) -> pl.DataFrame:
+        """Classify bars into volatility regimes (quintiles).
+
+        Args:
+            df: DataFrame with bar_return column
+            n_regimes: Number of volatility buckets (default: 5 quintiles)
+
+        Returns:
+            DataFrame with added 'volatility_regime' column (0 to n_regimes-1)
+            - 0: Lowest volatility (calm markets)
+            - n_regimes-1: Highest volatility (turbulent markets)
+        """
+        # Compute rolling realized volatility
+        df = df.with_columns(
+            pl.col("bar_return")
+            .abs()
+            .rolling_mean(window_size=self.lookback_window)
+            .alias("realized_volatility")
+        )
+
+        # Create quintile-based regime labels
+        df = df.with_columns(
+            pl.col("realized_volatility")
+            .qcut(n_regimes, labels=[str(i) for i in range(n_regimes)])
+            .cast(pl.Int32)
+            .alias("volatility_regime")
+        )
+
+        return df
+
+    def detect_trend_regime(
+        self,
+        df: pl.DataFrame,
+        threshold: float = 0.001,
+    ) -> pl.DataFrame:
+        """Classify bars into trend regimes.
+
+        Args:
+            df: DataFrame with close prices
+            threshold: Threshold for sideways classification (±0.1%)
+
+        Returns:
+            DataFrame with 'trend_regime' column:
+            - 0: Downtrend (rolling return < -threshold)
+            - 1: Sideways (|rolling return| <= threshold)
+            - 2: Uptrend (rolling return > threshold)
+        """
+        # Compute rolling price change
+        df = df.with_columns(
+            (
+                (pl.col("close") - pl.col("close").shift(self.lookback_window)) /
+                pl.col("close").shift(self.lookback_window)
+            ).alias("rolling_return")
+        )
+
+        # Classify trend
+        df = df.with_columns(
+            pl.when(pl.col("rolling_return") > threshold)
+            .then(2)  # Uptrend
+            .when(pl.col("rolling_return") < -threshold)
+            .then(0)  # Downtrend
+            .otherwise(1)  # Sideways
+            .alias("trend_regime")
+        )
+
+        return df
+
+    def detect_volume_regime(
+        self,
+        df: pl.DataFrame,
+        n_regimes: int = 3,
+    ) -> pl.DataFrame:
+        """Classify bars into volume regimes.
+
+        Args:
+            df: DataFrame with volume column
+            n_regimes: Number of volume buckets (default: 3 terciles)
+
+        Returns:
+            DataFrame with 'volume_regime' column:
+            - 0: Low volume
+            - 1: Medium volume
+            - 2: High volume
+        """
+        # Compute rolling normalized volume
+        df = df.with_columns(
+            (
+                pl.col("volume") /
+                pl.col("volume").rolling_mean(window_size=self.lookback_window * 2)
+            ).alias("normalized_volume")
+        )
+
+        # Create tercile-based regime labels
+        df = df.with_columns(
+            pl.col("normalized_volume")
+            .qcut(n_regimes, labels=[str(i) for i in range(n_regimes)])
+            .cast(pl.Int32)
+            .alias("volume_regime")
+        )
+
+        return df
+
+    def detect_all_regimes(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Detect all regime types.
+
+        Args:
+            df: Range bar DataFrame
+
+        Returns:
+            DataFrame with regime columns:
+            - volatility_regime (0-4)
+            - trend_regime (0-2)
+            - volume_regime (0-2)
+            - composite_regime (string ID combining all)
+        """
+        df = self.detect_volatility_regime(df)
+        df = self.detect_trend_regime(df)
+        df = self.detect_volume_regime(df)
+
+        # Create composite regime ID
+        df = df.with_columns(
+            (
+                pl.col("volatility_regime").cast(pl.Utf8) + "_" +
+                pl.col("trend_regime").cast(pl.Utf8) + "_" +
+                pl.col("volume_regime").cast(pl.Utf8)
+            ).alias("composite_regime")
+        )
+
+        # Remove NaN rows from rolling calculations
+        df = df.drop_nulls()
+
+        return df
+
+    def get_regime_statistics(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Compute statistics for each volatility regime.
+
+        Args:
+            df: DataFrame with regime labels
+
+        Returns:
+            Summary DataFrame with regime characteristics
+        """
+        stats = df.group_by("volatility_regime").agg([
+            pl.count().alias("n_bars"),
+            pl.col("realized_volatility").mean().alias("avg_volatility"),
+            pl.col("bar_return").mean().alias("avg_return"),
+            pl.col("bar_return").std().alias("std_return"),
+            pl.col("volume").mean().alias("avg_volume"),
+        ]).sort("volatility_regime")
+
+        return stats
+
+    def exclude_stress_period(
+        self,
+        df: pl.DataFrame,
+        event_name: Literal["terra_luna_crash", "ftx_collapse"],
+    ) -> pl.DataFrame:
+        """Exclude stress period from training data.
+
+        Args:
+            df: Range bar DataFrame
+            event_name: Crisis event to exclude
+
+        Returns:
+            DataFrame with stress period removed
+        """
+        from .utils import identify_stress_period
+
+        stress_df = identify_stress_period(df, event_name)
+
+        if len(stress_df) == 0:
+            return df
+
+        # Exclude by timestamp range
+        stress_start = stress_df["open_time"].min()
+        stress_end = stress_df["open_time"].max()
+
+        cleaned_df = df.filter(
+            (pl.col("open_time") < stress_start) |
+            (pl.col("open_time") > stress_end)
+        )
+
+        print(f"Excluded {len(df) - len(cleaned_df):,} bars from stress period '{event_name}'")
+        return cleaned_df

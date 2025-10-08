@@ -1,0 +1,264 @@
+"""Complete OOD-robust model combining encoder and prediction heads."""
+
+from typing import Dict, Optional
+
+import torch
+import torch.nn as nn
+
+from .encoder import TransformerFeatureEncoder
+from .heads import DualTaskHead
+
+
+class OODRobustRangeBarModel(nn.Module):
+    """End-to-end OOD-robust model for range bar prediction.
+
+    Architecture:
+        Input (batch, seq_len, n_features)
+        ↓
+        TransformerFeatureEncoder (auto-feature learning)
+        ↓
+        Embeddings (batch, embedding_dim)
+        ↓
+        DualTaskHead (direction + anomaly)
+        ↓
+        Outputs: (direction_logits, reconstructed_features)
+
+    OOD Robustness Mechanisms:
+        1. Transformer attention: Learns temporal patterns invariant to price levels
+        2. Layer normalization: Handles distribution shifts
+        3. Anomaly detection: Identifies OOD samples via reconstruction error
+        4. Dropout: Enables uncertainty estimation (MC Dropout)
+    """
+
+    def __init__(
+        self,
+        # Encoder parameters
+        n_features: int = 14,
+        d_model: int = 256,
+        n_heads: int = 8,
+        n_layers: int = 4,
+        dim_feedforward: int = 1024,
+        embedding_dim: int = 128,
+        # Head parameters
+        hidden_dim: int = 64,
+        bottleneck_dim: int = 32,
+        n_classes: int = 3,
+        # Training parameters
+        dropout: float = 0.1,
+        label_smoothing: float = 0.1,
+        direction_weight: float = 1.0,
+        anomaly_weight: float = 0.5,
+        max_seq_len: int = 512,
+    ):
+        """Initialize OOD-robust model.
+
+        Args:
+            n_features: Number of input features per bar
+            d_model: Transformer hidden dimension
+            n_heads: Number of attention heads
+            n_layers: Number of transformer layers
+            dim_feedforward: Feedforward network dimension
+            embedding_dim: Learned embedding dimension
+            hidden_dim: Direction head hidden dimension
+            bottleneck_dim: Anomaly head bottleneck dimension
+            n_classes: Number of direction classes
+            dropout: Dropout probability
+            label_smoothing: Label smoothing factor for cross-entropy loss (0.0 = no smoothing, 0.3 = aggressive)
+            direction_weight: Weight for direction loss
+            anomaly_weight: Weight for anomaly loss
+            max_seq_len: Maximum sequence length
+        """
+        super().__init__()
+
+        self.n_features = n_features
+        self.embedding_dim = embedding_dim
+        self.n_classes = n_classes
+
+        # Transformer encoder for feature learning
+        self.encoder = TransformerFeatureEncoder(
+            n_features=n_features,
+            d_model=d_model,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            embedding_dim=embedding_dim,
+            max_seq_len=max_seq_len,
+        )
+
+        # Dual-task prediction head
+        self.head = DualTaskHead(
+            embedding_dim=embedding_dim,
+            hidden_dim=hidden_dim,
+            bottleneck_dim=bottleneck_dim,
+            n_classes=n_classes,
+            n_features=n_features,
+            dropout=dropout,
+            label_smoothing=label_smoothing,
+            direction_weight=direction_weight,
+            anomaly_weight=anomaly_weight,
+        )
+
+    def forward(
+        self,
+        sequences: torch.Tensor,
+        return_embeddings: bool = False,
+    ) -> Dict[str, torch.Tensor]:
+        """Forward pass.
+
+        Args:
+            sequences: (batch, seq_len, n_features) input sequences
+            return_embeddings: Whether to return intermediate embeddings
+
+        Returns:
+            Dictionary containing:
+            - direction_logits: (batch, n_classes) direction predictions
+            - reconstructed: (batch, n_features) reconstructed features
+            - embeddings: (batch, embedding_dim) [if return_embeddings=True]
+        """
+        # Encode sequences to embeddings
+        embeddings = self.encoder(sequences)  # (batch, embedding_dim)
+
+        # Dual-task predictions
+        direction_logits, reconstructed = self.head(embeddings)
+
+        outputs = {
+            "direction_logits": direction_logits,
+            "reconstructed": reconstructed,
+        }
+
+        if return_embeddings:
+            outputs["embeddings"] = embeddings
+
+        return outputs
+
+    def compute_loss(
+        self,
+        outputs: Dict[str, torch.Tensor],
+        targets: torch.Tensor,
+        original_features: torch.Tensor,
+    ) -> tuple[torch.Tensor, Dict[str, float]]:
+        """Compute combined loss.
+
+        Args:
+            outputs: Model outputs from forward()
+            targets: (batch,) direction class labels
+            original_features: (batch, n_features) for reconstruction
+
+        Returns:
+            Tuple of:
+            - combined_loss: Scalar loss
+            - loss_dict: Individual loss components
+        """
+        return self.head.compute_combined_loss(
+            direction_logits=outputs["direction_logits"],
+            direction_targets=targets,
+            reconstructed=outputs["reconstructed"],
+            original_features=original_features,
+        )
+
+    def predict(
+        self,
+        sequences: torch.Tensor,
+        return_probabilities: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        """Make predictions.
+
+        Args:
+            sequences: (batch, seq_len, n_features) input
+            return_probabilities: Return class probabilities vs hard labels
+
+        Returns:
+            Dictionary containing:
+            - direction_pred: (batch, n_classes) probs or (batch,) labels
+            - anomaly_score: (batch,) reconstruction error
+        """
+        self.eval()
+        with torch.no_grad():
+            outputs = self.forward(sequences)
+
+            # Direction prediction
+            if return_probabilities:
+                direction_pred = self.head.direction_head.predict_proba(
+                    outputs["direction_logits"]
+                )
+            else:
+                direction_pred = self.head.direction_head.predict_class(
+                    outputs["direction_logits"]
+                )
+
+            # Anomaly score (requires original features for comparison)
+            # For now, return reconstructed output
+            # In practice, compare with last bar features
+            anomaly_score = outputs["reconstructed"]
+
+        return {
+            "direction_pred": direction_pred,
+            "anomaly_score": anomaly_score,
+        }
+
+    def predict_with_uncertainty(
+        self,
+        sequences: torch.Tensor,
+        n_samples: int = 20,
+    ) -> Dict[str, torch.Tensor]:
+        """Uncertainty-aware prediction using MC Dropout.
+
+        Args:
+            sequences: (batch, seq_len, n_features) input
+            n_samples: Number of stochastic forward passes
+
+        Returns:
+            Dictionary containing:
+            - direction_mean: (batch, n_classes) mean predictions
+            - direction_std: (batch, n_classes) prediction uncertainty
+            - anomaly_mean: (batch, n_features) mean reconstruction
+            - anomaly_std: (batch, n_features) reconstruction uncertainty
+        """
+        self.train()  # Enable dropout for MC sampling
+
+        direction_samples = []
+        anomaly_samples = []
+
+        with torch.no_grad():
+            for _ in range(n_samples):
+                outputs = self.forward(sequences)
+
+                direction_probs = self.head.direction_head.predict_proba(
+                    outputs["direction_logits"]
+                )
+                direction_samples.append(direction_probs)
+                anomaly_samples.append(outputs["reconstructed"])
+
+        # Stack samples: (n_samples, batch, ...)
+        direction_samples = torch.stack(direction_samples)
+        anomaly_samples = torch.stack(anomaly_samples)
+
+        # Compute mean and std
+        direction_mean = direction_samples.mean(dim=0)
+        direction_std = direction_samples.std(dim=0)
+        anomaly_mean = anomaly_samples.mean(dim=0)
+        anomaly_std = anomaly_samples.std(dim=0)
+
+        return {
+            "direction_mean": direction_mean,
+            "direction_std": direction_std,
+            "anomaly_mean": anomaly_mean,
+            "anomaly_std": anomaly_std,
+        }
+
+    @property
+    def num_parameters(self) -> int:
+        """Count trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return (
+            f"OODRobustRangeBarModel(\n"
+            f"  Encoder: {self.encoder.num_parameters:,} params\n"
+            f"  Total: {self.num_parameters:,} params\n"
+            f"  Features: {self.n_features} → Embedding: {self.embedding_dim}\n"
+            f"  Tasks: Direction ({self.n_classes} classes) + Anomaly\n"
+            f")"
+        )

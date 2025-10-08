@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""
+Memory-efficient aggregation for large files using PyArrow batches.
+"""
+
+import sys
+from pathlib import Path
+import argparse
+import pandas as pd
+import numpy as np
+import pyarrow.parquet as pq
+
+
+def aggregate_month_chunked(tick_file: Path, output_file: Path, batch_size_mb=500) -> dict:
+    """Aggregate using PyArrow batches to avoid OOM on large files."""
+
+    print(f"Loading tick data (chunked): {tick_file.name}")
+
+    # Read file info
+    parquet_file = pq.ParquetFile(tick_file)
+    total_rows = parquet_file.metadata.num_rows
+    print(f"  Total trades: {total_rows:,}")
+
+    # Process in batches
+    all_bars = []
+    batch_num = 0
+
+    for batch in parquet_file.iter_batches(batch_size=100000):
+        batch_num += 1
+        if batch_num % 50 == 0:
+            print(f"  Processing batch {batch_num} ({len(all_bars)} bars so far)...")
+
+        # Convert to pandas
+        df = batch.to_pandas()
+
+        # Ensure timestamp is datetime with UTC
+        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+        df['minute'] = df['timestamp'].dt.floor('1min')
+
+        # Calculate components
+        df['weighted_price'] = df['price'] * df['size']
+        df['buy_size'] = np.where(df['side'] == 'buy', df['size'], 0)
+        df['sell_size'] = np.where(df['side'] == 'sell', df['size'], 0)
+
+        # Aggregate batch
+        grouped = df.groupby(['symbol', 'minute'])
+        batch_bars = grouped.agg({
+            'price': ['first', 'max', 'min', 'last'],
+            'size': ['sum', 'max'],
+            'buy_size': 'sum',
+            'sell_size': 'sum',
+            'weighted_price': 'sum',
+            'timestamp': 'count'
+        }).reset_index()
+
+        batch_bars.columns = ['symbol', 'timestamp', 'open', 'high', 'low', 'close',
+                              'volume', 'largest_trade', 'buy_volume', 'sell_volume',
+                              'weighted_price_sum', 'trades']
+
+        all_bars.append(batch_bars)
+        del df, batch_bars
+
+    print(f"  Combining {len(all_bars)} batches...")
+
+    # Combine all batches
+    combined = pd.concat(all_bars, ignore_index=True)
+    del all_bars
+
+    # Re-aggregate (batches may have split same minute across batches)
+    print("  Final aggregation...")
+    grouped = combined.groupby(['symbol', 'timestamp'])
+
+    final_bars = pd.DataFrame({
+        'symbol': grouped['symbol'].first(),
+        'timestamp': grouped['timestamp'].first(),
+        'open': grouped['open'].first(),
+        'high': grouped['high'].max(),
+        'low': grouped['low'].min(),
+        'close': grouped['close'].last(),
+        'volume': grouped['volume'].sum(),
+        'buy_volume': grouped['buy_volume'].sum(),
+        'sell_volume': grouped['sell_volume'].sum(),
+        'weighted_price_sum': grouped['weighted_price_sum'].sum(),
+        'trades': grouped['trades'].sum(),
+        'largest_trade': grouped['largest_trade'].max()
+    }).reset_index(drop=True)
+
+    # Calculate VWAP
+    final_bars['vwap'] = final_bars['weighted_price_sum'] / final_bars['volume']
+
+    # Final schema
+    final_bars = final_bars[[
+        'timestamp', 'symbol', 'open', 'high', 'low', 'close', 'vwap',
+        'volume', 'buy_volume', 'sell_volume', 'trades', 'largest_trade'
+    ]]
+
+    # Data type optimization
+    final_bars = final_bars.astype({
+        'open': 'float32',
+        'high': 'float32',
+        'low': 'float32',
+        'close': 'float32',
+        'vwap': 'float32',
+        'volume': 'float32',
+        'buy_volume': 'float32',
+        'sell_volume': 'float32',
+        'trades': 'uint16',
+        'largest_trade': 'float32'
+    })
+
+    # Save
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    final_bars.to_parquet(
+        output_file,
+        compression='zstd',
+        compression_level=9,
+        index=False
+    )
+
+    # Report
+    input_size_mb = tick_file.stat().st_size / 1024 / 1024
+    output_size_mb = output_file.stat().st_size / 1024 / 1024
+    compression_ratio = input_size_mb / output_size_mb
+
+    print(f"\nResults:")
+    print(f"  Input: {input_size_mb:.0f} MB ({total_rows:,} trades)")
+    print(f"  Output: {output_size_mb:.0f} MB ({len(final_bars):,} bars)")
+    print(f"  Compression: {compression_ratio:.1f}x reduction")
+
+    return {
+        'file': output_file,
+        'bars': len(final_bars),
+        'size_mb': output_size_mb,
+        'compression_ratio': compression_ratio
+    }
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('year', type=int)
+    parser.add_argument('month', type=int)
+    parser.add_argument('--market-type', choices=['spot', 'swap'], default='spot')
+    parser.add_argument('--data-dir', type=Path, default=Path('data'))
+
+    args = parser.parse_args()
+
+    print("="*80)
+    print(f"Aggregating {args.market_type.upper()} to 1-Min Bars (CHUNKED): {args.year}-{args.month:02d}")
+    print("="*80)
+
+    # Input file
+    if args.market_type == "swap":
+        tick_file = args.data_dir / "raw_ticks_swap" / str(args.year) / f"{args.month:02d}.parquet"
+        output_file = args.data_dir / "1min_bars_swap" / str(args.year) / f"{args.month:02d}.parquet"
+    else:
+        tick_file = args.data_dir / "raw_ticks" / str(args.year) / f"{args.month:02d}.parquet"
+        output_file = args.data_dir / "1min_bars" / str(args.year) / f"{args.month:02d}.parquet"
+
+    if not tick_file.exists():
+        print(f"\n❌ ERROR: Tick data not found: {tick_file}")
+        sys.exit(1)
+
+    if output_file.exists():
+        print(f"\n⚠️  Output already exists: {output_file}")
+        if not sys.stdin.isatty():
+            print("y (auto-confirmed)")
+        else:
+            response = input("Overwrite? [y/N]: ")
+            if response.strip().lower() != 'y':
+                print("\nCancelled.")
+                sys.exit(0)
+
+    # Aggregate
+    result = aggregate_month_chunked(tick_file, output_file)
+
+    print("\n" + "="*80)
+    print("✅ AGGREGATION COMPLETE")
+    print("="*80)
+    print(f"\nSaved to: {output_file}")

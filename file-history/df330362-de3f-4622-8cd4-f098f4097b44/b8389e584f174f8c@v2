@@ -1,0 +1,246 @@
+# Temperature Scaling Calibration - Failure Analysis
+
+**Date:** 2025-10-05
+**Model:** research/ml_ood/experiments/run1/final_model.pt
+**Remediation Attempted:** Post-hoc temperature scaling (Guo et al. ICML 2017)
+
+---
+
+## Executive Summary
+
+**Status:** ✗ FAILED (Temperature scaling cannot resolve conformal coverage SLO violation)
+
+Temperature scaling optimization found T=1.0006 (essentially no change from baseline), indicating the model's overconfidence is not addressable via temperature scaling. Conformal coverage remains 57.3% vs 90% target (gap 32.7% >> 5% tolerance).
+
+**Critical Finding:** The model's overconfidence problem is fundamentally different from what temperature scaling can fix. ECE-based calibration and conformal prediction measure different aspects of uncertainty quantification.
+
+---
+
+## Experimental Setup
+
+### Data Splits
+```
+Temperature optimization: 52,602 samples (30% of test set)
+Conformal calibration:    61,369 samples (35% of test set)
+Coverage evaluation:      61,371 samples (35% of test set)
+```
+
+### Optimization Configuration
+```
+Method:     Brent's method (scipy.optimize.minimize_scalar)
+Objective:  Expected Calibration Error (ECE)
+Bounds:     [1.0, 10.0] (T≥1 to reduce overconfidence)
+Tolerance:  1e-3 (xatol)
+```
+
+---
+
+## Results
+
+### Temperature Optimization
+```
+Optimal Temperature:  1.0006  (essentially T=1, no change)
+Baseline ECE (T=1):   0.0442
+Calibrated ECE:       0.0443
+ECE Improvement:      -0.0001  (effectively zero)
+Iterations:           20
+Convergence:          Success
+```
+
+### Conformal Coverage (T=1.0006)
+```
+Empirical Coverage:  57.3%
+Target Coverage:     90.0%
+Coverage Gap:        32.7%  ← VIOLATION (> 5% tolerance)
+Avg Set Size:        1.00
+Median Set Size:     1.0
+```
+
+**SLO Violation:** Coverage gap 32.7% > 5% tolerance even after temperature scaling
+
+---
+
+## Root Cause Analysis
+
+### Why Temperature Scaling Failed
+
+1. **ECE Already Optimal**: Baseline ECE of 0.0442 is already very low. Temperature optimization found T≈1 because there is no calibration error from ECE's perspective.
+
+2. **ECE-Coverage Discrepancy**: ECE measures binned calibration accuracy. A model can have low ECE but still be systematically overconfident in ways that conformal prediction exposes.
+
+3. **Prediction Set Size = 1 Always**: The model always returns single-class predictions (set size 1.00), indicating extreme overconfidence. Temperature scaling requires T >> 1 to smooth such peaked distributions, but ECE optimization found T≈1.
+
+4. **Tail Uncertainty Missing**: Conformal prediction requires well-calibrated uncertainty in the tails of the probability distribution. ECE measures average calibration across bins but doesn't capture tail miscalibration.
+
+### Technical Explanation
+
+Temperature scaling divides logits by T before softmax:
+```
+p(y|x) = softmax(logits / T)
+```
+
+When T > 1, this reduces overconfidence by smoothing probability distributions. However, ECE optimization found T≈1 because:
+
+- ECE bins predictions and measures accuracy within each bin
+- A model that is consistently overconfident (always predicting with ~100% confidence) can have low ECE if it's accurate when confident
+- Conformal prediction requires prediction sets that account for true uncertainty, exposing systematic overconfidence
+
+**Concrete Example:**
+- Model predicts class 1 with 99% confidence
+- Actual class is 1 (correct prediction)
+- ECE contribution: Low (prediction confident and correct)
+- Conformal contribution: Prediction set size 1, does not include true class when wrong
+- When model is wrong with 99% confidence: ECE still low (if infrequent), but conformal coverage catastrophically fails
+
+---
+
+## Alternative Approaches
+
+### Post-hoc Calibration (No Retraining Required)
+
+1. **Platt Scaling**
+   - Fit logistic regression on validation set: `P(y|x) = σ(A·logit + B)`
+   - More flexible than temperature scaling (learns A, B vs single T)
+   - Estimated effort: 2-4 hours
+
+2. **Isotonic Regression**
+   - Fit isotonic (monotonic) function mapping confidences to calibrated probabilities
+   - Non-parametric, can handle complex miscalibration
+   - Estimated effort: 2-4 hours
+
+3. **Beta Calibration**
+   - Fit beta distribution parameters on validation set
+   - More expressive than Platt scaling
+   - Estimated effort: 4-6 hours
+
+### Training-Time Solutions (Retraining Required)
+
+4. **Label Smoothing**
+   - Modify targets: `y_smooth = (1-α)·one_hot(y) + α/K`
+   - Prevents model from becoming overconfident
+   - Requires full retraining (50 epochs ≈ 3 hours)
+   - Estimated effort: 4-8 hours (including validation)
+
+5. **Focal Loss**
+   - Loss function: `L = -(1-p_t)^γ log(p_t)`
+   - Focuses on hard examples, reduces overconfidence
+   - Requires full retraining
+   - Estimated effort: 4-8 hours
+
+6. **Mixup/CutMix Data Augmentation**
+   - Interpolate training examples: `x̃ = λx_i + (1-λ)x_j`
+   - Smooths decision boundaries, improves calibration
+   - Requires full retraining
+   - Estimated effort: 8-12 hours
+
+### Architectural Solutions (Significant Effort)
+
+7. **Ensemble Methods**
+   - Train 5-10 models with different initializations
+   - Average predictions for improved uncertainty
+   - Estimated effort: 16-24 hours (5x training time + ensemble logic)
+
+8. **Bayesian Neural Networks**
+   - Model posterior distribution over weights
+   - Provides principled uncertainty quantification
+   - Estimated effort: 40-80 hours (architecture redesign + training)
+
+---
+
+## Recommendations
+
+### Immediate Next Step (Fastest)
+
+**Try Platt Scaling** (2-4 hours estimated)
+- Post-hoc calibration method more flexible than temperature scaling
+- Learns 2 parameters (A, B) vs 1 parameter (T)
+- Can handle non-uniform miscalibration
+- No retraining required
+
+**Implementation Priority:**
+1. Implement Platt scaling on validation set
+2. Evaluate conformal coverage on test set
+3. If gap < 5%: Deploy calibrated model
+4. If gap > 5%: Escalate to training-time solutions
+
+### If Platt Scaling Fails
+
+**Label Smoothing + Retraining** (4-8 hours)
+- Most effective training-time solution for overconfidence
+- Widely used in production systems (Google, Meta)
+- Simpler than architectural changes
+- Preserves existing model architecture
+
+**Rationale:**
+- Post-hoc methods have limited expressiveness (2-3 parameters)
+- If miscalibration is deeply embedded in learned features, retraining required
+- Label smoothing α=0.1 standard starting point
+
+### Long-term Solution
+
+**Ensemble of Label-Smoothed Models** (20-30 hours)
+- Train 5 models with label smoothing α=0.1
+- Average predictions for final output
+- Best of both worlds: calibration + uncertainty quantification
+- Production-grade solution
+
+---
+
+## Lessons Learned
+
+1. **ECE ≠ Conformal Coverage**: Low ECE does not guarantee conformal coverage. ECE measures binned calibration but misses tail miscalibration.
+
+2. **Temperature Scaling Limitations**: Temperature scaling assumes uniform miscalibration (single parameter T). Models with complex overconfidence patterns require more expressive calibration.
+
+3. **Prediction Set Size Diagnostic**: Set size = 1 always indicates extreme overconfidence that temperature scaling cannot fix (would require T >> 1, but ECE optimization finds T≈1).
+
+4. **Train-Time vs Post-hoc**: Deeply embedded overconfidence (from architecture/loss function) may not be fixable post-hoc. Training-time regularization (label smoothing, mixup) addresses root cause.
+
+---
+
+## Technical Notes
+
+### Why ECE Optimization Found T=1
+
+ECE bins predictions by confidence and computes accuracy within each bin:
+```
+ECE = Σ (n_b / n) |acc_b - conf_b|
+```
+
+For a model that is consistently overconfident (always 99% confident):
+- If accuracy is high (e.g., 60%), predictions fall in 90-100% confidence bin
+- Within that bin: |0.60 - 0.99| = 0.39 contribution
+- But this is a single bin, so ECE = 0.39 * (fraction in that bin)
+- If most predictions are in that bin, ECE ≈ 0.39
+
+However, empirical ECE was 0.0442, suggesting:
+- Model is overconfident BUT accuracy varies across confidence bins
+- Binning artifacts make ECE appear low despite systematic overconfidence
+- Conformal prediction doesn't use bins - it requires calibrated probabilities directly
+
+### Conformal Prediction Mechanics
+
+Conformal predictor includes class y in prediction set if:
+```
+P(y|x) ≥ quantile
+```
+
+Where quantile is chosen so 90% of calibration samples have true class in set.
+
+With overconfident predictions (P_max ≈ 1 always):
+- Only the top-1 class exceeds quantile
+- Prediction set size = 1 always
+- When model is wrong, true class excluded from set
+- Coverage = accuracy (57.3% in this case)
+
+**Target**: Coverage should be 90% regardless of accuracy via larger prediction sets.
+
+---
+
+## References
+
+- Guo et al. "On Calibration of Modern Neural Networks" (ICML 2017) - Temperature scaling
+- Platt "Probabilistic Outputs for Support Vector Machines" (1999) - Platt scaling
+- Szegedy et al. "Rethinking the Inception Architecture" (CVPR 2016) - Label smoothing
+- Zhang et al. "mixup: Beyond Empirical Risk Minimization" (ICLR 2018) - Mixup augmentation
+- Vovk et al. "Algorithmic Learning in a Random World" (2005) - Conformal prediction theory

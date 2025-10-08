@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""
+Verify 1-min aggregated bars match tick-level VWAP resampling.
+
+This ensures no data loss in the aggregation process.
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+
+def verify_vwap_accuracy(tick_file: Path, bar_file: Path, sample_symbols=5):
+    """
+    Verify that aggregated VWAP matches manual tick resampling.
+
+    Tests random sample of symbols to ensure accuracy.
+    """
+    print(f"\n{'='*80}")
+    print(f"Verifying: {tick_file.name} → {bar_file.name}")
+    print(f"{'='*80}")
+
+    # Read both files
+    print("Loading tick data...")
+    ticks = pd.read_parquet(tick_file)
+    ticks['timestamp'] = pd.to_datetime(ticks['timestamp'], utc=True)
+    ticks['minute'] = ticks['timestamp'].dt.floor('1min')
+
+    print("Loading aggregated bars...")
+    bars = pd.read_parquet(bar_file)
+    bars['timestamp'] = pd.to_datetime(bars['timestamp'], utc=True)
+
+    # Sample random symbols for testing
+    all_symbols = bars['symbol'].unique()
+    np.random.seed(42)  # Reproducible
+    test_symbols = np.random.choice(all_symbols, min(sample_symbols, len(all_symbols)), replace=False)
+
+    print(f"\nTesting {len(test_symbols)} random symbols...")
+    print(f"Symbols: {', '.join(test_symbols)}")
+
+    errors = []
+
+    for symbol in test_symbols:
+        print(f"\n  {symbol}:")
+
+        # Get bars for this symbol
+        symbol_bars = bars[bars['symbol'] == symbol].set_index('timestamp').sort_index()
+
+        # Calculate VWAP manually from ticks
+        symbol_ticks = ticks[ticks['symbol'] == symbol].copy()
+        symbol_ticks['weighted_price'] = symbol_ticks['price'] * symbol_ticks['size']
+
+        manual_vwap = symbol_ticks.groupby('minute').apply(
+            lambda x: x['weighted_price'].sum() / x['size'].sum()
+        , include_groups=False).rename('manual_vwap')
+
+        # Compare
+        comparison = symbol_bars[['vwap']].join(manual_vwap, how='inner')
+
+        if len(comparison) == 0:
+            print(f"    ⚠️  No overlapping data")
+            continue
+
+        # Calculate difference
+        comparison['diff'] = comparison['vwap'] - comparison['manual_vwap']
+        comparison['rel_diff'] = (comparison['diff'] / comparison['manual_vwap']).abs()
+
+        max_abs_diff = comparison['diff'].abs().max()
+        max_rel_diff = comparison['rel_diff'].max()
+
+        print(f"    Bars compared: {len(comparison):,}")
+        print(f"    Max absolute diff: ${max_abs_diff:.10f}")
+        print(f"    Max relative diff: {max_rel_diff:.2e}")
+
+        # Tolerance check (floating point precision)
+        # For financial data, 1e-6 (0.0001%) is excellent precision
+        # e.g., For BTC at $27k: 1e-6 = $0.027 (2.7 cents)
+        tolerance = 1e-6  # 0.0001% relative error (sub-penny precision)
+        if max_rel_diff > tolerance:
+            errors.append({
+                'symbol': symbol,
+                'max_abs_diff': max_abs_diff,
+                'max_rel_diff': max_rel_diff
+            })
+            print(f"    ❌ FAILED: Difference exceeds tolerance ({tolerance:.2e})")
+        else:
+            print(f"    ✅ PASSED")
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("VERIFICATION SUMMARY")
+    print(f"{'='*80}")
+
+    if errors:
+        print(f"\n❌ FAILED: {len(errors)} symbol(s) failed verification")
+        for err in errors:
+            print(f"  {err['symbol']}: max_rel_diff = {err['max_rel_diff']:.2e}")
+        return False
+    else:
+        print(f"\n✅ SUCCESS: All {len(test_symbols)} symbols passed verification")
+        print("Aggregated VWAP matches tick-level resampling within floating point precision")
+        return True
+
+
+def verify_data_completeness(tick_file: Path, bar_file: Path):
+    """Verify no data was lost in aggregation."""
+
+    print(f"\n{'='*80}")
+    print("Data Completeness Check")
+    print(f"{'='*80}")
+
+    ticks = pd.read_parquet(tick_file, columns=['symbol', 'timestamp'])
+    bars = pd.read_parquet(bar_file, columns=['symbol', 'timestamp'])
+
+    ticks['timestamp'] = pd.to_datetime(ticks['timestamp'], utc=True)
+    bars['timestamp'] = pd.to_datetime(bars['timestamp'], utc=True)
+
+    tick_symbols = set(ticks['symbol'].unique())
+    bar_symbols = set(bars['symbol'].unique())
+
+    print(f"\nSymbols:")
+    print(f"  In ticks: {len(tick_symbols)}")
+    print(f"  In bars: {len(bar_symbols)}")
+    print(f"  Missing: {len(tick_symbols - bar_symbols)}")
+
+    if tick_symbols - bar_symbols:
+        print(f"  ⚠️  Missing symbols: {sorted(tick_symbols - bar_symbols)[:10]}...")
+    else:
+        print(f"  ✅ All symbols preserved")
+
+    tick_minutes = len(ticks['timestamp'].dt.floor('1min').unique())
+    bar_minutes = len(bars['timestamp'].unique())
+
+    print(f"\nTime coverage:")
+    print(f"  Tick minutes: {tick_minutes:,}")
+    print(f"  Bar minutes: {bar_minutes:,}")
+    print(f"  Match: {tick_minutes == bar_minutes}")
+
+    if tick_minutes == bar_minutes:
+        print(f"  ✅ Time coverage preserved")
+    else:
+        print(f"  ⚠️  Time coverage mismatch")
+
+
+def main():
+    """Run verification on all aggregated files."""
+
+    tick_dir = Path("data/okx_ticks")
+    bar_dir = Path("data/okx_1min_bars")
+
+    if not bar_dir.exists():
+        print(f"ERROR: No aggregated data found at {bar_dir}")
+        print("Run: uv run --active python aggregate_ticks_to_1min.py")
+        return
+
+    bar_files = sorted(bar_dir.glob("*_1min.parquet"))
+
+    if not bar_files:
+        print(f"ERROR: No 1-min bar files found in {bar_dir}")
+        return
+
+    print("\n" + "="*80)
+    print("1-MINUTE BAR VERIFICATION")
+    print("="*80)
+    print(f"Files to verify: {len(bar_files)}")
+
+    all_passed = True
+
+    for bar_file in bar_files:
+        # Find corresponding tick file
+        tick_file = tick_dir / bar_file.name.replace('_1min.parquet', '.parquet')
+
+        if not tick_file.exists():
+            print(f"\n⚠️  Skipping {bar_file.name}: No matching tick file")
+            continue
+
+        # Verify VWAP accuracy
+        passed = verify_vwap_accuracy(tick_file, bar_file, sample_symbols=5)
+        all_passed = all_passed and passed
+
+        # Verify completeness
+        verify_data_completeness(tick_file, bar_file)
+
+    # Final verdict
+    print("\n" + "="*80)
+    print("FINAL VERDICT")
+    print("="*80)
+
+    if all_passed:
+        print("\n✅ ALL VERIFICATIONS PASSED")
+        print("\nSafe to:")
+        print("  1. Use 1-min bars for backtesting")
+        print("  2. Delete raw tick data after 1-2 days of monitoring")
+        print("     rm -rf data/okx_ticks/  # Saves 8.1 GB")
+    else:
+        print("\n❌ SOME VERIFICATIONS FAILED")
+        print("\nDo NOT delete tick data until issues are resolved")
+
+
+if __name__ == "__main__":
+    main()

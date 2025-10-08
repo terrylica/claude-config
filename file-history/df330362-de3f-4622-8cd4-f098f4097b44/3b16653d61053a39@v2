@@ -1,0 +1,296 @@
+"""Stress testing suite for crisis periods (Terra/Luna, FTX)."""
+
+from pathlib import Path
+from typing import Dict, Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Subset
+from tqdm import tqdm
+
+from ..data import RangeBarDataset
+
+
+class StressTestSuite:
+    """Test model behavior during historical crisis events.
+
+    Known stress events:
+        - terra_luna_crash: 2022-05-07 to 2022-05-12 (SOL: $90 → $40, 55% drop)
+        - ftx_collapse: 2022-11-06 to 2022-11-11 (SOL: $35 → $13, 63% drop)
+    """
+
+    STRESS_EVENTS = {
+        "terra_luna_crash": {
+            "start": "2022-05-07",
+            "end": "2022-05-12",
+            "description": "Terra/Luna collapse (SOL -55%)",
+        },
+        "ftx_collapse": {
+            "start": "2022-11-06",
+            "end": "2022-11-11",
+            "description": "FTX exchange collapse (SOL -63%)",
+        },
+    }
+
+    def __init__(
+        self,
+        model: nn.Module,
+        dataset: RangeBarDataset,
+        device: torch.device,
+    ):
+        """Initialize stress test suite.
+
+        Args:
+            model: Trained model to test
+            dataset: Full dataset (to extract stress periods)
+            device: Device to run on
+        """
+        self.model = model
+        self.dataset = dataset
+        self.device = device
+
+    def run_stress_test(
+        self,
+        event_name: str,
+        batch_size: int = 256,
+    ) -> Dict[str, float]:
+        """Run stress test for a specific event.
+
+        Args:
+            event_name: Name of crisis event
+            batch_size: Batch size for evaluation
+
+        Returns:
+            Dictionary of stress test metrics
+        """
+        if event_name not in self.STRESS_EVENTS:
+            raise ValueError(
+                f"Unknown event: {event_name}. "
+                f"Available: {list(self.STRESS_EVENTS.keys())}"
+            )
+
+        event_info = self.STRESS_EVENTS[event_name]
+        print(f"\n{'='*60}")
+        print(f"Stress Test: {event_info['description']}")
+        print(f"Period: {event_info['start']} to {event_info['end']}")
+        print(f"{'='*60}")
+
+        # Get stress period indices
+        stress_indices = self.dataset.get_stress_period_indices(event_name)
+
+        if len(stress_indices) == 0:
+            print(f"⚠️  No data found for event '{event_name}'")
+            return {}
+
+        print(f"Stress period samples: {len(stress_indices):,}")
+
+        # Create stress period loader
+        stress_subset = Subset(self.dataset, stress_indices)
+        stress_loader = DataLoader(
+            stress_subset,
+            batch_size=batch_size,
+            shuffle=False,
+        )
+
+        # Evaluate model on stress period
+        metrics = self._evaluate_stress_period(stress_loader)
+
+        # Analyze uncertainty behavior
+        uncertainty_metrics = self._analyze_uncertainty_progression(stress_loader)
+        metrics.update(uncertainty_metrics)
+
+        return metrics
+
+    @torch.no_grad()
+    def _evaluate_stress_period(
+        self,
+        loader: DataLoader,
+    ) -> Dict[str, float]:
+        """Evaluate model performance during stress period.
+
+        Args:
+            loader: DataLoader for stress period
+
+        Returns:
+            Performance metrics
+        """
+        self.model.eval()
+
+        total_loss = 0.0
+        total_correct = 0
+        total_samples = 0
+        anomaly_scores = []
+
+        for batch in tqdm(loader, desc="Evaluating stress period"):
+            sequences = batch["features"].to(self.device)
+            targets = batch["target"].to(self.device)
+            original_features = sequences[:, -1, :].to(self.device)
+
+            # Forward pass
+            outputs = self.model(sequences)
+
+            # Compute loss
+            loss, _ = self.model.compute_loss(
+                outputs=outputs,
+                targets=targets,
+                original_features=original_features,
+            )
+
+            # Compute accuracy
+            preds = torch.argmax(outputs["direction_logits"], dim=-1)
+            correct = (preds == targets).sum().item()
+
+            # Compute anomaly scores
+            recon_error = torch.mean(
+                (outputs["reconstructed"] - original_features) ** 2,
+                dim=-1,
+            )
+
+            total_loss += loss.item() * len(targets)
+            total_correct += correct
+            total_samples += len(targets)
+            anomaly_scores.extend(recon_error.cpu().numpy())
+
+        metrics = {
+            "stress_loss": total_loss / total_samples,
+            "stress_accuracy": total_correct / total_samples,
+            "stress_anomaly_mean": np.mean(anomaly_scores),
+            "stress_anomaly_std": np.std(anomaly_scores),
+            "stress_anomaly_max": np.max(anomaly_scores),
+        }
+
+        print(f"\nStress Period Performance:")
+        print(f"  Loss: {metrics['stress_loss']:.4f}")
+        print(f"  Accuracy: {metrics['stress_accuracy']:.1%}")
+        print(f"  Anomaly Score (mean ± std): {metrics['stress_anomaly_mean']:.4f} ± {metrics['stress_anomaly_std']:.4f}")
+        print(f"  Anomaly Score (max): {metrics['stress_anomaly_max']:.4f}")
+
+        return metrics
+
+    @torch.no_grad()
+    def _analyze_uncertainty_progression(
+        self,
+        loader: DataLoader,
+        n_mc_samples: int = 20,
+    ) -> Dict[str, float]:
+        """Analyze how uncertainty evolves during crisis.
+
+        Uses MC Dropout to estimate prediction uncertainty.
+
+        Args:
+            loader: DataLoader for stress period
+            n_mc_samples: Number of Monte Carlo samples
+
+        Returns:
+            Uncertainty progression metrics
+        """
+        print("\nAnalyzing uncertainty progression...")
+
+        uncertainties = []
+
+        for batch in tqdm(loader, desc="Computing uncertainties"):
+            sequences = batch["features"].to(self.device)
+
+            # MC Dropout sampling
+            uncertainty_outputs = self.model.predict_with_uncertainty(
+                sequences,
+                n_samples=n_mc_samples,
+            )
+
+            # Compute entropy as uncertainty measure
+            direction_std = uncertainty_outputs["direction_std"]
+            # Avg std across classes as overall uncertainty
+            avg_uncertainty = direction_std.mean(dim=-1).cpu().numpy()
+
+            uncertainties.extend(avg_uncertainty)
+
+        uncertainties = np.array(uncertainties)
+
+        # Compute temporal trend (if uncertainty increases over time)
+        # Split into early/middle/late crisis
+        n = len(uncertainties)
+        early = uncertainties[:n//3].mean()
+        middle = uncertainties[n//3:2*n//3].mean()
+        late = uncertainties[2*n//3:].mean()
+
+        metrics = {
+            "uncertainty_mean": uncertainties.mean(),
+            "uncertainty_std": uncertainties.std(),
+            "uncertainty_early": early,
+            "uncertainty_middle": middle,
+            "uncertainty_late": late,
+            "uncertainty_trend": late - early,  # Positive = increasing
+        }
+
+        print(f"\nUncertainty Progression:")
+        print(f"  Early crisis: {early:.4f}")
+        print(f"  Middle crisis: {middle:.4f}")
+        print(f"  Late crisis: {late:.4f}")
+        print(f"  Trend: {metrics['uncertainty_trend']:+.4f} ({'↑ increasing' if metrics['uncertainty_trend'] > 0 else '↓ decreasing'})")
+
+        return metrics
+
+    def run_all_stress_tests(
+        self,
+        batch_size: int = 256,
+    ) -> Dict[str, Dict[str, float]]:
+        """Run stress tests for all known events.
+
+        Args:
+            batch_size: Batch size for evaluation
+
+        Returns:
+            Dict mapping event_name → metrics
+        """
+        all_results = {}
+
+        for event_name in self.STRESS_EVENTS.keys():
+            metrics = self.run_stress_test(event_name, batch_size)
+            all_results[event_name] = metrics
+
+        return all_results
+
+    def compare_with_normal_period(
+        self,
+        event_name: str,
+        normal_loader: DataLoader,
+        batch_size: int = 256,
+    ) -> Dict[str, float]:
+        """Compare stress period vs normal period performance.
+
+        Args:
+            event_name: Crisis event to test
+            normal_loader: DataLoader for normal (non-crisis) period
+            batch_size: Batch size
+
+        Returns:
+            Comparison metrics
+        """
+        # Run stress test
+        stress_metrics = self.run_stress_test(event_name, batch_size)
+
+        # Evaluate on normal period
+        print(f"\n{'='*60}")
+        print(f"Normal Period Evaluation (for comparison)")
+        print(f"{'='*60}")
+
+        normal_metrics = self._evaluate_stress_period(normal_loader)
+
+        # Compute degradation
+        comparison = {
+            "accuracy_degradation": normal_metrics["stress_accuracy"] - stress_metrics["stress_accuracy"],
+            "loss_increase": stress_metrics["stress_loss"] - normal_metrics["stress_loss"],
+            "anomaly_increase": stress_metrics["stress_anomaly_mean"] - normal_metrics["stress_anomaly_mean"],
+            "normal_accuracy": normal_metrics["stress_accuracy"],
+            "stress_accuracy": stress_metrics["stress_accuracy"],
+        }
+
+        print(f"\nComparison:")
+        print(f"  Normal accuracy: {comparison['normal_accuracy']:.1%}")
+        print(f"  Stress accuracy: {comparison['stress_accuracy']:.1%}")
+        print(f"  Degradation: {comparison['accuracy_degradation']:+.1%}")
+        print(f"  Loss increase: {comparison['loss_increase']:+.4f}")
+        print(f"  Anomaly increase: {comparison['anomaly_increase']:+.4f}")
+
+        return comparison

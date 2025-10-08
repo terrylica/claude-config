@@ -1,0 +1,167 @@
+"""
+Position sizing constraints and limits.
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class PositionConstraints:
+    """
+    Constraints for position sizing.
+
+    Enforces realistic limits on position sizes to prevent unrealistic allocations.
+    """
+
+    max_position_usd: float = 1_000_000.0  # Max $1M per position
+    min_position_usd: float = 100.0        # Min $100 per position
+    max_position_pct: float = 0.50         # Max 50% of portfolio
+    min_position_pct: float = 0.01         # Min 1% of portfolio
+    max_total_allocation_pct: float = 1.0  # Max 100% allocated
+
+    def __post_init__(self):
+        """Validate constraints after initialization."""
+        if self.max_position_usd <= 0:
+            raise ValueError("max_position_usd must be positive")
+        if self.min_position_usd <= 0:
+            raise ValueError("min_position_usd must be positive")
+        if self.min_position_usd > self.max_position_usd:
+            raise ValueError("min_position_usd cannot exceed max_position_usd")
+        if not 0 < self.max_position_pct <= 1.0:
+            raise ValueError("max_position_pct must be between 0 and 1")
+        if not 0 < self.min_position_pct <= 1.0:
+            raise ValueError("min_position_pct must be between 0 and 1")
+        if self.min_position_pct > self.max_position_pct:
+            raise ValueError("min_position_pct cannot exceed max_position_pct")
+
+    def clip_position_size(
+        self,
+        desired_size: float,
+        portfolio_value: Optional[float] = None
+    ) -> float:
+        """
+        Clip position size to respect constraints.
+
+        Args:
+            desired_size: Desired position size in USD
+            portfolio_value: Optional total portfolio value for percentage checks
+
+        Returns:
+            Constrained position size
+        """
+        # Clip to absolute dollar limits
+        clipped = max(self.min_position_usd, min(desired_size, self.max_position_usd))
+
+        # Apply percentage limits if portfolio value provided
+        if portfolio_value and portfolio_value > 0:
+            max_by_pct = portfolio_value * self.max_position_pct
+            min_by_pct = portfolio_value * self.min_position_pct
+
+            clipped = max(min_by_pct, min(clipped, max_by_pct))
+
+        return clipped
+
+    def is_valid_position_size(
+        self,
+        size: float,
+        portfolio_value: Optional[float] = None
+    ) -> bool:
+        """
+        Check if position size meets constraints.
+
+        Args:
+            size: Position size in USD
+            portfolio_value: Optional total portfolio value
+
+        Returns:
+            True if size meets all constraints
+        """
+        # Check absolute limits
+        if size < self.min_position_usd or size > self.max_position_usd:
+            return False
+
+        # Check percentage limits if portfolio value provided
+        if portfolio_value and portfolio_value > 0:
+            pct = size / portfolio_value
+            if pct < self.min_position_pct or pct > self.max_position_pct:
+                return False
+
+        return True
+
+    @classmethod
+    def for_funding_arb(
+        cls,
+        capital: float,
+        top_k: int = 5,
+        max_pct_per_position: float = 0.50
+    ) -> "PositionConstraints":
+        """
+        Create constraints optimized for funding rate arbitrage.
+
+        Args:
+            capital: Total capital available
+            top_k: Number of positions to hold
+            max_pct_per_position: Max percentage per position
+
+        Returns:
+            PositionConstraints instance
+        """
+        # For funding arb, typical setup:
+        # - 5 positions
+        # - Max 50% per position
+        # - Min 5% per position (20% of average if equal weight)
+
+        avg_position = capital / top_k
+        max_position_usd = min(capital * max_pct_per_position, 500_000)  # Cap at $500k
+        min_position_usd = max(capital * 0.05, 1_000)  # At least $1k or 5%
+
+        return cls(
+            max_position_usd=max_position_usd,
+            min_position_usd=min_position_usd,
+            max_position_pct=max_pct_per_position,
+            min_position_pct=0.05,
+            max_total_allocation_pct=1.0
+        )
+
+    @classmethod
+    def conservative(cls, capital: float) -> "PositionConstraints":
+        """
+        Create conservative constraints.
+
+        Suitable for risk-averse strategies or new traders.
+
+        Args:
+            capital: Total capital
+
+        Returns:
+            Conservative PositionConstraints
+        """
+        return cls(
+            max_position_usd=min(capital * 0.20, 100_000),  # Max 20% or $100k
+            min_position_usd=max(capital * 0.02, 500),      # Min 2% or $500
+            max_position_pct=0.20,
+            min_position_pct=0.02,
+            max_total_allocation_pct=0.90  # Keep 10% cash buffer
+        )
+
+    @classmethod
+    def aggressive(cls, capital: float) -> "PositionConstraints":
+        """
+        Create aggressive constraints.
+
+        Suitable for experienced traders with higher risk tolerance.
+
+        Args:
+            capital: Total capital
+
+        Returns:
+            Aggressive PositionConstraints
+        """
+        return cls(
+            max_position_usd=capital,  # No hard dollar limit
+            min_position_usd=max(capital * 0.01, 100),
+            max_position_pct=0.50,     # Can go up to 50% per position
+            min_position_pct=0.01,
+            max_total_allocation_pct=1.0
+        )

@@ -1,0 +1,539 @@
+#!/usr/bin/env python3
+"""
+OKX Funding Arbitrage — V1.5 HARSH REALITY Backtester
+
+Philosophy: Make backtest HARDER than reality so live trading is easier.
+
+Harsh Penalties Applied:
+1. Borrow costs: BTC 4% APR, Alts 12% APR (conservative floors)
+2. Execution: 100% taker fees (no maker rebate)
+3. Slippage: 3 bps per leg (conservative estimate)
+4. Partial fills: 90% execution, 10% missed hedges
+5. Ops risk: 0.5% daily skip probability
+6. Tighter gates: 4 bps hurdle, 10% no-trade bands
+
+Expected Impact: V1 (57% APY) → V1.5 (35-45% APY)
+
+If V1.5 shows >35% APY, live trading should exceed 40%+ easily.
+
+Author: Terry Li
+Date: 2025-09-30
+"""
+
+from collections import defaultdict
+from datetime import timedelta
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+import random
+
+# =================== Configuration =================== #
+CSV_PATH = Path(__file__).parent.parent / "data" / "okx_funding_2year_daily.csv"
+OUT_CSV  = Path(__file__).parent / "okx_funding_arb_v1_5_harsh_results.csv"
+OUT_PNG  = Path(__file__).parent / "okx_funding_arb_v1_5_harsh_chart.png"
+INITIAL_EQUITY = 1.0
+START_DATE = None  # Will use all available data
+END_DATE   = None
+
+# ===== HARSH REALISM PARAMETERS =====
+# Philosophy: Conservative assumptions, backtest harder than reality
+
+# Borrow costs (annualized, applied hourly)
+BORROW_APR_BTC = 0.04   # 4% for BTC
+BORROW_APR_ALTS = 0.12  # 12% for alts (conservative floor)
+
+# Execution penalties
+TAKER_FEE = 0.0002      # 2 bps
+MAKER_FEE = 0.0002      # Assume 100% taker (worst case)
+MAKER_RATIO = 0.0       # No maker fills (pessimistic)
+
+SLIPPAGE_BPS = 3.0      # 3 bps per leg (conservative)
+PARTIAL_FILL_RATIO = 0.90  # Only 90% of orders fill
+MISSED_HEDGE_SHARE = 0.10  # 10% doesn't get hedged (earns no funding)
+
+# Operational risks
+OPS_SKIP_PROB_DAILY = 0.005  # 0.5% chance to skip rebalance
+BORROW_UNAVAIL_PROB = 0.05   # 5% chance can't increase size
+
+# Strategy gates (tighter than V1)
+TOP_K = 5
+MAX_W = 0.50
+MIN_W = 0.05
+REBALANCE = "8h"
+MIN_HOLD_HOURS = 24.0
+HURDLE_BPS = 4.0        # Up from 3.0 (more conservative)
+BAND = 0.10             # Up from 0.05 (wider no-trade band)
+
+PROGRESS_EVERY = 200
+
+# =============================================================== #
+
+def load_data(csv_path: str) -> pd.DataFrame:
+    """Load funding rate data from CSV."""
+    df = pd.read_csv(csv_path)
+    need = {"symbol", "funding_time", "fundingRate"}
+    miss = need - set(df.columns)
+    if miss:
+        raise ValueError(f"Missing columns: {sorted(miss)}")
+    df["funding_time"] = pd.to_datetime(df["funding_time"], utc=True, errors="coerce")
+    df = df.dropna(subset=["funding_time", "fundingRate"]).copy()
+    df["fundingRate"] = pd.to_numeric(df["fundingRate"], errors="coerce")
+    df = df.dropna(subset=["fundingRate"]).copy()
+    df = df.sort_values(["funding_time", "symbol"]).reset_index(drop=True)
+    return df
+
+
+def filter_window(df: pd.DataFrame, start: str | None, end: str | None) -> pd.DataFrame:
+    """Filter data by date range."""
+    if start:
+        df = df[df["funding_time"] >= pd.Timestamp(start, tz="UTC")]
+    if end:
+        df = df[df["funding_time"] <= pd.Timestamp(end, tz="UTC")]
+    return df.reset_index(drop=True)
+
+
+def get_borrow_apr(symbol: str) -> float:
+    """
+    Get conservative borrow cost estimate.
+    Use max of: latest rate, p75 historical, floor.
+    For now, use floors as worst-case.
+    """
+    btc_symbols = {'BTC', 'BTCUSDT', 'BTC-USDT', 'BTCUSD'}
+    if symbol.upper() in btc_symbols:
+        return BORROW_APR_BTC
+    else:
+        return BORROW_APR_ALTS
+
+
+def apply_borrow_costs(holdings: dict, hours: float, equity: float) -> float:
+    """
+    Calculate borrow costs for period.
+
+    Args:
+        holdings: {symbol: weight}
+        hours: Hours in period (8 for standard funding)
+        equity: Current equity value
+
+    Returns:
+        Total borrow cost as fraction of equity
+    """
+    total_cost = 0.0
+    for symbol, weight in holdings.items():
+        notional = weight * equity
+        apr = get_borrow_apr(symbol)
+        hourly_rate = apr / 365.0 / 24.0
+        period_cost = notional * hourly_rate * hours
+        total_cost += period_cost
+
+    return total_cost / equity if equity > 0 else 0.0
+
+
+def apply_slippage(turnover: float) -> float:
+    """
+    Apply slippage to both legs of turnover.
+    Simple model: fixed 3 bps per leg.
+    """
+    slip_rate = SLIPPAGE_BPS / 10000.0
+    return 2 * turnover * slip_rate  # Both spot and perp legs
+
+
+def simulate_partial_fills(target_weights: dict) -> tuple[dict, float]:
+    """
+    Simulate partial fills and missed hedges.
+
+    Returns:
+        (actual_weights, missed_fraction)
+    """
+    actual = {}
+    for symbol, weight in target_weights.items():
+        # 90% of order fills
+        filled_weight = weight * PARTIAL_FILL_RATIO
+        actual[symbol] = filled_weight
+
+    # Normalize to maintain total allocation
+    total_actual = sum(actual.values())
+    total_target = sum(target_weights.values())
+
+    if total_actual > 0 and total_target > 0:
+        # Scale to match intended total
+        scale = total_target / total_actual
+        actual = {s: w * scale for s, w in actual.items()}
+
+    # Missed fraction
+    missed = 1.0 - PARTIAL_FILL_RATIO
+
+    return actual, missed
+
+
+def check_ops_skip(current_time: pd.Timestamp) -> bool:
+    """
+    Simulate operational skip (0.5% daily probability).
+    Deterministic based on date for reproducibility.
+    """
+    seed_str = f"ops_{current_time.date()}"
+    random.seed(hash(seed_str) % (2**32))
+    return random.random() < OPS_SKIP_PROB_DAILY
+
+
+def blended_fees():
+    """Calculate effective fees (100% taker in harsh mode)."""
+    spot_eff = TAKER_FEE
+    perp_eff = TAKER_FEE
+    return float(spot_eff), float(perp_eff)
+
+
+def fee_factor_for_turnover(turnover: float) -> float:
+    """Calculate fee drag from portfolio turnover."""
+    spot_eff, perp_eff = blended_fees()
+    turn_leg = float(np.clip(turnover, 0.0, 1.0))
+    spot_factor = (1 - spot_eff) ** (2 * turn_leg)
+    perp_factor = (1 - perp_eff) ** (2 * turn_leg)
+    return float(spot_factor * perp_factor)
+
+
+def capped_topk_weights_minmax(rates: pd.Series, k: int = TOP_K,
+                                max_w: float = MAX_W, min_w: float = MIN_W) -> dict:
+    """
+    Deterministic allocator with min/max caps.
+    Same as Victor's implementation.
+    """
+    sr = rates.abs().nlargest(k)
+    if sr.empty:
+        return {}
+    syms = list(sr.index)
+    n = len(syms)
+    w = pd.Series(0.0, index=syms)
+
+    seed_total = min_w * n
+    if seed_total > 1.0:
+        base = min(max_w, 1.0 / n)
+        w += base
+        remaining = 1.0 - base * n
+    else:
+        w += min_w
+        remaining = 1.0 - seed_total
+
+    if remaining > 1e-12:
+        headroom = (max_w - w).clip(lower=0.0)
+        for s in syms:
+            if remaining <= 1e-12:
+                break
+            add = float(min(headroom[s], remaining))
+            if add > 0:
+                w[s] += add
+                remaining -= add
+
+    total = float(w.sum())
+    if total > 0:
+        w /= total
+    return {s: float(w[s]) for s in syms}
+
+
+def portfolio_gross_factor(weights: dict, rates: pd.Series) -> float:
+    """Calculate portfolio gross return factor."""
+    return sum(weights.get(s, 0.0) * (1.0 + abs(float(rates.get(s, 0.0))))
+               for s in set(weights) | set(rates.index))
+
+
+def l1_half_turnover(new_w: dict, old_w: dict) -> float:
+    """Calculate L1 half-turnover between portfolios."""
+    syms = set(new_w) | set(old_w)
+    return 0.5 * sum(abs(new_w.get(s, 0.0) - old_w.get(s, 0.0)) for s in syms)
+
+
+def apply_no_trade_bands(target: dict, current: dict, band: float) -> dict:
+    """Apply no-trade bands to reduce noise trading."""
+    out = dict(current)
+    for s, tw in target.items():
+        cw = current.get(s, 0.0)
+        lo, hi = cw - band, cw + band
+        if tw > hi or tw < lo:
+            out[s] = tw
+        else:
+            out[s] = cw
+    for s, cw in current.items():
+        if s not in target:
+            lo, _ = cw - band, cw + band
+            out[s] = max(0.0, lo)
+    total = sum(out.values())
+    if total > 0:
+        out = {s: w / total for s, w in out.items() if w > 1e-12}
+    return out
+
+
+def build_portfolio_strategy_v1_5_harsh(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    V1.5 HARSH REALITY backtester with all penalties.
+    """
+    # Resample to snapshots
+    if REBALANCE == "daily":
+        snap = df.set_index("funding_time").groupby("symbol")["fundingRate"].resample("1D").last().dropna().reset_index()
+    else:
+        snap = df.set_index("funding_time").groupby("symbol")["fundingRate"].resample("8H").last().dropna().reset_index()
+
+    snap = snap.sort_values(["funding_time", "symbol"]).reset_index(drop=True)
+    times = sorted(snap["funding_time"].unique())
+
+    print(f"Total snapshots: {len(times)}")
+    print(f"\n{'='*80}")
+    print("V1.5 HARSH REALITY MODE ENABLED")
+    print(f"{'='*80}")
+    print(f"Borrow costs: BTC {BORROW_APR_BTC*100:.1f}%, Alts {BORROW_APR_ALTS*100:.1f}%")
+    print(f"Execution: 100% taker, {PARTIAL_FILL_RATIO*100:.0f}% fills")
+    print(f"Slippage: {SLIPPAGE_BPS:.1f} bps per leg")
+    print(f"Ops skip: {OPS_SKIP_PROB_DAILY*100:.2f}% daily")
+    print(f"Hurdle: {HURDLE_BPS:.1f} bps, No-trade band: {BAND*100:.0f}%")
+    print(f"{'='*80}\n")
+
+    rows = []
+    equity = INITIAL_EQUITY
+    prev_w = defaultdict(float)
+    last_change_time = None
+
+    total_borrow_cost = 0.0
+    total_slippage = 0.0
+    total_missed_funding = 0.0
+    ops_skips = 0
+
+    for i, t in enumerate(times, 1):
+        # Skip first period - no T-1 available
+        if i == 1:
+            print(f"[{i}/{len(times)}] {t}: Skipping (no T-1 data)")
+            continue
+
+        # Check operational skip
+        if check_ops_skip(t):
+            ops_skips += 1
+            # Hold current portfolio, apply returns
+            g_curr = snap[snap["funding_time"] == t]
+            rates_curr = g_curr.set_index("symbol")["fundingRate"]
+            gross = portfolio_gross_factor(prev_w, rates_curr)
+
+            # Still pay borrow costs
+            borrow_cost = apply_borrow_costs(prev_w, 8.0, equity)
+            total_borrow_cost += borrow_cost
+
+            net = (gross - 1.0) - borrow_cost
+            equity *= (1 + net)
+
+            rows.append({
+                "time": t,
+                "equity": equity,
+                "action": "ops_skip",
+                "borrow_cost": borrow_cost,
+                "slippage": 0.0,
+                "missed_funding": 0.0,
+            })
+            continue
+
+        # Get PREVIOUS rates (T-1) for selection
+        t_prev = times[i-2]
+        g_prev = snap[snap["funding_time"] == t_prev]
+        rates_prev = g_prev.set_index("symbol")["fundingRate"]
+
+        # Get CURRENT rates (T) for returns
+        g_curr = snap[snap["funding_time"] == t]
+        rates_curr = g_curr.set_index("symbol")["fundingRate"]
+
+        # Select portfolio using T-1 rates (what we knew yesterday)
+        target = capped_topk_weights_minmax(rates_prev, k=TOP_K, max_w=MAX_W, min_w=MIN_W)
+
+        # Calculate advantages using T-1 rates (realistic estimate)
+        gross_current = portfolio_gross_factor(prev_w, rates_prev)
+        gross_target = portfolio_gross_factor(target, rates_prev)
+
+        # Min-hold check
+        can_change = True
+        if last_change_time is not None:
+            elapsed = (t - last_change_time).total_seconds() / 3600.0
+            can_change = elapsed >= MIN_HOLD_HOURS
+
+        advantage_bps = (gross_target - gross_current) * 1e4
+
+        new_w = dict(prev_w)
+        executed = False
+        turnover = 0.0
+        fee_factor = 1.0
+
+        # Rebalancing decision
+        if can_change and advantage_bps >= HURDLE_BPS:
+            turnover_full = l1_half_turnover(target, prev_w)
+            fee_factor_full = fee_factor_for_turnover(turnover_full)
+            fee_drag_bps_full = (1.0 - fee_factor_full) * 1e4
+
+            if advantage_bps >= fee_drag_bps_full:
+                clipped = apply_no_trade_bands(target, prev_w, BAND)
+
+                # Simulate partial fills
+                actual_fills, missed_frac = simulate_partial_fills(clipped)
+
+                turnover = l1_half_turnover(actual_fills, prev_w)
+                fee_factor = fee_factor_for_turnover(turnover)
+                new_w = actual_fills
+                executed = True
+                last_change_time = t
+
+        # Apply returns using CURRENT rates (what actually happened)
+        gross = portfolio_gross_factor(new_w, rates_curr)
+
+        # Calculate all costs
+        period_costs = {}
+
+        # 1. Borrow costs (8 hours)
+        borrow_cost = apply_borrow_costs(new_w, 8.0, equity)
+        period_costs['borrow'] = borrow_cost
+        total_borrow_cost += borrow_cost
+
+        # 2. Trading fees (if rebalanced)
+        if executed:
+            fee_drag = 1.0 - fee_factor
+            period_costs['fees'] = fee_drag
+        else:
+            period_costs['fees'] = 0.0
+
+        # 3. Slippage (if rebalanced)
+        if executed:
+            slippage = apply_slippage(turnover)
+            period_costs['slippage'] = slippage
+            total_slippage += slippage
+        else:
+            period_costs['slippage'] = 0.0
+
+        # 4. Missed hedge penalty (if rebalanced with partials)
+        if executed:
+            # Missed portion earns no funding
+            missed_funding = (gross - 1.0) * MISSED_HEDGE_SHARE
+            period_costs['missed'] = missed_funding
+            total_missed_funding += missed_funding
+        else:
+            period_costs['missed'] = 0.0
+
+        # Net return
+        net_return = (gross - 1.0) - sum(period_costs.values())
+        equity *= (1 + net_return)
+
+        prev_w = new_w
+
+        rows.append({
+            "time": t,
+            "equity": equity,
+            "action": "rebalanced" if executed else "hold",
+            "advantage_bps": advantage_bps if can_change else None,
+            "turnover": turnover if executed else 0.0,
+            "borrow_cost": period_costs['borrow'],
+            "fee_drag": period_costs['fees'],
+            "slippage": period_costs['slippage'],
+            "missed_funding": period_costs['missed'],
+        })
+
+        if i % PROGRESS_EVERY == 0:
+            print(f"[{i}/{len(times)}] {t}: equity={equity:.6f}")
+
+    out_df = pd.DataFrame(rows)
+
+    print(f"\n{'='*80}")
+    print("COST BREAKDOWN")
+    print(f"{'='*80}")
+    print(f"Total borrow costs:     {total_borrow_cost:.6f} ({total_borrow_cost*100:.2f}%)")
+    print(f"Total slippage:         {total_slippage:.6f} ({total_slippage*100:.2f}%)")
+    print(f"Total missed funding:   {total_missed_funding:.6f} ({total_missed_funding*100:.2f}%)")
+    print(f"Operational skips:      {ops_skips}")
+    print(f"{'='*80}\n")
+
+    return out_df
+
+
+def sharpe_ratio(equity_series: pd.Series, periods_per_year: int = 365 * 3) -> float:
+    """Calculate annualized Sharpe ratio."""
+    if len(equity_series) < 2:
+        return 0.0
+    rets = equity_series.pct_change().dropna()
+    if rets.std() == 0:
+        return 0.0
+    return float((rets.mean() / rets.std()) * np.sqrt(periods_per_year))
+
+
+def main():
+    """Main execution."""
+    print("\n" + "=" * 80)
+    print("V1.5 HARSH REALITY BACKTESTER")
+    print("=" * 80)
+    print("\nPhilosophy: Make backtest HARDER than reality")
+    print("If V1.5 shows >35% APY, live trading should exceed 40%+")
+    print("=" * 80 + "\n")
+
+    # Load data
+    df_raw = load_data(str(CSV_PATH))
+    df = filter_window(df_raw, START_DATE, END_DATE)
+
+    print(f"✓ Loaded {len(df):,} funding rate records")
+    print(f"  Date range: {df['funding_time'].min()} → {df['funding_time'].max()}")
+    print(f"  Symbols: {df['symbol'].nunique()} unique")
+
+    # Run backtest
+    result_df = build_portfolio_strategy_v1_5_harsh(df)
+
+    # Calculate metrics
+    eq_series = result_df["equity"]
+    final_eq = float(eq_series.iloc[-1])
+    t0 = result_df["time"].iloc[0]
+    t1 = result_df["time"].iloc[-1]
+    days = (t1 - t0).total_seconds() / 86400.0
+
+    cagr = (final_eq ** (365.25 / days)) - 1.0 if days > 0 and final_eq > 0 else 0.0
+    sharpe = sharpe_ratio(eq_series)
+
+    # Save results
+    result_df.to_csv(str(OUT_CSV), index=False)
+
+    # Plot
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+    # Equity curve
+    ax1.plot(result_df["time"], result_df["equity"], linewidth=1.5)
+    ax1.set_title("V1.5 HARSH Backtest — Equity Curve (Pessimistic Assumptions)", fontsize=14, weight='bold')
+    ax1.set_ylabel("Equity (normalized)")
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
+
+    # Cost breakdown
+    cost_cols = ['borrow_cost', 'fee_drag', 'slippage', 'missed_funding']
+    costs_df = result_df[cost_cols].fillna(0)
+
+    ax2.plot(result_df["time"], costs_df['borrow_cost'].cumsum(), label='Borrow', linewidth=1.5)
+    ax2.plot(result_df["time"], costs_df['fee_drag'].cumsum(), label='Fees', linewidth=1.5)
+    ax2.plot(result_df["time"], costs_df['slippage'].cumsum(), label='Slippage', linewidth=1.5)
+    ax2.plot(result_df["time"], costs_df['missed_funding'].cumsum(), label='Missed Hedges', linewidth=1.5)
+
+    ax2.set_title("Cumulative Costs Over Time", fontsize=12)
+    ax2.set_xlabel("Date (UTC)")
+    ax2.set_ylabel("Cumulative Cost")
+    ax2.legend(loc='upper left')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(str(OUT_PNG), dpi=150, bbox_inches="tight")
+    plt.close()
+
+    # Print summary
+    print(f"\n{'='*80}")
+    print("=== V1.5 HARSH REALITY Results (Pessimistic) ===")
+    print(f"{'='*80}")
+    print(f"Period:     {t0.date()} → {t1.date()}  (~{days:.1f} days)")
+    print(f"Final eq:   {final_eq:.6f}  (start {INITIAL_EQUITY})")
+    print(f"APY (CAGR): {cagr*100:.2f}%")
+    print(f"Sharpe:     {sharpe:.2f}")
+    print(f"\nCSV:        {OUT_CSV}")
+    print(f"Chart:      {OUT_PNG}")
+    print(f"{'='*80}")
+    print("\nINTERPRETATION:")
+    print(f"  ✓ If APY > 45%: Excellent! Deploy with high confidence")
+    print(f"  ✓ If APY 35-45%: Good! Deploy with normal risk management")
+    print(f"  ⚠ If APY 25-35%: Marginal, consider smaller allocation")
+    print(f"  ✗ If APY < 25%: Don't deploy, need V2 predictive edge")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

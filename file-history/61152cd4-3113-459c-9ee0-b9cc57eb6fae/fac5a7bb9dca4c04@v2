@@ -1,0 +1,141 @@
+#!/bin/bash
+# Ultra-fast concurrency test using direct CDN downloads
+# Downloads 6 sample files, tests c=2,5,10
+# ETA: 5-10 minutes total
+
+set -e
+
+TEST_DIR="/tmp/cdn_speed_test"
+rm -rf "$TEST_DIR"
+mkdir -p "$TEST_DIR"
+
+# Sample files: 2 days from 3 different months
+FILES=(
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202309/allswap-trades-2023-09-15.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202309/allswap-trades-2023-09-16.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202311/allswap-trades-2023-11-10.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202311/allswap-trades-2023-11-11.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202401/allswap-trades-2024-01-15.zip"
+    "https://www.okx.com/cdn/okex/traderecords/trades/monthly/202401/allswap-trades-2024-01-16.zip"
+)
+
+echo "============================================"
+echo "Ultra-Fast CDN Concurrency Test"
+echo "============================================"
+echo "Dataset: 6 files (~3-4 GB total)"
+echo "Testing: c=2, c=5, c=10"
+echo ""
+
+# Function to download files
+download_files() {
+    local concurrency=$1
+    local test_dir="$TEST_DIR/c${concurrency}"
+    mkdir -p "$test_dir"
+
+    echo ""
+    echo "=== Testing Concurrency=$concurrency ==="
+
+    local start=$(date +%s)
+
+    if [ $concurrency -eq 1 ]; then
+        # Sequential
+        for url in "${FILES[@]}"; do
+            curl -sS -o "$test_dir/$(basename $url)" "$url"
+        done
+    else
+        # Parallel using xargs
+        printf '%s\n' "${FILES[@]}" | xargs -P $concurrency -I {} \
+            bash -c 'curl -sS -o "'$test_dir'/$(basename {})" "{}"'
+    fi
+
+    local end=$(date +%s)
+    local elapsed=$((end - start))
+
+    # Calculate total size
+    local total_mb=$(du -sm "$test_dir" | cut -f1)
+    local throughput=$(echo "scale=2; $total_mb / $elapsed" | bc)
+
+    echo "  Time: ${elapsed}s ($(echo "scale=1; $elapsed/60" | bc) min)"
+    echo "  Size: ${total_mb}MB"
+    echo "  Throughput: ${throughput}MB/s"
+
+    # Cleanup
+    rm -rf "$test_dir"
+
+    echo "$concurrency,$elapsed,$total_mb,$throughput"
+}
+
+# Run tests
+echo "concurrency,time_sec,size_mb,throughput_mbps" > "$TEST_DIR/results.csv"
+
+for level in 2 5 10; do
+    download_files $level >> "$TEST_DIR/results.csv"
+    sleep 2
+done
+
+# Analysis
+echo ""
+echo "============================================"
+echo "RESULTS & ANALYSIS"
+echo "============================================"
+echo ""
+
+# Parse results
+mapfile -t results < <(tail -n +2 "$TEST_DIR/results.csv")
+
+baseline_time=$(echo "${results[0]}" | cut -d, -f2)
+
+echo "Concurrency | Time(s) | Time(min) | Throughput | Speedup"
+echo "--------------------------------------------------------"
+
+best_throughput=0
+best_concurrency=2
+
+for result in "${results[@]}"; do
+    IFS=',' read -r conc time size throughput <<< "$result"
+    speedup=$(echo "scale=2; $baseline_time / $time" | bc)
+    time_min=$(echo "scale=1; $time / 60" | bc)
+
+    printf "%-11s | %-7s | %-9s | %-10s | %sx\n" \
+        "$conc" "$time" "$time_min" "$throughput" "$speedup"
+
+    # Track best
+    if (( $(echo "$throughput > $best_throughput" | bc -l) )); then
+        best_throughput=$throughput
+        best_concurrency=$conc
+    fi
+done
+
+echo ""
+echo "✓ Optimal concurrency: $best_concurrency jobs"
+echo "✓ Best throughput: ${best_throughput}MB/s"
+
+# Calculate time savings for remaining 13 months
+remaining=13
+est_seq=$(echo "scale=0; $remaining * $baseline_time / 6 * 31 / 60" | bc)
+best_time=$(grep "^$best_concurrency," "$TEST_DIR/results.csv" | cut -d, -f2)
+est_optimal=$(echo "scale=0; $remaining * $best_time / 6 * 31 / 60" | bc)
+saved=$(echo "scale=0; $est_seq - $est_optimal" | bc)
+
+echo ""
+echo "Projection for remaining 13 months:"
+echo "  Sequential (c=2): ~${est_seq} minutes"
+echo "  Optimal (c=$best_concurrency): ~${est_optimal} minutes"
+echo "  Time saved: ~${saved} minutes"
+
+# Recommendation
+echo ""
+if (( $(echo "$best_concurrency > 2" | bc -l) )); then
+    speedup=$(echo "${results[2]}" | cut -d, -f2)
+    speedup_ratio=$(echo "scale=2; $baseline_time / $speedup" | bc)
+    if (( $(echo "$speedup_ratio > 1.5" | bc -l) )); then
+        echo "✓ RECOMMENDATION: Use concurrency=$best_concurrency (${speedup_ratio}x faster)"
+    else
+        echo "⚠ RECOMMENDATION: Marginal benefit, continue with c=2"
+    fi
+else
+    echo "✗ RECOMMENDATION: Sequential is optimal (no benefit from parallelization)"
+fi
+
+echo ""
+echo "Results saved to: $TEST_DIR/results.csv"

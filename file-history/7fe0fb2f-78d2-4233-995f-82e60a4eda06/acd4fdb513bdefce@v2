@@ -1,0 +1,62 @@
+#!/bin/bash
+# Quick test for OSC 52 clipboard setup
+
+echo "🧪 Testing OSC 52 clipboard configuration..."
+echo ""
+
+# Source the new .zshrc to get the function
+source ~/.zshrc 2>/dev/null || {
+  echo "⚠️  For zsh, reload your shell or run: source ~/.zshrc"
+  echo ""
+  echo "Attempting to define function directly for this test..."
+  osc52-copy() {
+    local input
+    if [ -t 0 ]; then
+      input="$*"
+    else
+      input=$(cat)
+    fi
+    local encoded=$(printf %s "$input" | base64 | tr -d '\n')
+    if [ -n "$TMUX" ]; then
+      printf "\033Ptmux;\033\033]52;c;%s\007\033\\" "$encoded"
+    else
+      printf "\033]52;c;%s\007" "$encoded"
+    fi
+  }
+  alias pbcopy='osc52-copy'
+}
+
+echo "Test 1: Using echo and pipe"
+echo "Hello from SSH clipboard!" | pbcopy
+echo "✅ Sent 'Hello from SSH clipboard!' to clipboard"
+echo "   Try pasting (⌘V) on your Mac now."
+echo ""
+
+read -p "Press Enter to continue..."
+echo ""
+
+echo "Test 2: Using pbcopy with arguments"
+osc52-copy "Multi-line test:
+Line 1
+Line 2
+Line 3"
+echo "✅ Sent multi-line text to clipboard"
+echo "   Paste to verify you get 3 lines."
+echo ""
+
+read -p "Press Enter to continue..."
+echo ""
+
+if [ -n "$TMUX" ]; then
+  echo "Test 3: You're in tmux - testing tmux-wrapped OSC 52"
+  echo "tmux test data" | pbcopy
+  echo "✅ Sent through tmux wrapper"
+else
+  echo "Test 3: Not in tmux (direct OSC 52 only)"
+fi
+
+echo ""
+echo "🎉 Setup complete! The /export command should now work."
+echo ""
+echo "To activate in your current shell, run:"
+echo "  source ~/.zshrc"

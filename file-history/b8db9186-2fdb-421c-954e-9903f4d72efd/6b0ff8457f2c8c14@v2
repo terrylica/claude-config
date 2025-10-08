@@ -1,0 +1,507 @@
+# V1.5 "Harsh Realism" Backtester Upgrade
+
+**Philosophy:** Make backtest **harder than reality** so live trading is easier.
+
+**Goal:** Add realistic penalties with minimal complexity (no fancy modeling).
+
+---
+
+## 🎯 Current State vs Harsh Reality
+
+| Component | Current V1 | Harsh V1.5 | Impact |
+|-----------|-----------|------------|--------|
+| **Signal** | T-1 rate (0.056 correlation) | Premium prediction - 5 bps haircut | Better selection + safety buffer |
+| **Execution** | Instant fill at midpoint | Taker-only, 90% fills, 10% fails | -2-3 pp APY |
+| **Fees** | 60% maker / 40% taker | 100% taker (worst case) | -1-2 pp APY |
+| **Borrow costs** | ❌ Not modeled | BTC 4%, Alts 12% (floors) | -5-10 pp APY |
+| **Slippage** | ❌ Not modeled | 1 + 12√(size/ADV) bps | -1-2 pp APY |
+| **Availability** | Always available | 5% daily unavailability | -0.5 pp APY |
+| **Ops risk** | Perfect execution | 0.5% daily skip | -0.5 pp APY |
+| **Stress regime** | Same liquidity | Halve sizes if vol >3x | -1 pp APY |
+| **Capacity** | No limits | 50% of tier-1, 5% of ADV | Prevents oversize |
+
+**Expected result:** Current 57% APY → **35-45% APY** (harsh but realistic)
+
+**If backtest shows 35%+, live trading should exceed 40%+ easily.**
+
+---
+
+## 🔧 Specific Code Modifications
+
+### 1. **Add Harsh Realism Config**
+
+```python
+# funding_arb_strat_v1_5_harsh.py
+
+# ===== HARSH REALISM PARAMETERS =====
+# Philosophy: Make backtest harder than reality
+
+# Signal haircut
+EDGE_HAIRCUT_BPS_PER_8H = 5.0  # Conservative buffer on predicted rate
+FEE_SLIP_BUFFER_BPS_PER_8H = 3.0  # Additional hurdle for costs
+
+# Execution penalties
+PARTIAL_FILL_RATIO = 0.90  # Only 90% of orders fill
+MISSED_HEDGE_SHARE = 0.10  # 10% doesn't get hedged properly
+MAKER_SHARE = 0.0  # Assume 100% taker (worst case)
+
+# Slippage model (simple)
+SLIP_A_BPS = 1.0  # Base slippage
+SLIP_B_COEFF = 12.0  # Impact coefficient: slip = a + b*sqrt(size/ADV)
+
+# Borrow costs (annual, apply hourly)
+BORROW_FLOOR_APR_BTC = 0.04  # 4% for BTC
+BORROW_FLOOR_APR_ALTS = 0.12  # 12% for alts
+
+# Operational risks (probabilities per day)
+BORROW_UNAVAILABLE_PROB_DAILY = 0.05  # 5% chance can't increase size
+OPS_SKIP_REBALANCE_PROB_DAILY = 0.005  # 0.5% chance skip rebalance
+
+# Stress regime
+STRESS_VOL_MULTIPLIER = 3.0  # If vol > 3x median, halve sizes
+
+# Capacity limits
+SYMBOL_MAX_PCT_OF_TIER1 = 0.50  # Max 50% of tier-1 notional
+SYMBOL_MAX_PCT_OF_ADV = 0.05  # Max 5% of daily volume
+
+# Tighter gates
+HURDLE_BPS = 4.0  # Up from 3.0 (more conservative)
+NO_TRADE_BAND = 0.10  # Up from 0.05 (less churn)
+```
+
+### 2. **Add Borrow Cost Model**
+
+```python
+def get_borrow_apr(symbol: str) -> float:
+    """
+    Conservative borrow cost estimate.
+    Use max of: latest rate, p75 historical, floor.
+    """
+    # TODO: Pull from actual borrow rate data when available
+    # For now, use floors as worst-case
+
+    if symbol in ['BTC', 'BTCUSDT']:
+        return BORROW_FLOOR_APR_BTC
+    else:
+        return BORROW_FLOOR_APR_ALTS
+
+
+def apply_borrow_costs(holdings: dict, hours: float) -> float:
+    """
+    Calculate borrow costs for period.
+
+    Args:
+        holdings: {symbol: notional_value}
+        hours: Hours in period (8 for standard funding)
+
+    Returns:
+        Total borrow cost (as decimal, e.g., 0.001 = 10 bps)
+    """
+    total_cost = 0.0
+    for symbol, notional in holdings.items():
+        apr = get_borrow_apr(symbol)
+        hourly_rate = apr / 365.0 / 24.0
+        period_cost = notional * hourly_rate * hours
+        total_cost += period_cost
+
+    return total_cost
+```
+
+### 3. **Add Slippage Model**
+
+```python
+def calculate_slippage(symbol: str, turnover_notional: float, adv: float) -> float:
+    """
+    Simple slippage model: slip_bps = a + b * sqrt(size/ADV)
+
+    Args:
+        symbol: Trading symbol
+        turnover_notional: Notional value of trade
+        adv: Average daily volume (notional)
+
+    Returns:
+        Slippage in bps
+    """
+    if adv <= 0:
+        return 50.0  # Penalty for illiquid
+
+    size_ratio = turnover_notional / adv
+    slip_bps = SLIP_A_BPS + SLIP_B_COEFF * math.sqrt(size_ratio)
+
+    # Cap at reasonable level
+    return min(slip_bps, 100.0)
+
+
+def apply_slippage(turnover_notional: float, slip_bps: float) -> float:
+    """
+    Apply slippage to both legs of turnover.
+
+    Returns:
+        Total slippage cost (as decimal)
+    """
+    # Apply to both spot and perp legs
+    return 2 * turnover_notional * (slip_bps / 10000.0)
+```
+
+### 4. **Add Partial Fill Model**
+
+```python
+def simulate_partial_fills(target_weights: dict) -> tuple[dict, float]:
+    """
+    Simulate partial fills and missed hedges.
+
+    Returns:
+        (actual_weights, missed_notional)
+    """
+    actual = {}
+    total_target = sum(target_weights.values())
+
+    for symbol, weight in target_weights.items():
+        # 90% of order fills
+        filled_weight = weight * PARTIAL_FILL_RATIO
+        actual[symbol] = filled_weight
+
+    # Missed notional (10%)
+    missed = total_target * MISSED_HEDGE_SHARE
+
+    # Renormalize actual to sum to target total
+    actual_total = sum(actual.values())
+    if actual_total > 0:
+        scale = (total_target - missed) / actual_total
+        actual = {s: w * scale for s, w in actual.items()}
+
+    return actual, missed
+```
+
+### 5. **Add Operational Risk Simulation**
+
+```python
+def check_borrow_availability(symbol: str, current_date: datetime) -> bool:
+    """
+    Simulate borrow unavailability (5% daily probability).
+    """
+    # Use date as seed for deterministic results
+    random.seed(f"{symbol}_{current_date.date()}_borrow".encode())
+    return random.random() > BORROW_UNAVAILABLE_PROB_DAILY
+
+
+def check_ops_skip_rebalance(current_date: datetime) -> bool:
+    """
+    Simulate operational issues (0.5% daily probability).
+    """
+    random.seed(f"{current_date.date()}_ops".encode())
+    return random.random() < OPS_SKIP_REBALANCE_PROB_DAILY
+
+
+def check_stress_regime(recent_vol: float, median_vol: float) -> bool:
+    """
+    Detect stress regime (volatility spike).
+    """
+    return recent_vol > (median_vol * STRESS_VOL_MULTIPLIER)
+```
+
+### 6. **Modified Rebalancing Logic**
+
+```python
+def rebalance_with_harsh_reality(
+    t: datetime,
+    rates_prev: pd.Series,
+    rates_curr: pd.Series,
+    prev_weights: dict,
+    equity: float,
+    vol_history: pd.DataFrame
+) -> tuple[dict, float, dict]:
+    """
+    Rebalance with all harsh reality penalties.
+
+    Returns:
+        (new_weights, new_equity, cost_breakdown)
+    """
+    # Check operational skip
+    if check_ops_skip_rebalance(t):
+        return prev_weights, equity, {'reason': 'ops_skip'}
+
+    # Select target portfolio using T-1 rates
+    # (With harsh version, we'd use predicted rates - 5bps haircut)
+    target_raw = select_target_portfolio(rates_prev)
+
+    # Apply capacity limits (TODO: needs ADV data)
+    target_capped = apply_capacity_limits(target_raw)
+
+    # Check borrow availability
+    target_allowed = {}
+    for symbol, weight in target_capped.items():
+        prev_weight = prev_weights.get(symbol, 0.0)
+        if weight > prev_weight:  # Increasing position
+            if not check_borrow_availability(symbol, t):
+                # Can't increase, hold previous weight
+                target_allowed[symbol] = prev_weight
+                continue
+        target_allowed[symbol] = weight
+
+    # Check stress regime
+    if check_stress_regime(recent_vol, median_vol):
+        # Halve all weights
+        target_allowed = {s: w * 0.5 for s, w in target_allowed.items()}
+
+    # Calculate advantage using T-1 rates (realistic estimate)
+    gross_current = portfolio_gross_factor(prev_weights, rates_prev)
+    gross_target = portfolio_gross_factor(target_allowed, rates_prev)
+    advantage_bps = (gross_target - gross_current) * 1e4
+
+    # Harsher hurdle
+    if advantage_bps < HURDLE_BPS:
+        return prev_weights, equity, {'reason': 'below_hurdle'}
+
+    # Calculate turnover
+    turnover = calculate_turnover(target_allowed, prev_weights)
+
+    # Simulate partial fills
+    actual_fills, missed_notional = simulate_partial_fills(target_allowed)
+
+    # Calculate all costs
+    costs = {}
+
+    # 1. Trading fees (100% taker, both legs)
+    taker_fee = 0.0002  # 2 bps
+    costs['trading_fees'] = turnover * 2 * taker_fee  # Both legs
+
+    # 2. Slippage (TODO: needs ADV data)
+    # slip_bps = calculate_slippage(symbol, turnover, adv)
+    # costs['slippage'] = apply_slippage(turnover, slip_bps)
+    costs['slippage'] = turnover * 0.0003  # 3 bps placeholder
+
+    # 3. Borrow costs (for next period)
+    costs['borrow'] = apply_borrow_costs(actual_fills, hours=8)
+
+    # Check if net advantage covers costs
+    total_costs_bps = sum(costs.values()) * 1e4
+    if advantage_bps < total_costs_bps:
+        return prev_weights, equity, {'reason': 'costs_exceed_advantage'}
+
+    # Execute rebalance
+    new_weights = actual_fills
+
+    # Apply actual returns using T rates
+    gross_return = portfolio_gross_factor(new_weights, rates_curr)
+
+    # Apply all costs
+    net_return = gross_return - sum(costs.values())
+
+    # Penalty for missed hedge (earns no funding)
+    if missed_notional > 0:
+        missed_penalty = missed_notional * abs(rates_curr.mean())
+        net_return -= missed_penalty
+        costs['missed_hedge'] = missed_penalty
+
+    new_equity = equity * (1 + net_return)
+
+    return new_weights, new_equity, costs
+```
+
+### 7. **Cost Tracking & Reporting**
+
+```python
+def build_cost_breakdown_report(cost_history: list) -> pd.DataFrame:
+    """
+    Analyze cost breakdown over backtest.
+    """
+    df = pd.DataFrame(cost_history)
+
+    summary = {
+        'trading_fees_total_bps': df['trading_fees'].sum() * 1e4,
+        'slippage_total_bps': df['slippage'].sum() * 1e4,
+        'borrow_total_bps': df['borrow'].sum() * 1e4,
+        'missed_hedge_total_bps': df['missed_hedge'].sum() * 1e4,
+        'ops_skips_count': df[df['reason'] == 'ops_skip'].shape[0],
+        'borrow_unavailable_count': df['borrow_unavailable'].sum(),
+    }
+
+    return pd.DataFrame([summary])
+```
+
+---
+
+## 📊 Expected Performance Impact
+
+### Current V1 (Optimistic)
+```
+APY: 57.33%
+Sharpe: 17.49
+Assumptions: Instant fills, 60% maker, no borrow cost, no slippage
+```
+
+### V1.5 Harsh (Realistic)
+```
+Expected APY: 35-45%
+Expected Sharpe: 12-15
+Penalties:
+  - Borrow costs: -5 to -10 pp
+  - Taker fees: -1 to -2 pp
+  - Slippage: -1 to -2 pp
+  - Partial fills: -2 to -3 pp
+  - Ops risks: -1 to -2 pp
+Total drag: -10 to -19 pp
+```
+
+### Live Trading (Reality)
+```
+Expected APY: 40-50%
+Likely better than V1.5 because:
+  - Some maker fills (not 0%)
+  - Better execution (not always taker)
+  - Lower borrow costs (floors are worst-case)
+  - Careful ops (< 0.5% skip rate)
+```
+
+**Decision rule:** If V1.5 shows 35%+ APY, deploy with confidence.
+
+---
+
+## 🎯 Implementation Priority
+
+### Phase 1: Add Critical Costs (1 week)
+
+**Must-have for realistic expectations:**
+1. ✅ **Borrow costs** (use conservative floors)
+   - BTC: 4% APR, Alts: 12% APR
+   - Apply hourly accrual
+
+2. ✅ **Taker-only fees** (worst case)
+   - Change from 60/40 maker/taker to 100% taker
+   - Apply to both legs
+
+3. ✅ **Simple slippage** (conservative estimate)
+   - Fixed 3 bps per leg for now
+   - Can upgrade to model later
+
+**Result:** Should drop APY by ~10-15 pp (57% → 42-47%)
+
+### Phase 2: Add Execution Reality (3 days)
+
+**Operational penalties:**
+4. ✅ **Partial fills** (90% execution)
+5. ✅ **Missed hedges** (10% doesn't earn funding)
+6. ✅ **Ops skip** (0.5% daily skip probability)
+
+**Result:** Should drop APY by additional ~3-5 pp (42-47% → 37-44%)
+
+### Phase 3: Add Safety Buffers (2 days)
+
+**Conservative hurdles:**
+7. ✅ **Tighter hurdle** (4 bps instead of 3 bps)
+8. ✅ **Wider no-trade bands** (10% instead of 5%)
+9. ✅ **Borrow unavailability** (5% daily probability)
+
+**Result:** Should drop APY by additional ~2-3 pp (37-44% → 35-41%)
+
+---
+
+## 📋 Minimal Data Requirements
+
+**For V1.5, you only need:**
+
+1. ✅ **Historical funding rates** (already have)
+2. ✅ **Conservative borrow cost assumptions** (use floors)
+3. ✅ **Fixed slippage estimate** (3 bps conservative)
+4. ⏳ **Daily volume data** (for capacity checks - optional)
+
+**Nice to have (Phase 2 upgrades):**
+- Actual borrow rate history
+- L2 orderbook for slippage calibration
+- Position tier limits
+- OI data for capacity
+
+---
+
+## 🔧 Quick Implementation: Single File Modification
+
+```python
+# Add to existing funding_arb_strat_corrected.py
+
+# ===== HARSH REALISM MODE =====
+HARSH_MODE = True  # Toggle for conservative assumptions
+
+if HARSH_MODE:
+    # Penalties
+    TAKER_FEE = 0.0002  # 2 bps
+    MAKER_FEE = 0.0002  # Assume all taker
+    MAKER_SHARE = 0.0
+
+    BORROW_APR_BTC = 0.04
+    BORROW_APR_ALTS = 0.12
+
+    SLIPPAGE_BPS = 3.0
+    PARTIAL_FILL_RATIO = 0.90
+
+    HURDLE_BPS = 4.0
+    BAND = 0.10
+
+else:
+    # Original assumptions
+    TAKER_FEE = 0.0002
+    MAKER_FEE = -0.00005
+    MAKER_SHARE = 0.60
+
+    BORROW_APR_BTC = 0.0
+    BORROW_APR_ALTS = 0.0
+
+    SLIPPAGE_BPS = 0.0
+    PARTIAL_FILL_RATIO = 1.0
+
+    HURDLE_BPS = 3.0
+    BAND = 0.05
+```
+
+---
+
+## 💡 Key Philosophy
+
+**"Backtest harder than reality":**
+
+- If V1.5 (harsh) shows **35-40% APY** → Live will likely exceed **40-45%**
+- If V1.5 (harsh) shows **< 30% APY** → Don't deploy (too marginal)
+- If V1.5 (harsh) shows **> 45% APY** → Amazing, deploy aggressively
+
+**Safety margin:** 5-10 pp between harsh backtest and live expectations.
+
+---
+
+## 🎯 Decision Tree
+
+```
+Current V1: 57% APY
+  ↓
+Add harsh costs → V1.5 result?
+  ↓
+  ├─ >45%: Excellent! Deploy with high confidence
+  ├─ 35-45%: Good! Deploy with normal risk management
+  ├─ 25-35%: Marginal, consider smaller allocation
+  └─ <25%: Don't deploy, wait for V2 predictive edge
+```
+
+---
+
+## 🚀 Recommendation
+
+**Week 1: Implement V1.5 Harsh Mode**
+1. Add borrow costs (BTC 4%, Alts 12%)
+2. Change to 100% taker fees
+3. Add 3 bps slippage
+4. Add 90% partial fills
+5. Run backtest
+
+**Week 1 End: Decision Point**
+- If APY > 35%: Proceed to paper trading
+- If APY < 30%: Build V2 predictive model first
+- If APY 30-35%: Evaluate based on other factors
+
+**Cost:** 1 week to know if strategy survives harsh reality.
+
+**Value:** Confidence that live trading will be easier than backtest.
+
+---
+
+**Status:** Ready to implement V1.5 harsh mode as reality check.
+
+**Next:** Toggle `HARSH_MODE = True` and run backtest to see realistic performance.

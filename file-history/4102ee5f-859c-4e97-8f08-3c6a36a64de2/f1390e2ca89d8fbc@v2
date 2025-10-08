@@ -1,0 +1,331 @@
+"""Prediction heads for direction classification and anomaly detection."""
+
+from typing import Optional
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class DirectionHead(nn.Module):
+    """Direction classification head.
+
+    Predicts next bar direction: up/down/sideways (3 classes).
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int = 128,
+        hidden_dim: int = 64,
+        n_classes: int = 3,
+        dropout: float = 0.1,
+        label_smoothing: float = 0.1,
+        loss_fn: Optional[nn.Module] = None,
+    ):
+        """Initialize direction head.
+
+        Args:
+            embedding_dim: Input embedding dimension
+            hidden_dim: Hidden layer dimension
+            n_classes: Number of direction classes (default: 3)
+            dropout: Dropout probability
+            label_smoothing: Label smoothing factor for cross-entropy (ignored if loss_fn provided)
+            loss_fn: Custom loss function (e.g., FocalLoss). If None, uses CrossEntropyLoss with label_smoothing.
+
+        Raises:
+            ValueError: If both loss_fn and label_smoothing > 0 provided
+        """
+        super().__init__()
+
+        if loss_fn is not None and label_smoothing > 0:
+            raise ValueError(
+                "Cannot specify both loss_fn and label_smoothing > 0. "
+                "Set label_smoothing=0 when using custom loss_fn."
+            )
+
+        self.n_classes = n_classes
+        self.label_smoothing = label_smoothing
+        self.loss_fn = loss_fn
+
+        self.classifier = nn.Sequential(
+            nn.Linear(embedding_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, n_classes),
+        )
+
+    def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            embeddings: (batch, embedding_dim) tensor
+
+        Returns:
+            (batch, n_classes) logits
+        """
+        return self.classifier(embeddings)
+
+    def compute_loss(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute classification loss.
+
+        Args:
+            logits: (batch, n_classes) predictions
+            targets: (batch,) class labels
+
+        Returns:
+            Scalar loss
+
+        Raises:
+            ValueError: If targets shape/values invalid
+        """
+        if self.loss_fn is not None:
+            return self.loss_fn(logits, targets)
+        else:
+            return F.cross_entropy(
+                logits,
+                targets,
+                label_smoothing=self.label_smoothing,
+            )
+
+    def predict_proba(self, logits: torch.Tensor) -> torch.Tensor:
+        """Convert logits to probabilities.
+
+        Args:
+            logits: (batch, n_classes) raw predictions
+
+        Returns:
+            (batch, n_classes) probability distribution
+        """
+        return F.softmax(logits, dim=-1)
+
+    def predict_class(self, logits: torch.Tensor) -> torch.Tensor:
+        """Predict class labels.
+
+        Args:
+            logits: (batch, n_classes) raw predictions
+
+        Returns:
+            (batch,) predicted class indices
+        """
+        return torch.argmax(logits, dim=-1)
+
+
+class AnomalyHead(nn.Module):
+    """Anomaly detection head via reconstruction.
+
+    Uses autoencoder approach: Embed → Compress → Reconstruct.
+    High reconstruction error indicates OOD samples.
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int = 128,
+        bottleneck_dim: int = 32,
+        n_features: int = 14,
+        dropout: float = 0.1,
+    ):
+        """Initialize anomaly head.
+
+        Args:
+            embedding_dim: Input embedding dimension
+            bottleneck_dim: Compressed representation dimension
+            n_features: Number of features to reconstruct
+            dropout: Dropout probability
+        """
+        super().__init__()
+
+        self.n_features = n_features
+
+        # Compression pathway
+        self.compressor = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embedding_dim // 2, bottleneck_dim),
+        )
+
+        # Reconstruction pathway
+        self.reconstructor = nn.Sequential(
+            nn.Linear(bottleneck_dim, embedding_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embedding_dim // 2, embedding_dim),
+            nn.GELU(),
+            nn.Linear(embedding_dim, n_features),
+        )
+
+    def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            embeddings: (batch, embedding_dim) tensor
+
+        Returns:
+            (batch, n_features) reconstructed features
+        """
+        compressed = self.compressor(embeddings)
+        reconstructed = self.reconstructor(compressed)
+        return reconstructed
+
+    def compute_loss(
+        self,
+        reconstructed: torch.Tensor,
+        original: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute reconstruction loss (MSE).
+
+        Args:
+            reconstructed: (batch, n_features) predictions
+            original: (batch, n_features) ground truth
+
+        Returns:
+            Scalar loss
+        """
+        return F.mse_loss(reconstructed, original)
+
+    def compute_anomaly_score(
+        self,
+        reconstructed: torch.Tensor,
+        original: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute per-sample anomaly score.
+
+        Args:
+            reconstructed: (batch, n_features) predictions
+            original: (batch, n_features) ground truth
+
+        Returns:
+            (batch,) anomaly scores (higher = more anomalous)
+        """
+        # Per-sample MSE
+        mse_per_sample = F.mse_loss(
+            reconstructed,
+            original,
+            reduction='none',
+        ).mean(dim=1)
+
+        return mse_per_sample
+
+
+class DualTaskHead(nn.Module):
+    """Combined direction + anomaly prediction.
+
+    Shares learned representations between both tasks.
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int = 128,
+        hidden_dim: int = 64,
+        bottleneck_dim: int = 32,
+        n_classes: int = 3,
+        n_features: int = 14,
+        dropout: float = 0.1,
+        label_smoothing: float = 0.1,
+        direction_weight: float = 1.0,
+        anomaly_weight: float = 0.5,
+        direction_loss_fn: Optional[nn.Module] = None,
+    ):
+        """Initialize dual-task head.
+
+        Args:
+            embedding_dim: Input embedding dimension
+            hidden_dim: Hidden dimension for direction head
+            bottleneck_dim: Bottleneck for anomaly head
+            n_classes: Number of direction classes
+            n_features: Number of features for reconstruction
+            dropout: Dropout probability
+            label_smoothing: Label smoothing factor for cross-entropy loss (ignored if direction_loss_fn provided)
+            direction_weight: Weight for direction loss
+            anomaly_weight: Weight for anomaly loss
+            direction_loss_fn: Custom loss function for direction (e.g., FocalLoss). If None, uses CrossEntropyLoss.
+
+        Raises:
+            ValueError: If both direction_loss_fn and label_smoothing > 0 provided
+        """
+        super().__init__()
+
+        self.direction_weight = direction_weight
+        self.anomaly_weight = anomaly_weight
+
+        self.direction_head = DirectionHead(
+            embedding_dim=embedding_dim,
+            hidden_dim=hidden_dim,
+            n_classes=n_classes,
+            dropout=dropout,
+            label_smoothing=label_smoothing,
+            loss_fn=direction_loss_fn,
+        )
+
+        self.anomaly_head = AnomalyHead(
+            embedding_dim=embedding_dim,
+            bottleneck_dim=bottleneck_dim,
+            n_features=n_features,
+            dropout=dropout,
+        )
+
+    def forward(
+        self,
+        embeddings: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass for both tasks.
+
+        Args:
+            embeddings: (batch, embedding_dim) tensor
+
+        Returns:
+            Tuple of:
+            - direction_logits: (batch, n_classes)
+            - reconstructed_features: (batch, n_features)
+        """
+        direction_logits = self.direction_head(embeddings)
+        reconstructed = self.anomaly_head(embeddings)
+
+        return direction_logits, reconstructed
+
+    def compute_combined_loss(
+        self,
+        direction_logits: torch.Tensor,
+        direction_targets: torch.Tensor,
+        reconstructed: torch.Tensor,
+        original_features: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Compute weighted combined loss.
+
+        Args:
+            direction_logits: (batch, n_classes) predictions
+            direction_targets: (batch,) class labels
+            reconstructed: (batch, n_features) reconstructed features
+            original_features: (batch, n_features) original features
+
+        Returns:
+            Tuple of:
+            - combined_loss: Scalar weighted sum
+            - loss_dict: Individual loss components
+        """
+        direction_loss = self.direction_head.compute_loss(
+            direction_logits,
+            direction_targets,
+        )
+
+        anomaly_loss = self.anomaly_head.compute_loss(
+            reconstructed,
+            original_features,
+        )
+
+        combined_loss = (
+            self.direction_weight * direction_loss +
+            self.anomaly_weight * anomaly_loss
+        )
+
+        loss_dict = {
+            "direction_loss": direction_loss.item(),
+            "anomaly_loss": anomaly_loss.item(),
+            "combined_loss": combined_loss.item(),
+        }
+
+        return combined_loss, loss_dict

@@ -1,0 +1,232 @@
+"""PyTorch dataset for range bar sequences."""
+
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+import numpy as np
+import polars as pl
+import torch
+from torch.utils.data import Dataset
+
+from .regime import RegimeDetector
+from .utils import FixedPointConverter, compute_features
+
+
+class RangeBarDataset(Dataset):
+    """PyTorch dataset for range bar sequences.
+
+    Creates sliding windows of range bars for transformer input.
+    Each sample is a sequence of bars with target being the next bar's direction.
+    """
+
+    def __init__(
+        self,
+        csv_path: Path,
+        sequence_len: int = 64,
+        prediction_horizon: int = 1,
+        feature_cols: Optional[list[str]] = None,
+        detect_regimes: bool = True,
+        regime_lookback: int = 24,
+    ):
+        """Initialize dataset.
+
+        Args:
+            csv_path: Path to range bar CSV file
+            sequence_len: Number of bars in input sequence
+            prediction_horizon: Bars ahead to predict (default: 1)
+            feature_cols: List of feature columns to use (None = use defaults)
+            detect_regimes: Whether to compute regime labels
+            regime_lookback: Window for regime detection
+        """
+        self.csv_path = csv_path
+        self.sequence_len = sequence_len
+        self.prediction_horizon = prediction_horizon
+
+        # Load and preprocess data
+        print(f"Loading data from {csv_path}")
+        self.df = FixedPointConverter.load_csv(csv_path)
+        self.df = FixedPointConverter.compute_features(self.df)
+
+        # Detect regimes if requested
+        if detect_regimes:
+            detector = RegimeDetector(lookback_window=regime_lookback)
+            self.df = detector.detect_all_regimes(self.df)
+        else:
+            # Add dummy regime columns
+            self.df = self.df.with_columns([
+                pl.lit(0).alias("volatility_regime"),
+                pl.lit(0).alias("trend_regime"),
+                pl.lit(0).alias("volume_regime"),
+            ])
+
+        # Select features
+        if feature_cols is None:
+            feature_cols = self._default_features()
+        self.feature_cols = feature_cols
+
+        # Convert to numpy for fast indexing
+        self.features = self.df.select(feature_cols).to_numpy().astype(np.float32)
+        self.regimes = self.df.select([
+            "volatility_regime",
+            "trend_regime",
+            "volume_regime",
+        ]).to_numpy().astype(np.int64)
+
+        # Compute targets (next bar direction)
+        self.targets = self._compute_targets()
+
+        # Valid indices (excluding insufficient history and future)
+        self.valid_indices = list(range(
+            sequence_len,
+            len(self.df) - prediction_horizon
+        ))
+
+        print(f"Dataset loaded: {len(self.valid_indices):,} sequences")
+        print(f"  Features: {len(feature_cols)} columns")
+        print(f"  Sequence length: {sequence_len}")
+        print(f"  Prediction horizon: {prediction_horizon}")
+
+    def _default_features(self) -> list[str]:
+        """Default feature set for transformer input.
+
+        Returns:
+            List of 14 feature column names (OHLCV + derived)
+        """
+        return [
+            # Price action (normalized)
+            "bar_return",
+            "log_return",
+            "bar_range_pct",
+            "close_position",
+            "price_vs_vwap",
+
+            # Volume features
+            "volume",
+            "volume_imbalance",
+            "trade_imbalance",
+            "avg_trade_size",
+
+            # Count features
+            "trade_count",
+            "buy_trade_count",
+            "sell_trade_count",
+
+            # Temporal
+            "bar_duration_sec",
+
+            # Raw close (for anomaly reconstruction)
+            "close",
+        ]
+
+    def _compute_targets(self) -> np.ndarray:
+        """Compute classification targets.
+
+        Returns:
+            Array of target labels:
+            - 0: Down (return < -0.2%)
+            - 1: Sideways (-0.2% <= return <= 0.2%)
+            - 2: Up (return > 0.2%)
+        """
+        returns = self.df["bar_return"].to_numpy()
+
+        # Shift returns forward by prediction_horizon
+        future_returns = np.roll(returns, -self.prediction_horizon)
+
+        # Classify into 3 classes
+        targets = np.full(len(returns), 1, dtype=np.int64)  # Default: sideways
+        targets[future_returns > 0.002] = 2  # Up
+        targets[future_returns < -0.002] = 0  # Down
+
+        return targets
+
+    def __len__(self) -> int:
+        """Number of valid sequences."""
+        return len(self.valid_indices)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Get a sequence sample.
+
+        Args:
+            idx: Sample index
+
+        Returns:
+            Dictionary containing:
+            - features: (sequence_len, n_features) tensor
+            - target: Scalar target class (0, 1, or 2)
+            - regime: (3,) tensor of regime labels
+            - index: Original dataframe index (for debugging)
+        """
+        actual_idx = self.valid_indices[idx]
+
+        # Extract sequence
+        start_idx = actual_idx - self.sequence_len
+        end_idx = actual_idx
+
+        features = self.features[start_idx:end_idx]
+        target = self.targets[actual_idx]
+        regime = self.regimes[actual_idx]
+
+        return {
+            "features": torch.from_numpy(features),
+            "target": torch.tensor(target, dtype=torch.long),
+            "regime": torch.from_numpy(regime),
+            "index": torch.tensor(actual_idx, dtype=torch.long),
+        }
+
+    def get_regime_counts(self) -> Dict[int, int]:
+        """Count samples per volatility regime.
+
+        Returns:
+            Dict mapping regime_id → count
+        """
+        regime_labels = self.regimes[self.valid_indices, 0]  # Volatility regime
+        unique, counts = np.unique(regime_labels, return_counts=True)
+        return dict(zip(unique, counts))
+
+    def normalize_features(self, train_stats: Optional[Dict[str, np.ndarray]] = None) -> Dict[str, np.ndarray]:
+        """Normalize features using training set statistics.
+
+        Args:
+            train_stats: Dict with 'mean' and 'std' arrays. If None, compute from this dataset.
+
+        Returns:
+            Dict with 'mean' and 'std' arrays used for normalization
+        """
+        if train_stats is None:
+            # Compute statistics
+            mean = self.features.mean(axis=0)
+            std = self.features.std(axis=0) + 1e-8  # Avoid division by zero
+            train_stats = {"mean": mean, "std": std}
+
+        # Apply normalization
+        self.features = (self.features - train_stats["mean"]) / train_stats["std"]
+
+        return train_stats
+
+    def get_stress_period_indices(self, event_name: str) -> list[int]:
+        """Get indices corresponding to a stress event.
+
+        Args:
+            event_name: Crisis event identifier
+
+        Returns:
+            List of dataset indices during the stress period
+        """
+        from .utils import identify_stress_period
+
+        stress_df = identify_stress_period(self.df, event_name)
+
+        if len(stress_df) == 0:
+            return []
+
+        stress_start = stress_df["open_time"].min()
+        stress_end = stress_df["open_time"].max()
+
+        # Find indices in valid_indices that fall in stress period
+        stress_indices = []
+        for dataset_idx, df_idx in enumerate(self.valid_indices):
+            timestamp = self.df["open_time"][df_idx]
+            if stress_start <= timestamp <= stress_end:
+                stress_indices.append(dataset_idx)
+
+        return stress_indices

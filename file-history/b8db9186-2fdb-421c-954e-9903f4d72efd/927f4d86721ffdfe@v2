@@ -1,0 +1,330 @@
+# Temporal Validation Analysis - Victor's Funding Rate Arbitrage
+
+**Auditor:** Terry Li
+**Focus:** Look-ahead bias and temporal fallacies
+**Date:** September 30, 2025
+
+---
+
+## 🎯 Audit Objective
+
+Verify that Victor's backtester (`funding_arb_strat_1.py`) does NOT use information that would be unavailable at the time of decision-making.
+
+**Key Question:** When selecting top-5 symbols at timestamp T, does the strategy use rates that had already settled, or does it incorrectly peek into the future?
+
+---
+
+## 📊 Data Source Comparison
+
+### 1. **Binance API** (easiest for validation)
+
+**Endpoint:** `https://fapi.binance.com/fapi/v1/fundingRate`
+
+**Structure:**
+```json
+{
+  "symbol": "BTCUSDT",
+  "fundingTime": 1759017600000,    // When funding was SETTLED
+  "fundingRate": "0.00003314",      // Rate that WAS APPLIED
+  "markPrice": "109577.33157971"
+}
+```
+
+**Characteristics:**
+- ✅ Free, no authentication required
+- ✅ Simple REST API
+- ✅ Returns up to 1000 records per request
+- ✅ 8-hour intervals (00:00, 08:00, 16:00 UTC)
+- ⚠️ Historical data only (past settlements)
+
+**Rate Limit:** 500 requests / 5 minutes
+
+---
+
+### 2. **OKX Bulk Historical Data** (best for ground truth)
+
+**URL Pattern:** `https://www.okx.com/cdn/okex/traderecords/swaprate/daily/{YYYYMMDD}/{SYMBOL}-USDT-SWAP-swaprate-{YYYY-MM-DD}.zip`
+
+**Example:** `https://www.okx.com/cdn/okex/traderecords/swaprate/daily/20240805/BTC-USDT-SWAP-swaprate-2024-08-05.zip`
+
+**CSV Structure (GBK encoding):**
+```
+contract_type/合约类型, funding_rate/预测下一周期费率, real_funding_rate/本周期真实费率, funding_time/下一周期时间戳
+SWAP,                    0.000063,                     0.000065,                      1722816000000
+```
+
+**Critical Column Meanings:**
+
+| Column | English | Meaning | Temporal Alignment |
+|--------|---------|---------|-------------------|
+| `funding_time/下一周期时间戳` | Next period timestamp | Timestamp of NEXT funding settlement | Future reference |
+| `real_funding_rate/本周期真实费率` | Current period real rate | Rate that JUST SETTLED | Current (backward-looking) |
+| `funding_rate/预测下一周期费率` | Predicted next rate | Estimated rate for NEXT period | Forward-looking (would be look-ahead bias!) |
+
+**Key Insight:**
+- The `funding_time` column refers to the NEXT settlement
+- The `real_funding_rate` is for the period that JUST ENDED
+- Using `real_funding_rate` at timestamp T is SAFE (no look-ahead)
+- Using `funding_rate` (predicted) would be REALISTIC (this is what traders see)
+
+**Characteristics:**
+- ✅ Complete historical archive from 2021
+- ✅ Official OKX data (ground truth)
+- ✅ Includes both settled and predicted rates
+- ⚠️ Manual download required (one ZIP per day per symbol)
+- ⚠️ GBK encoding (Chinese characters)
+
+---
+
+### 3. **Coinglass API** (aggregated, premium)
+
+**Endpoint:** `https://open-api-v4.coinglass.com/api/futures/funding-rate/history`
+
+**Structure (OHLC format):**
+```json
+{
+  "time": 1658880000000,
+  "open": "0.004603",
+  "high": "0.009388",
+  "low": "-0.005063",
+  "close": "0.009229"
+}
+```
+
+**Characteristics:**
+- ⚠️ Requires API key (paid tiers for historical data)
+- ⚠️ OHLC format makes temporal validation harder
+- ⚠️ Aggregated across exchanges (may not match OKX exactly)
+- ✅ Good for cross-exchange validation
+
+**Not recommended for this audit** (use Binance or OKX instead)
+
+---
+
+## 🔍 Victor's Data Collection Process
+
+### **Script:** `pull_funding_arb_hist.py`
+
+**API Endpoint Used:**
+```python
+# Line 121
+data = okx_get("/public/funding-rate-history", params)
+```
+
+**What This Returns:**
+```json
+{
+  "fundingTime": "1722816000000",   // Settlement timestamp
+  "fundingRate": "0.000065"          // Settled rate
+}
+```
+
+**Critical Question:** What does `fundingTime` represent in OKX's `/public/funding-rate-history` endpoint?
+
+**Answer:** According to OKX API docs (need to verify):
+- `fundingTime`: Timestamp when funding was **settled** (past event)
+- `fundingRate`: The rate that **was charged** at that time
+
+**Temporal Safety:** ✅ This appears to be backward-looking (safe)
+
+---
+
+## ⚠️ **CRITICAL TEMPORAL ISSUE IDENTIFIED**
+
+### **Location:** `funding_arb_strat_1.py` lines 183-187
+
+```python
+for i, t in enumerate(times, 1):
+    g = snap[snap["funding_time"] == t]           # Get rates at time T
+    rates = g.set_index("symbol")["fundingRate"]
+
+    target = capped_topk_weights_minmax(rates, k=TOP_K, ...)  # Select top-5
+```
+
+**The Temporal Question:**
+
+At timestamp `T = 2024-08-05 08:00:00 UTC`:
+
+| Scenario | What rate is used? | Is this look-ahead? |
+|----------|-------------------|-------------------|
+| **A** | Rate that settled at 08:00 (for period 00:00-08:00) | ❌ **YES** - You don't know this until 08:00 passes |
+| **B** | Rate that settled at 00:00 (for previous period) | ✅ **NO** - This was known at 08:00 |
+| **C** | Predicted rate for 08:00-16:00 period | ⚠️ **MAYBE** - Realistic if using premium-index (like `next_funding_rate.py`) |
+
+**Victor's Implementation:** Appears to be **Scenario A** (look-ahead bias)
+
+---
+
+## 📝 The Temporal Bias Explained
+
+### **Realistic Trading Timeline (8-hour intervals)**
+
+```
+Timeline:
+00:00 UTC - Funding settles (rate R1 applied for period -8h to 0h)
+00:01 UTC - Traders know R1, can estimate next rate R2
+08:00 UTC - Funding settles (rate R2 applied for period 0h to 8h)
+08:01 UTC - Traders know R2, can estimate next rate R3
+16:00 UTC - Funding settles (rate R3 applied for period 8h to 16h)
+```
+
+### **What Victor's Backtester Does**
+
+**At 08:00 UTC:**
+```python
+# Victor's code at snapshot time = 08:00
+rates_at_08 = get_funding_rates(funding_time == "08:00")
+# This contains R2 (the rate that JUST settled)
+
+# Problem: R2 is not known until 08:00 UTC completes!
+# Traders making decisions at 08:00:00 only know R1 (previous settlement)
+```
+
+**Correct Implementation Would Be:**
+```python
+# At 08:00 UTC, use the PREVIOUS settlement (00:00)
+rates_at_00 = get_funding_rates(funding_time == "00:00")
+# Make allocation decision based on R1
+
+# Then apply returns using R2 (which settles at 08:00)
+```
+
+---
+
+## 🚨 **Look-Ahead Bias Severity**
+
+### **IF Victor's code uses same-timestamp rates:**
+
+**Impact:** ⚠️ **SEVERE LOOK-AHEAD BIAS**
+
+**Why:** The strategy would be selecting symbols based on funding rates that haven't settled yet, essentially peeking 8 hours into the future.
+
+**Expected Backtest Inflation:**
+- Overstated returns by catching all ex-post high funding events
+- Sharpe ratio artificially inflated (perfect timing)
+- Real live trading would perform significantly worse
+
+---
+
+### **IF Victor's code uses lagged rates (previous settlement):**
+
+**Impact:** ✅ **NO LOOK-AHEAD BIAS**
+
+**Assumption:** Funding rate momentum/persistence (symbols with high rates continue to have high rates)
+
+**Questions to validate:**
+- Is this assumption realistic?
+- How persistent are funding rates across 8-hour periods?
+- What's the correlation between R(t-1) and R(t)?
+
+---
+
+## 🔬 Validation Tests Required
+
+### **Test 1: Timestamp Alignment Check**
+
+**Objective:** Verify what `funding_time` represents in Victor's CSV
+
+**Method:**
+```python
+# Download OKX bulk data for same period as Victor's backtest
+# Compare timestamps and rates line-by-line
+# Check if fundingTime = settlement time or next-period time
+```
+
+**Expected Result:** Should match OKX's `real_funding_rate` with `funding_time` = next period timestamp
+
+---
+
+### **Test 2: Look-Ahead Detection**
+
+**Objective:** Determine if backtester uses current or previous rates
+
+**Method:**
+```python
+# Inspect backtester's snapshot logic
+# At time T, check if rates[T] or rates[T-1] are used for allocation
+# Cross-reference with settlement times
+```
+
+**Red Flag:** If `rates[T]` → look-ahead bias
+**Safe:** If `rates[T-1]` → no bias (assuming persistence strategy)
+
+---
+
+### **Test 3: Funding Rate Persistence Analysis**
+
+**Objective:** Validate if using T-1 rates to predict T is realistic
+
+**Method:**
+```python
+# Compute correlation between funding_rate[t-1] and funding_rate[t]
+# Analyze top-K stability (do top-5 at T-1 remain top-5 at T?)
+# Measure mean reversion vs momentum
+```
+
+**Expected:** Some persistence (positive correlation), but NOT perfect
+
+---
+
+### **Test 4: Backtest Reconstruction**
+
+**Objective:** Rebuild backtest with explicit temporal safeguards
+
+**Method:**
+```python
+# Force T-1 lag in rate selection
+# Compare results to Victor's reported 7,708% APY
+# Large difference → confirms look-ahead bias
+```
+
+---
+
+## 📋 Validation Checklist for Terry Li
+
+- [ ] **Download OKX bulk data for Victor's backtest period (2024-06-25 to 2024-09-27)**
+  - Note: Victor's dates show 2025, likely a typo
+
+- [ ] **Parse OKX CSV and compare to Victor's `okx_funding_arb_1y.csv`**
+  - Check timestamp alignment
+  - Check rate values match
+
+- [ ] **Trace Victor's backtester snapshot logic**
+  - Confirm whether rates[T] or rates[T-1] used
+  - Document exact resampling behavior
+
+- [ ] **Run funding rate autocorrelation analysis**
+  - Lag-1, lag-2, lag-3 correlation
+  - Top-K turnover statistics
+
+- [ ] **Reconstruct backtest with forced T-1 lag**
+  - Compare APY to Victor's 7,708%
+  - If massive drop → look-ahead confirmed
+
+- [ ] **Ask Victor directly:**
+  - "At 08:00 UTC, do you select top-5 using the 08:00 settlement (just happened) or the 00:00 settlement (8 hours ago)?"
+
+---
+
+## 🎯 **Next Steps**
+
+1. **Create validation script** (see `VALIDATION_SCRIPT.md`)
+2. **Download OKX bulk data** for test period
+3. **Run temporal audit** and document findings
+4. **Brief Victor** on results with specific recommendations
+
+---
+
+## 🔗 Recommended Data Source for Validation
+
+**Primary:** OKX Bulk Historical Data
+- Authoritative source (same exchange Victor trades on)
+- Complete archive
+- Includes both settled and predicted rates
+
+**Secondary:** Binance API
+- Easy to access
+- Good for quick spot-checks
+- Different exchange (minor rate differences expected)
+
+**Script Location:** `victor-cbo-analysis/analysis/validate_temporal_integrity.py`

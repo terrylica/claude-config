@@ -1,5 +1,7 @@
 # Claude Code User Memory
 
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure (essentials only, each doc links deeper, single source of truth per topic)
+
 **Navigation Index**: [`docs/INDEX.md`](docs/INDEX.md) - Hub-and-spoke documentation architecture
 
 **Quick Links**: [Tools](tools/) | [Specifications](specifications/) | [Agents](agents/) | [Commands](commands/) | [Docs](docs/)
@@ -114,4 +116,8 @@
 **Kitty Terminal**: [`docs/setup/terminal-setup.md`](docs/setup/terminal-setup.md) - Helix+Prettier PATH config, markdown formatting
 **Shell Functions**: [`shell-functions/`](shell-functions/) - Custom shell utilities
 **Text Editor**: Helix (`hx`) - Modal editor with LSP, tree-sitter
+
+### SSH Clipboard Integration (OSC 52)
+**Enable**: Claude Code `/export` copies to macOS clipboard over SSH/tmux (`~/.local/bin/xclip` wrapper emits OSC 52 to `>&2`, not `/dev/tty`)
+**Doc**: [`docs/setup/ssh-clipboard-osc52.md`](docs/setup/ssh-clipboard-osc52.md)
 

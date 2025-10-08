@@ -1,0 +1,173 @@
+#!/bin/bash
+# Download monitor with Pushover Emergency alerts
+# Monitors downloads and sends alerts for completion, stalls, or failures
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$PROJECT_ROOT/data"
+
+# Pushover credentials
+USER_KEY="ury88s1def6v16seeueoefqn1zbua1"
+APP_TOKEN="aej7osoja3x8nvxgi96up2poxdjmfj"
+DEVICE="iphone_13_mini"
+SOUND="dune"
+
+# State tracking
+STATE_FILE="/tmp/download_monitor_alerts_state.txt"
+ALERT_SENT_FILE="/tmp/download_monitor_alerts_sent.txt"
+
+# Expected totals
+TOTAL_MONTHS=33
+
+# Initialize state
+if [ ! -f "$STATE_FILE" ]; then
+    echo "0|0|0|0|$(date +%s)" > "$STATE_FILE"
+fi
+
+if [ ! -f "$ALERT_SENT_FILE" ]; then
+    echo "none" > "$ALERT_SENT_FILE"
+fi
+
+# Send Pushover notification
+send_pushover() {
+    local title="$1"
+    local message="$2"
+    local priority="${3:-2}"  # Default: Emergency
+
+    curl -s https://api.pushover.net/1/messages.json \
+      --form-string "token=$APP_TOKEN" \
+      --form-string "user=$USER_KEY" \
+      --form-string "device=$DEVICE" \
+      --form-string "sound=$SOUND" \
+      --form-string "priority=$priority" \
+      --form-string "retry=30" \
+      --form-string "expire=3600" \
+      --form-string "title=$title" \
+      --form-string "message=$message" > /dev/null
+}
+
+# Check if alert already sent
+alert_already_sent() {
+    local alert_type="$1"
+    grep -q "$alert_type" "$ALERT_SENT_FILE"
+}
+
+# Mark alert as sent
+mark_alert_sent() {
+    local alert_type="$1"
+    echo "$alert_type" >> "$ALERT_SENT_FILE"
+}
+
+# Main monitoring loop
+echo "Starting download monitor with Pushover alerts..."
+echo "Device: $DEVICE | Sound: $SOUND | Priority: Emergency"
+echo ""
+
+while true; do
+    # Get current counts
+    SPOT_COUNT=$(find "$DATA_DIR/raw_ticks" -name "*.parquet" 2>/dev/null | wc -l)
+    SWAP_COUNT=$(find "$DATA_DIR/raw_ticks_swap" -name "*.parquet" 2>/dev/null | wc -l)
+    SPOT_SIZE_KB=$(du -sk "$DATA_DIR/raw_ticks" 2>/dev/null | cut -f1 || echo "0")
+    SWAP_SIZE_KB=$(du -sk "$DATA_DIR/raw_ticks_swap" 2>/dev/null | cut -f1 || echo "0")
+
+    # Read previous state
+    IFS='|' read -r PREV_SPOT_COUNT PREV_SWAP_COUNT PREV_SPOT_SIZE PREV_SWAP_SIZE LAST_CHANGE_TIME < "$STATE_FILE"
+
+    # Detect changes
+    NOW=$(date +%s)
+    if [ "$SPOT_COUNT" != "$PREV_SPOT_COUNT" ] || \
+       [ "$SWAP_COUNT" != "$PREV_SWAP_COUNT" ] || \
+       [ "$SPOT_SIZE_KB" != "$PREV_SPOT_SIZE" ] || \
+       [ "$SWAP_SIZE_KB" != "$PREV_SWAP_SIZE" ]; then
+        # Progress detected
+        LAST_CHANGE_TIME=$NOW
+        echo "$SPOT_COUNT|$SWAP_COUNT|$SPOT_SIZE_KB|$SWAP_SIZE_KB|$LAST_CHANGE_TIME" > "$STATE_FILE"
+    fi
+
+    TIME_SINCE_CHANGE=$((NOW - LAST_CHANGE_TIME))
+
+    # Check for completion
+    if [ "$SPOT_COUNT" -eq "$TOTAL_MONTHS" ] && [ "$SWAP_COUNT" -eq "$TOTAL_MONTHS" ]; then
+        if ! alert_already_sent "completion"; then
+            echo "✅ All downloads complete! Sending notification..."
+            SPOT_SIZE=$(du -sh "$DATA_DIR/raw_ticks" 2>/dev/null | cut -f1)
+            SWAP_SIZE=$(du -sh "$DATA_DIR/raw_ticks_swap" 2>/dev/null | cut -f1)
+
+            send_pushover \
+                "🎉 Downloads Complete!" \
+                "All 33 months downloaded successfully!
+
+SPOT: ${SPOT_SIZE}
+SWAP: ${SWAP_SIZE}
+
+Ready for aggregation to 1-min bars."
+
+            mark_alert_sent "completion"
+            echo "Notification sent. Exiting monitor."
+            exit 0
+        fi
+    fi
+
+    # Check for stall (no progress for 15+ minutes)
+    if [ $TIME_SINCE_CHANGE -gt 900 ]; then
+        if ! alert_already_sent "stall_15min"; then
+            echo "⚠️ Stall detected (15+ min)! Sending notification..."
+
+            send_pushover \
+                "⚠️ Download Stalled" \
+                "No progress for 15+ minutes!
+
+SPOT: $SPOT_COUNT/$TOTAL_MONTHS
+SWAP: $SWAP_COUNT/$TOTAL_MONTHS
+
+Time since last progress: $((TIME_SINCE_CHANGE / 60)) minutes
+
+Check the server!"
+
+            mark_alert_sent "stall_15min"
+        fi
+    fi
+
+    # Check if process stopped
+    if ! ps aux | grep "download_missing.sh" | grep -v grep > /dev/null; then
+        if [ "$SPOT_COUNT" -lt "$TOTAL_MONTHS" ] || [ "$SWAP_COUNT" -lt "$TOTAL_MONTHS" ]; then
+            if ! alert_already_sent "process_stopped"; then
+                echo "❌ Process stopped early! Sending notification..."
+
+                send_pushover \
+                    "❌ Download Process Stopped" \
+                    "Process terminated before completion!
+
+SPOT: $SPOT_COUNT/$TOTAL_MONTHS
+SWAP: $SWAP_COUNT/$TOTAL_MONTHS
+
+Manual intervention required."
+
+                mark_alert_sent "process_stopped"
+                echo "Process stopped. Exiting monitor."
+                exit 1
+            fi
+        fi
+    fi
+
+    # Progress update (every 10 minutes if making progress)
+    if [ $((TIME_SINCE_CHANGE)) -lt 60 ]; then
+        CURRENT_TIME=$(date +%s)
+        LAST_PROGRESS_UPDATE=$(cat /tmp/last_progress_update 2>/dev/null || echo "0")
+        TIME_SINCE_UPDATE=$((CURRENT_TIME - LAST_PROGRESS_UPDATE))
+
+        if [ $TIME_SINCE_UPDATE -gt 600 ]; then  # 10 minutes
+            TOTAL_DOWNLOADED=$((SPOT_COUNT + SWAP_COUNT))
+            TOTAL_NEEDED=$((TOTAL_MONTHS * 2))
+            PROGRESS_PCT=$(( (TOTAL_DOWNLOADED * 100) / TOTAL_NEEDED ))
+
+            echo "📊 Progress update: $PROGRESS_PCT% complete"
+            echo "$CURRENT_TIME" > /tmp/last_progress_update
+        fi
+    fi
+
+    # Sleep and continue
+    sleep 30
+done

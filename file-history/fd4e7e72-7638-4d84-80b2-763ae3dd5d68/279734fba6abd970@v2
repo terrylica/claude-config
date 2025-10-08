@@ -1,0 +1,34 @@
+#!/bin/bash
+# Aggregate remaining SWAP months with chunked processing
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PYTHON="$(cd "$PROJECT_ROOT/.." && pwd)/.venv/bin/python"
+
+cd "$PROJECT_ROOT"
+
+echo "Aggregating remaining SWAP months (chunked)..."
+
+SWAP_MONTHS=(
+  "2024 12"
+  "2025 1" "2025 2" "2025 3" "2025 4" "2025 5" "2025 6"
+)
+
+for month_spec in "${SWAP_MONTHS[@]}"; do
+  read -r year month <<< "$month_spec"
+  OUT_FILE="data/1min_bars_swap/$year/$(printf '%02d' $month).parquet"
+
+  if [ ! -f "$OUT_FILE" ]; then
+    echo ""
+    echo "SWAP $year-$(printf '%02d' $month)..."
+    $PYTHON scripts/aggregate_month_chunked.py $year $month --market-type swap
+  else
+    echo "✓ SWAP $year-$(printf '%02d' $month) already exists"
+  fi
+done
+
+echo ""
+echo "✅ All SWAP aggregations complete"
+find data/1min_bars_swap -name "*.parquet" | wc -l | xargs echo "Total SWAP bars:"

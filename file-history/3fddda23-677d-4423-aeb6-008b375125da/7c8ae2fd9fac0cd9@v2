@@ -1,0 +1,177 @@
+# VIF Feasibility Test
+
+**Date**: 2025-10-03
+**Objective**: Validate VIF computational feasibility on 48 features before Phase 5 implementation
+**Context**: VIF on 85 features timed out (>120s); testing 48-feature subset from pruning manifest
+
+## Test Specifications
+
+### Input Data
+- **Dataset**: `experiments/orthogonality_filtering_20251003/results/raw/atoms_full.csv`
+- **Features**: 48 features from `features_corr_0.9.txt` (correlation threshold 0.90)
+- **Samples**: 9,901 rows (SOL 5-min, 2022-10-03 to 2022-11-07)
+
+### Test Cases
+
+**Test 1: Single VIF Calculation**
+- **Objective**: Measure baseline VIF computation time for one feature
+- **Method**: `variance_inflation_factor(X.values, 0)`
+- **SLO (Correctness)**: VIF value within numerical precision (< 1e-10 error)
+- **SLO (Observability)**: Log computation time, estimated total time
+
+**Test 2: Full VIF Matrix**
+- **Objective**: Calculate VIF for all 48 features (one-time cost)
+- **Method**: Loop over all features, call `variance_inflation_factor` per feature
+- **SLO (Availability)**: Complete within 5 minutes (acceptable threshold)
+- **SLO (Observability)**: Log per-feature VIF values, statistics (min, max, mean)
+
+**Test 3: Iterative VIF Removal**
+- **Objective**: Simulate Phase 5 VIF pruning (iterative removal until threshold met)
+- **Method**: Remove feature with max VIF > 5.0, recalculate, repeat
+- **SLO (Availability)**: Complete within 10 minutes (acceptable for iterative process)
+- **SLO (Correctness)**: Converge to all VIF ≤ 5.0
+- **SLO (Observability)**: Log iteration count, removed features, convergence time
+
+**Test 4: Correlation Filter (Alternative)**
+- **Objective**: Measure correlation-based filtering as VIF replacement
+- **Method**: Iteratively remove feature with highest avg |r| until max |r| ≤ 0.85
+- **SLO (Availability)**: Complete within 30 seconds (fast alternative required)
+- **SLO (Correctness)**: Converge to max pairwise |r| ≤ 0.85
+- **SLO (Observability)**: Log iteration count, removed features, convergence time
+
+### Decision Thresholds
+
+| Scenario | VIF Time | Correlation Time | Decision |
+|----------|----------|------------------|----------|
+| A: VIF Fast | < 120s | Any | Use VIF as planned |
+| B: VIF Marginal | 120-600s | < 30s | Use correlation filter (VIF too slow) |
+| C: VIF Slow | > 600s | < 30s | Use correlation filter (VIF infeasible) |
+| D: Both Slow | > 600s | > 30s | Blocker - rethink approach |
+
+### SLO Definitions
+
+**Correctness**:
+- VIF calculations match statsmodels reference implementation (no custom algorithm)
+- Correlation calculations match pandas.DataFrame.corr() (out-of-box)
+- Numerical precision: VIF formula 1/(1-R²) error < 1e-10
+
+**Availability**:
+- Test 1 (single VIF): Must complete (no timeout)
+- Test 2 (full VIF): Must complete within 5 minutes
+- Test 3 (iterative VIF): Must complete within 10 minutes
+- Test 4 (correlation): Must complete within 30 seconds
+
+**Observability**:
+- Log all computation times (per-feature, total)
+- Log all VIF values (distribution statistics)
+- Log convergence metrics (iterations, final feature count)
+- On error: Raise exception with clear message (no silent failures)
+
+**Maintainability**:
+- Use statsmodels.stats.outliers_influence.variance_inflation_factor (out-of-box)
+- Use pandas.DataFrame.corr() (out-of-box)
+- No custom VIF or correlation implementations
+- Test scripts in /tmp for isolation (no workspace pollution)
+
+## Implementation
+
+### Test Scripts
+
+**Location**: `/tmp/vif_feasibility_test/`
+
+**Files**:
+1. `test_vif_48_features.py` - VIF tests (Test 1-3)
+2. `test_correlation_filter.py` - Correlation filter test (Test 4)
+3. `compare_methods.py` - Side-by-side comparison
+
+**Execution**:
+```bash
+cd /tmp/vif_feasibility_test
+uvx --from statsmodels --from pandas --from numpy python test_vif_48_features.py
+uvx --from pandas --from numpy python test_correlation_filter.py
+uvx --from pandas --from numpy python compare_methods.py
+```
+
+### Output Format
+
+**Test results**: JSON + human-readable summary
+
+```json
+{
+  "test_1_single_vif": {
+    "time_seconds": 0.123,
+    "vif_value": 5.67,
+    "estimated_total_time": 5.9
+  },
+  "test_2_full_vif": {
+    "time_seconds": 45.2,
+    "features_count": 48,
+    "vif_min": 1.2,
+    "vif_max": 15.3,
+    "vif_mean": 4.5,
+    "features_above_10": 5
+  },
+  "test_3_iterative_vif": {
+    "time_seconds": 120.5,
+    "iterations": 8,
+    "features_removed": 8,
+    "features_remaining": 40,
+    "converged": true
+  },
+  "test_4_correlation_filter": {
+    "time_seconds": 2.3,
+    "iterations": 6,
+    "features_removed": 6,
+    "features_remaining": 42
+  },
+  "verdict": {
+    "vif_feasible": true,
+    "recommended_method": "vif",
+    "reason": "VIF completed within acceptable time"
+  }
+}
+```
+
+## Expected Results
+
+**Hypothesis**: 48 features (56% of 85) should be faster than linear reduction
+- 85 features timed out at 120s+ (didn't complete)
+- 48 features expected: 45-90s (based on O(n²) scaling)
+
+**If VIF fails**: Use correlation filter (O(n²) one-time, no iterative OLS)
+
+## Validation Criteria
+
+**Success**: At least one method completes within acceptable time
+- VIF < 10 min OR Correlation < 30s
+
+**Failure**: Both methods exceed thresholds → Blocker for Phase 5
+
+## Post-Test Actions
+
+**If VIF feasible**:
+1. Update NEXT_STEPS.md: Mark VIF as validated approach
+2. Proceed with Phase 5 using VIF
+
+**If VIF infeasible, correlation feasible**:
+1. Update NEXT_STEPS.md: Replace VIF with correlation filter
+2. Update CLAUDE.md: Document correlation filter as VIF replacement
+3. Update pruning manifest: Note methodological change
+4. Proceed with Phase 5 using correlation filter
+
+**If both infeasible**:
+1. Research alternative: PCA, variance threshold, tree-based importance
+2. Revisit pruning manifest (already at 48 features, may be sufficient)
+3. Consider skipping multicollinearity step (rely on IPSS only)
+
+## Cross-References
+
+**Related experiments**:
+- `experiments/orthogonality_filtering_20251003/` - Correlation-based filtering (source of 48 features)
+
+**Related documentation**:
+- `NEXT_STEPS.md` - Phase 5 feature selection pipeline
+- `CLAUDE.md` - VIF specification (lines 283-286)
+- `.claude/feature-pruning-manifest.md` - 48 kept features
+
+**Superseded by**: This test will inform Phase 5 implementation approach

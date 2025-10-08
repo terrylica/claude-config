@@ -1,0 +1,40 @@
+#!/bin/bash
+# Aggregate all missing months sequentially
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PYTHON="$(cd "$PROJECT_ROOT/.." && pwd)/.venv/bin/python"
+
+cd "$PROJECT_ROOT"
+
+echo "Aggregating missing SPOT months..."
+for year in 2023 2024 2025; do
+  for month in {1..12}; do
+    RAW_FILE="data/raw_ticks/$year/$(printf '%02d' $month).parquet"
+    OUT_FILE="data/1min_bars/$year/$(printf '%02d' $month).parquet"
+
+    if [ -f "$RAW_FILE" ] && [ ! -f "$OUT_FILE" ]; then
+      echo "  SPOT $year-$(printf '%02d' $month)..."
+      $PYTHON scripts/aggregate_month.py $year $month --market-type spot
+    fi
+  done
+done
+
+echo ""
+echo "Aggregating missing SWAP months..."
+for year in 2023 2024 2025; do
+  for month in {1..12}; do
+    RAW_FILE="data/raw_ticks_swap/$year/$(printf '%02d' $month).parquet"
+    OUT_FILE="data/1min_bars_swap/$year/$(printf '%02d' $month).parquet"
+
+    if [ -f "$RAW_FILE" ] && [ ! -f "$OUT_FILE" ]; then
+      echo "  SWAP $year-$(printf '%02d' $month)..."
+      $PYTHON scripts/aggregate_month.py $year $month --market-type swap
+    fi
+  done
+done
+
+echo ""
+echo "✅ All missing months aggregated"

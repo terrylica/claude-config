@@ -1,0 +1,295 @@
+# Dukascopy Integration - Critical Gap Analysis
+**Date:** 2025-09-30
+**Purpose:** Deep-dive audit identifying unresolved decisions blocking implementation
+
+---
+
+## Methodology
+
+Systematic cross-validation:
+1. Q&A decisions (Q1-Q9) vs Design Document
+2. Design Document vs Actual Codebase (types.rs, processor.rs)
+3. Edge cases & integration requirements
+
+---
+
+## CRITICAL GAPS (Implementation Blockers)
+
+### GAP-1: is_buyer_maker Type Conflict 🔴 CRITICAL
+
+**Q&A Decision (Q2):** `is_buyer_maker = None` (explicit unknown for quote data)
+
+**Current Codebase:**
+```rust
+// src/core/types.rs:46
+pub is_buyer_maker: bool,  // NOT Option<bool>!
+
+// types.rs:147 - buy/sell segregation depends on this
+let (buy_volume, sell_volume) = if trade.is_buyer_maker {
+    (FixedPoint(0), trade.volume)  // sell pressure
+} else {
+    (trade.volume, FixedPoint(0))  // buy pressure
+};
+```
+
+**Conflict:** RangeBar's microstructure tracking (buy_volume, sell_volume, buy_trade_count, sell_trade_count) requires boolean is_buyer_maker for segregation.
+
+**Impact:**
+- Making it Option<bool> is **BREAKING CHANGE** to core AggTrade struct
+- Affects ~200 lines across types.rs (new, update_with_trade, tests)
+- Dukascopy can't segregate buy/sell if direction unknown
+
+**Question for Q10:** How to handle is_buyer_maker for Dukascopy data?
+
+---
+
+### GAP-2: RangeBar.volume Field Mapping 🔴 CRITICAL
+
+**Q&A Decision (Q1):** Dual tracking (tick_count + total_bid_liquidity + total_ask_liquidity)
+
+**Current Codebase:**
+```rust
+// src/core/types.rs:92
+pub volume: FixedPoint,  // Single value, not dual!
+```
+
+**Conflict:** RangeBar.volume is a single FixedPoint field. SpreadStats tracks multiple metrics, but base RangeBar.volume needs ONE value.
+
+**Impact:**
+- Downstream consumers expect RangeBar.volume to have a value
+- Which value do we use? tick_count or total_liquidity?
+- Affects volume-based analysis and comparisons
+
+**Question for Q11:** What value goes into RangeBar.volume?
+
+---
+
+### GAP-3: Mid-Price Edge Cases 🔴 CRITICAL
+
+**Design Document (line 42):**
+```rust
+let mid_price = (tick.ask + tick.bid) / 2.0;  // No validation!
+```
+
+**Unhandled Cases:**
+1. `bid = 0.0` → mid_price = ask/2 (wrong!)
+2. `ask = 0.0` → mid_price = bid/2 (wrong!)
+3. `bid > ask` → crossed market (data corruption)
+4. `spread > 10%` → stale quote (outlier)
+
+**Real-World Examples:**
+- Market open: First tick may have bid=0 or ask=0
+- Network issues: Stale quotes with inverted bid/ask
+- Flash crashes: Temporary crossed markets
+
+**Impact:** Silent data corruption → range bars with wrong prices
+
+**Question for Q12:** How to validate and handle mid-price edge cases?
+
+---
+
+### GAP-4: Spread Stats Reset Strategy 🔴 CRITICAL
+
+**Q&A Decision (Q6):** EMATracker with `Option<FixedPoint>` state
+
+**Implementation Detail:**
+```rust
+pub struct EMATracker {
+    value: Option<FixedPoint>,  // Carries state across updates
+    period: usize,
+    alpha: f64,
+    tick_count: u32,
+}
+```
+
+**Unresolved:** When bar closes and new bar starts:
+- Reset `value` to `None`? (fresh start, but loses continuity)
+- Persist `value`? (continuity, but mixes bar semantics)
+- Reset `tick_count`? (always reset) or accumulate?
+- Reset `min_spread`/`max_spread`? (always reset)
+
+**Impact:** Affects semantic meaning of "average spread per bar" vs "rolling average across bars"
+
+**Question for Q13:** Bar close behavior for SpreadStats?
+
+---
+
+### GAP-5: Zero-Volume Synthetic Trade Quantity 🔴 CRITICAL
+
+**Q&A Decision (Q7):** Process all ticks, including zero-volume
+
+**Design Document (line 45):**
+```rust
+let total_liquidity = tick.ask_volume + tick.bid_volume;  // Could be 0!
+
+AggTrade {
+    volume: FixedPoint::from_f64(total_liquidity),  // volume = 0.0?
+}
+```
+
+**Conflict:** If both volumes are zero:
+- `volume = 0.0` → breaks downstream assumptions (division by zero in VWAP)
+- RangeBar.volume accumulation stays unchanged (tick doesn't contribute)
+- Breaks volume-based metrics
+
+**Impact:**
+- Zero-volume ticks don't move price but should still count as activity
+- VWAP calculation (line 251: `turnover / volume`) → division by zero if all ticks zero-volume
+
+**Question for Q14:** What quantity for zero-volume ticks?
+
+---
+
+### GAP-6: Instrument Config Source 🔴 CRITICAL
+
+**Design Document (line 375):** "Decimal factor lookup (100000/1000/10 by instrument)"
+
+**Unspecified:**
+- **Where** does config come from?
+  - Hardcoded HashMap in code?
+  - External TOML file (path = ?)?
+  - Builder parameter?
+  - Environment variable?
+- **Who** maintains it when Dukascopy adds instruments?
+- **What** happens if file missing/corrupted?
+
+**Impact:** Can't construct DukascopyRangeBarBuilder without this decision
+
+**Question for Q15:** Instrument config loading strategy?
+
+---
+
+## IMPORTANT GAPS (Quality/Correctness)
+
+### GAP-7: Timestamp Validation Range
+
+**Current Implementation:**
+```rust
+// src/core/timestamp.rs:44-45
+const MIN_TIMESTAMP: i64 = 1_577_836_800_000_000; // 2020-01-01
+const MAX_TIMESTAMP: i64 = 1_893_456_000_000_000; // 2030-01-01
+```
+
+**Issue:** Dukascopy Forex data starts from 2003 (validated empirically)
+- 2003 timestamp: 1,041,379,200,000 ms
+- Current validator would reject all pre-2020 data
+
+**Impact:** Historical Forex data ingestion fails validation
+
+**Question for Q16:** Expand validation range or skip validation for Dukascopy?
+
+---
+
+### GAP-8: Design Document Inconsistencies
+
+**Multiple conflicts between design doc and Q&A decisions:**
+
+| Aspect | Design Doc | Q&A Decision | Line # |
+|--------|-----------|--------------|--------|
+| Direction | `bid_vol > ask_vol` inference | `is_buyer_maker = None` | 48 |
+| Filtering | Zero-volume filtering for Forex | Process all ticks | 150-162 |
+| Return type | `Option<RangeBar>` | `Result<Option<DukascopyRangeBar>, DukascopyError>` | 178 |
+| Builder field | `instrument_type: InstrumentType` | No longer needed (no filtering) | 174 |
+
+**Impact:** Design doc is outdated, will cause confusion during implementation
+
+**Action Needed:** Update design doc to match Q1-Q9 decisions
+
+---
+
+### GAP-9: Timezone & DST Handling
+
+**Known:** Dukascopy timestamps are GMT (from their documentation)
+**Unspecified:**
+- Does normalize_timestamp() handle GMT correctly?
+- What about Daylight Saving Time transitions?
+- Should we convert to UTC? (GMT ≈ UTC but not identical)
+
+**Impact:** Potential timestamp skew during DST transitions (1-hour misalignment)
+
+**Question for Q17:** Timezone handling strategy?
+
+---
+
+### GAP-10: Decimal Factor Validation
+
+**Q5 Decision:** Error if unknown instrument
+**Missing:** Validation if decimal factor is WRONG
+
+**Example:**
+- Config says EURUSD decimal_factor = 1000 (wrong, should be 100000)
+- Prices would be off by 100x
+- No detection until manual inspection
+
+**Impact:** Silent data corruption with wrong magnitudes
+
+**Question for Q18:** Validate decimal factor against actual price ranges?
+
+---
+
+### GAP-11: Clone Implementation for SpreadStats
+
+**Q4 Requirement:** `get_incomplete_bar()` needs to clone spread_stats
+
+**Implication:**
+```rust
+pub struct SpreadStats {
+    pub avg_spread: EMATracker,  // Is EMATracker Clone?
+    pub avg_bid_liquidity: EMATracker,
+    pub avg_ask_liquidity: EMATracker,
+    // ...
+}
+
+// Q4 implementation:
+self.processor.get_incomplete_bar().map(|base| {
+    DukascopyRangeBar {
+        base,
+        spread_stats: self.current_spread_stats.clone(),  // Requires Clone
+    }
+})
+```
+
+**Need to verify:** EMATracker implements Clone (likely yes, but check)
+
+---
+
+## Summary: Questions Needing Resolution
+
+| ID | Question | Priority | Blocks |
+|----|----------|----------|--------|
+| Q10 | is_buyer_maker handling (Option vs bool) | 🔴 CRITICAL | Core struct design |
+| Q11 | RangeBar.volume field mapping | 🔴 CRITICAL | Data model |
+| Q12 | Mid-price edge case handling | 🔴 CRITICAL | Data validation |
+| Q13 | SpreadStats reset strategy | 🔴 CRITICAL | Semantic clarity |
+| Q14 | Zero-volume tick quantity | 🔴 CRITICAL | Volume tracking |
+| Q15 | Instrument config source | 🔴 CRITICAL | Builder API |
+| Q16 | Timestamp validation range | 🟡 IMPORTANT | Historical data |
+| Q17 | Timezone handling | 🟡 IMPORTANT | Data integrity |
+| Q18 | Decimal factor validation | 🟡 IMPORTANT | Corruption detection |
+
+---
+
+## Recommended Question Order
+
+**Phase 1 - Core Data Model (Q10-Q12):**
+1. Q10: is_buyer_maker (affects buy/sell segregation)
+2. Q11: RangeBar.volume mapping (single value choice)
+3. Q12: Mid-price validation (data quality gates)
+
+**Phase 2 - State & Lifecycle (Q13-Q14):**
+4. Q13: SpreadStats reset (bar semantics)
+5. Q14: Zero-volume quantity (edge case handling)
+
+**Phase 3 - Configuration & Deployment (Q15-Q18):**
+6. Q15: Instrument config source (builder API)
+7. Q16: Timestamp range (data ingestion)
+8. Q17: Timezone handling (time alignment)
+9. Q18: Decimal factor validation (data integrity)
+
+---
+
+**Next Steps:**
+1. Present Q10-Q18 to user (one at a time, as per user preference)
+2. Update Q&A log with decisions
+3. Polish design document to reconcile all inconsistencies
+4. User signals `LGTM` for final document polishing

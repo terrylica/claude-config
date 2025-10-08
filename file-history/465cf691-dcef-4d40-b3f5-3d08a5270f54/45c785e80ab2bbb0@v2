@@ -1,0 +1,88 @@
+#!/bin/bash
+# Download only missing months for SPOT and SWAP
+# Sequential (c=1) to avoid memory issues
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$PROJECT_ROOT/data"
+PYTHON="$(cd "$PROJECT_ROOT/.." && pwd)/.venv/bin/python"
+
+echo "=============================================================================="
+echo "Download Missing Months (SPOT + SWAP)"
+echo "=============================================================================="
+echo ""
+
+# Missing SPOT months
+SPOT_MISSING=(
+  "2023 3"
+  "2024 1" "2024 2" "2024 3" "2024 4" "2024 5" "2024 11"
+)
+
+# Missing SWAP months
+SWAP_MISSING=(
+  "2023 1" "2023 2" "2023 7" "2023 10" "2023 11" "2023 12"
+  "2024 1" "2024 2" "2024 3" "2024 4" "2024 5" "2024 6"
+  "2024 7" "2024 8" "2024 9" "2024 10" "2024 11" "2024 12"
+  "2025 1" "2025 2" "2025 3" "2025 4" "2025 5" "2025 6" "2025 7"
+)
+
+echo "Missing SPOT: ${#SPOT_MISSING[@]} months"
+echo "Missing SWAP: ${#SWAP_MISSING[@]} months"
+echo "Total: $((${#SPOT_MISSING[@]} + ${#SWAP_MISSING[@]})) months"
+echo ""
+
+START_TIME=$(date +%s)
+
+# Download missing SPOT months
+if [ ${#SPOT_MISSING[@]} -gt 0 ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Downloading missing SPOT months..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    for month_spec in "${SPOT_MISSING[@]}"; do
+        read -r year month <<< "$month_spec"
+        echo ""
+        echo "[$(date '+%H:%M:%S')] Downloading SPOT $year-$(printf '%02d' $month)..."
+        $PYTHON "$PROJECT_ROOT/scripts/download_month.py" "$year" "$month" --ticks --market-type spot --data-dir "$DATA_DIR" || {
+            echo "❌ Failed: SPOT $year-$(printf '%02d' $month)"
+        }
+    done
+fi
+
+# Download missing SWAP months
+if [ ${#SWAP_MISSING[@]} -gt 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Downloading missing SWAP months..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    for month_spec in "${SWAP_MISSING[@]}"; do
+        read -r year month <<< "$month_spec"
+        echo ""
+        echo "[$(date '+%H:%M:%S')] Downloading SWAP $year-$(printf '%02d' $month)..."
+        $PYTHON "$PROJECT_ROOT/scripts/download_month.py" "$year" "$month" --ticks --market-type swap --data-dir "$DATA_DIR" || {
+            echo "❌ Failed: SWAP $year-$(printf '%02d' $month)"
+        }
+    done
+fi
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+HOURS=$((DURATION / 3600))
+MINUTES=$(((DURATION % 3600) / 60))
+SECONDS=$((DURATION % 60))
+
+echo ""
+echo "=============================================================================="
+echo "✅ MISSING DOWNLOADS COMPLETE"
+echo "=============================================================================="
+echo "Duration: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+echo ""
+echo "Final counts:"
+SPOT_COUNT=$(find "$DATA_DIR/raw_ticks" -name "*.parquet" 2>/dev/null | wc -l)
+SWAP_COUNT=$(find "$DATA_DIR/raw_ticks_swap" -name "*.parquet" 2>/dev/null | wc -l)
+echo "  SPOT: $SPOT_COUNT/33"
+echo "  SWAP: $SWAP_COUNT/33"
+echo ""

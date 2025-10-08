@@ -1,0 +1,80 @@
+#!/bin/bash
+# Parallel SWAP data download with optimal concurrency
+# c=13 (empirically validated 2025-10-03, see CLAUDE.md)
+# Time savings: 88% vs sequential (30 min vs 4 hours for 13 months)
+
+set -e  # Fail-fast: exit on first error
+
+CONCURRENCY=13  # Optimal concurrency (peak CDN throughput 116.3 MB/s)
+
+echo "=================================="
+echo "Phase 1: SWAP Data Download (PARALLEL)"
+echo "=================================="
+echo "Concurrency: $CONCURRENCY jobs"
+echo "Period: 2023-01 to 2024-12 (21 months)"
+echo "Estimated time: ~2 hours"
+echo ""
+
+START_TIME=$(date +%s)
+
+# Generate list of year-month pairs
+MONTHS=()
+for year in 2023 2024; do
+    for month in {1..12}; do
+        MONTHS+=("$year $month")
+    done
+done
+
+# Function to download a single month
+download_month() {
+    local year=$1
+    local month=$2
+
+    echo "[$(date +%H:%M:%S)] Starting $year-$(printf "%02d" $month)..."
+
+    uv run --active python scripts/download_month.py $year $month \
+        --ticks --market-type swap --data-dir data/ \
+        2>&1 | grep -vE "^DEBUG|Unnecessary package"
+
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        echo "[$(date +%H:%M:%S)] ✓ Completed $year-$(printf "%02d" $month)"
+    else
+        echo "[$(date +%H:%M:%S)] ✗ FAILED $year-$(printf "%02d" $month)"
+        return $exit_code
+    fi
+
+    return 0
+}
+
+export -f download_month
+
+# Run downloads in parallel using xargs
+# -P $CONCURRENCY: run N jobs in parallel
+# -n 2: take 2 arguments (year month)
+# -I {}: placeholder for arguments
+printf '%s\n' "${MONTHS[@]}" | xargs -P $CONCURRENCY -n 2 bash -c 'download_month "$@"' _
+
+# Check if any downloads failed
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "ERROR: One or more downloads failed"
+    exit 1
+fi
+
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+ELAPSED_MIN=$((ELAPSED / 60))
+
+echo ""
+echo "=================================="
+echo "Phase 1 Complete: SWAP Download"
+echo "=================================="
+echo "Elapsed time: ${ELAPSED_MIN} minutes"
+echo ""
+echo "Verifying downloads..."
+ls -lh data/raw_ticks_swap/2023/ data/raw_ticks_swap/2024/
+echo ""
+echo "Total size:"
+du -sh data/raw_ticks_swap/

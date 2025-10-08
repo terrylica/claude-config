@@ -1,0 +1,266 @@
+# v1.10-modular.py Changes
+## Real Perpetual Price Integration
+
+**Purpose:** Replace synthetic delta-neutral calculation with real perpetual prices
+
+---
+
+## Key Changes Required
+
+### 1. Initialize Two Price Providers (Lines 111-116)
+
+**BEFORE (v1.9):**
+```python
+# Line 112-114
+bar_data_dir = Path("data/1min_bars")
+print(f"Initializing price provider with 1-min bars from {bar_data_dir}...")
+self.price_provider = BarPriceProvider(bar_data_dir, market_type="spot")
+```
+
+**AFTER (v1.10):**
+```python
+# Initialize SPOT price provider
+spot_bar_dir = Path("data/1min_bars")
+print(f"Initializing SPOT price provider from {spot_bar_dir}...")
+self.spot_provider = BarPriceProvider(spot_bar_dir, market_type="spot")
+
+# Initialize PERP price provider
+perp_bar_dir = Path("data/1min_bars_swap")
+print(f"Initializing PERP price provider from {perp_bar_dir}...")
+self.perp_provider = BarPriceProvider(perp_bar_dir, market_type="spot")  # SWAP bars treated as spot type
+print("Price providers ready (SPOT + PERP)")
+```
+
+---
+
+### 2. Add get_perp_prices() Method (After line 254)
+
+**NEW METHOD:**
+```python
+def get_perp_prices(self, symbols, start_time, end_time, freq='1min'):
+    """
+    Get perpetual (SWAP) prices for symbols over time period.
+
+    Args:
+        symbols: List of SWAP symbols (e.g., 'BTC-USDT-SWAP')
+        start_time: Start timestamp
+        end_time: End timestamp
+        freq: Resampling frequency
+
+    Returns:
+        DataFrame with columns: timestamp, symbol, price
+    """
+    # Get prices from SWAP 1-min bars (VWAP)
+    prices = self.perp_provider.get_prices(
+        symbols=symbols,
+        start_date=start_time,
+        end_date=end_time,
+        freq=freq,
+        method='vwap'
+    )
+    return prices
+```
+
+---
+
+### 3. Load Real Perpetual Prices (Lines 293-323)
+
+**BEFORE (v1.9):**
+```python
+# Line 287: Convert perpetual swap symbols to spot symbols
+spot_symbols = [s.replace('-SWAP', '') for s in symbols]
+
+# Line 295: GET ENTRY PRICES (SPOT ONLY)
+entry_prices_df = self.get_spot_prices(spot_symbols, entry_time, entry_time, freq='1min')
+
+# Line 311: GET EXIT PRICES (SPOT ONLY)
+exit_prices_df = self.get_spot_prices(spot_symbols, exit_time, exit_time, freq='1min')
+```
+
+**AFTER (v1.10):**
+```python
+# NO CONVERSION - use symbols directly
+spot_symbols = [s.replace('-SWAP', '') for s in symbols]
+perp_symbols = symbols  # Keep SWAP symbols as-is
+
+# GET ENTRY PRICES - BOTH MARKETS
+entry_spot_prices_df = self.get_spot_prices(spot_symbols, entry_time, entry_time, freq='1min')
+entry_perp_prices_df = self.get_perp_prices(perp_symbols, entry_time, entry_time, freq='1min')
+
+# GET EXIT PRICES - BOTH MARKETS
+exit_spot_prices_df = self.get_spot_prices(spot_symbols, exit_time, exit_time, freq='1min')
+exit_perp_prices_df = self.get_perp_prices(perp_symbols, exit_time, exit_time, freq='1min')
+
+# Extract prices into dictionaries
+entry_spot_prices = {}
+entry_perp_prices = {}
+exit_spot_prices = {}
+exit_perp_prices = {}
+
+for swap_sym, spot_sym in zip(symbols, spot_symbols):
+    # SPOT entry
+    spot_data = entry_spot_prices_df[entry_spot_prices_df['symbol'] == spot_sym]
+    if len(spot_data) == 0:
+        print(f"  ⚠ No SPOT price for {spot_sym} at entry")
+        return None
+    entry_spot_prices[swap_sym] = spot_data['price'].iloc[0]
+
+    # PERP entry
+    perp_data = entry_perp_prices_df[entry_perp_prices_df['symbol'] == swap_sym]
+    if len(perp_data) == 0:
+        print(f"  ⚠ No PERP price for {swap_sym} at entry")
+        return None
+    entry_perp_prices[swap_sym] = perp_data['price'].iloc[0]
+
+    # SPOT exit
+    spot_data = exit_spot_prices_df[exit_spot_prices_df['symbol'] == spot_sym]
+    if len(spot_data) == 0:
+        print(f"  ⚠ No SPOT price for {spot_sym} at exit")
+        return None
+    exit_spot_prices[swap_sym] = spot_data['price'].iloc[0]
+
+    # PERP exit
+    perp_data = exit_perp_prices_df[exit_perp_prices_df['symbol'] == swap_sym]
+    if len(perp_data) == 0:
+        print(f"  ⚠ No PERP price for {swap_sym} at exit")
+        return None
+    exit_perp_prices[swap_sym] = perp_data['price'].iloc[0]
+```
+
+---
+
+### 4. Calculate Real Delta-Neutral P&L (Lines 358-369)
+
+**BEFORE (v1.9) - SYNTHETIC:**
+```python
+entry_price = entry_prices[symbol]  # SPOT price
+exit_price = exit_prices[symbol]    # SPOT price
+
+# Spot PnL (long position)
+spot_pnl = (exit_price - entry_price) * position_size
+
+# Perp PnL (short position) - SAME PRICE!
+perp_pnl = (entry_price - exit_price) * position_size
+# Result: perp_pnl = -spot_pnl ALWAYS
+```
+
+**AFTER (v1.10) - REAL PRICES:**
+```python
+# Get prices for this symbol
+spot_entry = entry_spot_prices[symbol]
+spot_exit = exit_spot_prices[symbol]
+perp_entry = entry_perp_prices[symbol]
+perp_exit = exit_perp_prices[symbol]
+
+# Position size (based on SPOT entry price)
+position_size = allocation_per_symbol / spot_entry
+
+# Spot PnL (long position)
+spot_pnl = (spot_exit - spot_entry) * position_size
+
+# Perp PnL (short position) - REAL PERP PRICES
+perp_pnl = (perp_entry - perp_exit) * position_size
+
+# Basis tracking (new metrics)
+basis_entry_bps = (perp_entry - spot_entry) / spot_entry * 10000  # Convert to bps
+basis_exit_bps = (perp_exit - spot_exit) / spot_exit * 10000
+basis_pnl = (basis_exit_bps - basis_entry_bps) / 10000 * allocation_per_symbol
+```
+
+---
+
+### 5. Add New Output Columns (Lines 370-400)
+
+**ADD to trades list:**
+```python
+trades.append({
+    'symbol': symbol,
+    'entry_time': entry_time,
+    'exit_time': exit_time,
+    'predicted_rate': predicted_rate,
+    'current_rate_at_T': current_rate_at_T,
+    'actual_rate': actual_rate,
+
+    # SPOT prices
+    'spot_entry_price': spot_entry,
+    'spot_exit_price': spot_exit,
+
+    # PERP prices (NEW)
+    'perp_entry_price': perp_entry,
+    'perp_exit_price': perp_exit,
+
+    # Basis metrics (NEW)
+    'basis_entry_bps': basis_entry_bps,
+    'basis_exit_bps': basis_exit_bps,
+    'basis_pnl': basis_pnl,
+
+    # P&L components
+    'funding': funding,
+    'spot_pnl': spot_pnl,
+    'perp_pnl': perp_pnl,
+    'symbol_pnl': symbol_pnl,
+    'position_size': position_size
+})
+```
+
+---
+
+## Expected Behavior Changes
+
+### Market P&L Distribution
+**v1.9 (Synthetic):**
+- Mean: $0.00
+- Std Dev: $0.00
+- Always zero (by construction)
+
+**v1.10 (Real):**
+- Mean: ~$0 (should average near zero over time)
+- Std Dev: $500-$2,000 (basis fluctuation)
+- 40-60% positive periods (random walk)
+
+### Performance Adjustment
+- Expected APY reduction: -0.5 to -2.0 pp
+- Due to: basis risk, execution timing differences, perp funding mechanism impact
+
+---
+
+## Testing Plan
+
+### Small-Scale Test (Jan 2024 only)
+```bash
+# 1. Use existing SWAP data from /tmp/swap_test/
+# 2. Run v1.10 for 1 month only
+# 3. Compare results with v1.9
+
+uv run --active python /tmp/option_b_implementation/v1.10-modular.py \
+  --start 2024-01-01 --end 2024-01-31 --capital 1000000
+```
+
+### Full Test (After validation)
+```bash
+# Run full 32-month backtest with real data
+uv run --active python v1.10-modular.py \
+  --start 2023-01-01 --end 2025-08-31 --capital 1000000
+```
+
+---
+
+## Files to Create
+
+1. `/tmp/option_b_implementation/v1.10-modular.py` - Modified backtester
+2. Test with `/tmp/swap_test/1min_bars/` - Use existing SWAP bars for Jan 2024
+3. Compare output: v1.9 vs v1.10 results for Jan 2024
+
+---
+
+## Validation Checklist
+
+- [ ] Two price providers initialized (spot + perp)
+- [ ] get_perp_prices() method added
+- [ ] Real perp prices loaded at entry/exit
+- [ ] P&L uses different prices for spot and perp
+- [ ] Basis metrics calculated and tracked
+- [ ] Market P&L has non-zero variance
+- [ ] Output parquet includes new columns
+- [ ] Small-scale test passes (Jan 2024)
+- [ ] Results comparison documented

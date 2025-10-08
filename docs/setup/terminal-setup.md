@@ -73,6 +73,18 @@ ZSH_HIGHLIGHT_STYLES[builtin]='fg=cyan'
 ZSH_HIGHLIGHT_STYLES[command]='fg=green'
 ```
 
+### SSH Clipboard Integration (OSC 52)
+
+Enable Claude Code `/export` to copy to macOS clipboard over SSH:
+
+**See**: [ssh-clipboard-osc52.md](ssh-clipboard-osc52.md) for complete setup
+
+**Quick setup**:
+1. Local Ghostty: Add `clipboard-write = allow` to `~/.config/ghostty/config`
+2. Remote Linux: Install xclip wrapper to `~/.local/bin/xclip`
+
+The wrapper emits OSC 52 escape sequences that travel over SSH and are interpreted by Ghostty to update the macOS system clipboard.
+
 ## Kitty Terminal Emulator
 
 ### Helix Markdown Formatter (Prettier) PATH Issue

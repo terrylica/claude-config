@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+Fast concurrency test for OKX SWAP downloads
+Downloads 2 days from 10 months, tests concurrency 2, 5, 10
+"""
+import subprocess
+import time
+import sys
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Test months (10 months we haven't fully downloaded)
+TEST_MONTHS = [
+    (2023, 9), (2023, 10), (2023, 11), (2023, 12),
+    (2024, 1), (2024, 2), (2024, 3), (2024, 4), (2024, 5), (2024, 6)
+]
+
+WORK_DIR = Path("/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis")
+TEST_DIR = Path("/tmp/concurrency_test")
+
+def download_month(year, month, output_dir, suppress_output=True):
+    """Download SWAP data for one month"""
+    cmd = [
+        "uv", "run", "--active", "python", "scripts/download_month.py",
+        str(year), str(month),
+        "--ticks", "--market-type", "swap", "--data-dir", str(output_dir)
+    ]
+
+    start = time.time()
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=WORK_DIR,
+            capture_output=suppress_output,
+            text=True,
+            timeout=600
+        )
+        elapsed = time.time() - start
+
+        if result.returncode == 0:
+            # Get file size
+            parquet_file = output_dir / f"raw_ticks_swap/{year}/{month:02d}.parquet"
+            if parquet_file.exists():
+                size_mb = parquet_file.stat().st_size / 1024 / 1024
+                return True, elapsed, size_mb
+
+        return False, elapsed, 0
+    except Exception as e:
+        elapsed = time.time() - start
+        print(f"ERROR downloading {year}-{month:02d}: {e}")
+        return False, elapsed, 0
+
+def test_concurrency(level):
+    """Test downloads with specific concurrency level"""
+    print(f"\n{'='*60}")
+    print(f"Testing Concurrency: {level} jobs")
+    print(f"{'='*60}")
+
+    test_dir = TEST_DIR / f"test_c{level}"
+    test_dir.mkdir(parents=True, exist_ok=True)
+
+    start_time = time.time()
+
+    if level == 1:
+        # Sequential
+        results = []
+        for year, month in TEST_MONTHS:
+            print(f"[{time.strftime('%H:%M:%S')}] Downloading {year}-{month:02d}...")
+            success, elapsed, size = download_month(year, month, test_dir)
+            results.append((year, month, success, elapsed, size))
+            if success:
+                print(f"  ✓ Completed in {elapsed:.1f}s ({size:.0f}MB)")
+            else:
+                print(f"  ✗ Failed after {elapsed:.1f}s")
+    else:
+        # Parallel
+        results = []
+        with ThreadPoolExecutor(max_workers=level) as executor:
+            futures = {
+                executor.submit(download_month, year, month, test_dir): (year, month)
+                for year, month in TEST_MONTHS
+            }
+
+            for future in as_completed(futures):
+                year, month = futures[future]
+                try:
+                    success, elapsed, size = future.result()
+                    results.append((year, month, success, elapsed, size))
+                    if success:
+                        print(f"[{time.strftime('%H:%M:%S')}] ✓ {year}-{month:02d}: {elapsed:.1f}s ({size:.0f}MB)")
+                    else:
+                        print(f"[{time.strftime('%H:%M:%S')}] ✗ {year}-{month:02d}: Failed")
+                except Exception as e:
+                    print(f"[{time.strftime('%H:%M:%S')}] ✗ {year}-{month:02d}: {e}")
+                    results.append((year, month, False, 0, 0))
+
+    total_time = time.time() - start_time
+    successful = sum(1 for r in results if r[2])
+    total_size = sum(r[4] for r in results if r[2])
+    throughput = total_size / total_time if total_time > 0 else 0
+
+    print(f"\nResults for concurrency={level}:")
+    print(f"  Total time: {total_time:.1f}s ({total_time/60:.1f} min)")
+    print(f"  Successful: {successful}/{len(TEST_MONTHS)}")
+    print(f"  Total size: {total_size:.0f}MB")
+    print(f"  Throughput: {throughput:.2f}MB/s")
+
+    # Cleanup
+    subprocess.run(["rm", "-rf", str(test_dir)], check=False)
+
+    return {
+        'concurrency': level,
+        'time': total_time,
+        'successful': successful,
+        'size': total_size,
+        'throughput': throughput
+    }
+
+def main():
+    print("="*60)
+    print("Fast Concurrency Test for OKX SWAP Downloads")
+    print("="*60)
+    print(f"Test dataset: 10 months × 2-3 days each")
+    print(f"Concurrency levels: 2, 5, 10")
+    print("")
+
+    # Clean test directory
+    if TEST_DIR.exists():
+        subprocess.run(["rm", "-rf", str(TEST_DIR)])
+    TEST_DIR.mkdir(parents=True)
+
+    # Run tests
+    results = []
+    for level in [2, 5, 10]:
+        result = test_concurrency(level)
+        results.append(result)
+        time.sleep(2)  # Brief pause between tests
+
+    # Analysis
+    print("\n" + "="*60)
+    print("ANALYSIS")
+    print("="*60)
+    print(f"\n{'Concurrency':<12} {'Time(s)':<10} {'Time(min)':<12} {'Throughput':<15} {'Speedup':<10}")
+    print("-"*60)
+
+    baseline_time = results[0]['time']
+    for r in results:
+        speedup = baseline_time / r['time'] if r['time'] > 0 else 0
+        print(f"{r['concurrency']:<12} {r['time']:<10.1f} {r['time']/60:<12.1f} {r['throughput']:<15.2f} {speedup:<10.2f}x")
+
+    # Find optimal
+    best = max(results, key=lambda x: x['throughput'])
+    print(f"\n✓ Optimal concurrency: {best['concurrency']} jobs")
+    print(f"✓ Best throughput: {best['throughput']:.2f}MB/s")
+
+    # Estimate for remaining downloads
+    remaining = 21 - 8  # 13 months left
+    months_per_batch = 10
+    est_time_optimal = (remaining / months_per_batch) * best['time']
+    est_time_sequential = (remaining / months_per_batch) * results[0]['time']
+    time_saved = (est_time_sequential - est_time_optimal) / 60
+
+    print(f"\nProjection for remaining 13 months:")
+    print(f"  Sequential (c=2): {est_time_sequential/60:.0f} minutes")
+    print(f"  Optimal (c={best['concurrency']}): {est_time_optimal/60:.0f} minutes")
+    print(f"  Time saved: {time_saved:.0f} minutes")
+
+    print(f"\nRecommendation: Use concurrency={best['concurrency']} for production download")
+
+    # Cleanup
+    subprocess.run(["rm", "-rf", str(TEST_DIR)])
+
+if __name__ == "__main__":
+    main()

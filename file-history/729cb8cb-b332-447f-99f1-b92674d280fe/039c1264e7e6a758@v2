@@ -1,0 +1,190 @@
+# Claude Code + tmux: BTT One-Liner Guide
+
+## Test Results Summary
+
+All three variants tested successfully on your system. Settings verified:
+- ✅ 1,000,000 line scrollback
+- ✅ Zero escape delay
+- ✅ Mouse support enabled
+- ✅ Auto-logging to `~/.logs/claude/`
+- ✅ Multi-pane layout works
+
+## Recommended Commands for BetterTouchTool
+
+### Option 1: Base (Simple, Reliable) ⭐ **RECOMMENDED**
+
+Single pane, massive scrollback, auto-logging. Reattaches if session exists.
+
+```bash
+tmux has-session -t cc 2>/dev/null && tmux attach -t cc || { tmux new-session -d -s cc -n repl; tmux set-option -t cc history-limit 1000000 \; set-option -t cc escape-time 0 \; set-option -t cc mouse on; tmux set-window-option -t cc:repl aggressive-resize on \; set-window-option -t cc:repl remain-on-exit on; mkdir -p "$HOME/.logs/claude"; tmux pipe-pane -t cc:repl "stdbuf -i0 -o0 -e0 tee -a $HOME/.logs/claude/trace_$(date +%Y%m%d_%H%M%S).log"; tmux send-keys -t cc:repl 'claude --dangerously-skip-permissions --add-dir /tmp --resume --fork-session' C-m; tmux attach -t cc; }
+```
+
+**Pros:**
+- Clean session management (reattaches if exists)
+- Single pane = no layout confusion
+- Full logging without complexity
+- Easy to kill/restart (`tmux kill-session -t cc`)
+
+**Cons:**
+- No side-by-side editor view
+- Must manage logs separately
+
+---
+
+### Option 2: Nuke-and-Pave (Fresh Start)
+
+Fresh session every launch. Use when Claude wedges often.
+
+```bash
+tmux kill-session -t cc 2>/dev/null; tmux new-session -d -s cc -n repl; tmux set-option -t cc history-limit 1000000 \; set-option -t cc escape-time 0 \; set-option -t cc mouse on; tmux set-window-option -t cc:repl aggressive-resize on \; set-window-option -t cc:repl remain-on-exit on; mkdir -p "$HOME/.logs/claude"; tmux pipe-pane -t cc:repl "stdbuf -i0 -o0 -e0 tee -a $HOME/.logs/claude/trace_$(date +%Y%m%d_%H%M%S).log"; tmux send-keys -t cc:repl 'claude --dangerously-skip-permissions --add-dir /tmp --resume --fork-session' C-m; tmux attach -t cc
+```
+
+**Pros:**
+- Guaranteed clean slate
+- No stale state from previous crashes
+- Simpler logic (no session check)
+
+**Cons:**
+- Loses in-progress work if you accidentally invoke twice
+- Can't detach and reattach later
+
+---
+
+### Option 3: Multi-Pane (Power User)
+
+Claude + workspace + live log tail in split view.
+
+```bash
+tmux has-session -t cc 2>/dev/null && tmux attach -t cc || { tmux new-session -d -s cc -n repl; tmux set-option -t cc history-limit 1000000 \; set-option -t cc escape-time 0 \; set-option -t cc mouse on; tmux set-window-option -t cc:repl aggressive-resize on \; set-window-option -t cc:repl remain-on-exit on; mkdir -p "$HOME/.logs/claude"; LOG_FILE="$HOME/.logs/claude/trace_$(date +%Y%m%d_%H%M%S).log"; tmux pipe-pane -t cc:repl "stdbuf -i0 -o0 -e0 tee -a $LOG_FILE"; tmux send-keys -t cc:repl 'claude --dangerously-skip-permissions --add-dir /tmp --resume --fork-session' C-m; tmux split-window -h -t cc:repl -c /tmp; tmux split-window -v -t cc:repl.right "tail -f $LOG_FILE 2>/dev/null || tail -f /dev/null"; tmux select-pane -t cc:repl.left; tmux attach -t cc; }
+```
+
+**Layout:**
+```
+┌──────────────┬──────────────┐
+│              │              │
+│   Claude     │  /tmp shell  │
+│   REPL       │              │
+│              ├──────────────┤
+│              │  Live log    │
+│              │  tail        │
+└──────────────┴──────────────┘
+```
+
+**Pros:**
+- All context visible at once
+- Edit files in right pane without leaving tmux
+- Watch agent traces live in bottom-right
+- Can navigate panes with Ctrl+b arrow
+
+**Cons:**
+- More complex layout = more things to break
+- Smaller pane = harder to read long traces
+- Requires mouse or tmux pane navigation knowledge
+
+---
+
+## Usage Patterns
+
+### Starting Claude
+1. Hit your BTT hotkey → launches or reattaches
+2. Claude starts with your flags automatically
+3. Logs begin streaming to `~/.logs/claude/trace_*.log`
+
+### Interrupting Claude
+- **Correct:** `Ctrl+C` (interrupt current operation)
+- **Wrong:** `ESC ESC` (triggers the freeze bug you reported)
+
+### Detaching (keeps Claude running)
+- Press: `Ctrl+b d`
+- Reattach later: `tmux attach -t cc`
+
+### Killing session (full stop)
+```bash
+tmux kill-session -t cc
+```
+
+### Viewing logs later
+```bash
+ls -lt ~/.logs/claude/  # newest first
+tail -f ~/.logs/claude/trace_*.log  # follow latest
+```
+
+---
+
+## Troubleshooting
+
+### "can't find session cc"
+Session doesn't exist. Just run the command again to create it.
+
+### Claude froze, can't type
+1. Don't mash ESC
+2. Try `Ctrl+C` first
+3. If dead: open new terminal, run `tmux kill-session -t cc`
+4. Relaunch via BTT
+
+### Log files pile up
+```bash
+# Delete logs older than 7 days
+find ~/.logs/claude -name "trace_*.log" -mtime +7 -delete
+```
+
+### Pane layout messed up
+```bash
+# Reset to default layout
+tmux select-layout -t cc:repl even-horizontal
+```
+
+---
+
+## Advanced: Customize for Your Workflow
+
+### Change starting directory
+Replace `-c /tmp` with your project path:
+```bash
+tmux split-window -h -t cc:repl -c ~/your/project
+```
+
+### Add more panes
+After the split commands, add:
+```bash
+tmux split-window -v -t cc:repl.left -c ~/another/dir
+```
+
+### Use different editor
+Replace the shell pane command:
+```bash
+tmux send-keys -t cc:repl.right 'nvim .' C-m
+```
+
+---
+
+## My Recommendation
+
+**Use Option 1 (Base)** unless you have a specific reason not to.
+
+Why:
+- Simplest mental model
+- Fewest moving parts
+- Easy to debug when it breaks
+- Full logging preserved
+- Reattachment works correctly
+
+Switch to Option 2 (Nuke) only if Claude crashes so often that you need guaranteed fresh starts.
+
+Switch to Option 3 (Multi-pane) only if you truly work inside tmux all day and won't be confused by the layout.
+
+---
+
+## Test Scripts
+
+Saved at:
+- `/tmp/claude_tmux_base.sh`
+- `/tmp/claude_tmux_nuke.sh`
+- `/tmp/claude_tmux_multi.sh`
+
+Run any to test before committing to BTT:
+```bash
+/tmp/claude_tmux_base.sh
+```
+
+Press `Ctrl+b d` to detach, then `tmux attach -t cc` to verify reattachment.

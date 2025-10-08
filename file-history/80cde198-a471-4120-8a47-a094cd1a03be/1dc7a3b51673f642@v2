@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Base one-liner variant - single pane, massive scrollback, auto-logging
+
+tmux has-session -t cc 2>/dev/null && tmux attach -t cc || { \
+  tmux new-session -d -s cc -n repl; \
+  tmux set-option  -t cc history-limit 1000000 \; \
+                   set-option  -t cc escape-time 0 \; \
+                   set-option  -t cc mouse on; \
+  tmux set-window-option -t cc:repl aggressive-resize on \; \
+                         set-window-option -t cc:repl remain-on-exit on; \
+  mkdir -p "$HOME/.logs/claude"; \
+  tmux pipe-pane -t cc:repl "stdbuf -i0 -o0 -e0 tee -a $HOME/.logs/claude/trace_$(date +%Y%m%d_%H%M%S).log"; \
+  tmux send-keys -t cc:repl 'claude --dangerously-skip-permissions --add-dir /tmp --resume --fork-session' C-m; \
+  tmux attach -t cc; \
+}

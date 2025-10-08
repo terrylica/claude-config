@@ -1,0 +1,37 @@
+#!/bin/bash
+# Monitor pipeline progress every 10 minutes
+
+while true; do
+    echo "========================================"
+    echo "Pipeline Status Check: $(date)"
+    echo "========================================"
+
+    # Check if pipeline is still running
+    if pgrep -f "full_pipeline.sh" > /dev/null; then
+        echo "✓ Pipeline is running"
+
+        # Show last 50 lines of progress
+        echo ""
+        echo "Latest progress:"
+        tail -50 pipeline_full.log | grep -E "Progress:|Downloading|✓|✅|STEP"
+
+        # Show current data directory size
+        echo ""
+        echo "Current data sizes:"
+        du -sh data/funding_rates data/raw_ticks data/1min_bars 2>/dev/null || echo "  Calculating..."
+
+    else
+        echo "❌ Pipeline has stopped"
+        echo ""
+        echo "Final status:"
+        tail -100 pipeline_full.log
+        break
+    fi
+
+    echo ""
+    echo "Next check in 10 minutes ($(date -v+10M '+%H:%M'))..."
+    echo ""
+
+    # Wait 10 minutes
+    sleep 600
+done

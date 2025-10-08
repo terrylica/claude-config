@@ -1,0 +1,227 @@
+"""
+Compute MAE/MFE Quality Target Labels
+
+Calculates directional trading quality (reward/risk ratio) for long and short positions.
+
+SLOs:
+- Correctness: Lookahead-free (window starts at t+1), edge cases handled
+- Availability: >= 80% valid samples (exclude flat markets only)
+- Observability: Log quality distribution, sample counts
+- Maintainability: Use pandas operations (out-of-box), no custom algorithms
+
+Usage:
+    cd /workspace
+    python -m experiments.phase5_mae_mfe_ipss_20251003.compute_targets
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+import numpy as np
+
+# Add workspace to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+
+def calculate_directional_quality(df: pd.DataFrame, horizon: int = 20, max_quality: float = 100.0) -> pd.DataFrame:
+    """
+    Calculate MAE/MFE quality for long/short positions
+
+    Args:
+        df: OHLC DataFrame with columns ['open', 'high', 'low', 'close']
+        horizon: Number of bars to look forward (e.g., 20 bars = 100 min for 5-min data)
+        max_quality: Maximum quality value for perfect trades (MAE=0)
+
+    Returns:
+        DataFrame with columns:
+            - long_quality: MFE/MAE for long (higher = better)
+            - short_quality: MFE/MAE for short (higher = better)
+            - best_direction: 'long' or 'short' (whichever has higher quality)
+            - best_quality: max(long_quality, short_quality)
+
+    Edge cases:
+        - MFE=0, MAE=0 (flat market): np.nan (exclude from training)
+        - MAE=0, MFE>0 (perfect trade): max_quality (clip to avoid inf)
+        - MFE=0, MAE>0 (no opportunity): 0.0 (valid, poor trade)
+
+    SLO (Correctness): Window starts at i+1 (no lookahead)
+    """
+    required_cols = ['open', 'high', 'low', 'close']
+    missing = set(required_cols) - set(df.columns)
+    if missing:
+        raise ValueError(f"DataFrame missing required columns: {missing}")
+
+    n = len(df)
+    long_quality = np.full(n, np.nan)
+    short_quality = np.full(n, np.nan)
+
+    print(f"Calculating quality labels for {n} bars with horizon H={horizon}")
+
+    for i in range(n - horizon):
+        entry_price = df['close'].iloc[i]
+
+        # Window: [i+1:i+horizon+1] to avoid lookahead
+        window_high = df['high'].iloc[i+1:i+horizon+1].max()
+        window_low = df['low'].iloc[i+1:i+horizon+1].min()
+
+        # Long position
+        MFE_long = window_high - entry_price
+        MAE_long = entry_price - window_low
+
+        if MAE_long > 0:
+            long_quality[i] = min(MFE_long / MAE_long, max_quality)
+        elif MFE_long > 0 and MAE_long == 0:
+            long_quality[i] = max_quality  # Perfect trade (no drawdown)
+        # else: MFE_long == MAE_long == 0 → np.nan (flat market, exclude)
+
+        # Short position
+        MFE_short = entry_price - window_low
+        MAE_short = window_high - entry_price
+
+        if MAE_short > 0:
+            short_quality[i] = min(MFE_short / MAE_short, max_quality)
+        elif MFE_short > 0 and MAE_short == 0:
+            short_quality[i] = max_quality
+
+        if (i + 1) % 1000 == 0 or i == n - horizon - 1:
+            print(f"  Progress: {i+1}/{n-horizon} bars processed")
+
+    results = pd.DataFrame({
+        'long_quality': long_quality,
+        'short_quality': short_quality
+    }, index=df.index)
+
+    # Best direction per bar
+    results['best_direction'] = np.where(
+        results['long_quality'] > results['short_quality'],
+        'long',
+        'short'
+    )
+    results['best_quality'] = np.maximum(
+        results['long_quality'],
+        results['short_quality']
+    )
+
+    return results
+
+
+def validate_quality_labels(quality_df: pd.DataFrame, min_coverage: float = 0.80):
+    """
+    Validate quality labels meet SLO requirements
+
+    SLO (Availability): >= 80% valid samples
+
+    Args:
+        quality_df: DataFrame with quality columns
+        min_coverage: Minimum fraction of valid samples
+
+    Raises:
+        ValueError: If coverage below threshold
+    """
+    total_samples = len(quality_df)
+    valid_long = quality_df['long_quality'].notna().sum()
+    valid_short = quality_df['short_quality'].notna().sum()
+    valid_best = quality_df['best_quality'].notna().sum()
+
+    coverage_long = valid_long / total_samples
+    coverage_short = valid_short / total_samples
+    coverage_best = valid_best / total_samples
+
+    print(f"\nQuality label coverage:")
+    print(f"  Long quality: {valid_long}/{total_samples} ({coverage_long:.2%})")
+    print(f"  Short quality: {valid_short}/{total_samples} ({coverage_short:.2%})")
+    print(f"  Best quality: {valid_best}/{total_samples} ({coverage_best:.2%})")
+
+    if coverage_best < min_coverage:
+        raise ValueError(
+            f"Coverage {coverage_best:.2%} < minimum {min_coverage:.2%} (SLO: Availability)"
+        )
+
+    print(f"✓ Coverage validation passed (>= {min_coverage:.2%})")
+
+
+def log_quality_distribution(quality_df: pd.DataFrame):
+    """
+    Log quality distribution statistics (SLO: Observability)
+    """
+    print(f"\nQuality distribution:")
+
+    for col in ['long_quality', 'short_quality', 'best_quality']:
+        valid_values = quality_df[col].dropna()
+
+        if len(valid_values) == 0:
+            print(f"  {col}: No valid values")
+            continue
+
+        print(f"\n  {col}:")
+        print(f"    Min:    {valid_values.min():.4f}")
+        print(f"    25%:    {valid_values.quantile(0.25):.4f}")
+        print(f"    Median: {valid_values.median():.4f}")
+        print(f"    75%:    {valid_values.quantile(0.75):.4f}")
+        print(f"    Max:    {valid_values.max():.4f}")
+        print(f"    Mean:   {valid_values.mean():.4f}")
+
+    # Direction bias
+    direction_counts = quality_df['best_direction'].value_counts()
+    print(f"\n  Best direction:")
+    for direction, count in direction_counts.items():
+        pct = count / len(quality_df) * 100
+        print(f"    {direction}: {count} ({pct:.1f}%)")
+
+
+def main():
+    """Execute target calculation pipeline"""
+    print("="*70)
+    print("Phase 5: MAE/MFE Quality Target Calculation")
+    print("="*70)
+
+    # Paths
+    workspace = Path(__file__).parent.parent.parent
+    data_csv = workspace / "ml_feature_set/sample_data/resampled_binance_SOL-5m.csv"
+    output_csv = Path(__file__).parent / "results/quality_labels.csv"
+
+    # Load data
+    print(f"\nLoading data from: {data_csv}")
+    if not data_csv.exists():
+        raise FileNotFoundError(f"Data file not found: {data_csv}")
+
+    df = pd.read_csv(data_csv)
+
+    # Parse timestamp
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+    elif 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.set_index('timestamp', inplace=True)
+    else:
+        raise ValueError(f"CSV missing 'date' or 'timestamp' column. Columns: {df.columns.tolist()}")
+
+    print(f"Loaded {len(df)} bars")
+    print(f"Date range: {df.index[0]} to {df.index[-1]}")
+
+    # Calculate quality labels
+    horizon = 20  # 100 minutes for 5-min bars
+    quality_df = calculate_directional_quality(df, horizon=horizon)
+
+    # Validate
+    validate_quality_labels(quality_df, min_coverage=0.80)
+
+    # Log distribution (SLO: Observability)
+    log_quality_distribution(quality_df)
+
+    # Save
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    quality_df.to_csv(output_csv)
+
+    print(f"\n✓ Quality labels saved to: {output_csv}")
+    print(f"  Rows: {len(quality_df)}")
+    print(f"  Columns: {list(quality_df.columns)}")
+
+    print("\n" + "="*70)
+    print("Target calculation complete")
+    print("="*70)
+
+
+if __name__ == '__main__':
+    main()

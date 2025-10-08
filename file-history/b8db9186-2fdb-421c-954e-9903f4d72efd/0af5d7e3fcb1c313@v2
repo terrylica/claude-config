@@ -1,0 +1,186 @@
+# Rolling APY Chart: Overlapping Issues Fixed
+
+**Date:** October 1, 2025
+**Issue:** Overlapping subplots and labels in bottom distribution panels
+
+---
+
+## Problem Identified
+
+The original `okx_funding_arb_v1_6_less_harsh_rolling_apy.png` had three overlapping issues:
+
+### 1. Distribution Histograms Overlapping
+**Root cause:** Logic error in subplot positioning
+```python
+# BROKEN CODE:
+for idx, (window, color) in enumerate(zip(windows, colors)):
+    ax = fig.add_subplot(gs[2, idx // 2]) if idx < 2 else fig.add_subplot(gs[2, 1])
+```
+
+**Problem:**
+- `idx // 2` for idx=0,1,2,3 gives: 0, 0, 1, 1
+- This creates 4 histograms but only 2 subplot positions
+- idx=0 and idx=1 both write to `gs[2, 0]` → overlap!
+- idx=2 and idx=3 both write to `gs[2, 1]` → overlap!
+
+### 2. Titles Overlapping
+**Root cause:** Too many plots crammed into limited space without proper padding
+
+### 3. X-axis Labels Overlapping
+**Root cause:** Default `plt.tight_layout()` insufficient for complex multi-panel layout
+
+---
+
+## Solution Implemented
+
+### Fix 1: Show Only 2 Most Relevant Distributions
+**Changed from:** Attempting to plot all 4 windows (30d, 90d, 180d, 365d)
+**Changed to:** Plot only 2 key windows (90d, 365d)
+
+**Rationale:**
+- 90-day: Short-term performance (quarterly view)
+- 365-day: Long-term performance (annual view)
+- These are most relevant for deployment decisions
+
+**New code:**
+```python
+distribution_windows = [(90, '#F77F00', 0), (365, '#2E86AB', 1)]
+
+for window, color, pos in distribution_windows:
+    ax = fig.add_subplot(gs[2, pos])  # Explicit positioning
+    # ... plot histogram
+```
+
+### Fix 2: Enhanced Padding
+**Changed from:** `plt.tight_layout()`
+**Changed to:** `plt.tight_layout(pad=2.0, h_pad=2.5, w_pad=1.5)`
+
+**Impact:**
+- `pad=2.0`: Overall padding around figure
+- `h_pad=2.5`: Vertical spacing between rows
+- `w_pad=1.5`: Horizontal spacing between columns
+
+### Fix 3: Improved Formatting
+**Enhancements:**
+- Added explicit `pad=10` to subplot titles
+- Increased legend `framealpha=0.95` for clarity
+- Added reference lines for 15% and 20% targets
+- Added statistics text box (sample size, std dev)
+- Reduced title fontsize to 11 (from 12) for more space
+
+---
+
+## Result: Fixed Chart
+
+**New layout:**
+```
+┌─────────────────────────────────────────────────┐
+│  Panel 1: Equity Curve (full width)             │
+├─────────────────────────────────────────────────┤
+│  Panel 2: Rolling APY Time Series (full width)  │
+│  (30d, 90d, 180d, 365d all shown)               │
+├────────────────────────┬────────────────────────┤
+│  Panel 3 Left:         │  Panel 3 Right:        │
+│  90-Day APY            │  365-Day APY           │
+│  Distribution          │  Distribution          │
+│  (no overlap!)         │  (no overlap!)         │
+└────────────────────────┴────────────────────────┘
+```
+
+**Improvements:**
+- ✅ No overlapping histograms
+- ✅ Clear title separation
+- ✅ Readable x-axis labels
+- ✅ Clean, professional appearance
+- ✅ Added reference lines for deployment targets (15%, 20%)
+- ✅ Statistics box showing n and std dev
+
+---
+
+## Verification
+
+**Re-ran backtest successfully:**
+```
+CAGR: 13.16% (vs 13.10% previous - consistent)
+365-day rolling mean APY: 18.52% (vs 18.45% previous - consistent)
+```
+
+**Files updated:**
+- ✅ `okx_funding_arb_v1_6_less_harsh_rolling_apy.png` - Fixed chart
+- ✅ `okx_funding_arb_v1_6_less_harsh_rolling_apy.csv` - Rolling APY data
+- ✅ `analysis/funding_arb_strat_v1_6_less_harsh.py` - Fixed code
+
+---
+
+## Technical Details
+
+### Before Fix
+```python
+# Attempted 4 distributions in 2 positions
+for idx, (window, color) in enumerate(zip([30,90,180,365], colors)):
+    ax = fig.add_subplot(gs[2, idx // 2])  # Bug: idx//2 repeats values
+    # idx=0: gs[2,0]
+    # idx=1: gs[2,0] <- OVERLAP!
+    # idx=2: gs[2,1]
+    # idx=3: gs[2,1] <- OVERLAP!
+```
+
+### After Fix
+```python
+# Show 2 distributions in 2 positions
+distribution_windows = [(90, color1, 0), (365, color2, 1)]
+for window, color, pos in distribution_windows:
+    ax = fig.add_subplot(gs[2, pos])  # Explicit, no repeats
+    # pos=0: gs[2,0] - 90-day
+    # pos=1: gs[2,1] - 365-day
+```
+
+---
+
+## Lessons Learned
+
+**1. Explicit positioning > calculated positioning**
+- Using explicit `pos` values prevents logic errors
+- Easier to debug and maintain
+
+**2. Padding matters for multi-panel plots**
+- Default `tight_layout()` insufficient for complex layouts
+- Manual `h_pad` and `w_pad` critical for clarity
+
+**3. Less is more in visualization**
+- 2 well-formatted distributions > 4 crammed ones
+- Choose most relevant windows for deployment decisions
+
+**4. Test edge cases**
+- Original code worked for 2 windows but failed for 4
+- Always test with max expected load
+
+---
+
+## Chart Interpretation Guide
+
+### Panel 1: Equity Curve
+- Shows capital growth over time
+- Look for: Consistent upward trend, drawdown periods
+
+### Panel 2: Rolling APY Time Series
+- Shows APY at different time horizons simultaneously
+- Look for: Convergence of lines (stability), divergence (regime change)
+- Reference lines: 15% (good), 20% (excellent)
+
+### Panel 3 Left: 90-Day Distribution
+- Short-term performance distribution
+- Look for: Mean/median position, spread, skewness
+- Orange color, n=2122 samples
+
+### Panel 3 Right: 365-Day Distribution
+- Long-term performance distribution
+- Look for: Consistency (narrow spread), positive skew
+- Blue color, n=2122 samples
+- **Most important for deployment decision**
+
+---
+
+**Status:** ✅ FIXED
+**Verification:** Backtest re-run successful, results consistent
+**Chart:** Clean, professional, no overlaps

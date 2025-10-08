@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+Real Production Performance Test: Option 1 vs Option 2
+
+This script tests ACTUAL production scenarios with 5-minute SOL data:
+- Option 1: Expanding window (refit on every bar)
+- Option 2: Stateful STL (fit once, transform streaming, refit periodically)
+
+Goal: Determine if there's ANY reason NOT to use Option 2
+"""
+
+import sys
+import time
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from statsmodels.tsa.seasonal import STL
+
+sys.path.insert(0, str(Path.cwd()))
+
+# Import stateful implementation
+exec(open('/tmp/stateful_stl_production.py').read())
+
+
+def test_option1_expanding_window(historical_df, streaming_df, sample_size=100):
+    """
+    Option 1: Expanding Window (Current Framework)
+
+    Simulates: For each new bar, refit STL on all data up to that point
+    """
+    print("\n" + "="*80)
+    print("OPTION 1: Expanding Window (Refit on Every Bar)")
+    print("="*80)
+
+    historical_size = len(historical_df)
+    results = []
+
+    print(f"\nSimulating {sample_size} streaming bars...")
+    print(f"Historical data: {historical_size} bars")
+
+    for i in range(sample_size):
+        # Get current data (historical + bars up to now)
+        current_df = pd.concat([
+            historical_df,
+            streaming_df.iloc[:i+1]
+        ])
+
+        # Refit STL on ALL current data
+        start = time.time()
+        stl = STL(current_df['close'], period=13, seasonal=13, trend=31)
+        result = stl.fit()
+        elapsed = time.time() - start
+
+        results.append({
+            'bar': i + 1,
+            'total_bars': len(current_df),
+            'time_ms': elapsed * 1000
+        })
+
+        if (i + 1) % 20 == 0:
+            print(f"  Bar {i+1:3d}: {len(current_df):6d} total bars, {elapsed*1000:6.1f}ms")
+
+    # Summary
+    times = [r['time_ms'] for r in results]
+    print(f"\nPerformance Summary:")
+    print(f"  Bars processed: {len(results)}")
+    print(f"  Avg time per bar: {np.mean(times):.1f}ms")
+    print(f"  Min time: {np.min(times):.1f}ms")
+    print(f"  Max time: {np.max(times):.1f}ms")
+    print(f"  Total time: {sum(times)/1000:.2f}s")
+    print(f"  Final dataset size: {results[-1]['total_bars']} bars")
+
+    return results
+
+
+def test_option2_stateful(historical_df, streaming_df, sample_size=100, refit_every=None):
+    """
+    Option 2: Stateful STL (Fit Once, Transform Many)
+
+    Args:
+        refit_every: Refit every N bars (None = no refitting)
+    """
+    print("\n" + "="*80)
+    if refit_every:
+        print(f"OPTION 2: Stateful STL (Refit Every {refit_every} Bars)")
+    else:
+        print("OPTION 2: Stateful STL (No Refitting)")
+    print("="*80)
+
+    # Initial fit on historical data
+    print(f"\nInitial fit on {len(historical_df)} historical bars...")
+    start = time.time()
+    stl = StatefulSTLAtoms(seasonal=13, trend=31)
+    stl.fit(historical_df)
+    fit_time = time.time() - start
+    print(f"  Initial fit: {fit_time*1000:.1f}ms")
+
+    results = []
+    total_refit_time = 0
+    refit_count = 0
+
+    print(f"\nProcessing {sample_size} streaming bars...")
+
+    for i in range(sample_size):
+        # Check if we need to refit
+        if refit_every and (i + 1) % refit_every == 0:
+            # Refit on historical + all bars up to now
+            refit_df = pd.concat([
+                historical_df,
+                streaming_df.iloc[:i+1]
+            ])
+
+            start = time.time()
+            stl.fit(refit_df)
+            refit_elapsed = time.time() - start
+
+            total_refit_time += refit_elapsed
+            refit_count += 1
+
+            print(f"  Bar {i+1:3d}: REFIT on {len(refit_df)} bars ({refit_elapsed*1000:.1f}ms)")
+
+        # Transform current bar (fast)
+        current_bar = streaming_df.iloc[i:i+1]
+
+        start = time.time()
+        features = stl.transform(current_bar)
+        elapsed = time.time() - start
+
+        results.append({
+            'bar': i + 1,
+            'time_ms': elapsed * 1000,
+            'is_refit': refit_every and (i + 1) % refit_every == 0
+        })
+
+        if (i + 1) % 20 == 0 and not (refit_every and (i + 1) % refit_every == 0):
+            print(f"  Bar {i+1:3d}: transform in {elapsed*1000:6.2f}ms")
+
+    # Summary
+    transform_times = [r['time_ms'] for r in results if not r['is_refit']]
+
+    print(f"\nPerformance Summary:")
+    print(f"  Bars processed: {len(results)}")
+    print(f"  Initial fit: {fit_time*1000:.1f}ms (one-time cost)")
+    if refit_count > 0:
+        print(f"  Refits: {refit_count} times, {total_refit_time*1000:.1f}ms total")
+    print(f"  Avg transform time: {np.mean(transform_times):.2f}ms")
+    print(f"  Min transform: {np.min(transform_times):.2f}ms")
+    print(f"  Max transform: {np.max(transform_times):.2f}ms")
+    print(f"  Total time: {(fit_time + total_refit_time + sum(transform_times)/1000):.2f}s")
+
+    return results
+
+
+def compare_options(historical_df, streaming_df, sample_size=100):
+    """Compare all options side by side"""
+    print("\n" + "="*80)
+    print("COMPREHENSIVE COMPARISON: 5-Minute Production Scenario")
+    print("="*80)
+    print(f"\nScenario:")
+    print(f"  Historical data: {len(historical_df):,} bars")
+    print(f"  Streaming bars to process: {sample_size}")
+    print(f"  Bar frequency: 5 minutes")
+    print(f"  Time between bars: 300 seconds")
+
+    # Option 1: Expanding window
+    option1_results = test_option1_expanding_window(historical_df, streaming_df, sample_size)
+
+    # Option 2a: Stateful (no refitting)
+    option2a_results = test_option2_stateful(historical_df, streaming_df, sample_size, refit_every=None)
+
+    # Option 2b: Stateful (refit every 50 bars = ~4 hours)
+    option2b_results = test_option2_stateful(historical_df, streaming_df, sample_size, refit_every=50)
+
+    # Option 2c: Stateful (refit every 100 bars = ~8 hours)
+    option2c_results = test_option2_stateful(historical_df, streaming_df, sample_size, refit_every=100)
+
+    # Final comparison
+    print("\n" + "="*80)
+    print("FINAL COMPARISON")
+    print("="*80)
+
+    option1_times = [r['time_ms'] for r in option1_results]
+    option2a_times = [r['time_ms'] for r in option2a_results if not r['is_refit']]
+    option2b_times = [r['time_ms'] for r in option2b_results if not r['is_refit']]
+    option2c_times = [r['time_ms'] for r in option2c_results if not r['is_refit']]
+
+    print(f"\nAverage Time Per Bar:")
+    print(f"  Option 1 (Expanding): {np.mean(option1_times):8.1f}ms")
+    print(f"  Option 2a (Stateful, no refit): {np.mean(option2a_times):8.2f}ms")
+    print(f"  Option 2b (Stateful, refit/50): {np.mean(option2b_times):8.2f}ms")
+    print(f"  Option 2c (Stateful, refit/100): {np.mean(option2c_times):8.2f}ms")
+
+    print(f"\nSpeedup vs Option 1:")
+    print(f"  Option 2a: {np.mean(option1_times)/np.mean(option2a_times):.0f}x faster")
+    print(f"  Option 2b: {np.mean(option1_times)/np.mean(option2b_times):.0f}x faster")
+    print(f"  Option 2c: {np.mean(option1_times)/np.mean(option2c_times):.0f}x faster")
+
+    print(f"\nTime Available vs Time Used (5-min bars = 300s between bars):")
+    print(f"  Option 1: {np.mean(option1_times)/1000:.2f}s used / 300s available ({np.mean(option1_times)/1000/300*100:.1f}% utilization)")
+    print(f"  Option 2: {np.mean(option2a_times)/1000:.4f}s used / 300s available ({np.mean(option2a_times)/1000/300*100:.3f}% utilization)")
+
+    print(f"\n✓ Conclusion:")
+    if np.mean(option1_times) < 1000:  # Less than 1 second
+        print(f"  • Option 1 is FAST ENOUGH for 5-min bars ({np.mean(option1_times):.1f}ms << 300s)")
+        print(f"  • Option 2 is {np.mean(option1_times)/np.mean(option2a_times):.0f}x faster but BOTH work fine")
+        print(f"  • Recommendation: Use Option 2 for cleaner architecture, not performance")
+    else:
+        print(f"  • Option 1 is TOO SLOW ({np.mean(option1_times)/1000:.1f}s per bar)")
+        print(f"  • Option 2 is REQUIRED for production ({np.mean(option2a_times):.2f}ms per bar)")
+        print(f"  • Recommendation: MUST use Option 2")
+
+
+def test_scalability(historical_df, streaming_df):
+    """Test how performance scales with data size"""
+    print("\n" + "="*80)
+    print("SCALABILITY TEST: Performance vs Data Size")
+    print("="*80)
+
+    # Test with increasing historical data sizes
+    sizes = [1000, 5000, 10000, 50000, 100000, 200000]
+
+    print("\nOption 1 (Expanding Window) Performance:")
+    print(f"{'Historical Bars':>15} {'Time per Bar':>15} {'Acceptable?':>15}")
+    print("-" * 50)
+
+    for size in sizes:
+        if size > len(historical_df):
+            break
+
+        test_df = historical_df.iloc[:size]
+        new_bar = streaming_df.iloc[:1]
+
+        # Combine and time
+        full_df = pd.concat([test_df, new_bar])
+
+        start = time.time()
+        stl = STL(full_df['close'], period=13, seasonal=13, trend=31)
+        result = stl.fit()
+        elapsed = time.time() - start
+
+        acceptable = "✓ YES" if elapsed < 1.0 else "✗ NO"
+        print(f"{size:>15,} {elapsed*1000:>14.1f}ms {acceptable:>15}")
+
+    print("\nOption 2 (Stateful) Performance:")
+    print(f"{'Historical Bars':>15} {'Fit Time':>15} {'Transform Time':>15}")
+    print("-" * 50)
+
+    for size in sizes:
+        if size > len(historical_df):
+            break
+
+        test_df = historical_df.iloc[:size]
+        new_bar = streaming_df.iloc[:1]
+
+        # Fit
+        stl = StatefulSTLAtoms(seasonal=13, trend=31)
+        start = time.time()
+        stl.fit(test_df)
+        fit_time = time.time() - start
+
+        # Transform
+        start = time.time()
+        features = stl.transform(new_bar)
+        transform_time = time.time() - start
+
+        print(f"{size:>15,} {fit_time*1000:>14.1f}ms {transform_time*1000:>14.2f}ms")
+
+    print("\n✓ Insight:")
+    print("  • Option 1: Time increases linearly with data size")
+    print("  • Option 2: Fit time increases, transform time stays constant")
+    print("  • Option 2: Transform is ALWAYS fast (regardless of history size)")
+
+
+if __name__ == '__main__':
+    # Load data
+    print("Loading SOL 5-minute data...")
+    df = pd.read_csv('ml_feature_set/sample_data/resampled_binance_SOL-5m.csv')
+    df['actual_ready_time'] = pd.to_datetime(df['date'])
+    df = df.set_index('actual_ready_time')
+    print(f"✓ Loaded {len(df):,} bars")
+
+    # Split into historical and streaming
+    split_point = int(len(df) * 0.7)
+    historical = df.iloc[:split_point]
+    streaming = df.iloc[split_point:]
+
+    print(f"\nData Split:")
+    print(f"  Historical: {len(historical):,} bars (training)")
+    print(f"  Streaming: {len(streaming):,} bars (production simulation)")
+
+    # Run comprehensive comparison
+    compare_options(historical, streaming, sample_size=100)
+
+    # Test scalability
+    test_scalability(historical, streaming)
+
+    print("\n" + "="*80)
+    print("TESTING COMPLETE")
+    print("="*80)

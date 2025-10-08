@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""
+Aggregate tick data to 1-minute bars for a date range.
+
+Usage:
+    # Aggregate all months from 2023-01 to 2025-08
+    python scripts/aggregate_range.py --start 2023-01 --end 2025-08
+
+    # Aggregate 2023 Q4
+    python scripts/aggregate_range.py --start 2023-10 --end 2023-12
+
+    # Aggregate specific year
+    python scripts/aggregate_range.py --start 2024-01 --end 2024-12
+"""
+
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+import subprocess
+import numpy as np
+
+
+def parse_month(month_str: str) -> tuple[int, int]:
+    """Parse 'YYYY-MM' to (year, month)."""
+    try:
+        year, month = map(int, month_str.split('-'))
+        if month < 1 or month > 12:
+            raise ValueError
+        return year, month
+    except:
+        raise ValueError(f"Invalid month format: {month_str}. Use YYYY-MM (e.g., 2023-01)")
+
+
+def get_month_range(start: str, end: str) -> list[tuple[int, int]]:
+    """Generate list of (year, month) tuples in range."""
+
+    start_year, start_month = parse_month(start)
+    end_year, end_month = parse_month(end)
+
+    start_date = datetime(start_year, start_month, 1)
+    end_date = datetime(end_year, end_month, 1)
+
+    if start_date > end_date:
+        raise ValueError(f"Start month {start} is after end month {end}")
+
+    months = []
+    current = start_date
+
+    while current <= end_date:
+        months.append((current.year, current.month))
+        current += relativedelta(months=1)
+
+    return months
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Aggregate tick data to 1-min bars for a date range',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Aggregate full range (2023-01 to 2025-08)
+  python scripts/aggregate_range.py --start 2023-01 --end 2025-08
+
+  # Aggregate 2023 Q4
+  python scripts/aggregate_range.py --start 2023-10 --end 2023-12
+
+  # Aggregate 2024
+  python scripts/aggregate_range.py --start 2024-01 --end 2024-12
+        """
+    )
+
+    parser.add_argument('--start', required=True, help='Start month (YYYY-MM)')
+    parser.add_argument('--end', required=True, help='End month (YYYY-MM)')
+    parser.add_argument('--data-dir', type=Path, default=Path('data'),
+                       help='Base data directory (default: data/)')
+
+    args = parser.parse_args()
+
+    # Parse and validate range
+    try:
+        months = get_month_range(args.start, args.end)
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return 1
+
+    print("="*80)
+    print("BULK AGGREGATION TO 1-MIN BARS")
+    print("="*80)
+    print(f"Range: {args.start} to {args.end}")
+    print(f"Months: {len(months)}")
+    print()
+
+    # Check which months have tick data
+    available = []
+    missing = []
+
+    for year, month in months:
+        tick_file = args.data_dir / "raw_ticks" / str(year) / f"{month:02d}.parquet"
+        if tick_file.exists():
+            available.append((year, month))
+        else:
+            missing.append((year, month))
+
+    print(f"Tick data available: {len(available)}/{len(months)} months")
+
+    if missing:
+        print(f"\n⚠️  Missing tick data for {len(missing)} months:")
+        for year, month in missing[:5]:  # Show first 5
+            print(f"  {year}-{month:02d}")
+        if len(missing) > 5:
+            print(f"  ... and {len(missing) - 5} more")
+        print(f"\nDownload missing months:")
+        print(f"  python scripts/download_range.py --start {args.start} --end {args.end} --ticks")
+        print()
+
+    if not available:
+        print("\n❌ No tick data found. Download first.")
+        return 1
+
+    print(f"Confirm aggregation of {len(available)} months? [y/N]: ", end='', flush=True)
+
+    # Auto-confirm if running non-interactively
+    if not sys.stdin.isatty():
+        print("y (auto-confirmed)")
+        proceed = True
+    else:
+        proceed = input().strip().lower() == 'y'
+
+    if not proceed:
+        print("\nCancelled.")
+        return 0
+
+    # Aggregate each month
+    failed = []
+    results = []
+
+    for i, (year, month) in enumerate(available, 1):
+        print(f"\n{'='*80}")
+        print(f"Progress: {i}/{len(available)} - {year}-{month:02d}")
+        print(f"{'='*80}")
+
+        cmd = [
+            'uv', 'run', '--active', 'python',
+            'scripts/aggregate_month.py',
+            str(year),
+            str(month),
+            '--data-dir', str(args.data_dir)
+        ]
+
+        result = subprocess.run(cmd)
+
+        if result.returncode != 0:
+            failed.append(f"{year}-{month:02d}")
+            print(f"\n⚠️  Failed: {year}-{month:02d}")
+        else:
+            # Get output file size for summary
+            output_file = args.data_dir / "1min_bars" / str(year) / f"{month:02d}.parquet"
+            if output_file.exists():
+                size_mb = output_file.stat().st_size / 1024 / 1024
+                results.append(size_mb)
+
+    # Summary
+    print("\n" + "="*80)
+    print("AGGREGATION SUMMARY")
+    print("="*80)
+    print(f"Total months: {len(available)}")
+    print(f"Successful: {len(available) - len(failed)}")
+    print(f"Failed: {len(failed)}")
+
+    if results:
+        total_size_mb = sum(results)
+        avg_compression = 4.2  # Typical compression ratio from testing
+        estimated_input_gb = (total_size_mb / 1024) * avg_compression
+
+        print(f"\nStorage:")
+        print(f"  Aggregated size: {total_size_mb / 1024:.2f} GB ({total_size_mb:.0f} MB)")
+        print(f"  Estimated original: ~{estimated_input_gb:.1f} GB")
+        print(f"  Space saved: ~{(1 - total_size_mb / 1024 / estimated_input_gb) * 100:.0f}%")
+
+    if failed:
+        print(f"\nFailed months: {', '.join(failed)}")
+        print("You can retry individual months with:")
+        for month_str in failed:
+            year, month = month_str.split('-')
+            print(f"  python scripts/aggregate_month.py {year} {month}")
+        return 1
+
+    print("\n✅ All aggregations complete!")
+
+    # Next steps
+    print("\n" + "="*80)
+    print("NEXT STEPS")
+    print("="*80)
+    print("\n1. Verify aggregated data quality:")
+    print("   python verify_1min_bars.py")
+    print("\n2. Update backtester to use new structure")
+    print("\n3. After verification, delete raw ticks (saves ~75% space):")
+    print("   rm -rf data/raw_ticks/")
+    print()
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

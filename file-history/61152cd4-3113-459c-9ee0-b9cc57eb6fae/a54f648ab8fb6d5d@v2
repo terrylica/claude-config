@@ -1,0 +1,391 @@
+"""
+Portfolio state tracking with explicit locked capital management.
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, Optional, Literal
+from decimal import Decimal
+
+
+@dataclass
+class Position:
+    """Represents a single position in the portfolio."""
+
+    symbol: str
+    quantity: float  # Positive for long, negative for short
+    entry_price: float
+    side: Literal["long", "short"]
+    entry_value: float = field(init=False)
+
+    def __post_init__(self):
+        """Calculate derived fields after initialization."""
+        self.entry_value = abs(self.quantity) * self.entry_price
+
+    def get_current_value(self, current_price: float) -> float:
+        """Calculate current market value of position."""
+        return abs(self.quantity) * current_price
+
+    def get_pnl(self, current_price: float) -> float:
+        """Calculate unrealized P&L."""
+        current_value = self.get_current_value(current_price)
+        if self.side == "long":
+            return current_value - self.entry_value
+        else:  # short
+            return self.entry_value - current_value
+
+    def get_pnl_percent(self, current_price: float) -> float:
+        """Calculate unrealized P&L as percentage."""
+        pnl = self.get_pnl(current_price)
+        return (pnl / self.entry_value) * 100 if self.entry_value > 0 else 0.0
+
+
+class PortfolioState:
+    """
+    Track portfolio cash, positions, and locked capital.
+
+    Core principle: Cash is either AVAILABLE or LOCKED in positions.
+    Total value = available_cash + sum(position_values)
+    """
+
+    def __init__(self, initial_capital: float):
+        """
+        Initialize portfolio with starting capital.
+
+        Args:
+            initial_capital: Starting cash in USD (or other base currency)
+        """
+        if initial_capital <= 0:
+            raise ValueError(f"Initial capital must be positive, got {initial_capital}")
+
+        self.initial_capital = initial_capital
+        self.cash = initial_capital  # Available cash (not locked)
+        self.positions: Dict[str, Position] = {}
+        self._closed_pnl = 0.0  # Realized P&L from closed positions
+
+    def get_available_cash(self) -> float:
+        """Get cash available for new positions (not locked)."""
+        return self.cash
+
+    def get_locked_capital(self, prices: Optional[Dict[str, float]] = None) -> float:
+        """
+        Get capital locked in open positions.
+
+        Args:
+            prices: Optional current prices. If not provided, uses entry prices.
+
+        Returns:
+            Total value of all open positions
+        """
+        if not prices:
+            # Use entry values if no current prices provided
+            return sum(pos.entry_value for pos in self.positions.values())
+
+        return sum(
+            pos.get_current_value(prices[symbol])
+            for symbol, pos in self.positions.items()
+            if symbol in prices
+        )
+
+    def get_total_value(self, prices: Optional[Dict[str, float]] = None) -> float:
+        """
+        Get total portfolio value (cash + positions).
+
+        Args:
+            prices: Current market prices for positions
+
+        Returns:
+            Total portfolio value
+        """
+        return self.cash + self.get_locked_capital(prices)
+
+    def get_total_pnl(self, prices: Dict[str, float]) -> float:
+        """
+        Get total P&L (realized + unrealized).
+
+        Args:
+            prices: Current market prices
+
+        Returns:
+            Total P&L in USD
+        """
+        unrealized = sum(
+            pos.get_pnl(prices[symbol])
+            for symbol, pos in self.positions.items()
+            if symbol in prices
+        )
+        return self._closed_pnl + unrealized
+
+    def get_return_percent(self, prices: Optional[Dict[str, float]] = None) -> float:
+        """Calculate portfolio return as percentage of initial capital."""
+        total_value = self.get_total_value(prices)
+        return ((total_value - self.initial_capital) / self.initial_capital) * 100
+
+    def can_allocate(self, dollar_amount: float) -> bool:
+        """
+        Check if enough cash available for allocation.
+
+        Args:
+            dollar_amount: Amount to allocate in USD
+
+        Returns:
+            True if sufficient cash available
+        """
+        return dollar_amount <= self.cash
+
+    def open_position(
+        self,
+        symbol: str,
+        quantity: float,
+        entry_price: float,
+        side: Literal["long", "short"] = "long"
+    ) -> Position:
+        """
+        Open a new position or add to existing.
+
+        Args:
+            symbol: Asset symbol
+            quantity: Number of units (positive for long, negative for short)
+            entry_price: Entry price per unit
+            side: 'long' or 'short'
+
+        Returns:
+            Position object
+
+        Raises:
+            ValueError: If insufficient cash available
+        """
+        capital_needed = abs(quantity) * entry_price
+
+        if not self.can_allocate(capital_needed):
+            raise ValueError(
+                f"Insufficient cash to open position: "
+                f"need ${capital_needed:,.2f}, have ${self.cash:,.2f}"
+            )
+
+        # Lock capital
+        self.cash -= capital_needed
+
+        if symbol in self.positions:
+            # Add to existing position (average entry price)
+            existing = self.positions[symbol]
+            total_qty = existing.quantity + quantity
+            total_value = existing.entry_value + capital_needed
+            avg_price = total_value / abs(total_qty) if total_qty != 0 else entry_price
+
+            self.positions[symbol] = Position(
+                symbol=symbol,
+                quantity=total_qty,
+                entry_price=avg_price,
+                side=side
+            )
+        else:
+            # New position
+            self.positions[symbol] = Position(
+                symbol=symbol,
+                quantity=quantity,
+                entry_price=entry_price,
+                side=side
+            )
+
+        return self.positions[symbol]
+
+    def close_position(self, symbol: str, exit_price: float) -> float:
+        """
+        Close position and realize P&L.
+
+        Args:
+            symbol: Asset symbol to close
+            exit_price: Exit price per unit
+
+        Returns:
+            Realized P&L in USD
+
+        Raises:
+            KeyError: If position doesn't exist
+        """
+        if symbol not in self.positions:
+            raise KeyError(f"No position found for {symbol}")
+
+        position = self.positions[symbol]
+
+        # Calculate P&L
+        pnl = position.get_pnl(exit_price)
+
+        # Release capital + P&L
+        exit_value = position.get_current_value(exit_price)
+        self.cash += exit_value
+
+        # Track realized P&L
+        self._closed_pnl += pnl
+
+        # Remove position
+        del self.positions[symbol]
+
+        return pnl
+
+    def reduce_position(
+        self,
+        symbol: str,
+        quantity_to_reduce: float,
+        exit_price: float
+    ) -> float:
+        """
+        Partially close a position.
+
+        Args:
+            symbol: Asset symbol
+            quantity_to_reduce: Amount to reduce (positive number)
+            exit_price: Exit price per unit
+
+        Returns:
+            Realized P&L from the reduction
+
+        Raises:
+            KeyError: If position doesn't exist
+            ValueError: If trying to reduce more than position size
+        """
+        if symbol not in self.positions:
+            raise KeyError(f"No position found for {symbol}")
+
+        position = self.positions[symbol]
+
+        if quantity_to_reduce > abs(position.quantity):
+            raise ValueError(
+                f"Cannot reduce {quantity_to_reduce} units, "
+                f"position only has {abs(position.quantity)} units"
+            )
+
+        # Calculate proportional P&L
+        reduction_ratio = quantity_to_reduce / abs(position.quantity)
+        exit_value = quantity_to_reduce * exit_price
+        entry_value_portion = position.entry_value * reduction_ratio
+
+        if position.side == "long":
+            pnl = exit_value - entry_value_portion
+        else:
+            pnl = entry_value_portion - exit_value
+
+        # Release capital + P&L
+        self.cash += exit_value
+        self._closed_pnl += pnl
+
+        # Update position
+        new_quantity = position.quantity - (quantity_to_reduce if position.side == "long" else -quantity_to_reduce)
+        position.quantity = new_quantity
+        position.entry_value -= entry_value_portion
+
+        # Remove if fully closed
+        if abs(new_quantity) < 1e-8:
+            del self.positions[symbol]
+
+        return pnl
+
+    def rebalance_to_weights(
+        self,
+        target_weights: Dict[str, float],
+        prices: Dict[str, float],
+        tolerance: float = 0.01
+    ) -> Dict[str, float]:
+        """
+        Rebalance portfolio to target weights.
+
+        Args:
+            target_weights: {symbol: weight} where weights sum to 1.0
+            prices: Current market prices
+            tolerance: Don't rebalance if within this % of target
+
+        Returns:
+            Dictionary of trades executed {symbol: dollar_amount}
+        """
+        total_value = self.get_total_value(prices)
+        trades = {}
+
+        # Calculate target values
+        for symbol, target_weight in target_weights.items():
+            target_value = target_weight * total_value
+            current_value = (
+                self.positions[symbol].get_current_value(prices[symbol])
+                if symbol in self.positions
+                else 0.0
+            )
+
+            diff = target_value - current_value
+            diff_pct = abs(diff) / total_value if total_value > 0 else 0
+
+            # Only trade if outside tolerance band
+            if diff_pct > tolerance:
+                if diff > 0:
+                    # Need to buy
+                    quantity = diff / prices[symbol]
+                    self.open_position(symbol, quantity, prices[symbol])
+                    trades[symbol] = diff
+                else:
+                    # Need to sell
+                    quantity_to_reduce = abs(diff) / prices[symbol]
+                    self.reduce_position(symbol, quantity_to_reduce, prices[symbol])
+                    trades[symbol] = diff  # Negative indicates sell
+
+        # Close positions not in target
+        for symbol in list(self.positions.keys()):
+            if symbol not in target_weights:
+                self.close_position(symbol, prices[symbol])
+                trades[symbol] = -self.positions[symbol].get_current_value(prices[symbol])
+
+        return trades
+
+    def get_position_summary(self, prices: Optional[Dict[str, float]] = None) -> Dict:
+        """
+        Get summary of all positions.
+
+        Args:
+            prices: Optional current prices for P&L calculation
+
+        Returns:
+            Dictionary with position details
+        """
+        summary = {
+            "cash": self.cash,
+            "initial_capital": self.initial_capital,
+            "realized_pnl": self._closed_pnl,
+            "positions": []
+        }
+
+        for symbol, pos in self.positions.items():
+            pos_data = {
+                "symbol": symbol,
+                "quantity": pos.quantity,
+                "side": pos.side,
+                "entry_price": pos.entry_price,
+                "entry_value": pos.entry_value,
+            }
+
+            if prices and symbol in prices:
+                current_price = prices[symbol]
+                pos_data.update({
+                    "current_price": current_price,
+                    "current_value": pos.get_current_value(current_price),
+                    "pnl": pos.get_pnl(current_price),
+                    "pnl_pct": pos.get_pnl_percent(current_price)
+                })
+
+            summary["positions"].append(pos_data)
+
+        if prices:
+            summary["total_value"] = self.get_total_value(prices)
+            summary["unrealized_pnl"] = sum(
+                pos.get_pnl(prices[sym])
+                for sym, pos in self.positions.items()
+                if sym in prices
+            )
+            summary["total_pnl"] = self.get_total_pnl(prices)
+            summary["return_pct"] = self.get_return_percent(prices)
+
+        return summary
+
+    def __repr__(self) -> str:
+        """String representation of portfolio state."""
+        return (
+            f"PortfolioState(cash=${self.cash:,.2f}, "
+            f"positions={len(self.positions)}, "
+            f"initial=${self.initial_capital:,.2f})"
+        )

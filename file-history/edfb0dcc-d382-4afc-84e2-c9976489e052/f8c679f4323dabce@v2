@@ -1,0 +1,119 @@
+#!/bin/bash
+# Memory-safe download for remaining SWAP months
+# Downloads one at a time with delays to prevent OOM
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$PROJECT_ROOT/data"
+PYTHON="$(cd "$PROJECT_ROOT/.." && pwd)/.venv/bin/python"
+
+# Pushover credentials
+USER_KEY="ury88s1def6v16seeueoefqn1zbua1"
+APP_TOKEN="aej7osoja3x8nvxgi96up2poxdjmfj"
+DEVICE="iphone_13_mini"
+SOUND="dune"
+
+send_pushover() {
+    local title="$1"
+    local message="$2"
+    curl -s https://api.pushover.net/1/messages.json \
+      --form-string "token=$APP_TOKEN" \
+      --form-string "user=$USER_KEY" \
+      --form-string "device=$DEVICE" \
+      --form-string "sound=$SOUND" \
+      --form-string "priority=2" \
+      --form-string "retry=30" \
+      --form-string "expire=3600" \
+      --form-string "title=$title" \
+      --form-string "message=$message" > /dev/null
+}
+
+echo "=============================================================================="
+echo "Memory-Safe SWAP Download (9 missing months)"
+echo "=============================================================================="
+
+MISSING=("2024 3" "2024 11" "2024 12" "2025 1" "2025 2" "2025 5" "2025 10" "2025 11" "2025 12")
+TOTAL=${#MISSING[@]}
+COMPLETED=0
+FAILED=0
+
+for month_spec in "${MISSING[@]}"; do
+    read -r year month <<< "$month_spec"
+    MONTH_STR=$(printf '%02d' $month)
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "[$(date '+%H:%M:%S')] Downloading SWAP $year-$MONTH_STR ($((COMPLETED + 1))/$TOTAL)"
+
+    # Check memory before download
+    MEM_FREE=$(free -g | grep Mem | awk '{print $7}')
+    echo "Memory available: ${MEM_FREE}GB"
+
+    if [ "$MEM_FREE" -lt 20 ]; then
+        echo "⚠️  Low memory, waiting 60s for cleanup..."
+        sleep 60
+    fi
+
+    # Download
+    if $PYTHON "$PROJECT_ROOT/scripts/download_month.py" "$year" "$month" --ticks --market-type swap --data-dir "$DATA_DIR" 2>&1 | tee -a download_safe.log; then
+        echo "✅ Success: SWAP $year-$MONTH_STR"
+        ((COMPLETED++))
+
+        # Brief pause to let memory clear
+        echo "Pausing 30s for memory cleanup..."
+        sleep 30
+    else
+        echo "❌ Failed: SWAP $year-$MONTH_STR"
+        ((FAILED++))
+
+        send_pushover \
+            "❌ Download Failed" \
+            "SWAP $year-$MONTH_STR failed
+
+Progress: $COMPLETED/$TOTAL completed
+Failed: $FAILED
+
+Continuing with remaining months..."
+
+        # Longer pause after failure
+        sleep 60
+    fi
+done
+
+# Final count
+FINAL_COUNT=$(find "$DATA_DIR/raw_ticks_swap" -name "*.parquet" | wc -l)
+
+echo ""
+echo "=============================================================================="
+echo "Download Summary"
+echo "=============================================================================="
+echo "Completed: $COMPLETED/$TOTAL"
+echo "Failed: $FAILED"
+echo "Final SWAP count: $FINAL_COUNT/33"
+echo "=============================================================================="
+
+# Send completion notification
+if [ "$FINAL_COUNT" -eq 33 ]; then
+    SPOT_SIZE=$(du -sh "$DATA_DIR/raw_ticks" 2>/dev/null | cut -f1)
+    SWAP_SIZE=$(du -sh "$DATA_DIR/raw_ticks_swap" 2>/dev/null | cut -f1)
+
+    send_pushover \
+        "🎉 All Downloads Complete!" \
+        "Successfully downloaded all 33 SWAP months!
+
+SPOT: ${SPOT_SIZE} (33/33)
+SWAP: ${SWAP_SIZE} (33/33)
+
+Ready for aggregation to 1-min bars."
+else
+    send_pushover \
+        "⚠️ Downloads Incomplete" \
+        "Finished with $FAILED failures
+
+Final count: $FINAL_COUNT/33 SWAP files
+Completed: $COMPLETED/$TOTAL attempted
+
+Manual intervention needed for remaining files."
+fi

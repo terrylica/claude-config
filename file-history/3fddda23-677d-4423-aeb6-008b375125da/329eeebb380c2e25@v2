@@ -1,0 +1,282 @@
+"""
+VIF Feasibility Test: 48 Features
+
+Tests:
+1. Single VIF calculation (baseline)
+2. Full VIF matrix (all 48 features)
+3. Iterative VIF removal (simulate Phase 5)
+
+SLOs:
+- Correctness: Use statsmodels VIF (out-of-box, no custom implementation)
+- Availability: Complete within 5 min (Test 2), 10 min (Test 3)
+- Observability: Log all times, VIF values, convergence metrics
+- Maintainability: Raise on error (no silent failures)
+"""
+
+import pandas as pd
+import numpy as np
+import time
+import json
+from pathlib import Path
+
+# Out-of-box implementation
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# Paths
+WORKSPACE = Path("/Users/terryli/eon/ml-feature-set")
+ATOMS_CSV = WORKSPACE / "experiments/orthogonality_filtering_20251003/results/raw/atoms_full.csv"
+FEATURES_48 = WORKSPACE / "experiments/orthogonality_filtering_20251003/results/raw/features_corr_0.9.txt"
+
+
+def load_data():
+    """Load 48-feature dataset"""
+    if not ATOMS_CSV.exists():
+        raise FileNotFoundError(f"Atom dataset not found: {ATOMS_CSV}")
+
+    if not FEATURES_48.exists():
+        raise FileNotFoundError(f"Feature list not found: {FEATURES_48}")
+
+    atoms_df = pd.read_csv(ATOMS_CSV, index_col=0, parse_dates=True)
+
+    with open(FEATURES_48) as f:
+        kept_features = [line.strip() for line in f if line.strip()]
+
+    # Filter to kept features
+    missing = set(kept_features) - set(atoms_df.columns)
+    if missing:
+        raise ValueError(f"Features missing from dataset: {missing}")
+
+    X = atoms_df[kept_features].copy()
+
+    # SLO: Correctness - No NaN values
+    if X.isna().any().any():
+        raise ValueError("Dataset contains NaN values")
+
+    return X
+
+
+def test_single_vif(X):
+    """Test 1: Single VIF calculation"""
+    print("="*70)
+    print("TEST 1: Single VIF Calculation (Baseline)")
+    print("="*70)
+
+    start = time.time()
+    vif_value = variance_inflation_factor(X.values, 0)
+    elapsed = time.time() - start
+
+    estimated_total = elapsed * len(X.columns)
+
+    print(f"Feature: {X.columns[0]}")
+    print(f"VIF: {vif_value:.4f}")
+    print(f"Time: {elapsed:.3f}s")
+    print(f"Estimated for all {len(X.columns)} features: {estimated_total:.1f}s ({estimated_total/60:.2f} min)")
+
+    return {
+        "time_seconds": elapsed,
+        "vif_value": vif_value,
+        "estimated_total_seconds": estimated_total,
+        "feature": X.columns[0]
+    }
+
+
+def test_full_vif(X):
+    """Test 2: Full VIF matrix"""
+    print("\n" + "="*70)
+    print("TEST 2: Full VIF Matrix (All 48 Features)")
+    print("="*70)
+
+    start = time.time()
+    vif_data = pd.DataFrame()
+    vif_data['feature'] = X.columns
+
+    vif_values = []
+    for i, col in enumerate(X.columns):
+        iter_start = time.time()
+        vif = variance_inflation_factor(X.values, i)
+        iter_elapsed = time.time() - iter_start
+
+        vif_values.append(vif)
+
+        # Log first 5, last 2
+        if i < 5 or i >= len(X.columns) - 2:
+            print(f"  [{i+1:2d}/{len(X.columns)}] {col:30s} VIF={vif:8.2f}  ({iter_elapsed:.2f}s)")
+        elif i == 5:
+            print(f"  ... (calculating {len(X.columns)-7} more) ...")
+
+    vif_data['VIF'] = vif_values
+    elapsed = time.time() - start
+
+    print(f"\nTotal time: {elapsed:.1f}s ({elapsed/60:.2f} min)")
+    print(f"Average per feature: {elapsed/len(X.columns):.2f}s")
+
+    # Statistics
+    print(f"\nVIF Statistics:")
+    print(f"  Min:  {vif_data['VIF'].min():.2f}")
+    print(f"  Max:  {vif_data['VIF'].max():.2f}")
+    print(f"  Mean: {vif_data['VIF'].mean():.2f}")
+    print(f"  Median: {vif_data['VIF'].median():.2f}")
+
+    high_vif = vif_data[vif_data['VIF'] > 10].sort_values('VIF', ascending=False)
+    print(f"\nFeatures with VIF > 10: {len(high_vif)}")
+    if len(high_vif) > 0:
+        print(high_vif.to_string(index=False))
+
+    return {
+        "time_seconds": elapsed,
+        "features_count": len(X.columns),
+        "vif_min": float(vif_data['VIF'].min()),
+        "vif_max": float(vif_data['VIF'].max()),
+        "vif_mean": float(vif_data['VIF'].mean()),
+        "vif_median": float(vif_data['VIF'].median()),
+        "features_above_10": int(len(high_vif)),
+        "high_vif_features": high_vif.to_dict('records') if len(high_vif) > 0 else []
+    }
+
+
+def test_iterative_vif(X, threshold=5.0, max_iterations=20):
+    """Test 3: Iterative VIF removal"""
+    print("\n" + "="*70)
+    print(f"TEST 3: Iterative VIF Removal (Threshold={threshold})")
+    print("="*70)
+
+    X_filtered = X.copy()
+    removed = []
+    iteration = 0
+
+    start = time.time()
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        # SLO: Availability - Must have at least 2 features
+        if len(X_filtered.columns) < 2:
+            print("\nOnly 1 feature left, stopping")
+            break
+
+        # Calculate VIF for all remaining features
+        vif_values = []
+        for i in range(len(X_filtered.columns)):
+            vif = variance_inflation_factor(X_filtered.values, i)
+            vif_values.append(vif)
+
+        max_vif = max(vif_values)
+        max_idx = vif_values.index(max_vif)
+        max_feature = X_filtered.columns[max_idx]
+
+        # Check convergence
+        if max_vif <= threshold:
+            print(f"\n✓ Converged! Max VIF={max_vif:.2f} <= {threshold}")
+            break
+
+        print(f"Iteration {iteration:2d}: Remove '{max_feature}' (VIF={max_vif:.2f})")
+        removed.append({
+            'feature': max_feature,
+            'vif': max_vif,
+            'iteration': iteration
+        })
+
+        X_filtered = X_filtered.drop(columns=[max_feature])
+
+    elapsed = time.time() - start
+    converged = (iteration < max_iterations) and (max_vif <= threshold if iteration > 0 else False)
+
+    print(f"\nIterative VIF removal summary:")
+    print(f"  Time: {elapsed:.1f}s ({elapsed/60:.2f} min)")
+    print(f"  Iterations: {iteration}")
+    print(f"  Features removed: {len(removed)}")
+    print(f"  Features remaining: {len(X_filtered.columns)}")
+    print(f"  Converged: {'Yes' if converged else 'No'}")
+
+    return {
+        "time_seconds": elapsed,
+        "iterations": iteration,
+        "features_removed": len(removed),
+        "features_remaining": len(X_filtered.columns),
+        "converged": converged,
+        "removed_features": removed,
+        "remaining_features": list(X_filtered.columns)
+    }
+
+
+def main():
+    """Execute all VIF tests"""
+    print("VIF Feasibility Test: 48 Features")
+    print("="*70)
+
+    # Load data
+    print("\nLoading data...")
+    X = load_data()
+    print(f"Dataset: {len(X)} rows × {len(X.columns)} features")
+    print(f"Features: {list(X.columns[:3])} ... {list(X.columns[-2:])}")
+
+    results = {}
+
+    # Test 1: Single VIF
+    try:
+        results['test_1_single_vif'] = test_single_vif(X)
+    except Exception as e:
+        print(f"\n❌ TEST 1 FAILED: {e}")
+        results['test_1_single_vif'] = {"error": str(e)}
+        raise  # SLO: Observability - Propagate error
+
+    # Test 2: Full VIF
+    try:
+        results['test_2_full_vif'] = test_full_vif(X)
+    except Exception as e:
+        print(f"\n❌ TEST 2 FAILED: {e}")
+        results['test_2_full_vif'] = {"error": str(e)}
+        raise  # SLO: Observability - Propagate error
+
+    # Test 3: Iterative VIF
+    try:
+        results['test_3_iterative_vif'] = test_iterative_vif(X, threshold=5.0)
+    except Exception as e:
+        print(f"\n❌ TEST 3 FAILED: {e}")
+        results['test_3_iterative_vif'] = {"error": str(e)}
+        raise  # SLO: Observability - Propagate error
+
+    # Verdict
+    print("\n" + "="*70)
+    print("VERDICT: VIF Feasibility")
+    print("="*70)
+
+    full_vif_time = results['test_2_full_vif']['time_seconds']
+    iterative_time = results['test_3_iterative_vif']['time_seconds']
+
+    vif_feasible = full_vif_time < 300  # 5 minutes
+    iterative_feasible = iterative_time < 600  # 10 minutes
+
+    if full_vif_time < 60:
+        print(f"✅ VIF VERY FAST: {full_vif_time:.1f}s (< 1 min)")
+    elif full_vif_time < 300:
+        print(f"✅ VIF FEASIBLE: {full_vif_time:.1f}s (< 5 min)")
+    else:
+        print(f"❌ VIF TOO SLOW: {full_vif_time:.1f}s (> 5 min)")
+
+    if iterative_time < 120:
+        print(f"✅ Iterative VIF fast: {iterative_time:.1f}s (< 2 min)")
+    elif iterative_time < 600:
+        print(f"✅ Iterative VIF feasible: {iterative_time:.1f}s (< 10 min)")
+    else:
+        print(f"❌ Iterative VIF too slow: {iterative_time:.1f}s (> 10 min)")
+
+    results['verdict'] = {
+        "vif_feasible": vif_feasible and iterative_feasible,
+        "full_vif_time": full_vif_time,
+        "iterative_time": iterative_time,
+        "recommended_method": "vif" if (vif_feasible and iterative_feasible) else "correlation_filter"
+    }
+
+    # Save results
+    output_file = Path("/tmp/vif_feasibility_test/vif_test_results.json")
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\n✓ Results saved to: {output_file}")
+
+    return results
+
+
+if __name__ == '__main__':
+    results = main()

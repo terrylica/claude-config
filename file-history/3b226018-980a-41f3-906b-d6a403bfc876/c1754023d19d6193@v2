@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""
+Temporal Leakage Audit for ML Feature Set
+
+Detects forward-looking bias in feature computation that would inflate
+backtest performance but fail in production.
+
+CRITICAL LEAKAGE TYPES:
+1. Forward-looking features (using future data)
+2. Centered rolling windows (using future data for smoothing)
+3. Lookahead bias in returns/lags
+4. Non-causal decompositions (STL using future for smoothing)
+5. Index misalignment
+"""
+
+import sys
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def load_test_data():
+    """Load SOL 5m sample data"""
+    df = pd.read_csv('ml_feature_set/sample_data/resampled_binance_SOL-5m.csv')
+    if 'actual_ready_time' not in df.columns:
+        df['actual_ready_time'] = pd.to_datetime(df['date'])
+    else:
+        df['actual_ready_time'] = pd.to_datetime(df['actual_ready_time'])
+    df = df.set_index('actual_ready_time')
+    return df
+
+
+def create_deterministic_test_series():
+    """Create synthetic data with known patterns for leakage detection"""
+    # Create a simple linear trend + known shocks
+    n = 1000
+    dates = pd.date_range('2024-01-01', periods=n, freq='5min')
+
+    # Linear trend + known shocks at specific positions
+    values = np.arange(n, dtype=float)
+    values[100] += 50  # Shock at position 100
+    values[500] += 100  # Shock at position 500
+
+    df = pd.DataFrame({
+        'close': values,
+        'high': values + 1,
+        'low': values - 1,
+        'volume': np.ones(n) * 1000
+    }, index=dates)
+
+    return df
+
+
+def test_returns_alignment(lib):
+    """
+    CRITICAL TEST: Verify returns[t] uses close[t] and close[t-1], NOT future data
+
+    Correct:   returns[t] = (close[t] - close[t-1]) / close[t-1]
+    LEAKAGE:   returns[t] = (close[t+1] - close[t]) / close[t]
+    """
+    print("\n" + "="*80)
+    print("TEST 1: Returns Temporal Alignment")
+    print("="*80)
+
+    issues = []
+
+    # Create simple test data with known values
+    test_df = create_deterministic_test_series()
+
+    # Compute returns atom
+    returns_atom = lib.get_atom('returns')
+    returns = returns_atom.compute(test_df)
+
+    # Manual computation (correct way)
+    expected_returns = test_df['close'].pct_change()
+
+    # Check alignment
+    mask = ~(returns.isna() | expected_returns.isna())
+    if mask.sum() > 0:
+        diff = np.abs(returns[mask] - expected_returns[mask])
+        max_diff = diff.max()
+
+        print(f"\nReturns Alignment:")
+        print(f"   Max difference vs pct_change(): {max_diff:.2e}")
+
+        if max_diff > 1e-10:
+            issues.append("returns: TEMPORAL LEAKAGE - incorrect alignment")
+            print(f"   ❌ LEAKAGE DETECTED")
+        else:
+            print(f"   ✅ CORRECT - Uses only past data")
+
+        # Additional check: returns[t] should NOT predict close[t+1]
+        # If returns has leakage, it would perfectly predict next close
+        future_close = test_df['close'].shift(-1)
+        reconstructed = test_df['close'] * (1 + returns)
+
+        leak_check = np.abs(reconstructed - future_close).dropna()
+        if leak_check.mean() < 1e-6:
+            issues.append("returns: CRITICAL LEAKAGE - predicts future close perfectly")
+            print(f"   ❌ CRITICAL: Returns predict future close (mean error: {leak_check.mean():.2e})")
+
+    return issues
+
+
+def test_lag_direction(df, lib):
+    """
+    Verify lags shift BACKWARD in time, not forward
+
+    Correct:   lag_1[t] = value[t-1]
+    LEAKAGE:   lag_1[t] = value[t+1]
+    """
+    print("\n" + "="*80)
+    print("TEST 2: Lag Direction Verification")
+    print("="*80)
+
+    issues = []
+
+    returns = lib.get_atom('returns').compute(df)
+
+    for lag in [1, 2, 3, 5, 10, 20]:
+        lag_atom = lib.get_atom(f'returns_lag_{lag}')
+        lag_vals = lag_atom.compute(df)
+
+        # Correct: shift(+lag) moves data backward (t-lag)
+        expected_backward = returns.shift(lag)
+
+        # Leakage: shift(-lag) moves data forward (t+lag)
+        leakage_forward = returns.shift(-lag)
+
+        # Check which one matches
+        mask_backward = ~(lag_vals.isna() | expected_backward.isna())
+        mask_forward = ~(lag_vals.isna() | leakage_forward.isna())
+
+        if mask_backward.sum() > 0:
+            diff_backward = np.abs(lag_vals[mask_backward] - expected_backward[mask_backward]).max()
+            diff_forward = np.abs(lag_vals[mask_forward] - leakage_forward[mask_forward]).max() if mask_forward.sum() > 0 else np.inf
+
+            print(f"\nreturns_lag_{lag}:")
+            print(f"   Match with shift(+{lag}) [CORRECT]: {diff_backward:.2e}")
+            print(f"   Match with shift(-{lag}) [LEAKAGE]: {diff_forward:.2e}")
+
+            if diff_backward < 1e-10:
+                print(f"   ✅ CORRECT - Backward shift (past data)")
+            elif diff_forward < 1e-10:
+                issues.append(f"returns_lag_{lag}: CRITICAL LEAKAGE - forward shift (future data)")
+                print(f"   ❌ CRITICAL LEAKAGE - Uses future data!")
+            else:
+                issues.append(f"returns_lag_{lag}: Unknown shift pattern")
+                print(f"   ⚠️  WARNING - Neither backward nor forward shift")
+
+    return issues
+
+
+def test_rolling_causality(df, lib):
+    """
+    Verify rolling windows use ONLY past data, not centered windows
+
+    Correct:   rolling(window).mean() uses [t-window+1, ..., t]
+    LEAKAGE:   rolling(window, center=True).mean() uses [t-window/2, ..., t+window/2]
+    """
+    print("\n" + "="*80)
+    print("TEST 3: Rolling Window Causality")
+    print("="*80)
+
+    issues = []
+
+    for window in [5, 10, 20]:
+        atom = lib.get_atom(f'rolling_mean_{window}')
+        atom_vals = atom.compute(df)
+
+        # Correct: backward-only rolling
+        expected_backward = df['close'].rolling(window).mean()
+
+        # Leakage: centered rolling (uses future data)
+        leakage_centered = df['close'].rolling(window, center=True).mean()
+
+        mask_backward = ~(atom_vals.isna() | expected_backward.isna())
+        mask_centered = ~(atom_vals.isna() | leakage_centered.isna())
+
+        if mask_backward.sum() > 0:
+            diff_backward = np.abs(atom_vals[mask_backward] - expected_backward[mask_backward]).max()
+            diff_centered = np.abs(atom_vals[mask_centered] - leakage_centered[mask_centered]).max() if mask_centered.sum() > 0 else np.inf
+
+            print(f"\nrolling_mean_{window}:")
+            print(f"   Match with backward rolling [CORRECT]: {diff_backward:.2e}")
+            print(f"   Match with centered rolling [LEAKAGE]: {diff_centered:.2e}")
+
+            if diff_backward < 1e-10:
+                print(f"   ✅ CORRECT - Backward-only (causal)")
+            elif diff_centered < 1e-10:
+                issues.append(f"rolling_mean_{window}: CRITICAL LEAKAGE - centered window uses future data")
+                print(f"   ❌ CRITICAL LEAKAGE - Centered window uses future!")
+
+    return issues
+
+
+def test_stl_causality(df, lib):
+    """
+    STL decomposition is INHERENTLY NON-CAUSAL
+
+    STL uses LOESS smoothing which requires future data for trend estimation.
+    This is a KNOWN limitation - STL should ONLY be used for analysis, NOT for
+    online prediction unless you accept the lookahead bias.
+    """
+    print("\n" + "="*80)
+    print("TEST 4: STL Decomposition Causality (KNOWN ISSUE)")
+    print("="*80)
+
+    issues = []
+
+    # Create test data with a known shock
+    test_df = create_deterministic_test_series()
+
+    # Get STL trend at shock position
+    stl_atom = lib.get_atom('stl_trend_s7_t21')
+    stl_trend = stl_atom.compute(test_df)
+
+    shock_idx = 100
+
+    # Check if trend BEFORE shock is affected by shock
+    # If STL is causal, trend[shock_idx-10] should NOT see shock at shock_idx
+    # If STL is non-causal, trend[shock_idx-10] will be smoothed using future data
+
+    print(f"\nSTL Trend Analysis:")
+    print(f"   Shock at position {shock_idx}: +50 units")
+
+    if not stl_trend.isna().all():
+        # Compare trend slope before and after shock
+        pre_shock_trend = stl_trend.iloc[shock_idx-20:shock_idx-10].diff().mean()
+        at_shock_trend = stl_trend.iloc[shock_idx-5:shock_idx+5].diff().mean()
+
+        print(f"   Trend slope pre-shock (t-20 to t-10): {pre_shock_trend:.6f}")
+        print(f"   Trend slope at shock (t-5 to t+5): {at_shock_trend:.6f}")
+
+        # If trend slope changes before the shock position, STL is non-causal
+        if abs(at_shock_trend - pre_shock_trend) > 0.01:
+            issues.append("STL: NON-CAUSAL - uses future data for smoothing (expected behavior)")
+            print(f"   ⚠️  CONFIRMED: STL uses future data (LOESS smoothing)")
+            print(f"   📌 RECOMMENDATION: Use STL for offline analysis only, NOT for online prediction")
+            print(f"   📌 ALTERNATIVE: Use causal trend filters (EWM, rolling mean)")
+        else:
+            print(f"   ✅ Appears causal (unexpected - may need deeper inspection)")
+
+    return issues
+
+
+def test_forward_looking_features(df, lib):
+    """
+    Identify explicitly forward-looking features
+
+    LEAKAGE BY DESIGN:
+    - days_to_next_holiday: Uses future calendar data
+    - These are acceptable if used as EXOGENOUS features (known in advance)
+    """
+    print("\n" + "="*80)
+    print("TEST 5: Forward-Looking Features (Exogenous Check)")
+    print("="*80)
+
+    issues = []
+
+    forward_features = [
+        'days_to_next_holiday',
+    ]
+
+    for feat_name in forward_features:
+        atom = lib.get_atom(feat_name)
+        if atom:
+            vals = atom.compute(df)
+
+            print(f"\n{feat_name}:")
+            print(f"   Type: FORWARD-LOOKING (uses future calendar)")
+            print(f"   Range: [{vals.min():.0f}, {vals.max():.0f}] days")
+            print(f"   ⚠️  ACCEPTABLE: Known in advance (exogenous)")
+            print(f"   📌 NOTE: Can be used for prediction if calendar is known")
+
+    # No issues - these are acceptable
+    return []
+
+
+def test_expanding_window_leakage(df, lib):
+    """
+    Expanding windows should NOT leak, but verify they start from first observation
+
+    Correct:   expanding().mean() uses [0, ..., t]
+    LEAKAGE:   expanding().mean() accidentally uses future data
+    """
+    print("\n" + "="*80)
+    print("TEST 6: Expanding Window Causality")
+    print("="*80)
+
+    issues = []
+
+    atom = lib.get_atom('expanding_mean')
+    atom_vals = atom.compute(df)
+
+    # Correct: expanding from start
+    expected = df['close'].expanding().mean()
+
+    mask = ~(atom_vals.isna() | expected.isna())
+    if mask.sum() > 0:
+        diff = np.abs(atom_vals[mask] - expected[mask]).max()
+
+        print(f"\nexpanding_mean:")
+        print(f"   Max difference vs pandas expanding: {diff:.2e}")
+
+        if diff < 1e-10:
+            print(f"   ✅ CORRECT - Expanding from first observation (causal)")
+        else:
+            issues.append("expanding_mean: Potential leakage or implementation error")
+            print(f"   ❌ ERROR - Does not match expected expanding window")
+
+    return issues
+
+
+def test_index_alignment(df, lib):
+    """
+    Verify that feature indices align with data indices (no accidental shifts)
+    """
+    print("\n" + "="*80)
+    print("TEST 7: Index Alignment")
+    print("="*80)
+
+    issues = []
+
+    # Test a few representative atoms
+    test_atoms = ['returns', 'rolling_mean_20', 'ewm_mean_20', 'hour_of_day_sin']
+
+    for atom_name in test_atoms:
+        atom = lib.get_atom(atom_name)
+        vals = atom.compute(df)
+
+        # Check index alignment
+        if not vals.index.equals(df.index):
+            issues.append(f"{atom_name}: Index mismatch - potential temporal misalignment")
+            print(f"\n{atom_name}:")
+            print(f"   ❌ Index does not match input DataFrame")
+        else:
+            print(f"\n{atom_name}:")
+            print(f"   ✅ Index correctly aligned")
+
+    return issues
+
+
+def main():
+    print("="*80)
+    print("TEMPORAL LEAKAGE AUDIT")
+    print("="*80)
+    print("\nDetecting forward-looking bias that would inflate backtest performance")
+    print("but fail in production...\n")
+
+    # Load library and data
+    print("Loading atom library...")
+    lib = load_library_from_formulas()
+    print(f"Loaded {len(lib)} atoms")
+
+    print("\nLoading test data...")
+    df = load_test_data()
+    print(f"Loaded {len(df)} rows")
+
+    # Run all temporal leakage tests
+    all_issues = []
+
+    all_issues.extend(test_returns_alignment(lib))
+    all_issues.extend(test_lag_direction(df, lib))
+    all_issues.extend(test_rolling_causality(df, lib))
+    all_issues.extend(test_stl_causality(df, lib))
+    all_issues.extend(test_forward_looking_features(df, lib))
+    all_issues.extend(test_expanding_window_leakage(df, lib))
+    all_issues.extend(test_index_alignment(df, lib))
+
+    # Final report
+    print("\n" + "="*80)
+    print("TEMPORAL LEAKAGE AUDIT SUMMARY")
+    print("="*80)
+
+    if not all_issues:
+        print("\n✅ NO TEMPORAL LEAKAGE DETECTED")
+        print("   All atoms use only past data (causal)")
+        print("   Safe for online prediction")
+        return 0
+    else:
+        print(f"\n⚠️  {len(all_issues)} TEMPORAL ISSUES FOUND:\n")
+        for issue in all_issues:
+            print(f"   - {issue}")
+
+        print("\n📌 CRITICAL RECOMMENDATIONS:")
+        print("   1. STL atoms are NON-CAUSAL by design (LOESS smoothing)")
+        print("      → Use for offline analysis only, NOT online prediction")
+        print("      → Alternative: Use EWM or causal rolling filters")
+        print("   2. Forward-looking features (days_to_next_holiday) are acceptable")
+        print("      → These are EXOGENOUS (known in advance from calendar)")
+        print("   3. All other atoms MUST be causal for production use")
+
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

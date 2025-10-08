@@ -1,0 +1,192 @@
+"""
+Tests for PortfolioState class.
+"""
+
+import pytest
+from portfolio_capital_manager import PortfolioState, Position
+
+
+def test_initialization():
+    """Test portfolio initialization."""
+    portfolio = PortfolioState(initial_capital=100_000)
+
+    assert portfolio.initial_capital == 100_000
+    assert portfolio.get_available_cash() == 100_000
+    assert portfolio.get_total_value() == 100_000
+    assert len(portfolio.positions) == 0
+
+
+def test_initialization_invalid_capital():
+    """Test that negative capital raises error."""
+    with pytest.raises(ValueError, match="must be positive"):
+        PortfolioState(initial_capital=-1000)
+
+
+def test_open_position():
+    """Test opening a new position."""
+    portfolio = PortfolioState(100_000)
+
+    position = portfolio.open_position(
+        symbol="BTC",
+        quantity=1.0,
+        entry_price=45_000,
+        side="long"
+    )
+
+    assert position.symbol == "BTC"
+    assert position.quantity == 1.0
+    assert position.entry_price == 45_000
+    assert portfolio.get_available_cash() == 55_000  # 100k - 45k locked
+    assert len(portfolio.positions) == 1
+
+
+def test_open_position_insufficient_cash():
+    """Test that insufficient cash raises error."""
+    portfolio = PortfolioState(10_000)
+
+    with pytest.raises(ValueError, match="Insufficient cash"):
+        portfolio.open_position(
+            symbol="BTC",
+            quantity=1.0,
+            entry_price=50_000,
+            side="long"
+        )
+
+
+def test_close_position():
+    """Test closing a position with profit."""
+    portfolio = PortfolioState(100_000)
+
+    # Open position
+    portfolio.open_position("BTC", 1.0, 45_000, "long")
+
+    # Close at profit
+    pnl = portfolio.close_position("BTC", exit_price=50_000)
+
+    assert pnl == 5_000  # $5k profit
+    assert portfolio.get_available_cash() == 105_000  # Original + profit
+    assert len(portfolio.positions) == 0
+
+
+def test_close_position_with_loss():
+    """Test closing a position with loss."""
+    portfolio = PortfolioState(100_000)
+
+    portfolio.open_position("ETH", 10.0, 2_500, "long")
+    pnl = portfolio.close_position("ETH", exit_price=2_000)
+
+    assert pnl == -5_000  # $5k loss
+    assert portfolio.get_available_cash() == 95_000
+
+
+def test_close_nonexistent_position():
+    """Test closing a position that doesn't exist."""
+    portfolio = PortfolioState(100_000)
+
+    with pytest.raises(KeyError):
+        portfolio.close_position("BTC", 50_000)
+
+
+def test_total_value_with_profit():
+    """Test total value calculation with profitable position."""
+    portfolio = PortfolioState(100_000)
+
+    portfolio.open_position("BTC", 1.0, 45_000, "long")
+
+    prices = {"BTC": 50_000}
+    total_value = portfolio.get_total_value(prices)
+
+    assert total_value == 105_000  # 55k cash + 50k position
+
+
+def test_multiple_positions():
+    """Test managing multiple positions."""
+    portfolio = PortfolioState(100_000)
+
+    portfolio.open_position("BTC", 1.0, 45_000, "long")
+    portfolio.open_position("ETH", 10.0, 2_500, "long")
+
+    assert len(portfolio.positions) == 2
+    assert portfolio.get_available_cash() == 30_000  # 100k - 45k - 25k
+
+    prices = {"BTC": 50_000, "ETH": 3_000}
+    total_value = portfolio.get_total_value(prices)
+
+    assert total_value == 110_000  # 30k cash + 50k BTC + 30k ETH
+
+
+def test_reduce_position():
+    """Test partial position closure."""
+    portfolio = PortfolioState(100_000)
+
+    portfolio.open_position("BTC", 2.0, 45_000, "long")
+
+    # Reduce by half
+    pnl = portfolio.reduce_position("BTC", 1.0, 50_000)
+
+    assert pnl == 5_000  # Profit on 1 BTC
+    assert portfolio.positions["BTC"].quantity == 1.0
+    assert portfolio.get_available_cash() == 60_000  # 10k + 50k from sale
+
+
+def test_rebalance_to_weights():
+    """Test portfolio rebalancing."""
+    portfolio = PortfolioState(100_000)
+
+    # Initial positions
+    portfolio.open_position("BTC", 1.0, 40_000, "long")
+
+    prices = {"BTC": 50_000, "ETH": 2_500}
+
+    # Rebalance to 50% BTC, 50% ETH
+    target_weights = {"BTC": 0.5, "ETH": 0.5}
+    trades = portfolio.rebalance_to_weights(target_weights, prices, tolerance=0.01)
+
+    # Should buy ETH, adjust BTC
+    assert "ETH" in trades
+
+
+def test_get_position_summary():
+    """Test position summary generation."""
+    portfolio = PortfolioState(100_000)
+
+    portfolio.open_position("BTC", 1.0, 45_000, "long")
+    portfolio.open_position("ETH", 10.0, 2_500, "long")
+
+    prices = {"BTC": 50_000, "ETH": 3_000}
+    summary = portfolio.get_position_summary(prices)
+
+    assert summary["cash"] == 30_000
+    assert summary["initial_capital"] == 100_000
+    assert len(summary["positions"]) == 2
+    assert summary["total_value"] == 110_000
+    assert summary["total_pnl"] == 10_000
+
+
+def test_position_pnl_calculations():
+    """Test P&L calculations for positions."""
+    position = Position(
+        symbol="BTC",
+        quantity=1.0,
+        entry_price=45_000,
+        side="long"
+    )
+
+    assert position.get_current_value(50_000) == 50_000
+    assert position.get_pnl(50_000) == 5_000
+    assert position.get_pnl_percent(50_000) == pytest.approx(11.11, rel=0.01)
+
+
+def test_can_allocate():
+    """Test cash allocation checking."""
+    portfolio = PortfolioState(100_000)
+
+    assert portfolio.can_allocate(50_000) is True
+    assert portfolio.can_allocate(100_000) is True
+    assert portfolio.can_allocate(100_001) is False
+
+    # Lock some capital
+    portfolio.open_position("BTC", 1.0, 45_000, "long")
+
+    assert portfolio.can_allocate(55_000) is True
+    assert portfolio.can_allocate(55_001) is False

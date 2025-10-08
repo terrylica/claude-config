@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""
+Download OKX data for a date range (2023-01 to 2025-08).
+
+Usage:
+    # Download all months from 2023-01 to 2025-08
+    python scripts/download_range.py --start 2023-01 --end 2025-08 --ticks
+
+    # Download just 2023 Q4 (funding rates only)
+    python scripts/download_range.py --start 2023-10 --end 2023-12
+
+    # Download specific year
+    python scripts/download_range.py --start 2024-01 --end 2024-12 --ticks
+"""
+
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+import subprocess
+
+
+def parse_month(month_str: str) -> tuple[int, int]:
+    """Parse 'YYYY-MM' to (year, month)."""
+    try:
+        year, month = map(int, month_str.split('-'))
+        if month < 1 or month > 12:
+            raise ValueError
+        return year, month
+    except:
+        raise ValueError(f"Invalid month format: {month_str}. Use YYYY-MM (e.g., 2023-01)")
+
+
+def get_month_range(start: str, end: str) -> list[tuple[int, int]]:
+    """Generate list of (year, month) tuples in range."""
+
+    start_year, start_month = parse_month(start)
+    end_year, end_month = parse_month(end)
+
+    start_date = datetime(start_year, start_month, 1)
+    end_date = datetime(end_year, end_month, 1)
+
+    if start_date > end_date:
+        raise ValueError(f"Start month {start} is after end month {end}")
+
+    months = []
+    current = start_date
+
+    while current <= end_date:
+        months.append((current.year, current.month))
+        current += relativedelta(months=1)
+
+    return months
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Download OKX data for a date range',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Download full range (2023-01 to 2025-08) with ticks
+  python scripts/download_range.py --start 2023-01 --end 2025-08 --ticks
+
+  # Download 2023 Q4 (funding rates only)
+  python scripts/download_range.py --start 2023-10 --end 2023-12
+
+  # Download 2025 Q2-Q3
+  python scripts/download_range.py --start 2025-06 --end 2025-08 --ticks
+        """
+    )
+
+    parser.add_argument('--start', required=True, help='Start month (YYYY-MM)')
+    parser.add_argument('--end', required=True, help='End month (YYYY-MM)')
+    parser.add_argument('--ticks', action='store_true', help='Also download tick data (~1GB/month)')
+    parser.add_argument('--data-dir', type=Path, default=Path('data'),
+                       help='Base data directory (default: data/)')
+
+    args = parser.parse_args()
+
+    # Parse and validate range
+    try:
+        months = get_month_range(args.start, args.end)
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return 1
+
+    print("="*80)
+    print("BULK DOWNLOAD")
+    print("="*80)
+    print(f"Range: {args.start} to {args.end}")
+    print(f"Months: {len(months)}")
+    print(f"Ticks: {'YES' if args.ticks else 'NO (funding rates only)'}")
+    print()
+
+    if args.ticks:
+        estimated_gb = len(months) * 1.5  # ~1.5GB per month
+        print(f"⚠️  Estimated download size: ~{estimated_gb:.0f} GB")
+        print()
+
+    print("Confirm download? [y/N]: ", end='', flush=True)
+
+    # Auto-confirm if running non-interactively
+    if not sys.stdin.isatty():
+        print("y (auto-confirmed)")
+        proceed = True
+    else:
+        proceed = input().strip().lower() == 'y'
+
+    if not proceed:
+        print("\nCancelled.")
+        return 0
+
+    # Download each month
+    failed = []
+
+    for i, (year, month) in enumerate(months, 1):
+        print(f"\n{'='*80}")
+        print(f"Progress: {i}/{len(months)} - {year}-{month:02d}")
+        print(f"{'='*80}")
+
+        cmd = [
+            'uv', 'run', '--active', 'python',
+            'scripts/download_month.py',
+            str(year),
+            str(month),
+            '--data-dir', str(args.data_dir)
+        ]
+
+        if args.ticks:
+            cmd.append('--ticks')
+
+        result = subprocess.run(cmd)
+
+        if result.returncode != 0:
+            failed.append(f"{year}-{month:02d}")
+            print(f"\n⚠️  Failed: {year}-{month:02d}")
+
+    # Summary
+    print("\n" + "="*80)
+    print("DOWNLOAD SUMMARY")
+    print("="*80)
+    print(f"Total months: {len(months)}")
+    print(f"Successful: {len(months) - len(failed)}")
+    print(f"Failed: {len(failed)}")
+
+    if failed:
+        print(f"\nFailed months: {', '.join(failed)}")
+        print("You can retry individual months with:")
+        for month_str in failed:
+            year, month = month_str.split('-')
+            print(f"  python scripts/download_month.py {year} {month}" +
+                  (" --ticks" if args.ticks else ""))
+        return 1
+
+    print("\n✅ All downloads complete!")
+
+    # Next steps
+    print("\n" + "="*80)
+    print("NEXT STEPS")
+    print("="*80)
+    print("\n1. Aggregate to 1-min bars (saves 76% space, 10x faster):")
+    print(f"   python scripts/aggregate_range.py --start {args.start} --end {args.end}")
+    print("\n2. Run backtest:")
+    print(f"   python v1.8.4-spot-filtered.py --start {args.start} --end {args.end}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

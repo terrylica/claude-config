@@ -1,0 +1,242 @@
+# OOD-Robust ML Architecture for Range Bar Prediction
+
+## Overview
+
+This research pipeline implements **Out-of-Distribution robust machine learning** for cryptocurrency range bar analysis with **automatic feature generation** using transformer-based architectures.
+
+## Design Decisions (from Clarification)
+
+### Prediction Targets (Q1)
+- **Primary**: Price direction classification (next bar: up/down/sideways)
+- **Secondary**: Anomaly detection (distribution shift identification)
+
+### OOD Definition (Q2)
+**Priority**: Temporal shift + Volatility regime shift
+- Temporal: 2022-2024 train → 2025 test
+- Volatility regimes: Low-vol vs high-vol periods
+- Future: Cross-symbol, black swan events
+
+### Auto-Feature Generation (Q3)
+**Transformer-based end-to-end learning**
+- Zero human bias in feature engineering
+- Self-attention mechanism discovers temporal patterns
+- Positional encodings for sequence structure
+
+### Computational Constraints (Q4)
+- **Training**: GPU-accelerated (hours acceptable)
+- **Inference**: Fast (milliseconds for production readiness)
+- **Strategy**: Train deep models, distill for production
+
+### Validation Strategy (Q5)
+1. **Regime-stratified splits**: Train on low-vol, test on high-vol
+2. **Conformal prediction**: Uncertainty-aware probabilistic guarantees
+3. **Stress testing**: 2022 Terra/Luna crash, 2023 FTX collapse
+
+## Architecture Components
+
+### 1. Data Pipeline (`data/`)
+
+#### RangeBarDataset
+```python
+Loads CSV range bars with:
+- Fixed-point to float conversion (÷1e9)
+- Temporal sorting and validation
+- Rolling window construction (sequence_len)
+- Regime labeling (volatility-based stratification)
+```
+
+#### RegimeDetector
+```python
+Identifies market regimes:
+- Realized volatility (rolling std of returns)
+- Volume regime (high/low activity periods)
+- Trend regime (bullish/bearish/sideways)
+Used for stratified sampling
+```
+
+### 2. Models (`models/`)
+
+#### TransformerFeatureEncoder
+```python
+Architecture:
+- Input: Raw OHLCV + volume metrics (14 features)
+- Positional encoding: Learnable temporal embeddings
+- Multi-head self-attention (8 heads, 256 dim)
+- Feed-forward layers with GELU activation
+- Output: 128-dim learned representation
+
+OOD Robustness:
+- Layer normalization for distribution shift
+- Dropout (0.1) for uncertainty estimation
+- No explicit price level features (relative only)
+```
+
+#### DualTaskHead
+```python
+Two prediction heads from shared encoder:
+
+1. Direction Classifier
+   - 3-class: up/down/sideways (±0.2% threshold)
+   - Cross-entropy loss with label smoothing
+
+2. Anomaly Detector
+   - Reconstruction-based (autoencoder branch)
+   - Anomaly score = reconstruction error
+   - High score → OOD sample
+```
+
+### 3. Training (`training/`)
+
+#### RegimeStratifiedSampler
+```python
+Ensures balanced training across:
+- Volatility regimes (quintiles)
+- Temporal periods (seasonal effects)
+- Price levels (log-space buckets)
+
+Prevents overfitting to dominant regime
+```
+
+#### ConformalCalibrator
+```python
+Post-hoc calibration layer:
+- Computes prediction sets with guaranteed coverage
+- α = 0.1 → 90% coverage on calibration set
+- Adapts prediction intervals for OOD data
+```
+
+#### Training Loop
+```python
+- Optimizer: AdamW (lr=1e-4, weight_decay=0.01)
+- Scheduler: Cosine annealing with warmup
+- Loss: Combined direction + reconstruction
+- Early stopping: Validation regime diversity
+- Checkpointing: Best regime-averaged performance
+```
+
+### 4. Evaluation (`evaluation/`)
+
+#### OOD Metrics
+```python
+1. Direction Accuracy
+   - Overall, per-regime, temporal decay
+
+2. Calibration Metrics
+   - Expected Calibration Error (ECE)
+   - Coverage on OOD test sets
+
+3. Anomaly Detection
+   - ROC-AUC for known regime shifts
+   - Precision@k for stress events
+
+4. Uncertainty Quality
+   - Proper scoring rules (Brier, log-likelihood)
+   - Uncertainty vs error correlation
+```
+
+#### StressTestSuite
+```python
+Historical crisis periods:
+- 2022-05-07 to 2022-05-12 (Terra/Luna collapse)
+- SOL dropped from ~$90 to ~$40 (55% crash)
+
+Metrics:
+- Model uncertainty spikes (early warning)
+- Prediction degradation timeline
+- Recovery period analysis
+```
+
+### 5. Utilities (`utils/`)
+
+#### FixedPointConverter
+```python
+Handles rangebar CSV format:
+- Prices/volumes: int → float (÷1e9)
+- Timestamps: microseconds → datetime
+- VWAP validation
+```
+
+#### ExperimentTracker
+```python
+TensorBoard integration:
+- Loss curves per regime
+- Attention weight visualization
+- Confusion matrices (temporal slices)
+- OOD detection ROC curves
+```
+
+## Data Flow
+
+```
+CSV Files (175K bars)
+    ↓
+FixedPointConverter
+    ↓
+RangeBarDataset (sequences of 64 bars)
+    ↓
+RegimeDetector (label regimes)
+    ↓
+RegimeStratifiedSampler
+    ↓
+TransformerFeatureEncoder (14 → 128 features)
+    ↓
+DualTaskHead (direction + anomaly)
+    ↓
+ConformalCalibrator (uncertainty)
+    ↓
+OOD Evaluation + Stress Testing
+```
+
+## Train/Val/Test Splits
+
+### Temporal Split
+- Train: 2022-01-01 to 2023-12-31 (2 years, ~95K bars)
+- Val: 2024-01-01 to 2024-06-30 (6 months, ~24K bars)
+- Test: 2024-07-01 to 2025-09-30 (15 months, ~57K bars)
+
+### Regime Stratification
+Within each split, ensure 20% representation of each volatility quintile
+
+### Stress Test Holdout
+Explicitly exclude 2022-05-07 to 2022-05-12 from training for crisis testing
+
+## Experiment Tracking
+
+### Baseline Comparisons
+1. **Random Forest**: Traditional ML on hand-crafted features
+2. **LSTM**: Recurrent baseline without self-attention
+3. **TabNet**: Tabular-specific architecture
+4. **Temporal Fusion Transformer**: Full SOTA comparison
+
+### Ablation Studies
+- Remove regime stratification → test temporal OOD
+- Remove conformal calibration → test uncertainty quality
+- Remove anomaly head → test OOD detection value
+
+## Production Considerations
+
+### Model Distillation
+After training transformer (128-dim encoder):
+- Distill to smaller student (32-dim, 10x faster)
+- Knowledge distillation preserves OOD robustness
+- Deploy student for sub-millisecond inference
+
+### Monitoring
+- Drift detection: Track anomaly scores over time
+- Retraining triggers: High anomaly rate (>5% for 1 week)
+- A/B testing framework for model updates
+
+## References
+
+### OOD Robustness
+- Invariant Risk Minimization (Arjovsky et al., 2019)
+- Conformal Prediction (Vovk et al., 2005)
+- Test-Time Augmentation for robustness
+
+### Transformers for Time Series
+- Temporal Fusion Transformer (Lim et al., 2021)
+- Informer: Beyond Efficient Transformer (Zhou et al., 2021)
+
+### Crypto-Specific
+- Range bars: Invariant to time sampling bias
+- Regime-conditional models for volatile assets

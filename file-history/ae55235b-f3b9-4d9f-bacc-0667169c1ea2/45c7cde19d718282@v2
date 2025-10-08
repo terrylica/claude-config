@@ -1,0 +1,94 @@
+#!/bin/bash
+# LittleBlack macOS Path Compatibility Setup
+# This creates a symlink structure so Linux paths match macOS paths
+
+set -e
+
+echo "========================================"
+echo "LittleBlack macOS Path Compatibility Setup"
+echo "========================================"
+echo
+
+# Check if running as root
+if [ "$EUID" -eq 0 ]; then
+    echo "ERROR: Do not run this script as root. Run as yca and it will prompt for sudo."
+    exit 1
+fi
+
+echo "This script will:"
+echo "1. Create user 'terryli' on this system"
+echo "2. Create /Users directory"
+echo "3. Create symlink /Users/terryli -> /home/terryli"
+echo "4. Set up proper permissions"
+echo
+echo "This allows Claude Code sessions to work across macOS and Linux."
+echo
+
+read -p "Continue? (y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Cancelled."
+    exit 1
+fi
+
+echo
+echo "Step 1: Creating /Users directory..."
+sudo mkdir -p /Users
+sudo chmod 755 /Users
+echo "✓ /Users directory created"
+
+echo
+echo "Step 2: Checking if terryli user exists..."
+if id terryli &>/dev/null; then
+    echo "✓ User terryli already exists"
+else
+    echo "Creating user terryli..."
+    sudo useradd -m -d /home/terryli -s /bin/bash terryli
+    echo "✓ User terryli created with home at /home/terryli"
+fi
+
+echo
+echo "Step 3: Creating symlink /Users/terryli -> /home/terryli..."
+if [ -L /Users/terryli ]; then
+    echo "Symlink already exists, removing old one..."
+    sudo rm /Users/terryli
+fi
+
+if [ -d /Users/terryli ]; then
+    echo "ERROR: /Users/terryli exists as a directory (not symlink)!"
+    echo "Please investigate and remove it manually if safe."
+    exit 1
+fi
+
+sudo ln -s /home/terryli /Users/terryli
+echo "✓ Symlink created: /Users/terryli -> /home/terryli"
+
+echo
+echo "Step 4: Verifying setup..."
+echo "Checking /Users/terryli..."
+ls -ld /Users/terryli
+
+echo
+echo "Checking if path resolves correctly..."
+if [ -d /Users/terryli ]; then
+    echo "✓ /Users/terryli is accessible"
+else
+    echo "ERROR: /Users/terryli is not accessible!"
+    exit 1
+fi
+
+echo
+echo "========================================"
+echo "Setup Complete!"
+echo "========================================"
+echo
+echo "Test the setup:"
+echo "  ls -la /Users/terryli"
+echo "  readlink /Users/terryli"
+echo
+echo "Now you can sync Claude Code sessions from macOS and paths will match!"
+echo
+echo "Next steps:"
+echo "1. Set up SSH key for terryli user (copy from yca)"
+echo "2. Configure CCMS on macOS to sync to terryli@172.25.236.1"
+echo "3. Run 'ccms push' to test sync"

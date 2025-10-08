@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""
+Comprehensive Atom Integrity Testing
+
+Tests all atoms from ml_feature_set library and generates integrity report.
+"""
+
+import sys
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+# Add project root to path
+project_root = Path.cwd()
+sys.path.insert(0, str(project_root))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def load_test_data():
+    """Load SOL 5m sample data"""
+    data_path = Path('ml_feature_set/sample_data/resampled_binance_SOL-5m.csv')
+
+    if not data_path.exists():
+        raise FileNotFoundError(f"Cannot find SOL 5m data at {data_path}")
+
+    df = pd.read_csv(data_path)
+
+    # Prepare data
+    if 'actual_ready_time' not in df.columns:
+        if 'date' in df.columns:
+            df['actual_ready_time'] = pd.to_datetime(df['date'])
+        else:
+            raise ValueError("No time column found in data")
+    else:
+        df['actual_ready_time'] = pd.to_datetime(df['actual_ready_time'])
+
+    df = df.set_index('actual_ready_time')
+    return df
+
+
+def check_sensibility(result: pd.Series) -> dict:
+    """Run sensibility checks on atom result"""
+    checks = {
+        'all_nan': result.isna().all(),
+        'nan_ratio': result.isna().sum() / len(result),
+        'all_zero': (result == 0).all(),
+        'all_constant': result.nunique() == 1,
+        'has_inf': np.isinf(result).any(),
+        'unique_count': result.nunique(),
+        'value_range': (result.min(), result.max()) if result.notna().any() else (np.nan, np.nan),
+        'std': result.std() if result.notna().any() else np.nan,
+        'mean': result.mean() if result.notna().any() else np.nan,
+    }
+
+    return checks
+
+
+def test_atom(atom, df):
+    """Test a single atom and return results"""
+    result = {
+        'name': atom.name,
+        'layer': atom.layer,
+        'library': atom.library,
+        'status': atom.status,
+        'lookback': atom.lookback,
+        'dependencies': ','.join(atom.dependencies) if atom.dependencies else 'None',
+        'success': False,
+        'error': None,
+    }
+
+    try:
+        series = atom.compute(df)
+        checks = check_sensibility(series)
+
+        result['success'] = True
+        result['total_values'] = len(series)
+        result['non_null'] = series.notna().sum()
+        result['null_count'] = series.isna().sum()
+        result['nan_ratio'] = checks['nan_ratio']
+        result['unique_count'] = checks['unique_count']
+        result['mean'] = checks['mean']
+        result['std'] = checks['std']
+        result['min'] = checks['value_range'][0]
+        result['max'] = checks['value_range'][1]
+        result['all_nan'] = checks['all_nan']
+        result['all_zero'] = checks['all_zero']
+        result['all_constant'] = checks['all_constant']
+        result['has_inf'] = checks['has_inf']
+
+        # Determine pass/warn/fail
+        if checks['all_nan'] or checks['has_inf']:
+            result['verdict'] = 'FAIL'
+        elif checks['all_zero'] or checks['all_constant'] or checks['nan_ratio'] > 0.5:
+            result['verdict'] = 'WARN'
+        else:
+            result['verdict'] = 'PASS'
+
+    except Exception as e:
+        result['error'] = str(e)
+        result['verdict'] = 'ERROR'
+
+    return result
+
+
+def main():
+    print("=" * 80)
+    print("COMPREHENSIVE ATOM INTEGRITY TESTING")
+    print("=" * 80)
+    print()
+
+    # Load library
+    print("Loading atom library...")
+    lib = load_library_from_formulas()
+    print(f"Library loaded: {len(lib)} total atoms\n")
+
+    # Load data
+    print("Loading test data...")
+    try:
+        df = load_test_data()
+        print(f"Loaded {len(df)} rows from {df.index.min()} to {df.index.max()}\n")
+    except Exception as e:
+        print(f"❌ Failed to load test data: {e}")
+        sys.exit(1)
+
+    # Test all atoms
+    results = []
+
+    for layer in ['A', 'B']:
+        atoms = lib.get_atoms_by_layer(layer)
+        if not atoms:
+            continue
+
+        print(f"\n{'=' * 80}")
+        print(f"TESTING LAYER {layer} ({len(atoms)} atoms)")
+        print(f"{'=' * 80}\n")
+
+        for i, atom in enumerate(atoms, 1):
+            print(f"[{i}/{len(atoms)}] Testing {atom.name}...", end=' ')
+            result = test_atom(atom, df)
+            results.append(result)
+
+            if result['verdict'] == 'PASS':
+                print(f"✅ PASS")
+            elif result['verdict'] == 'WARN':
+                print(f"⚠️  WARN - {result.get('error', 'Minor issues')}")
+            elif result['verdict'] == 'ERROR':
+                print(f"❌ ERROR - {result['error'][:60]}...")
+            else:
+                print(f"❌ FAIL - Critical issues")
+
+    # Generate summary report
+    print("\n" + "=" * 80)
+    print("SUMMARY REPORT")
+    print("=" * 80)
+
+    results_df = pd.DataFrame(results)
+
+    # Overall stats
+    print(f"\n📊 OVERALL STATISTICS")
+    print(f"   Total atoms tested:  {len(results)}")
+    print(f"   Passed:              {(results_df['verdict'] == 'PASS').sum()} ({(results_df['verdict'] == 'PASS').sum() / len(results) * 100:.1f}%)")
+    print(f"   Warnings:            {(results_df['verdict'] == 'WARN').sum()} ({(results_df['verdict'] == 'WARN').sum() / len(results) * 100:.1f}%)")
+    print(f"   Failures:            {(results_df['verdict'] == 'FAIL').sum()} ({(results_df['verdict'] == 'FAIL').sum() / len(results) * 100:.1f}%)")
+    print(f"   Errors:              {(results_df['verdict'] == 'ERROR').sum()} ({(results_df['verdict'] == 'ERROR').sum() / len(results) * 100:.1f}%)")
+
+    # Layer breakdown
+    print(f"\n📈 LAYER BREAKDOWN")
+    for layer in ['A', 'B']:
+        layer_results = results_df[results_df['layer'] == layer]
+        if len(layer_results) == 0:
+            continue
+        passed = (layer_results['verdict'] == 'PASS').sum()
+        total = len(layer_results)
+        print(f"   Layer {layer}: {passed}/{total} passed ({passed/total*100:.1f}%)")
+
+    # Failed/warned atoms
+    failed = results_df[results_df['verdict'].isin(['FAIL', 'ERROR'])]
+    if len(failed) > 0:
+        print(f"\n❌ FAILED/ERROR ATOMS ({len(failed)})")
+        for _, row in failed.iterrows():
+            print(f"   - {row['name']} ({row['layer']}): {row['error']}")
+
+    warned = results_df[results_df['verdict'] == 'WARN']
+    if len(warned) > 0:
+        print(f"\n⚠️  WARNED ATOMS ({len(warned)})")
+        for _, row in warned.iterrows():
+            issues = []
+            if row.get('all_zero'):
+                issues.append('all_zero')
+            if row.get('all_constant'):
+                issues.append('all_constant')
+            if row.get('nan_ratio', 0) > 0.5:
+                issues.append(f"high_nan({row['nan_ratio']*100:.1f}%)")
+            print(f"   - {row['name']} ({row['layer']}): {', '.join(issues)}")
+
+    # Save detailed report
+    output_path = '/tmp/atom_integrity_report.csv'
+    results_df.to_csv(output_path, index=False)
+    print(f"\n💾 Detailed report saved to: {output_path}")
+
+    # Exit code based on results
+    if (results_df['verdict'] == 'FAIL').any():
+        sys.exit(1)
+    else:
+        sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()

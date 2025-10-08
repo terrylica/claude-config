@@ -1,0 +1,124 @@
+name: Enforce Production Code Only (ZERO-TRUST WHITELIST)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-whitelist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce zero-trust whitelist
+        run: |
+          set -e
+
+          echo "🔒 ZERO-TRUST WHITELIST: Nothing merges to main unless explicitly approved"
+          echo "========================================================================"
+
+          # Get all files changed in this PR
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "✅ No files changed in PR"
+            exit 0
+          fi
+
+          echo "📄 Files attempting to merge:"
+          echo "$CHANGED_FILES" | sed 's/^/  - /'
+          echo ""
+
+          # ═══════════════════════════════════════════════════════════════
+          # WHITELIST: Add patterns here when explicitly approved
+          # ═══════════════════════════════════════════════════════════════
+          # Format: One regex pattern per line
+          # Example: '^ml_feature_set/bundled/.*\.py$'
+          #
+          # CURRENT POLICY: EMPTY = BLOCK EVERYTHING
+          # ═══════════════════════════════════════════════════════════════
+
+          WHITELIST_PATTERNS=(
+            # TODO: Add approved file patterns here
+            # NO PATTERNS = ZERO FILES ALLOWED
+          )
+
+          # ═══════════════════════════════════════════════════════════════
+
+          # Check each changed file against whitelist
+          BLOCKED_FILES=()
+
+          while IFS= read -r file; do
+            matched=false
+
+            # If whitelist is empty, nothing is allowed
+            if [ ${#WHITELIST_PATTERNS[@]} -eq 0 ]; then
+              BLOCKED_FILES+=("$file")
+              continue
+            fi
+
+            # Check if file matches any approved pattern
+            for pattern in "${WHITELIST_PATTERNS[@]}"; do
+              # Skip empty lines and comments
+              if [[ -z "$pattern" ]] || [[ "$pattern" =~ ^[[:space:]]*# ]]; then
+                continue
+              fi
+
+              if echo "$file" | grep -qE "$pattern"; then
+                matched=true
+                break
+              fi
+            done
+
+            # If no match found, file is BLOCKED
+            if [ "$matched" = false ]; then
+              BLOCKED_FILES+=("$file")
+            fi
+          done <<< "$CHANGED_FILES"
+
+          # Report results
+          if [ ${#BLOCKED_FILES[@]} -eq 0 ]; then
+            echo "✅ SUCCESS: All files are in the approved whitelist"
+            echo ""
+            echo "All changed files have been explicitly approved for main branch."
+            exit 0
+          else
+            echo "❌ FAILURE: Unapproved files detected in PR"
+            echo ""
+            echo "The following files are NOT in the whitelist:"
+            printf '  ❌ %s\n' "${BLOCKED_FILES[@]}"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🔒 ZERO-TRUST WHITELIST POLICY"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "📋 Current whitelist status:"
+
+            if [ ${#WHITELIST_PATTERNS[@]} -eq 0 ]; then
+              echo "  ⛔ EMPTY WHITELIST - Nothing is approved for main branch"
+            else
+              echo "  ✅ Approved patterns:"
+              printf '     • %s\n' "${WHITELIST_PATTERNS[@]}" | grep -v "^[[:space:]]*#" | grep -v "^[[:space:]]*$"
+            fi
+
+            echo ""
+            echo "💡 To approve files for main branch:"
+            echo "  1. Review the files in this PR carefully"
+            echo "  2. If approved, add pattern to whitelist in:"
+            echo "     .github/workflows/enforce-production-only.yml"
+            echo "  3. Commit whitelist update to main branch first"
+            echo "  4. Then rebase/update this PR"
+            echo ""
+            echo "Example patterns to add:"
+            echo "  '^ml_feature_set/bundled/.*\.py$'     # Allow Python files in bundled/"
+            echo "  '^pyproject\.toml$'                    # Allow pyproject.toml"
+            echo "  '^README\.md$'                         # Allow root README only"
+            echo ""
+            echo "⚠️  Default policy: BLOCK EVERYTHING unless explicitly approved"
+            echo ""
+            exit 1
+          fi

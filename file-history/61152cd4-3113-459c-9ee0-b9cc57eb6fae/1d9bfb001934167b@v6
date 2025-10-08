@@ -1,0 +1,923 @@
+#!/usr/bin/env python3
+"""
+OKX Funding Arbitrage — V1.6 LESS HARSH (Realistic Execution)
+
+Philosophy: Use Victor's realistic execution assumptions (60% maker ratio)
+while keeping conservative cost estimates.
+
+Realistic Assumptions:
+1. Execution: 60% maker / 40% taker (Victor's assumption from VIP-7 fee schedule)
+2. Maker fee: -0.5 bps (rebate), Taker: +2.0 bps
+3. Borrow costs: BTC 4% APR, Alts 12% APR (still conservative)
+4. Slippage: 3 bps per leg (conservative estimate)
+5. Partial fills: 90% execution
+6. Ops risk: 0.5% daily skip probability
+7. Gates: 4 bps hurdle, 10% no-trade bands
+
+Expected Impact: V1.5 Harsh (11.24%) → V1.6 Less Harsh (14-17%)
+
+Author: Terry Li
+Date: 2025-10-01
+"""
+
+from collections import defaultdict
+from datetime import timedelta
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+import random
+from scipy import stats as scipy_stats
+import quantstats as qs
+
+# =================== Configuration =================== #
+CSV_PATH = Path(__file__).parent.parent / "data" / "okx_funding_2year_daily.csv"
+OUT_CSV  = Path(__file__).parent / "okx_funding_arb_v1_6_less_harsh_results.csv"
+OUT_PNG  = Path(__file__).parent / "okx_funding_arb_v1_6_less_harsh_chart.png"
+INITIAL_EQUITY = 1.0
+START_DATE = None  # Will use all available data
+END_DATE   = None
+
+# ===== HARSH REALISM PARAMETERS =====
+# Philosophy: Conservative assumptions, backtest harder than reality
+
+# Borrow costs (annualized, applied hourly)
+BORROW_APR_BTC = 0.04   # 4% for BTC
+BORROW_APR_ALTS = 0.12  # 12% for alts (conservative floor)
+
+# Execution (Victor's VIP-7 realistic assumptions)
+TAKER_FEE = 0.0002      # 2 bps (VIP-7)
+MAKER_FEE = -0.00005    # -0.5 bps rebate (VIP-7)
+MAKER_RATIO = 0.60      # 60% maker fills (Victor's assumption)
+
+SLIPPAGE_BPS = 3.0      # 3 bps per leg (conservative)
+PARTIAL_FILL_RATIO = 0.90  # Only 90% of orders fill
+MISSED_HEDGE_SHARE = 0.10  # 10% doesn't get hedged (earns no funding)
+
+# Operational risks
+OPS_SKIP_PROB_DAILY = 0.005  # 0.5% chance to skip rebalance
+BORROW_UNAVAIL_PROB = 0.05   # 5% chance can't increase size
+
+# Strategy gates (tighter than V1)
+TOP_K = 5
+MAX_W = 0.50
+MIN_W = 0.05
+REBALANCE = "8h"
+MIN_HOLD_HOURS = 24.0
+HURDLE_BPS = 4.0        # Up from 3.0 (more conservative)
+BAND = 0.10             # Up from 0.05 (wider no-trade band)
+
+PROGRESS_EVERY = 200
+
+# =============================================================== #
+
+def load_data(csv_path: str) -> pd.DataFrame:
+    """Load funding rate data from CSV."""
+    df = pd.read_csv(csv_path)
+    need = {"symbol", "funding_time", "fundingRate"}
+    miss = need - set(df.columns)
+    if miss:
+        raise ValueError(f"Missing columns: {sorted(miss)}")
+    df["funding_time"] = pd.to_datetime(df["funding_time"], utc=True, errors="coerce")
+    df = df.dropna(subset=["funding_time", "fundingRate"]).copy()
+    df["fundingRate"] = pd.to_numeric(df["fundingRate"], errors="coerce")
+    df = df.dropna(subset=["fundingRate"]).copy()
+    df = df.sort_values(["funding_time", "symbol"]).reset_index(drop=True)
+    return df
+
+
+def filter_window(df: pd.DataFrame, start: str | None, end: str | None) -> pd.DataFrame:
+    """Filter data by date range."""
+    if start:
+        df = df[df["funding_time"] >= pd.Timestamp(start, tz="UTC")]
+    if end:
+        df = df[df["funding_time"] <= pd.Timestamp(end, tz="UTC")]
+    return df.reset_index(drop=True)
+
+
+def get_borrow_apr(symbol: str) -> float:
+    """
+    Get conservative borrow cost estimate.
+    Use max of: latest rate, p75 historical, floor.
+    For now, use floors as worst-case.
+    """
+    btc_symbols = {'BTC', 'BTCUSDT', 'BTC-USDT', 'BTCUSD'}
+    if symbol.upper() in btc_symbols:
+        return BORROW_APR_BTC
+    else:
+        return BORROW_APR_ALTS
+
+
+def apply_borrow_costs(holdings: dict, hours: float, equity: float) -> float:
+    """
+    Calculate borrow costs for period.
+
+    Args:
+        holdings: {symbol: weight}
+        hours: Hours in period (8 for standard funding)
+        equity: Current equity value
+
+    Returns:
+        Total borrow cost as fraction of equity
+    """
+    total_cost = 0.0
+    for symbol, weight in holdings.items():
+        notional = weight * equity
+        apr = get_borrow_apr(symbol)
+        hourly_rate = apr / 365.0 / 24.0
+        period_cost = notional * hourly_rate * hours
+        total_cost += period_cost
+
+    return total_cost / equity if equity > 0 else 0.0
+
+
+def apply_slippage(turnover: float) -> float:
+    """
+    Apply slippage to both legs of turnover.
+    Simple model: fixed 3 bps per leg.
+    """
+    slip_rate = SLIPPAGE_BPS / 10000.0
+    return 2 * turnover * slip_rate  # Both spot and perp legs
+
+
+def simulate_partial_fills(target_weights: dict) -> tuple[dict, float]:
+    """
+    Simulate partial fills and missed hedges.
+
+    Returns:
+        (actual_weights, missed_fraction)
+    """
+    actual = {}
+    for symbol, weight in target_weights.items():
+        # 90% of order fills
+        filled_weight = weight * PARTIAL_FILL_RATIO
+        actual[symbol] = filled_weight
+
+    # Normalize to maintain total allocation
+    total_actual = sum(actual.values())
+    total_target = sum(target_weights.values())
+
+    if total_actual > 0 and total_target > 0:
+        # Scale to match intended total
+        scale = total_target / total_actual
+        actual = {s: w * scale for s, w in actual.items()}
+
+    # Missed fraction
+    missed = 1.0 - PARTIAL_FILL_RATIO
+
+    return actual, missed
+
+
+def check_ops_skip(current_time: pd.Timestamp) -> bool:
+    """
+    Simulate operational skip (0.5% daily probability).
+    Deterministic based on date for reproducibility.
+    """
+    seed_str = f"ops_{current_time.date()}"
+    random.seed(hash(seed_str) % (2**32))
+    return random.random() < OPS_SKIP_PROB_DAILY
+
+
+def blended_fees():
+    """Calculate effective fees (60% maker / 40% taker blend)."""
+    spot_eff = MAKER_RATIO * MAKER_FEE + (1 - MAKER_RATIO) * TAKER_FEE
+    perp_eff = MAKER_RATIO * MAKER_FEE + (1 - MAKER_RATIO) * TAKER_FEE
+    return float(spot_eff), float(perp_eff)
+
+
+def fee_factor_for_turnover(turnover: float) -> float:
+    """Calculate fee drag from portfolio turnover."""
+    spot_eff, perp_eff = blended_fees()
+    turn_leg = float(np.clip(turnover, 0.0, 1.0))
+    spot_factor = (1 - spot_eff) ** (2 * turn_leg)
+    perp_factor = (1 - perp_eff) ** (2 * turn_leg)
+    return float(spot_factor * perp_factor)
+
+
+def capped_topk_weights_minmax(rates: pd.Series, k: int = TOP_K,
+                                max_w: float = MAX_W, min_w: float = MIN_W) -> dict:
+    """
+    Deterministic allocator with min/max caps.
+    Same as Victor's implementation.
+    """
+    sr = rates.abs().nlargest(k)
+    if sr.empty:
+        return {}
+    syms = list(sr.index)
+    n = len(syms)
+    w = pd.Series(0.0, index=syms)
+
+    seed_total = min_w * n
+    if seed_total > 1.0:
+        base = min(max_w, 1.0 / n)
+        w += base
+        remaining = 1.0 - base * n
+    else:
+        w += min_w
+        remaining = 1.0 - seed_total
+
+    if remaining > 1e-12:
+        headroom = (max_w - w).clip(lower=0.0)
+        for s in syms:
+            if remaining <= 1e-12:
+                break
+            add = float(min(headroom[s], remaining))
+            if add > 0:
+                w[s] += add
+                remaining -= add
+
+    total = float(w.sum())
+    if total > 0:
+        w /= total
+    return {s: float(w[s]) for s in syms}
+
+
+def portfolio_gross_factor(weights: dict, rates: pd.Series) -> float:
+    """Calculate portfolio gross return factor."""
+    return sum(weights.get(s, 0.0) * (1.0 + abs(float(rates.get(s, 0.0))))
+               for s in set(weights) | set(rates.index))
+
+
+def l1_half_turnover(new_w: dict, old_w: dict) -> float:
+    """Calculate L1 half-turnover between portfolios."""
+    syms = set(new_w) | set(old_w)
+    return 0.5 * sum(abs(new_w.get(s, 0.0) - old_w.get(s, 0.0)) for s in syms)
+
+
+def apply_no_trade_bands(target: dict, current: dict, band: float) -> dict:
+    """Apply no-trade bands to reduce noise trading."""
+    out = dict(current)
+    for s, tw in target.items():
+        cw = current.get(s, 0.0)
+        lo, hi = cw - band, cw + band
+        if tw > hi or tw < lo:
+            out[s] = tw
+        else:
+            out[s] = cw
+    for s, cw in current.items():
+        if s not in target:
+            lo, _ = cw - band, cw + band
+            out[s] = max(0.0, lo)
+    total = sum(out.values())
+    if total > 0:
+        out = {s: w / total for s, w in out.items() if w > 1e-12}
+    return out
+
+
+def build_portfolio_strategy_v1_5_harsh(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    V1.6 LESS HARSH backtester with realistic execution (60% maker).
+    """
+    # Resample to snapshots
+    if REBALANCE == "daily":
+        snap = df.set_index("funding_time").groupby("symbol")["fundingRate"].resample("1D").last().dropna().reset_index()
+    else:
+        snap = df.set_index("funding_time").groupby("symbol")["fundingRate"].resample("8H").last().dropna().reset_index()
+
+    snap = snap.sort_values(["funding_time", "symbol"]).reset_index(drop=True)
+    times = sorted(snap["funding_time"].unique())
+
+    print(f"Total snapshots: {len(times)}")
+    print(f"\n{'='*80}")
+    print("V1.6 LESS HARSH (Realistic Execution - 60% Maker)")
+    print(f"{'='*80}")
+    print(f"Borrow costs: BTC {BORROW_APR_BTC*100:.1f}%, Alts {BORROW_APR_ALTS*100:.1f}%")
+    spot_eff, perp_eff = blended_fees()
+    print(f"Execution: {MAKER_RATIO*100:.0f}% maker ({MAKER_FEE*10000:+.1f} bps), {(1-MAKER_RATIO)*100:.0f}% taker (+{TAKER_FEE*10000:.1f} bps)")
+    print(f"  → Blended fee: {spot_eff*10000:+.2f} bps per leg")
+    print(f"Slippage: {SLIPPAGE_BPS:.1f} bps per leg")
+    print(f"Partial fills: {PARTIAL_FILL_RATIO*100:.0f}%")
+    print(f"Ops skip: {OPS_SKIP_PROB_DAILY*100:.2f}% daily")
+    print(f"Hurdle: {HURDLE_BPS:.1f} bps, No-trade band: {BAND*100:.0f}%")
+    print(f"{'='*80}\n")
+
+    rows = []
+    equity = INITIAL_EQUITY
+    prev_w = defaultdict(float)
+    last_change_time = None
+
+    total_borrow_cost = 0.0
+    total_slippage = 0.0
+    total_missed_funding = 0.0
+    ops_skips = 0
+
+    for i, t in enumerate(times, 1):
+        # Skip first period - no T-1 available
+        if i == 1:
+            print(f"[{i}/{len(times)}] {t}: Skipping (no T-1 data)")
+            continue
+
+        # Check operational skip
+        if check_ops_skip(t):
+            ops_skips += 1
+            # Hold current portfolio, apply returns
+            g_curr = snap[snap["funding_time"] == t]
+            rates_curr = g_curr.set_index("symbol")["fundingRate"]
+            gross = portfolio_gross_factor(prev_w, rates_curr)
+
+            # Still pay borrow costs
+            borrow_cost = apply_borrow_costs(prev_w, 8.0, equity)
+            total_borrow_cost += borrow_cost
+
+            net = (gross - 1.0) - borrow_cost
+            equity *= (1 + net)
+
+            rows.append({
+                "time": t,
+                "equity": equity,
+                "action": "ops_skip",
+                "borrow_cost": borrow_cost,
+                "slippage": 0.0,
+                "missed_funding": 0.0,
+            })
+            continue
+
+        # Get PREVIOUS rates (T-1) for selection
+        t_prev = times[i-2]
+        g_prev = snap[snap["funding_time"] == t_prev]
+        rates_prev = g_prev.set_index("symbol")["fundingRate"]
+
+        # Get CURRENT rates (T) for returns
+        g_curr = snap[snap["funding_time"] == t]
+        rates_curr = g_curr.set_index("symbol")["fundingRate"]
+
+        # Select portfolio using T-1 rates (what we knew yesterday)
+        target = capped_topk_weights_minmax(rates_prev, k=TOP_K, max_w=MAX_W, min_w=MIN_W)
+
+        # Calculate advantages using T-1 rates (realistic estimate)
+        gross_current = portfolio_gross_factor(prev_w, rates_prev)
+        gross_target = portfolio_gross_factor(target, rates_prev)
+
+        # Min-hold check
+        can_change = True
+        if last_change_time is not None:
+            elapsed = (t - last_change_time).total_seconds() / 3600.0
+            can_change = elapsed >= MIN_HOLD_HOURS
+
+        advantage_bps = (gross_target - gross_current) * 1e4
+
+        new_w = dict(prev_w)
+        executed = False
+        turnover = 0.0
+        fee_factor = 1.0
+
+        # Rebalancing decision
+        if can_change and advantage_bps >= HURDLE_BPS:
+            turnover_full = l1_half_turnover(target, prev_w)
+            fee_factor_full = fee_factor_for_turnover(turnover_full)
+            fee_drag_bps_full = (1.0 - fee_factor_full) * 1e4
+
+            if advantage_bps >= fee_drag_bps_full:
+                clipped = apply_no_trade_bands(target, prev_w, BAND)
+
+                # Simulate partial fills
+                actual_fills, missed_frac = simulate_partial_fills(clipped)
+
+                turnover = l1_half_turnover(actual_fills, prev_w)
+                fee_factor = fee_factor_for_turnover(turnover)
+                new_w = actual_fills
+                executed = True
+                last_change_time = t
+
+        # Apply returns using CURRENT rates (what actually happened)
+        gross = portfolio_gross_factor(new_w, rates_curr)
+
+        # Calculate all costs
+        period_costs = {}
+
+        # 1. Borrow costs (8 hours)
+        borrow_cost = apply_borrow_costs(new_w, 8.0, equity)
+        period_costs['borrow'] = borrow_cost
+        total_borrow_cost += borrow_cost
+
+        # 2. Trading fees (if rebalanced)
+        if executed:
+            fee_drag = 1.0 - fee_factor
+            period_costs['fees'] = fee_drag
+        else:
+            period_costs['fees'] = 0.0
+
+        # 3. Slippage (if rebalanced)
+        if executed:
+            slippage = apply_slippage(turnover)
+            period_costs['slippage'] = slippage
+            total_slippage += slippage
+        else:
+            period_costs['slippage'] = 0.0
+
+        # 4. Missed hedge penalty (if rebalanced with partials)
+        if executed:
+            # Missed portion earns no funding
+            missed_funding = (gross - 1.0) * MISSED_HEDGE_SHARE
+            period_costs['missed'] = missed_funding
+            total_missed_funding += missed_funding
+        else:
+            period_costs['missed'] = 0.0
+
+        # Net return
+        net_return = (gross - 1.0) - sum(period_costs.values())
+        equity *= (1 + net_return)
+
+        prev_w = new_w
+
+        rows.append({
+            "time": t,
+            "equity": equity,
+            "action": "rebalanced" if executed else "hold",
+            "advantage_bps": advantage_bps if can_change else None,
+            "turnover": turnover if executed else 0.0,
+            "borrow_cost": period_costs['borrow'],
+            "fee_drag": period_costs['fees'],
+            "slippage": period_costs['slippage'],
+            "missed_funding": period_costs['missed'],
+        })
+
+        if i % PROGRESS_EVERY == 0:
+            print(f"[{i}/{len(times)}] {t}: equity={equity:.6f}")
+
+    out_df = pd.DataFrame(rows)
+
+    print(f"\n{'='*80}")
+    print("COST BREAKDOWN")
+    print(f"{'='*80}")
+    print(f"Total borrow costs:     {total_borrow_cost:.6f} ({total_borrow_cost*100:.2f}%)")
+    print(f"Total slippage:         {total_slippage:.6f} ({total_slippage*100:.2f}%)")
+    print(f"Total missed funding:   {total_missed_funding:.6f} ({total_missed_funding*100:.2f}%)")
+    print(f"Operational skips:      {ops_skips}")
+    print(f"{'='*80}\n")
+
+    return out_df
+
+
+def sharpe_ratio(equity_series: pd.Series, periods_per_year: int = 365 * 3) -> float:
+    """Calculate annualized Sharpe ratio."""
+    if len(equity_series) < 2:
+        return 0.0
+    rets = equity_series.pct_change().dropna()
+    if rets.std() == 0:
+        return 0.0
+    return float((rets.mean() / rets.std()) * np.sqrt(periods_per_year))
+
+
+def calculate_rolling_apy(equity_df: pd.DataFrame, windows_days: list[int] = [30, 90, 180, 365]) -> pd.DataFrame:
+    """
+    Calculate rolling APY at multiple time windows.
+
+    Args:
+        equity_df: DataFrame with 'time' and 'equity' columns
+        windows_days: List of window sizes in days
+
+    Returns:
+        DataFrame with rolling APY columns for each window
+    """
+    # Ensure time is datetime
+    df = equity_df.copy()
+    df['time'] = pd.to_datetime(df['time'])
+    df = df.set_index('time').sort_index()
+
+    rolling_apy_df = pd.DataFrame(index=df.index)
+    rolling_apy_df['equity'] = df['equity']
+
+    for window_days in windows_days:
+        col_name = f'apy_{window_days}d'
+
+        # Calculate rolling APY for each point
+        apy_values = []
+        for i in range(len(df)):
+            current_time = df.index[i]
+            lookback_time = current_time - pd.Timedelta(days=window_days)
+
+            # Get data within window
+            window_data = df[(df.index >= lookback_time) & (df.index <= current_time)]
+
+            if len(window_data) >= 2:
+                start_eq = window_data['equity'].iloc[0]
+                end_eq = window_data['equity'].iloc[-1]
+                actual_days = (window_data.index[-1] - window_data.index[0]).total_seconds() / 86400.0
+
+                if actual_days > 0 and start_eq > 0:
+                    apy = ((end_eq / start_eq) ** (365.25 / actual_days) - 1) * 100
+                    apy_values.append(apy)
+                else:
+                    apy_values.append(np.nan)
+            else:
+                apy_values.append(np.nan)
+
+        rolling_apy_df[col_name] = apy_values
+
+    return rolling_apy_df.reset_index()
+
+
+def calculate_apy_statistics(rolling_apy_df: pd.DataFrame, windows_days: list[int] = [30, 90, 180, 365]) -> dict:
+    """
+    Calculate comprehensive statistics for rolling APY.
+
+    Returns:
+        Dictionary with statistics for each window size
+    """
+    stats_dict = {}
+
+    for window_days in windows_days:
+        col_name = f'apy_{window_days}d'
+        if col_name not in rolling_apy_df.columns:
+            continue
+
+        apy_values = rolling_apy_df[col_name].dropna()
+
+        if len(apy_values) == 0:
+            stats_dict[window_days] = {'error': 'No valid data'}
+            continue
+
+        # Basic statistics
+        stats_dict[window_days] = {
+            'count': len(apy_values),
+            'mean': float(apy_values.mean()),
+            'median': float(apy_values.median()),
+            'std': float(apy_values.std()),
+            'min': float(apy_values.min()),
+            'max': float(apy_values.max()),
+            'q25': float(apy_values.quantile(0.25)),
+            'q75': float(apy_values.quantile(0.75)),
+            'q10': float(apy_values.quantile(0.10)),
+            'q90': float(apy_values.quantile(0.90)),
+            'iqr': float(apy_values.quantile(0.75) - apy_values.quantile(0.25)),
+            'skew': float(scipy_stats.skew(apy_values)),
+            'kurtosis': float(scipy_stats.kurtosis(apy_values)),
+            # Regime statistics
+            'pct_positive': float((apy_values > 0).sum() / len(apy_values) * 100),
+            'pct_above_10': float((apy_values > 10).sum() / len(apy_values) * 100),
+            'pct_above_15': float((apy_values > 15).sum() / len(apy_values) * 100),
+            'pct_above_20': float((apy_values > 20).sum() / len(apy_values) * 100),
+        }
+
+    return stats_dict
+
+
+def print_apy_statistics(stats_dict: dict):
+    """Print formatted APY statistics table."""
+    print("\n" + "="*80)
+    print("ROLLING APY STATISTICS")
+    print("="*80)
+
+    # Header
+    print(f"\n{'Metric':<25} {'30-Day':<15} {'90-Day':<15} {'180-Day':<15} {'365-Day':<15}")
+    print("-"*80)
+
+    # Metrics to display
+    metrics = [
+        ('Count', 'count', '{:.0f}'),
+        ('Mean APY', 'mean', '{:+.2f}%'),
+        ('Median APY', 'median', '{:+.2f}%'),
+        ('Std Dev', 'std', '{:.2f}%'),
+        ('Min APY', 'min', '{:+.2f}%'),
+        ('Max APY', 'max', '{:+.2f}%'),
+        ('10th Percentile', 'q10', '{:+.2f}%'),
+        ('25th Percentile', 'q25', '{:+.2f}%'),
+        ('75th Percentile', 'q75', '{:+.2f}%'),
+        ('90th Percentile', 'q90', '{:+.2f}%'),
+        ('IQR', 'iqr', '{:.2f}%'),
+        ('Skewness', 'skew', '{:+.2f}'),
+        ('Kurtosis', 'kurtosis', '{:+.2f}'),
+    ]
+
+    for display_name, key, fmt in metrics:
+        row = [display_name]
+        for window in [30, 90, 180, 365]:
+            if window in stats_dict and key in stats_dict[window]:
+                value = stats_dict[window][key]
+                row.append(fmt.format(value))
+            else:
+                row.append('N/A')
+        print(f"{row[0]:<25} {row[1]:<15} {row[2]:<15} {row[3]:<15} {row[4]:<15}")
+
+    # Regime statistics
+    print("\n" + "-"*80)
+    print("REGIME ANALYSIS")
+    print("-"*80)
+
+    regime_metrics = [
+        ('% Positive APY', 'pct_positive', '{:.1f}%'),
+        ('% APY > 10%', 'pct_above_10', '{:.1f}%'),
+        ('% APY > 15%', 'pct_above_15', '{:.1f}%'),
+        ('% APY > 20%', 'pct_above_20', '{:.1f}%'),
+    ]
+
+    for display_name, key, fmt in regime_metrics:
+        row = [display_name]
+        for window in [30, 90, 180, 365]:
+            if window in stats_dict and key in stats_dict[window]:
+                value = stats_dict[window][key]
+                row.append(fmt.format(value))
+            else:
+                row.append('N/A')
+        print(f"{row[0]:<25} {row[1]:<15} {row[2]:<15} {row[3]:<15} {row[4]:<15}")
+
+    print("="*80)
+
+
+def plot_rolling_apy_analysis(rolling_apy_df: pd.DataFrame, output_path: Path):
+    """
+    Create comprehensive rolling APY visualization.
+
+    Creates 5-panel plot:
+    1. Equity curve
+    2. Rolling APY time series (all windows)
+    3. APY distribution (histograms)
+    4. Drawdown underwater plot (left) + Rolling 365d Sharpe (right)
+    """
+    fig = plt.figure(figsize=(16, 16))
+    gs = fig.add_gridspec(4, 2, height_ratios=[1, 1, 1, 1], width_ratios=[1, 1])
+
+    # Panel 1: Equity curve
+    ax1 = fig.add_subplot(gs[0, :])
+    ax1.plot(rolling_apy_df['time'], rolling_apy_df['equity'], linewidth=1.5, color='#2E86AB')
+    ax1.set_title("Equity Curve", fontsize=14, fontweight='bold')
+    ax1.set_ylabel("Equity (normalized)")
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
+
+    # Panel 2: Rolling APY time series
+    ax2 = fig.add_subplot(gs[1, :])
+    colors = ['#E63946', '#F77F00', '#06A77D', '#2E86AB']
+    windows = [30, 90, 180, 365]
+
+    for window, color in zip(windows, colors):
+        col_name = f'apy_{window}d'
+        if col_name in rolling_apy_df.columns:
+            ax2.plot(rolling_apy_df['time'], rolling_apy_df[col_name],
+                    label=f'{window}d', linewidth=1.5, alpha=0.8, color=color)
+
+    ax2.set_title("Rolling APY (Multiple Windows)", fontsize=14, fontweight='bold')
+    ax2.set_ylabel("APY (%)")
+    ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.3)
+    ax2.axhline(y=15, color='green', linestyle='--', linewidth=1, alpha=0.5, label='15% target')
+    ax2.axhline(y=20, color='blue', linestyle='--', linewidth=1, alpha=0.5, label='20% target')
+    ax2.legend(loc='best', framealpha=0.9)
+    ax2.grid(True, alpha=0.3)
+
+    # Panel 3: Distribution histograms (show 2 most relevant windows)
+    # Left: 90-day distribution, Right: 365-day distribution
+    distribution_windows = [(90, '#F77F00', 0), (365, '#2E86AB', 1)]  # (window, color, position)
+
+    for window, color, pos in distribution_windows:
+        ax = fig.add_subplot(gs[2, pos])
+        col_name = f'apy_{window}d'
+
+        if col_name in rolling_apy_df.columns:
+            apy_values = rolling_apy_df[col_name].dropna()
+
+            if len(apy_values) > 0:
+                # Create histogram
+                n, bins, patches = ax.hist(apy_values, bins=35, alpha=0.7, color=color,
+                                          edgecolor='black', linewidth=0.5)
+
+                # Add mean and median lines
+                mean_val = apy_values.mean()
+                median_val = apy_values.median()
+
+                ax.axvline(mean_val, color='red', linestyle='--',
+                          linewidth=2.5, label=f'Mean: {mean_val:.1f}%', alpha=0.9)
+                ax.axvline(median_val, color='green', linestyle='--',
+                          linewidth=2.5, label=f'Median: {median_val:.1f}%', alpha=0.9)
+
+                # Add target reference lines
+                ax.axvline(15, color='blue', linestyle=':', linewidth=1.5,
+                          label='15% target', alpha=0.5)
+                ax.axvline(20, color='purple', linestyle=':', linewidth=1.5,
+                          label='20% target', alpha=0.5)
+
+                # Formatting
+                ax.set_title(f'{window}-Day Rolling APY Distribution',
+                           fontsize=11, fontweight='bold', pad=10)
+                ax.set_xlabel('APY (%)', fontsize=10)
+                ax.set_ylabel('Frequency', fontsize=10)
+                ax.legend(loc='upper right', fontsize=8, framealpha=0.95)
+                ax.grid(True, alpha=0.3, axis='y')
+
+                # Add statistics text box
+                stats_text = f'n={len(apy_values)}\nStd={apy_values.std():.1f}%'
+                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                       fontsize=8, verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    # Panel 4 Left: Drawdown Underwater Plot
+    ax_dd = fig.add_subplot(gs[3, 0])
+    equity_series = rolling_apy_df['equity'].values
+    running_max = np.maximum.accumulate(equity_series)
+    drawdown = (equity_series - running_max) / running_max * 100
+
+    ax_dd.fill_between(rolling_apy_df['time'], drawdown, 0,
+                       color='#E63946', alpha=0.6, label='Drawdown')
+    ax_dd.plot(rolling_apy_df['time'], drawdown,
+               color='#A4161A', linewidth=1.5, alpha=0.8)
+
+    max_dd = drawdown.min()
+    ax_dd.axhline(y=max_dd, color='red', linestyle='--',
+                  linewidth=2, alpha=0.7, label=f'Max DD: {max_dd:.2f}%')
+
+    ax_dd.set_title('Drawdown Underwater Plot', fontsize=11, fontweight='bold', pad=10)
+    ax_dd.set_ylabel('Drawdown (%)', fontsize=10)
+    ax_dd.set_xlabel('Date', fontsize=10)
+    ax_dd.legend(loc='lower right', fontsize=8, framealpha=0.95)
+    ax_dd.grid(True, alpha=0.3)
+    ax_dd.axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.3)
+
+    # Add stats box
+    dd_stats = f'Max: {max_dd:.2f}%\nMean: {drawdown.mean():.2f}%'
+    ax_dd.text(0.02, 0.02, dd_stats, transform=ax_dd.transAxes,
+               fontsize=8, verticalalignment='bottom',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    # Panel 4 Right: Rolling Sharpe Ratio (using quantstats)
+    ax_sharpe = fig.add_subplot(gs[3, 1])
+
+    # Calculate 8-hour returns from equity curve
+    equity_series = rolling_apy_df.set_index('time')['equity']
+    returns = equity_series.pct_change()
+
+    # Use quantstats rolling_sharpe (industry standard implementation)
+    # 90-day window = 270 periods (3 periods/day × 90 days)
+    # Annualize using 1095 periods/year (3 per day × 365 days)
+    rolling_period = 270  # 90 days in 8-hour periods
+    periods_per_year = 1095  # 8-hour periods per year
+
+    if len(returns) > rolling_period:
+        # Calculate rolling Sharpe using quantstats
+        sharpe_ratio = qs.stats.rolling_sharpe(
+            returns,
+            rf=0.0,
+            rolling_period=rolling_period,
+            annualize=True,
+            periods_per_year=periods_per_year,
+            prepare_returns=True
+        )
+
+        # Plot
+        ax_sharpe.plot(sharpe_ratio.index, sharpe_ratio.values,
+                      color='#06A77D', linewidth=1.5, alpha=0.8, label='90d Rolling Sharpe')
+
+        # Reference lines
+        ax_sharpe.axhline(y=2.0, color='green', linestyle='--',
+                         linewidth=1.5, alpha=0.5, label='Excellent (>2)')
+        ax_sharpe.axhline(y=1.0, color='orange', linestyle='--',
+                         linewidth=1.5, alpha=0.5, label='Good (>1)')
+        ax_sharpe.axhline(y=0, color='black', linestyle='-',
+                         linewidth=0.8, alpha=0.3)
+
+        # Stats
+        sharpe_clean = sharpe_ratio.dropna()
+        if len(sharpe_clean) > 0:
+            mean_sharpe = sharpe_clean.mean()
+            median_sharpe = sharpe_clean.median()
+            current_sharpe = sharpe_clean.iloc[-1] if len(sharpe_clean) > 0 else np.nan
+
+            ax_sharpe.set_title('Rolling Sharpe Ratio (quantstats, 90d window)',
+                              fontsize=11, fontweight='bold', pad=10)
+            ax_sharpe.set_ylabel('Sharpe Ratio', fontsize=10)
+            ax_sharpe.set_xlabel('Date', fontsize=10)
+            ax_sharpe.legend(loc='best', fontsize=8, framealpha=0.95)
+            ax_sharpe.grid(True, alpha=0.3)
+
+            # Add stats box
+            sharpe_stats = f'Mean: {mean_sharpe:.2f}\nMedian: {median_sharpe:.2f}\nCurrent: {current_sharpe:.2f}'
+            ax_sharpe.text(0.02, 0.98, sharpe_stats, transform=ax_sharpe.transAxes,
+                          fontsize=8, verticalalignment='top',
+                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout(pad=2.0, h_pad=2.5, w_pad=1.5)
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"[SAVE] Rolling APY analysis chart saved to {output_path}")
+
+
+def main():
+    """Main execution."""
+    print("\n" + "=" * 80)
+    print("V1.6 LESS HARSH BACKTESTER (60% Maker Ratio)")
+    print("=" * 80)
+    print("\nPhilosophy: Use realistic execution (60% maker) with conservative costs")
+    print("Expected: V1.6 should show ~3-5 pp improvement over V1.5 harsh")
+    print("=" * 80 + "\n")
+
+    # Load data
+    df_raw = load_data(str(CSV_PATH))
+    df = filter_window(df_raw, START_DATE, END_DATE)
+
+    print(f"✓ Loaded {len(df):,} funding rate records")
+    print(f"  Date range: {df['funding_time'].min()} → {df['funding_time'].max()}")
+    print(f"  Symbols: {df['symbol'].nunique()} unique")
+
+    # Run backtest
+    result_df = build_portfolio_strategy_v1_5_harsh(df)
+
+    # Calculate metrics
+    eq_series = result_df["equity"]
+    final_eq = float(eq_series.iloc[-1])
+    t0 = result_df["time"].iloc[0]
+    t1 = result_df["time"].iloc[-1]
+    days = (t1 - t0).total_seconds() / 86400.0
+
+    cagr = (final_eq ** (365.25 / days)) - 1.0 if days > 0 and final_eq > 0 else 0.0
+    sharpe = sharpe_ratio(eq_series)
+
+    # Save results
+    result_df.to_csv(str(OUT_CSV), index=False)
+
+    # Plot
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+    # Equity curve
+    ax1.plot(result_df["time"], result_df["equity"], linewidth=1.5)
+    ax1.set_title("V1.6 LESS HARSH Backtest — Equity Curve (60% Maker Execution)", fontsize=14, weight='bold')
+    ax1.set_ylabel("Equity (normalized)")
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
+
+    # Cost breakdown
+    cost_cols = ['borrow_cost', 'fee_drag', 'slippage', 'missed_funding']
+    costs_df = result_df[cost_cols].fillna(0)
+
+    ax2.plot(result_df["time"], costs_df['borrow_cost'].cumsum(), label='Borrow', linewidth=1.5)
+    ax2.plot(result_df["time"], costs_df['fee_drag'].cumsum(), label='Fees', linewidth=1.5)
+    ax2.plot(result_df["time"], costs_df['slippage'].cumsum(), label='Slippage', linewidth=1.5)
+    ax2.plot(result_df["time"], costs_df['missed_funding'].cumsum(), label='Missed Hedges', linewidth=1.5)
+
+    ax2.set_title("Cumulative Costs Over Time", fontsize=12)
+    ax2.set_xlabel("Date (UTC)")
+    ax2.set_ylabel("Cumulative Cost")
+    ax2.legend(loc='upper left')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(str(OUT_PNG), dpi=150, bbox_inches="tight")
+    plt.close()
+
+    # Print summary
+    print(f"\n{'='*80}")
+    print("=== V1.6 LESS HARSH Results (60% Maker Ratio) ===")
+    print(f"{'='*80}")
+    print(f"Period:     {t0.date()} → {t1.date()}  (~{days:.1f} days)")
+    print(f"Final eq:   {final_eq:.6f}  (start {INITIAL_EQUITY})")
+    print(f"APY (CAGR): {cagr*100:.2f}%")
+    print(f"Sharpe:     {sharpe:.2f}")
+    print(f"\nCSV:        {OUT_CSV}")
+    print(f"Chart:      {OUT_PNG}")
+    print(f"{'='*80}")
+
+    # Calculate rolling APY statistics
+    print("\n" + "="*80)
+    print("CALCULATING ROLLING APY STATISTICS...")
+    print("="*80)
+
+    windows = [30, 90, 180, 365]
+    rolling_apy_df = calculate_rolling_apy(result_df[['time', 'equity']], windows_days=windows)
+
+    # Calculate statistics
+    stats_dict = calculate_apy_statistics(rolling_apy_df, windows_days=windows)
+
+    # Print statistics
+    print_apy_statistics(stats_dict)
+
+    # Save rolling APY data
+    rolling_csv = Path(str(OUT_CSV).replace('_results.csv', '_rolling_apy.csv'))
+    rolling_apy_df.to_csv(rolling_csv, index=False)
+    print(f"\n[SAVE] Rolling APY data saved to {rolling_csv}")
+
+    # Create rolling APY visualization
+    rolling_png = Path(str(OUT_PNG).replace('_chart.png', '_rolling_apy.png'))
+    plot_rolling_apy_analysis(rolling_apy_df, rolling_png)
+
+    print("\n" + "="*80)
+    print("INTERPRETATION:")
+    print("="*80)
+    print(f"Overall CAGR: {cagr*100:.2f}%")
+    print(f"\nRolling APY Assessment (365-day window):")
+    if 365 in stats_dict:
+        mean_365 = stats_dict[365]['mean']
+        median_365 = stats_dict[365]['median']
+        q25_365 = stats_dict[365]['q25']
+        q75_365 = stats_dict[365]['q75']
+
+        print(f"  Mean: {mean_365:+.2f}%")
+        print(f"  Median: {median_365:+.2f}%")
+        print(f"  25th-75th percentile: {q25_365:+.2f}% to {q75_365:+.2f}%")
+
+        if mean_365 > 20:
+            print(f"  ✅ Excellent! Consistently high returns")
+        elif mean_365 > 15:
+            print(f"  ✅ Good! Deploy with confidence")
+        elif mean_365 > 10:
+            print(f"  ⚠️  Acceptable, monitor closely")
+        else:
+            print(f"  ❌ Below target, reconsider deployment")
+
+    print(f"\nFiles generated:")
+    print(f"  Results: {OUT_CSV}")
+    print(f"  Chart: {OUT_PNG}")
+    print(f"  Rolling APY data: {rolling_csv}")
+    print(f"  Rolling APY chart: {rolling_png}")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()

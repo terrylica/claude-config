@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""
+Temporal Integrity Validator for Victor's Funding Rate Arbitrage Strategy
+
+Purpose: Detect look-ahead bias by comparing Victor's backtester logic against
+         ground-truth OKX bulk historical data.
+
+Author: Terry Li (Engineering Lead)
+Date: 2025-09-30
+
+Usage:
+    uv run --with pandas,requests python validate_temporal_integrity.py
+
+Tests:
+1. Timestamp alignment - verify fundingTime meanings
+2. Look-ahead detection - check if backtester uses future data
+3. Funding rate persistence - validate T-1 → T correlation
+4. Backtest reconstruction - rebuild with forced lag
+"""
+
+import pandas as pd
+import requests
+from datetime import datetime, timedelta
+from pathlib import Path
+
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# Test period (use Victor's backtest period if available, else recent data)
+TEST_START = "2024-08-01"
+TEST_END = "2024-08-10"
+SYMBOLS = ["BTC", "ETH", "SOL"]  # Start with major symbols
+
+# Data sources
+OKX_BULK_BASE = "https://www.okx.com/cdn/okex/traderecords/swaprate/daily"
+OUTPUT_DIR = Path(__file__).parent
+
+
+# ============================================================================
+# Step 1: Download OKX Bulk Historical Data
+# ============================================================================
+
+def download_okx_bulk_data(symbol: str, date_str: str) -> pd.DataFrame:
+    """
+    Download OKX bulk funding rate data for a specific symbol and date.
+
+    Returns DataFrame with columns:
+    - funding_time_next: Timestamp of NEXT settlement
+    - real_rate: Actual rate that SETTLED for current period
+    - predicted_rate: Estimated rate for NEXT period
+    """
+    # Format: YYYYMMDD for URL path, YYYY-MM-DD for filename
+    url_date = date_str.replace("-", "")
+    file_date = date_str
+
+    url = f"{OKX_BULK_BASE}/{url_date}/{symbol}-USDT-SWAP-swaprate-{file_date}.zip"
+
+    try:
+        print(f"Downloading {symbol} data for {date_str}... ", end="")
+
+        # Download ZIP
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+
+        # Save temporarily
+        zip_path = OUTPUT_DIR / f"temp_{symbol}_{url_date}.zip"
+        zip_path.write_bytes(resp.content)
+
+        # Extract and parse CSV
+        import zipfile
+        import io
+
+        with zipfile.ZipFile(zip_path) as zf:
+            csv_name = zf.namelist()[0]
+            with zf.open(csv_name) as f:
+                # Read with GBK encoding (Chinese column names)
+                df = pd.read_csv(io.BytesIO(f.read()), encoding='gbk')
+
+        # Clean up
+        zip_path.unlink()
+
+        # Rename columns for clarity
+        df = df.rename(columns={
+            'funding_time/下一周期时间戳': 'funding_time_next',
+            'real_funding_rate/本周期真实费率': 'real_rate',
+            'funding_rate/预测下一周期费率': 'predicted_rate'
+        })
+
+        df['symbol'] = symbol
+        df['date'] = date_str
+
+        # Convert timestamps
+        df['funding_time_next_dt'] = pd.to_datetime(df['funding_time_next'], unit='ms', utc=True)
+
+        # CRITICAL: Calculate the CURRENT settlement time (8 hours before next)
+        df['funding_time_current'] = df['funding_time_next'] - (8 * 3600 * 1000)
+        df['funding_time_current_dt'] = pd.to_datetime(df['funding_time_current'], unit='ms', utc=True)
+
+        print(f"✓ ({len(df)} rows)")
+        return df[['symbol', 'date', 'funding_time_current', 'funding_time_current_dt',
+                   'funding_time_next', 'funding_time_next_dt', 'real_rate', 'predicted_rate']]
+
+    except Exception as e:
+        print(f"✗ ({e})")
+        return pd.DataFrame()
+
+
+def download_bulk_dataset(symbols: list, start_date: str, end_date: str) -> pd.DataFrame:
+    """Download bulk data for multiple symbols across date range."""
+    all_data = []
+
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+    dates = pd.date_range(start, end, freq='D')
+
+    for symbol in symbols:
+        for date in dates:
+            date_str = date.strftime('%Y-%m-%d')
+            df = download_okx_bulk_data(symbol, date_str)
+            if not df.empty:
+                all_data.append(df)
+
+    if all_data:
+        combined = pd.concat(all_data, ignore_index=True)
+        combined = combined.sort_values(['symbol', 'funding_time_current']).reset_index(drop=True)
+        return combined
+    return pd.DataFrame()
+
+
+# ============================================================================
+# Step 2: Simulate Victor's Data Collection (API)
+# ============================================================================
+
+def simulate_victor_api_call(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+    """
+    Simulate what Victor's script gets from OKX /public/funding-rate-history
+
+    CRITICAL QUESTION: What does fundingTime represent?
+    - Hypothesis A: Settlement time (when rate was applied) - SAFE
+    - Hypothesis B: Next settlement time (forward-looking) - LOOK-AHEAD
+    """
+    # For now, we'll use the bulk data as ground truth
+    # In real validation, we'd call the actual API
+
+    # TODO: Implement actual API call
+    # data = okx_get("/api/v5/public/funding-rate-history", {
+    #     "instId": f"{symbol}-USDT-SWAP",
+    #     "before": str(end_ms),
+    #     "after": str(start_ms),
+    #     "limit": "100"
+    # })
+
+    print(f"[SIMULATION] Would call API for {symbol} from {start_ms} to {end_ms}")
+    return pd.DataFrame()
+
+
+# ============================================================================
+# Step 3: Temporal Alignment Test
+# ============================================================================
+
+def test_timestamp_alignment(bulk_data: pd.DataFrame):
+    """
+    Test: Verify what funding_time represents in Victor's data
+
+    Expected: funding_time should align with settlement time (current),
+              NOT next settlement time (would be look-ahead)
+    """
+    print("\n" + "="*80)
+    print("TEST 1: Timestamp Alignment")
+    print("="*80)
+
+    print("\nOKX Bulk Data Structure:")
+    print("-" * 80)
+    print(bulk_data[['symbol', 'funding_time_current_dt', 'real_rate']].head(10))
+
+    print("\n📊 Key Observation:")
+    print("  - 'funding_time_next' in bulk data = timestamp 8h in the FUTURE")
+    print("  - 'real_rate' = rate that JUST settled for CURRENT period")
+    print("  - If Victor's CSV uses 'funding_time_next' → LOOK-AHEAD BIAS")
+    print("  - If Victor's CSV uses 'funding_time_current' → SAFE")
+
+    # TODO: Load Victor's actual CSV and compare
+    # victor_csv = pd.read_csv("../data/okx_funding_arb_1y.csv")
+    # Compare timestamps
+
+
+# ============================================================================
+# Step 4: Look-Ahead Detection Test
+# ============================================================================
+
+def test_lookahead_bias(bulk_data: pd.DataFrame):
+    """
+    Test: Detect if backtester uses same-period rates (look-ahead)
+
+    Method: Simulate backtester logic and check temporal order
+    """
+    print("\n" + "="*80)
+    print("TEST 2: Look-Ahead Bias Detection")
+    print("="*80)
+
+    # Group by settlement time
+    pivoted = bulk_data.pivot_table(
+        index='funding_time_current_dt',
+        columns='symbol',
+        values='real_rate'
+    )
+
+    print("\n📊 Funding Rates by Settlement Time:")
+    print("-" * 80)
+    print(pivoted.head())
+
+    print("\n⚠️  CRITICAL QUESTION:")
+    print("  At time T = 2024-08-05 08:00:00 UTC:")
+    print("  - Does Victor select top-5 using rates from 08:00 row? → LOOK-AHEAD")
+    print("  - Or does he use rates from 00:00 row (previous)? → SAFE")
+
+    print("\n  Backtester code inspection needed:")
+    print("    `snap[snap['funding_time'] == t]`")
+    print("    ↑ What is t? Current settlement or previous?")
+
+
+# ============================================================================
+# Step 5: Funding Rate Persistence Test
+# ============================================================================
+
+def test_funding_persistence(bulk_data: pd.DataFrame):
+    """
+    Test: Measure autocorrelation to validate if T-1 rates predict T
+
+    If using T-1 rates is realistic, we need positive correlation
+    """
+    print("\n" + "="*80)
+    print("TEST 3: Funding Rate Persistence Analysis")
+    print("="*80)
+
+    results = []
+
+    for symbol in bulk_data['symbol'].unique():
+        df_sym = bulk_data[bulk_data['symbol'] == symbol].sort_values('funding_time_current')
+
+        if len(df_sym) < 2:
+            continue
+
+        # Lag-1 correlation
+        df_sym['real_rate_lag1'] = df_sym['real_rate'].shift(1)
+        corr_lag1 = df_sym[['real_rate', 'real_rate_lag1']].corr().iloc[0, 1]
+
+        # Absolute value correlation (magnitude persistence)
+        df_sym['abs_rate'] = df_sym['real_rate'].abs()
+        df_sym['abs_rate_lag1'] = df_sym['abs_rate'].shift(1)
+        corr_abs = df_sym[['abs_rate', 'abs_rate_lag1']].corr().iloc[0, 1]
+
+        results.append({
+            'symbol': symbol,
+            'n_obs': len(df_sym),
+            'corr_lag1': corr_lag1,
+            'corr_abs_lag1': corr_abs
+        })
+
+    df_results = pd.DataFrame(results)
+    print("\n📊 Lag-1 Autocorrelation:")
+    print("-" * 80)
+    print(df_results)
+
+    mean_corr = df_results['corr_lag1'].mean()
+    mean_abs_corr = df_results['corr_abs_lag1'].mean()
+
+    print(f"\n  Average correlation (signed): {mean_corr:.3f}")
+    print(f"  Average correlation (absolute): {mean_abs_corr:.3f}")
+
+    if mean_abs_corr > 0.3:
+        print("  ✅ Moderate persistence detected - using T-1 rates may be realistic")
+    elif mean_abs_corr > 0.1:
+        print("  ⚠️  Weak persistence - strategy edge unclear")
+    else:
+        print("  ❌ No persistence - using T-1 rates has no predictive power")
+
+
+# ============================================================================
+# Step 6: Backtest Reconstruction
+# ============================================================================
+
+def reconstruct_backtest_with_lag(bulk_data: pd.DataFrame, top_k: int = 5):
+    """
+    Reconstruct Victor's backtest with FORCED T-1 lag
+
+    Compare results to Victor's 7,708% APY
+    Large difference → confirms look-ahead bias
+    """
+    print("\n" + "="*80)
+    print("TEST 4: Backtest Reconstruction (T-1 Lag Enforced)")
+    print("="*80)
+
+    # Pivot to wide format
+    pivoted = bulk_data.pivot_table(
+        index='funding_time_current_dt',
+        columns='symbol',
+        values='real_rate'
+    ).sort_index()
+
+    print(f"\n📊 Backtesting with TOP_K={top_k}, T-1 lag enforced")
+    print("-" * 80)
+
+    equity = 1.0
+    trades = []
+
+    for i in range(1, len(pivoted)):
+        t_current = pivoted.index[i]
+        t_prev = pivoted.index[i-1]
+
+        # Use PREVIOUS rates to select portfolio (T-1)
+        rates_prev = pivoted.iloc[i-1].dropna()
+
+        # Select top-K by absolute value
+        top_symbols = rates_prev.abs().nlargest(top_k).index.tolist()
+        weights = {s: 1.0/top_k for s in top_symbols}  # Equal weight
+
+        # Apply returns using CURRENT rates (T)
+        rates_current = pivoted.iloc[i]
+
+        period_return = 0.0
+        for symbol, weight in weights.items():
+            if symbol in rates_current.index:
+                period_return += weight * abs(rates_current[symbol])
+
+        equity *= (1 + period_return)
+
+        trades.append({
+            'time': t_current,
+            'top_symbols': ','.join(top_symbols),
+            'period_return': period_return,
+            'equity': equity
+        })
+
+    df_trades = pd.DataFrame(trades)
+
+    if len(df_trades) > 0:
+        final_equity = df_trades['equity'].iloc[-1]
+        days = (df_trades['time'].max() - df_trades['time'].min()).days
+
+        if days > 0:
+            cagr = (final_equity ** (365.0 / days)) - 1.0
+
+            print(f"\n  Final Equity: {final_equity:.6f}")
+            print(f"  Period: {days} days")
+            print(f"  APY (CAGR): {cagr*100:.2f}%")
+            print(f"\n  Victor's reported: 7,708% APY")
+            print(f"  Difference: {(7708 - cagr*100):.2f} percentage points")
+
+            if cagr * 100 < 1000:
+                print("\n  ⚠️  MAJOR DISCREPANCY - Suggests look-ahead bias in Victor's backtest")
+            elif cagr * 100 < 5000:
+                print("\n  ⚠️  Moderate discrepancy - Further investigation needed")
+            else:
+                print("\n  ✅ Results similar - Look-ahead bias less likely")
+
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
+def main():
+    print("="*80)
+    print("TEMPORAL INTEGRITY VALIDATION")
+    print("Victor's OKX Funding Rate Arbitrage Strategy")
+    print("="*80)
+
+    print(f"\nTest Period: {TEST_START} to {TEST_END}")
+    print(f"Symbols: {', '.join(SYMBOLS)}")
+
+    # Step 1: Download ground truth data
+    print("\n" + "="*80)
+    print("Downloading OKX Bulk Historical Data...")
+    print("="*80)
+
+    bulk_data = download_bulk_dataset(SYMBOLS, TEST_START, TEST_END)
+
+    if bulk_data.empty:
+        print("❌ No data downloaded. Check date range and network connectivity.")
+        return
+
+    print(f"\n✓ Downloaded {len(bulk_data)} funding rate records")
+
+    # Save for reference
+    output_file = OUTPUT_DIR / "okx_bulk_validation_data.csv"
+    bulk_data.to_csv(output_file, index=False)
+    print(f"✓ Saved to {output_file}")
+
+    # Run tests
+    test_timestamp_alignment(bulk_data)
+    test_lookahead_bias(bulk_data)
+    test_funding_persistence(bulk_data)
+    reconstruct_backtest_with_lag(bulk_data, top_k=5)
+
+    # Final summary
+    print("\n" + "="*80)
+    print("VALIDATION SUMMARY")
+    print("="*80)
+    print("\n✅ Completed temporal integrity tests")
+    print("\n📋 Next Steps:")
+    print("  1. Review test results above")
+    print("  2. Compare Victor's actual CSV timestamps")
+    print("  3. Inspect backtester snapshot logic in code")
+    print("  4. Ask Victor: 'At time T, do you use rates from T or T-1?'")
+    print("\n📁 Output saved to:")
+    print(f"  {output_file}")
+
+
+if __name__ == "__main__":
+    main()

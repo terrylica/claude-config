@@ -1,0 +1,219 @@
+"""
+Apply Feature Pruning Manifest
+
+Filters 89 atoms to 48 features using pruning manifest exclusion list.
+
+SLOs:
+- Correctness: Verify 48 features output (not 89), no pruned features present
+- Availability: All kept features must exist in atom dataset
+- Observability: Log pruned features, feature counts
+- Maintainability: Parse YAML from manifest (out-of-box), no custom filtering logic
+
+Usage:
+    cd /workspace
+    python -m experiments.phase5_mae_mfe_ipss_20251003.apply_pruning_manifest
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+import yaml
+
+# Add workspace to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def load_pruning_manifest(manifest_path: Path) -> dict:
+    """
+    Load feature pruning manifest
+
+    Returns:
+        dict with 'pruned_features' and 'kept_features' keys
+
+    Raises:
+        FileNotFoundError: If manifest not found
+        ValueError: If YAML parsing fails
+    """
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Pruning manifest not found: {manifest_path}")
+
+    with open(manifest_path) as f:
+        content = f.read()
+
+    # Extract YAML frontmatter (between --- delimiters)
+    parts = content.split('---')
+    if len(parts) < 3:
+        raise ValueError(f"Invalid manifest format: expected YAML frontmatter between ---")
+
+    yaml_content = parts[1]  # Second part is YAML
+    manifest = yaml.safe_load(yaml_content)
+
+    if 'pruned_features' not in manifest:
+        raise ValueError("Manifest missing 'pruned_features' section")
+
+    if 'kept_features' not in manifest:
+        raise ValueError("Manifest missing 'kept_features' section")
+
+    return manifest
+
+
+def filter_to_kept_features(atoms_df: pd.DataFrame, manifest: dict) -> pd.DataFrame:
+    """
+    Filter atoms to kept features only
+
+    Args:
+        atoms_df: Full atom dataset (89 columns)
+        manifest: Parsed pruning manifest
+
+    Returns:
+        Filtered DataFrame (48 columns)
+
+    Raises:
+        ValueError: If missing features or pruned features present
+    """
+    pruned_set = set(manifest['pruned_features'].keys())
+    kept_list = manifest['kept_features']
+
+    print(f"Pruning manifest:")
+    print(f"  Pruned features: {len(pruned_set)}")
+    print(f"  Kept features: {len(kept_list)}")
+
+    # Verify no overlap (SLO: Correctness)
+    overlap = pruned_set & set(kept_list)
+    if overlap:
+        raise ValueError(f"Manifest error: Features in both pruned and kept: {overlap}")
+
+    # Filter to kept features
+    available_features = set(atoms_df.columns)
+    missing_kept = set(kept_list) - available_features
+    pruned_present = pruned_set & available_features
+
+    print(f"\nAtom dataset:")
+    print(f"  Total features: {len(atoms_df.columns)}")
+    print(f"  Missing kept features: {len(missing_kept)}")
+    print(f"  Pruned features present: {len(pruned_present)}")
+
+    if missing_kept:
+        print(f"\nWARNING: Missing features (will skip):")
+        for feat in sorted(missing_kept)[:10]:
+            print(f"    - {feat}")
+        if len(missing_kept) > 10:
+            print(f"    ... and {len(missing_kept)-10} more")
+
+    # SLO: Observability - Log pruned features if present
+    if pruned_present:
+        print(f"\nPruned features in dataset (will remove):")
+        for feat in sorted(pruned_present)[:10]:
+            # Show what to use instead
+            replacement = manifest['pruned_features'][feat]['keep_instead']
+            print(f"    - {feat} → {replacement}")
+        if len(pruned_present) > 10:
+            print(f"    ... and {len(pruned_present)-10} more")
+
+    # Filter: Only keep features in kept_list that exist
+    kept_available = [f for f in kept_list if f in available_features]
+
+    if len(kept_available) != len(kept_list):
+        print(f"\nFiltered to {len(kept_available)}/{len(kept_list)} kept features (some missing)")
+    else:
+        print(f"\nUsing all {len(kept_available)} kept features")
+
+    filtered_df = atoms_df[kept_available].copy()
+
+    # SLO: Correctness - Verify target count
+    expected_count = 48  # From pruning manifest
+    if len(filtered_df.columns) < expected_count - 5:  # Allow some missing (holidays)
+        raise ValueError(
+            f"Filtered features {len(filtered_df.columns)} << expected {expected_count}. "
+            f"Missing {len(missing_kept)} features."
+        )
+
+    return filtered_df
+
+
+def main():
+    """Execute pruning manifest application"""
+    print("="*70)
+    print("Phase 5: Apply Pruning Manifest (89 → 48 Features)")
+    print("="*70)
+
+    # Paths
+    workspace = Path(__file__).parent.parent.parent
+    manifest_path = workspace / ".claude/feature-pruning-manifest.md"
+    data_csv = workspace / "ml_feature_set/sample_data/resampled_binance_SOL-5m.csv"
+    output_txt = Path(__file__).parent / "results/features_48_pruned.txt"
+    output_csv = Path(__file__).parent / "results/atoms_48_pruned.csv"
+
+    # Load pruning manifest
+    print(f"\nLoading pruning manifest from: {manifest_path}")
+    manifest = load_pruning_manifest(manifest_path)
+
+    # Load data
+    print(f"\nLoading data from: {data_csv}")
+    if not data_csv.exists():
+        raise FileNotFoundError(f"Data file not found: {data_csv}")
+
+    df = pd.read_csv(data_csv)
+
+    # Parse timestamp
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+    elif 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.set_index('timestamp', inplace=True)
+    else:
+        raise ValueError(f"CSV missing 'date' or 'timestamp' column")
+
+    print(f"Loaded {len(df)} bars")
+
+    # Compute atoms
+    print(f"\nComputing atoms from library...")
+    lib = load_library_from_formulas()
+    atoms_df = lib.compute_all(df, layers=['A', 'B'])
+
+    print(f"Computed {len(atoms_df.columns)} atoms")
+    print(f"Shape: {atoms_df.shape}")
+
+    # Filter to kept features
+    filtered_df = filter_to_kept_features(atoms_df, manifest)
+
+    print(f"\nFiltered result:")
+    print(f"  Features: {len(filtered_df.columns)}")
+    print(f"  Samples: {len(filtered_df)}")
+
+    # Drop NaN rows
+    before_rows = len(filtered_df)
+    filtered_df = filtered_df.dropna()
+    after_rows = len(filtered_df)
+
+    if before_rows - after_rows > 0:
+        print(f"  Dropped {before_rows - after_rows} rows with NaN")
+        print(f"  Final samples: {after_rows}")
+
+    # SLO: Availability - Check sufficient data
+    min_samples = 100
+    if after_rows < min_samples:
+        raise ValueError(f"Insufficient samples: {after_rows} < {min_samples} (SLO: Availability)")
+
+    # Save feature list
+    output_txt.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_txt, 'w') as f:
+        for feature in filtered_df.columns:
+            f.write(f"{feature}\n")
+
+    print(f"\n✓ Feature list saved to: {output_txt}")
+
+    # Save atom values
+    filtered_df.to_csv(output_csv)
+    print(f"✓ Atom values saved to: {output_csv}")
+
+    print("\n" + "="*70)
+    print("Pruning manifest application complete")
+    print("="*70)
+
+
+if __name__ == '__main__':
+    main()

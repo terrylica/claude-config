@@ -1,0 +1,288 @@
+# Funding Rate Arbitrage Workflow - Lookahead Bias Audit
+
+## The Complete Workflow
+
+### Timeline of a Funding Rate Arbitrage Trade
+
+```
+Time T-1h (e.g., 23:00):  Decision point - which symbols to trade?
+Time T-30m (e.g., 23:30): Establish positions (spot long + perp short)
+Time T (e.g., 00:00):     Funding settlement - collect/pay funding
+Time T+8h (e.g., 08:00):  Next settlement - rebalance or exit
+```
+
+## Critical Questions
+
+### 1. Selection Decision - WHEN and WHAT DATA?
+
+**Scenario A: Select BEFORE settlement to capture CURRENT period**
+```python
+# At T-30m (23:30), trying to capture T (00:00) funding
+funding_rates = get_funding_rates(time="23:30")  # What do we use?
+
+# Option A1: Use funding_rate (prediction for 00:00)
+top_5 = select_top_5(funding_rates["funding_rate"])  # ❌ LOOKAHEAD BIAS?
+# Problem: This prediction can change between 23:30 and 00:00
+# Problem: We're using incomplete information that will be updated
+
+# Option A2: Use real_funding_rate from PREVIOUS settlement (e.g., 16:00)
+top_5 = select_top_5(previous_real_funding_rate)  # ✅ No lookahead
+# Problem: We're assuming 16:00 rates persist to 00:00 (rate persistence)
+```
+
+**Scenario B: Select AFTER settlement for NEXT period**
+```python
+# At T (00:00), select for T to T+8h period
+funding_rates = get_funding_rates(time="00:00")
+
+# Option B1: Use real_funding_rate from T (just charged)
+top_5 = select_top_5(funding_rates["real_funding_rate"])  # ✅ No lookahead
+# Problem: We MISSED the T funding payment! Too late.
+# Strategy: Hold positions from T to T+8h, collect at T+8h
+# Assumption: Rates at T persist to T+8h
+
+# Option B2: Use funding_rate (prediction for T+8h)
+top_5 = select_top_5(funding_rates["funding_rate"])  # ❌ LOOKAHEAD BIAS?
+# Problem: Using prediction that can change
+```
+
+## 2. Position Establishment - PRICES and TIMING
+
+```python
+# At what price do we buy spot?
+# At what price do we open perp short?
+
+# Realistic execution:
+spot_price = get_spot_price(symbol, time="T-5m")  # ✅ Available before T
+perp_price = get_perp_price(symbol, time="T-5m")  # ✅ Available before T
+
+# Backtesting MUST use prices from T-5m, not T or later
+```
+
+## 3. Funding Collection - WHAT RATE IS ACTUALLY CHARGED?
+
+**At settlement time T:**
+```python
+# The actual funding we collect is based on:
+actual_funding = real_funding_rate_at_T * position_size
+
+# This is the REALIZED funding rate
+# It may differ from the prediction we used for selection
+```
+
+## 4. Position Liquidation - TIMING and PRICES
+
+**At T+8h:**
+```python
+# Close positions
+spot_exit_price = get_spot_price(symbol, time="T+8h")
+perp_exit_price = get_perp_price(symbol, time="T+8h")
+
+# Calculate PnL:
+funding_collected = real_funding_rate_T_to_T8h * position_size
+spot_pnl = (spot_exit_price - spot_entry_price) * position_size
+perp_pnl = (perp_entry_price - perp_exit_price) * position_size
+
+total_pnl = funding_collected + spot_pnl + perp_pnl
+```
+
+## Viable Strategies (No Lookahead Bias)
+
+### Strategy 1: Rate Persistence (Post-Settlement Rebalance)
+
+**Timeline:**
+```
+T=00:00:00:  Funding settlement happens (missed this payment)
+T=00:00:05:  Check real_funding_rate from settlement
+T=00:01:00:  Select top-5 based on real_funding_rate (assume persistence)
+T=00:02:00:  Establish positions (spot long + perp short)
+T=08:00:00:  Collect funding based on positions held T to T+8h
+T=08:00:05:  Rebalance for next period
+```
+
+**Data sources (no lookahead):**
+- Selection: `real_funding_rate` from T (finalized, no lookahead)
+- Entry prices: Spot/perp prices at T+2m (realistic execution delay)
+- Funding collected: `real_funding_rate` from T+8h (actual charged rate)
+- Exit prices: Spot/perp prices at T+8h
+
+**Assumption:** Funding rates at T persist through [T, T+8h]
+**Risk:** Rates can change during the 8-hour period
+
+### Strategy 2: Historical Average (Ultra-Conservative)
+
+**Timeline:**
+```
+T-1h:        Calculate average real_funding_rate over past 24h
+T-30m:       Select top-5 based on 24h average
+T-5m:        Establish positions
+T:           Collect funding (first payment)
+T+8h:        Collect funding (hold or rebalance)
+```
+
+**Data sources (no lookahead):**
+- Selection: Historical average of `real_funding_rate` (definitely no lookahead)
+- All prices: Real market prices at execution time
+
+**Assumption:** Historical rates predict future rates
+**Risk:** Less responsive to sudden rate changes
+
+### Strategy 3: Prediction-Based (Uses Prediction, Accept Risk)
+
+**Timeline:**
+```
+T-30m:       Check funding_rate (prediction for T)
+T-30m:       Select top-5 based on prediction
+T-5m:        Establish positions
+T:           Collect funding (actual rate may differ from prediction)
+T+8h:        Collect funding and rebalance
+```
+
+**Data sources:**
+- Selection: `funding_rate` prediction (this CAN change before T)
+- Funding: `real_funding_rate` (actual charged rate)
+
+**This is technically lookahead** because the prediction updates every minute.
+**BUT** this is how real traders would operate (using available predictions).
+
+**Realistic simulation:** Add prediction error (difference between funding_rate at T-30m vs real_funding_rate at T)
+
+## Our Current Approach - AUDIT
+
+Looking at our analysis code:
+
+```python
+# analyze_funding_corrected.py
+for period in sorted(settlement_periods):
+    period_data = df[df['settlement_period'] == period].copy()
+    period_data['abs_rate'] = period_data['real_funding_rate'].abs()
+
+    top_5 = period_data.nlargest(5, 'abs_rate')['symbol'].tolist()
+```
+
+**What we're doing:**
+1. At each settlement period T, selecting top-5 based on `real_funding_rate`
+2. Implicitly assuming we establish positions AFTER T
+3. Implicitly assuming we collect funding at T+8h
+
+**Is this correct?**
+
+✅ **YES for Strategy 1 (Rate Persistence)** IF we explicitly model:
+- Entry at T (using prices from T, not before T)
+- Hold from T to T+8h
+- Collect funding at T+8h based on `real_funding_rate` at T+8h
+- Exit at T+8h
+
+❌ **NO if we're trying to capture the T funding payment**
+- We can't use real_funding_rate from T to capture T funding
+- That rate is finalized AT T, we're already too late
+
+## Required Fixes
+
+### Fix 1: Clarify Strategy Intent
+
+**Add to backtest:**
+```python
+# Make explicit: We're using Strategy 1 (Rate Persistence)
+# At each settlement T:
+#   1. Look at real_funding_rate from T (just charged)
+#   2. Select top-5 symbols
+#   3. Establish positions for period [T, T+8h]
+#   4. Collect funding at T+8h
+#   5. Calculate returns including basis risk (spot-perp price difference)
+```
+
+### Fix 2: Add Execution Timing
+
+```python
+# Current (implicit):
+entry_time = settlement_time  # e.g., 00:00:00
+exit_time = settlement_time + 8h  # e.g., 08:00:00
+
+# Should be explicit:
+decision_time = settlement_time  # 00:00:00 (when we see real_funding_rate)
+entry_time = settlement_time + 60s  # 00:01:00 (realistic execution delay)
+exit_time = next_settlement_time  # 08:00:00
+```
+
+### Fix 3: Track Actual vs Expected Returns
+
+```python
+# At T, we select based on real_funding_rate from T
+expected_funding = real_funding_rate[T] * position_size
+
+# At T+8h, we actually collect real_funding_rate from T+8h
+actual_funding = real_funding_rate[T+8h] * position_size
+
+# The difference is rate change risk
+rate_persistence = actual_funding / expected_funding
+```
+
+### Fix 4: Include Basis Risk
+
+```python
+# When we open positions at T:
+spot_entry = spot_price[T+1m]
+perp_entry = perp_price[T+1m]
+entry_basis = spot_entry - perp_entry
+
+# When we close at T+8h:
+spot_exit = spot_price[T+8h]
+perp_exit = perp_price[T+8h]
+exit_basis = spot_exit - perp_exit
+
+# Basis change is a risk/return component
+basis_pnl = (exit_basis - entry_basis) * position_size
+```
+
+## Recommendation
+
+**Update the backtest to explicitly model Strategy 1:**
+
+```python
+# For each settlement period T:
+settlements = get_settlement_times(start_date, end_date)
+
+for i, T in enumerate(settlements[:-1]):
+    T_next = settlements[i+1]
+
+    # 1. SELECTION (at T, using data from T)
+    rates_at_T = funding_rates[funding_rates['timestamp'] == T]
+    top_5 = select_top_5_by_abs_rate(rates_at_T, column='real_funding_rate')
+
+    # 2. ENTRY (at T + 1min, using prices from T+1min)
+    entry_prices = get_prices(top_5, time=T + 1min)
+    positions = establish_positions(top_5, entry_prices)
+
+    # 3. FUNDING COLLECTION (at T_next, using real_funding_rate from T_next)
+    rates_at_T_next = funding_rates[funding_rates['timestamp'] == T_next]
+    funding_collected = calculate_funding(positions, rates_at_T_next)
+
+    # 4. EXIT (at T_next, using prices from T_next)
+    exit_prices = get_prices(top_5, time=T_next)
+    pnl = calculate_total_pnl(positions, entry_prices, exit_prices, funding_collected)
+```
+
+**This ensures:**
+✅ No lookahead bias (using real_funding_rate from T, not predictions)
+✅ Realistic execution (prices from T+1m, not exactly T)
+✅ Correct funding collection (rates from T_next, when actually charged)
+✅ Complete PnL (funding + spot PnL + perp PnL)
+
+## Open Questions
+
+1. **Is rate persistence a valid assumption?**
+   - Need to measure correlation between real_funding_rate[T] and real_funding_rate[T+8h]
+
+2. **Should we use Strategy 3 (prediction-based) instead?**
+   - More realistic (traders use predictions)
+   - But requires modeling prediction error
+
+3. **What about transaction costs?**
+   - Spot trading fees
+   - Perp trading fees
+   - Slippage
+
+4. **What about position sizing?**
+   - How much capital to allocate to each of top-5?
+   - Equal weight? Rate-weighted?

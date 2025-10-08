@@ -1,0 +1,310 @@
+---
+# OOD-Robust ML Pipeline - Validation Status
+# Machine: yca (/home/yca/eon/rangebar)
+# Date: 2025-10-04
+# Branch: research/ood-robustness-2025
+
+pipeline_status: "ready_for_production_training"
+production_ready: false
+data_ready: true
+
+validation_results:
+  validate-001_dependencies:
+    status: "passed"
+    date: "2025-10-04"
+    outcome: |
+      Dependencies installed successfully via uv pip install
+      Packages: torch, polars, numpy, scikit-learn, scipy, tqdm, tensorboard, matplotlib, seaborn, einops
+      Total packages: 38
+      Environment: /home/yca/eon/rangebar/.venv (Python 3.13.7)
+
+  validate-002_imports:
+    status: "passed"
+    date: "2025-10-04"
+    outcome: |
+      All imports resolve correctly
+      Verified: RangeBarDataset, OODRobustRangeBarModel
+      Method: sys.path.insert(0, 'research/ml_ood')
+
+  validate-003_data_loading:
+    status: "passed_with_synthetic_data"
+    date: "2025-10-04"
+    outcome: |
+      Synthetic data: 50 bars generated
+      Dataset created: 25 valid samples (sequence_len=5, regime_lookback=10)
+      Schema validated: Fixed-point conversion working
+      Regime detection: Working (requires lookback adjustment for small datasets)
+    notes: |
+      - Regime detection with lookback=24 requires 24+ bars before valid samples
+      - For 50 bars with lookback=24: only 3 valid samples remain
+      - For 50 bars with lookback=10: 25 valid samples
+      - Production datasets (175K+ bars) will not have this limitation
+
+  validate-004_model_forward:
+    status: "passed"
+    date: "2025-10-04"
+    outcome: |
+      Model instantiated: 3,720,113 parameters
+      Forward pass: shapes correct
+        - Input: (8, 5, 14)
+        - Direction logits: (8, 3)
+        - Reconstructed: (8, 14)
+      Loss computation: successful
+        - Combined loss: 1.6204
+        - Direction loss: 1.1086
+        - Anomaly loss: 1.0236
+    warnings: |
+      Non-critical: enable_nested_tensor warning (transformer internal optimization)
+
+  validate-005_training_loop:
+    status: "passed"
+    date: "2025-10-04"
+    outcome: |
+      Dry-run training (3 batches, synthetic data)
+      Loss progression:
+        - Batch 1: 1.2933 (dir=0.9995, anom=0.5875)
+        - Batch 2: 0.8706 (dir=0.7434, anom=0.2543)
+        - Batch 3: 0.7550 (dir=0.6037, anom=0.3026)
+      Gradient flow: working
+      Optimizer: working
+      Loss decreasing: confirmed
+
+# Critical Blockers
+blockers:
+  blocker-001_missing_production_data:
+    severity: "resolved"
+    category: "data_availability"
+    description: |
+      SOLUSDT range bar data successfully generated on yca machine
+      Output path: output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv
+      Resolution: Rebuilt rangebar-export without statistics feature (avoided OOM), generated locally
+
+    original_issue:
+      - Data initially missing (only existed on Terry's Mac)
+      - First generation attempt failed silently at day ~850 due to memory exhaustion
+      - Root cause: statistics feature loads all 424M trades into memory (16GB+ RAM)
+
+    resolution_implemented: "option_2 (local generation with memory-efficient build)"
+    resolution_date: "2025-10-04"
+    resolution_steps:
+      - "Rebuilt rangebar-export with: cargo build --release --bin rangebar-export --no-default-features --features data-integrity"
+      - "Generated SOLUSDT spot market range bars: 2022-01-01 to 2025-09-30, threshold=0.005 (50bps)"
+      - "Processing time: 32 minutes 10 seconds (424,479,155 trades → 175,454 bars)"
+      - "Memory usage: 190MB (vs 16GB+ with statistics feature)"
+
+    validation_results:
+      total_bars: 175454
+      total_trades: 424479155
+      total_volume: "6.13B SOLUSDT"
+      file_size_csv: "39MB"
+      file_size_json: "93MB"
+      schema_match: "✓ Perfect match with ML pipeline expectations"
+      columns: ["open_time", "close_time", "open", "high", "low", "close", "volume", "turnover", "trade_count", "first_id", "last_id", "buy_volume", "sell_volume", "buy_trade_count", "sell_trade_count", "vwap", "buy_turnover", "sell_turnover"]
+      first_bar_timestamp: "2022-01-01 00:00:01.550 UTC (1640995201550)"
+      last_bar_timestamp: "2025-09-30 (end of dataset)"
+
+    next_steps:
+      - "Run full ML training (50 epochs) with production data"
+      - "Validate on Terra/Luna crash period (2022-05-07 to 2022-05-12)"
+      - "Evaluate conformal prediction calibration"
+
+  blocker-002_rangebar_export_library:
+    severity: "resolved"
+    category: "dependency"
+    description: |
+      rangebar-export binary library dependency issue resolved
+      Original error: libssl-a3035eb2.so.3: cannot open shared object file
+
+    resolution:
+      - Rebuilt binary with cargo (links to system OpenSSL)
+      - Binary now executes successfully
+      - Resolved: 2025-10-04
+
+# SLO Compliance Assessment
+slo_compliance:
+  availability:
+    training_pipeline: "compliant"
+    assessment: "Pipeline executes without crashes on synthetic data"
+
+    data_loading: "compliant"
+    assessment: "CSV parsing raises ValueError on schema mismatch (validated)"
+
+  correctness:
+    data_integrity: "compliant"
+    assessment: "Fixed-point conversion accurate to ±1e-9 (validated on synthetic data)"
+    validation_method: |
+      # Verified with synthetic data
+      assert (price_float * 1e9).round() == price_int
+
+    temporal_ordering: "compliant"
+    assessment: "assert df['open_time'].is_sorted() enforced"
+    validation_method: "Polars DataFrame checked during load"
+
+    regime_detection: "compliant"
+    assessment: "No NaN labels after detection (drop_nulls() called)"
+    validation_method: "Verified on 50-bar synthetic dataset"
+
+    model_output: "compliant"
+    assessment: "Shape assertions enforced in forward pass"
+    validation_method: "Tested with (8, 5, 14) batch, outputs correct shapes"
+
+  observability:
+    training_logging: "not_yet_tested"
+    status: "TensorBoard integration exists but not tested end-to-end"
+
+    checkpoint_tracking: "not_yet_tested"
+    status: "Checkpoint save logic exists but not executed (no full training run)"
+
+    evaluation_metrics: "partially_tested"
+    status: "Metrics computation logic validated, not tested on full dataset"
+
+  maintainability:
+    dependency_management: "compliant"
+    assessment: "All dependencies install via uv pip install"
+
+    code_organization: "compliant"
+    assessment: "Imports resolve with sys.path.insert(0, 'research/ml_ood')"
+    note: "Package structure valid"
+
+    error_messages: "compliant"
+    assessment: "Exceptions provide context (validated in data loading errors)"
+
+# Next Actions (Priority Order)
+next_actions:
+  - id: "data-001"
+    priority: "completed"
+    task: "Resolve production data availability"
+    status: "✓ Completed (2025-10-04)"
+    resolution: "Generated locally on yca with memory-efficient rangebar-export build"
+    output: "output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv"
+    validation: "175,454 bars, schema match confirmed"
+
+  - id: "train-001"
+    priority: "high"
+    task: "Run full training (50 epochs) with production SOLUSDT data"
+    depends_on: ["data-001"]
+    status: "ready_to_execute"
+    command: |
+      cd ~/eon/rangebar
+      uv run --active python -m research.ml_ood.train \
+        --data output/solusdt_historical_2022_2025/SOLUSDT_rangebar_20220101_20250930_0.500pct.csv \
+        --epochs 50 \
+        --batch-size 256 \
+        --device auto \
+        --output-dir research/ml_ood/experiments/run1
+    estimated_time: "2-4 hours (GPU) / 8-12 hours (CPU)"
+    notes: |
+      - Data now available (175,454 bars)
+      - Schema validated
+      - All blockers resolved
+
+  - id: "eval-001"
+    priority: "high"
+    task: "Evaluate trained model"
+    depends_on: ["train-001"]
+    includes:
+      - "Test set accuracy, ECE, regime-conditional metrics"
+      - "Conformal calibration (90% coverage target)"
+      - "Stress testing (Terra/Luna crash 2022-05-07 to 2022-05-12)"
+      - "FTX collapse testing (2022-11-06 to 2022-11-11)"
+
+  - id: "doc-001"
+    priority: "medium"
+    task: "Document experimental results"
+    depends_on: ["eval-001"]
+    output_file: "research/ml_ood/RESULTS.md"
+
+# Lessons Learned
+lessons_learned:
+  - issue: "Regime detection drops rows with small datasets"
+    root_cause: "Rolling calculations require lookback_window bars of history, then drop_nulls() removes NaN rows"
+    solution: "For testing: use smaller lookback_window. For production: 175K bars >> lookback_window=24"
+    impact: "Synthetic test data needs 50+ bars for meaningful testing with default lookback"
+
+  - issue: "Transformer nested tensor warning"
+    root_cause: "PyTorch internal optimization disabled when norm_first=True"
+    solution: "Benign warning, no action needed"
+    impact: "None (performance hint only)"
+
+  - issue: "Production data not available on all machines"
+    root_cause: "Range bar generation happened on Terry's Mac, not synced to yca"
+    solution: "Document data transfer steps in implementation plan"
+    impact: "Training blocked until data available"
+
+# Environment Details
+environment:
+  machine: "yca"
+  hostname: "/home/yca/eon/rangebar"
+  os: "Linux 6.1.0-31-amd64"
+  python: "3.13.7"
+  venv: "/home/yca/eon/rangebar/.venv"
+  branch: "research/ood-robustness-2025"
+  last_commit: "13e9437 (feat: OOD-robust ML pipeline with transformer auto-features)"
+
+# Artifacts Generated
+artifacts:
+  - path: "research/ml_ood/IMPLEMENTATION_PLAN.yaml"
+    description: "Machine-readable implementation tracking"
+    status: "created"
+
+  - path: "research/ml_ood/STATUS.yaml"
+    description: "Validation results and blocker documentation"
+    status: "created"
+
+  - path: "test_data/synthetic_rangebar_test.csv"
+    description: "50-bar synthetic range bar data for validation"
+    status: "created"
+    records: 50
+
+  - path: "research/ml_ood/{data,models,training,evaluation}/**/*.py"
+    description: "Complete ML pipeline codebase"
+    status: "committed (13e9437)"
+    files: 20
+    lines: 3670
+
+# Success Criteria for Production Readiness
+production_readiness_checklist:
+  code_validation:
+    - criterion: "All imports resolve"
+      status: "passed"
+    - criterion: "Model instantiates"
+      status: "passed"
+    - criterion: "Forward pass works"
+      status: "passed"
+    - criterion: "Training loop executes"
+      status: "passed"
+
+  data_validation:
+    - criterion: "Load production SOLUSDT data (175K bars)"
+      status: "blocked (blocker-001)"
+    - criterion: "Regime detection on full dataset"
+      status: "pending"
+    - criterion: "Train/val/test splits created"
+      status: "pending"
+
+  model_validation:
+    - criterion: "Train for 50 epochs"
+      status: "blocked (blocker-001)"
+    - criterion: "Test accuracy > random baseline (33%)"
+      status: "pending"
+    - criterion: "ECE < 0.15 (calibration)"
+      status: "pending"
+    - criterion: "Regime accuracy std measured (OOD robustness)"
+      status: "pending"
+
+  ood_validation:
+    - criterion: "Conformal calibration (90% coverage ±2%)"
+      status: "pending"
+    - criterion: "Stress test: Terra/Luna crash"
+      status: "pending"
+    - criterion: "Stress test: FTX collapse"
+      status: "pending"
+    - criterion: "Uncertainty increases during crises"
+      status: "pending"
+
+# References
+references:
+  implementation_plan: "research/ml_ood/IMPLEMENTATION_PLAN.yaml"
+  architecture: "research/ml_ood/ARCHITECTURE.md"
+  readme: "research/ml_ood/README.md"
+  codebase: "research/ml_ood/{data,models,training,evaluation}/"

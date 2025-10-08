@@ -1,0 +1,188 @@
+# Next Steps: OOD Robustness Pipeline (EL-1009)
+
+**Current Status**: Atom validation complete (89/89 production-ready)
+**Branch**: `feat/ood-robust/EL-1009`
+**Date**: 2025-10-03
+
+## Completed
+
+✅ **Phase 1-4: Atom Validation** (Complete)
+- Individual atom integrity (89/89 passing)
+- Adversarial mathematical testing (all passed)
+- Temporal leakage audit (89/89 causal)
+- Framework temporal safety validation (complete)
+- STL stateful implementation (6 atoms fixed)
+
+**Result**: 89/89 atoms production-ready and causal
+
+## Next: Feature Selection & OOD Robustness
+
+### Phase 5: Feature Selection with IPSS + VIF
+
+**Input**: 89 production-safe atoms
+**Goal**: Reduce to ~30-40 orthogonal features
+**Method**: IPSS (feature importance) + VIF (multicollinearity removal)
+
+#### Updated Feature Tiers (STL now included)
+
+**Tier 1 (Highest Priority)**:
+- Returns & lags: `returns`, `returns_lag_{1,2,3,5,10,20}`
+- Rolling: `rolling_mean_{5,10,20,50}`, `rolling_std_{5,10,20,50}`
+- EWM: `ewm_mean_{5,10,20,50}`, `ewm_std_{5,10,20,50}`
+- Calendar: `hour_of_day_sin/cos`, `day_of_week_sin/cos`
+- **STL (now causal)**: `stl_trend_*`, `stl_seasonal_*`, `stl_resid_*`
+
+**Tier 2 (High Confidence)**:
+- `z_score_{10,20,50}`
+- `parkinson_vol_{10,20}`
+- `pct_from_ma_{10,20,50}`
+
+**Tier 3 (Use Cautiously - Class Imbalance)**:
+- `is_us_holiday` (3.3% positive)
+- `is_month_end` (9.9% positive)
+- `is_quarter_end` (5.5% positive)
+
+#### VIF Filtering (Multicollinearity)
+
+**Known Redundant Pairs** (VIF > 10):
+- `fourier_daily_sin_1` ↔ `hour_of_day_sin` (identical)
+- `fourier_weekly_sin_1` ↔ `day_of_week_sin` (identical)
+- `rolling_mean_X` ↔ `ewm_mean_X` (highly correlated)
+- `stl_trend_*` ↔ `ewm_mean_*` (correlation TBD)
+
+**Recommendation**: Keep EWM over rolling (no window lag)
+
+#### VIF Feasibility Validation (2025-10-03)
+
+✅ **VALIDATED**: VIF on 48 features (pruning manifest) is fast
+- **Full VIF matrix**: 1.1s (very fast)
+- **Iterative VIF removal**: 9.7s (threshold ≤ 5.0)
+- **Result**: 48 features → 37 features (11 removed)
+- **Verdict**: Proceed with VIF as planned (no alternative needed)
+
+**Source**: `experiments/vif_feasibility_test_20251003/FINDINGS.md`
+
+**Why 85 features timed out**: Extreme multicollinearity (r=1.0 pairs) caused numerical instability. Pruning manifest (48 features) already removed redundant pairs → VIF now stable.
+
+#### Implementation Tasks
+
+1. **Compute atoms on full dataset**
+   ```python
+   lib = load_library_from_formulas()
+   atoms_df = lib.compute_all(df, layers=['A', 'B'])
+   # Result: 89 atom columns
+   ```
+
+2. **VIF filtering**
+   ```python
+   from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+   # Calculate VIF for each feature
+   vif_data = pd.DataFrame()
+   vif_data["feature"] = atoms_df.columns
+   vif_data["VIF"] = [variance_inflation_factor(atoms_df.values, i)
+                      for i in range(len(atoms_df.columns))]
+
+   # Remove features with VIF > 10
+   low_vif_features = vif_data[vif_data["VIF"] < 10]["feature"].tolist()
+   ```
+
+3. **IPSS feature importance**
+   ```python
+   from sklearn.ensemble import RandomForestClassifier
+   from sklearn.inspection import permutation_importance
+
+   # Train baseline model
+   model = RandomForestClassifier(n_estimators=100)
+   model.fit(atoms_df[low_vif_features], y_train)
+
+   # Permutation importance
+   result = permutation_importance(model, X_val, y_val, n_repeats=10)
+
+   # Select top N features
+   top_features = result.importances_mean.argsort()[-40:][::-1]
+   ```
+
+4. **Output**: Selected feature set (~30-40 features)
+
+### Phase 6: OOD Robustness Testing
+
+**Input**: Selected features from Phase 5
+**Goal**: Validate model performance under distribution shift
+
+#### Test Scenarios
+
+1. **Temporal OOD**: Train on 2022-2023, test on 2024-2025
+2. **Regime Shift**: Train on bull market, test on bear market
+3. **Volatility OOD**: Train on low vol, test on high vol
+4. **Cross-Symbol**: Train on BTC, test on SOL/ETH
+
+#### Metrics
+
+- **Accuracy**: Performance degradation under OOD
+- **Calibration**: Predicted probabilities vs actual outcomes
+- **Feature Drift**: Distribution shift in feature space
+- **Prediction Stability**: Consistency across OOD scenarios
+
+#### Implementation
+
+```python
+# 1. Temporal split
+train_df = df[df.index < '2024-01-01']
+test_df = df[df.index >= '2024-01-01']
+
+# 2. Train model on selected features
+model.fit(train_atoms, train_labels)
+
+# 3. Evaluate on OOD test set
+ood_predictions = model.predict(test_atoms)
+ood_accuracy = accuracy_score(test_labels, ood_predictions)
+
+# 4. Compare to in-distribution performance
+print(f"In-distribution accuracy: {train_accuracy:.2%}")
+print(f"OOD accuracy: {ood_accuracy:.2%}")
+print(f"Performance gap: {train_accuracy - ood_accuracy:.2%}")
+```
+
+### Phase 7: Model Selection & Deployment
+
+**Based on OOD results**:
+- Select model architecture (RF, XGBoost, LightGBM)
+- Tune hyperparameters for robustness
+- Implement prediction pipeline
+- Deploy to production
+
+## Timeline Estimate
+
+**Phase 5 (Feature Selection)**: 4-6 hours
+- Compute atoms: 30 min
+- VIF filtering: 1 hour
+- IPSS importance: 2 hours
+- Analysis & selection: 1-2 hours
+
+**Phase 6 (OOD Testing)**: 8-12 hours
+- Temporal OOD: 2-3 hours
+- Regime shift: 2-3 hours
+- Volatility OOD: 2-3 hours
+- Cross-symbol: 2-3 hours
+
+**Phase 7 (Deployment)**: 4-8 hours
+- Model selection: 2-3 hours
+- Hyperparameter tuning: 2-3 hours
+- Pipeline implementation: 2-4 hours
+
+**Total**: 16-26 hours
+
+## Immediate Next Step
+
+**Start Phase 5**: Feature selection with IPSS + VIF
+
+```bash
+# 1. Create feature selection script
+# 2. Compute all 89 atoms on full dataset
+# 3. Calculate VIF and remove redundant features
+# 4. Run IPSS for feature importance ranking
+# 5. Select final feature set
+```
+
+**Deliverable**: Curated feature set (~30-40 features) for OOD testing

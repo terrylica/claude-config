@@ -1,0 +1,203 @@
+"""
+Generate 89-atom dataset for orthogonality filtering experiment
+
+SLOs:
+- Correctness: All atoms computed correctly (validation via library)
+- Availability: >= min_valid_rows after NaN drop (raises ValueError)
+- Observability: Logs atom count, NaN statistics, output path
+- Maintainability: Uses library.compute_all() (out-of-box)
+
+Usage:
+    cd /workspace
+    python -m experiments.orthogonality_filtering_20251003.compute_atoms
+"""
+
+import sys
+from pathlib import Path
+import pandas as pd
+import yaml
+
+# Add workspace to path for library imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from ml_feature_set.atoms.library import load_library_from_formulas
+
+
+def load_config() -> dict:
+    """Load experiment configuration"""
+    config_path = Path(__file__).parent / "config.yaml"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def load_sample_data(csv_path: str, sample_size: int) -> pd.DataFrame:
+    """
+    Load SOL 5-minute OHLCV data
+
+    Args:
+        csv_path: Path to SOL_5m.csv
+        sample_size: Number of bars to load
+
+    Returns:
+        DataFrame with datetime index and OHLCV columns
+
+    Raises:
+        FileNotFoundError: If CSV not found
+        ValueError: If insufficient data
+    """
+    csv_full_path = Path(__file__).parent / csv_path
+
+    if not csv_full_path.exists():
+        raise FileNotFoundError(f"Sample data not found: {csv_full_path}")
+
+    df = pd.read_csv(csv_full_path)
+
+    # Parse timestamp
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+    elif 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df.set_index('timestamp', inplace=True)
+    else:
+        raise ValueError(f"CSV missing required 'date' or 'timestamp' column. Columns: {df.columns.tolist()}")
+
+    # Sample
+    if len(df) < sample_size:
+        raise ValueError(
+            f"Insufficient data: requested {sample_size} bars, "
+            f"CSV contains {len(df)} bars"
+        )
+
+    df = df.iloc[:sample_size].copy()
+
+    print(f"Loaded {len(df)} bars from {csv_full_path}")
+    print(f"Date range: {df.index[0]} to {df.index[-1]}")
+
+    return df
+
+
+def compute_all_atoms(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute all 89 production-safe atoms
+
+    Args:
+        df: OHLCV DataFrame with datetime index
+
+    Returns:
+        DataFrame with 89 atom columns
+
+    Raises:
+        Any exception from library.compute_all()
+    """
+    lib = load_library_from_formulas()
+
+    print(f"\nComputing atoms from library...")
+    print(f"Total atoms in library: {len(lib.atoms)}")
+
+    # Compute all layers
+    atoms_df = lib.compute_all(df, layers=['A', 'B'])
+
+    print(f"Computed {len(atoms_df.columns)} atom columns")
+    print(f"Raw output shape: {atoms_df.shape}")
+
+    return atoms_df
+
+
+def validate_and_clean(atoms_df: pd.DataFrame, min_valid_rows: int) -> pd.DataFrame:
+    """
+    Drop NaN rows and validate data sufficiency
+
+    Args:
+        atoms_df: Raw atom DataFrame (may contain NaN)
+        min_valid_rows: Minimum required rows (SLO: availability)
+
+    Returns:
+        Cleaned DataFrame with no NaN
+
+    Raises:
+        ValueError: If insufficient valid rows
+    """
+    print(f"\nValidating data...")
+    print(f"NaN counts per column:")
+    nan_counts = atoms_df.isna().sum()
+    print(nan_counts[nan_counts > 0].to_string())
+
+    # Drop NaN rows
+    before_rows = len(atoms_df)
+    atoms_df = atoms_df.dropna()
+    after_rows = len(atoms_df)
+
+    print(f"\nDropped {before_rows - after_rows} rows with NaN")
+    print(f"Valid rows: {after_rows}")
+
+    # SLO: Availability
+    if after_rows < min_valid_rows:
+        raise ValueError(
+            f"Insufficient valid data: {after_rows} rows < "
+            f"minimum {min_valid_rows} required (SLO: availability)"
+        )
+
+    print(f"✓ Data validation passed (>= {min_valid_rows} rows)")
+
+    return atoms_df
+
+
+def save_atoms(atoms_df: pd.DataFrame, output_path: Path):
+    """
+    Save atom dataset to CSV
+
+    Args:
+        atoms_df: Cleaned atom DataFrame
+        output_path: Output CSV path
+
+    Raises:
+        Any exception from to_csv()
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    atoms_df.to_csv(output_path)
+
+    print(f"\n✓ Saved {len(atoms_df)} rows × {len(atoms_df.columns)} columns")
+    print(f"  Output: {output_path}")
+
+
+def main():
+    """Execute atom computation pipeline"""
+    print("=" * 80)
+    print("Orthogonality Filtering Experiment: Atom Computation")
+    print("=" * 80)
+
+    # Load configuration
+    config = load_config()
+    print(f"\nConfiguration loaded:")
+    print(f"  Sample size: {config['data']['sample_size']} bars")
+    print(f"  Min valid rows: {config['data']['min_valid_rows']}")
+    print(f"  CSV path: {config['data']['sample_csv']}")
+
+    # Load sample data
+    df = load_sample_data(
+        csv_path=config['data']['sample_csv'],
+        sample_size=config['data']['sample_size']
+    )
+
+    # Compute atoms
+    atoms_df = compute_all_atoms(df)
+
+    # Validate and clean
+    atoms_df = validate_and_clean(
+        atoms_df,
+        min_valid_rows=config['data']['min_valid_rows']
+    )
+
+    # Save
+    output_path = Path(__file__).parent / config['output']['raw_dir'] / 'atoms_full.csv'
+    save_atoms(atoms_df, output_path)
+
+    print("\n" + "=" * 80)
+    print("Atom computation complete")
+    print("=" * 80)
+
+
+if __name__ == '__main__':
+    main()

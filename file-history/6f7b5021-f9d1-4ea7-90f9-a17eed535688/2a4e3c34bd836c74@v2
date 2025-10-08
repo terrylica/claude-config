@@ -1,0 +1,29 @@
+#!/bin/bash
+# Download final 6 missing SWAP months
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$PROJECT_ROOT/data"
+PYTHON="$(cd "$PROJECT_ROOT/.." && pwd)/.venv/bin/python"
+
+echo "=============================================================================="
+echo "Download Final 6 SWAP Months"
+echo "=============================================================================="
+
+MISSING=("2024 3" "2024 11" "2024 12" "2025 1" "2025 2" "2025 5")
+
+for month_spec in "${MISSING[@]}"; do
+    read -r year month <<< "$month_spec"
+    echo ""
+    echo "[$(date '+%H:%M:%S')] Downloading SWAP $year-$(printf '%02d' $month)..."
+    $PYTHON "$PROJECT_ROOT/scripts/download_month.py" "$year" "$month" --ticks --market-type swap --data-dir "$DATA_DIR" || {
+        echo "❌ Failed: SWAP $year-$(printf '%02d' $month)"
+    }
+done
+
+echo ""
+echo "=============================================================================="
+echo "Final count: $(find "$DATA_DIR/raw_ticks_swap" -name "*.parquet" | wc -l)/33"
+echo "=============================================================================="
