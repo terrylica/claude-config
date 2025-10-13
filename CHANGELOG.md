@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Claude Code Global Configuration will be documented in this file.
+All notable changes to RangeBar will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -173,6 +173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Enable Claude Code session history tracking
 
+- **hooks,docs**: Add session ID display and ccstatusline integration - Implement session ID display hook via Stop hook system - Replace custom statusline with ccstatusline (Bun-based) - Update CLAUDE.md with new sections for hooks and statusline - Remove root README.md (policy compliance) - Add new documentation files (AWS credentials, LaTeX workflow) - Preserve Claude Code session tracking (file-history/, todos/)
+
 
 ### 🏗️ Build System
 
@@ -228,7 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Finalize CNS documentation updates and hook path corrections - Knowledge Gap: How to ensure complete documentation consistency after systematic file renaming while maintaining hook system integration reliability - Motivation: Previous commit renamed files but left documentation and settings.json references pointing to old paths, requiring final update pass to complete CNS transition and prevent system malfunction - Hypothesis: Final update of CLAUDE.md, documentation files, and settings.json hook paths would complete the TTS → CNS transition and restore system functionality - Investigation: Updated settings.json hook commands to point to new CNS paths, corrected all documentation references to use CNS terminology, verified hook paths exist and are executable, confirmed JSON configuration validity - Result: Updated settings.json with corrected CNS hook paths, finalized all documentation to use CNS terminology consistently, verified system integration points functional, completed transition from TTS to CNS naming - Authenticity: Final CNS documentation completed Monday 2025-07-28 0237 PDT -0700, verified hook system paths operational, confirmed documentation coherence across all system files Monday 2025-07-28 0237 PDT -0700
 
-- **workspace**: Update ARCHITECTURE.md v2.2 - comprehensive workspace modernization SR&ED EVIDENCE - SYSTEMATIC INVESTIGATION & TECHNICAL UNCERTAINTY: Addressing architectural documentation debt through comprehensive workspace analysis and modernization efforts. TECHNICAL ADVANCEMENT ACHIEVED: • Added missing directory documentation (bin/, tmux/, tools/) - 4 new subsystem sections • Updated CNS system architecture from TTS-contaminated to pure clipboard+sound model • Documented async hook architecture implementation (fire-and-forget pattern) • Corrected 40+ outdated file references and path specifications • Enhanced maintenance guidelines with cleanup procedures and backup strategies • Integrated SR&ED workflow documentation with APCF methodology references SYSTEMATIC INVESTIGATION APPROACH: 1. Comprehensive directory structure audit against actual workspace state 2. Analysis of CNS system purification from 196-line TTS to 59-line CNS-only config 3. Documentation of async hook architecture preventing session delays 4. Integration pattern documentation for hook system flow and CNS processing chain 5. Security considerations and file permission documentation updates 6. Future extensibility planning with plugin architecture framework EVIDENCE OF TECHNICAL UNCERTAINTY RESOLUTION: - Eliminated documentation inconsistencies between described vs actual architecture - Resolved missing subsystem documentation causing workflow integration confusion - Addressed outdated TTS references conflicting with current CNS-only implementation - Corrected file path specifications for reliable automation system operation Files: docs/ARCHITECTURE.md (+97/-40 lines) Timestamp: 2025-07-28 1327 PDT Author: Terry Li [operations@eonlabs.ca](mailto:operations@eonlabs.ca)
+- **workspace**: Update ARCHITECTURE.md v2.2 - comprehensive workspace modernization SR&ED EVIDENCE - SYSTEMATIC INVESTIGATION & TECHNICAL UNCERTAINTY: Addressing architectural documentation debt through comprehensive workspace analysis and modernization efforts. TECHNICAL ADVANCEMENT ACHIEVED: • Added missing directory documentation (bin/, tmux/, tools/) - 4 new subsystem sections • Updated CNS system architecture from TTS-contaminated to pure clipboard+sound model • Documented async hook architecture implementation (fire-and-forget pattern) • Corrected 40+ outdated file references and path specifications • Enhanced maintenance guidelines with cleanup procedures and backup strategies • Integrated SR&ED workflow documentation with APCF methodology references SYSTEMATIC INVESTIGATION APPROACH: 1. Comprehensive directory structure audit against actual workspace state 2. Analysis of CNS system purification from 196-line TTS to 59-line CNS-only config 3. Documentation of async hook architecture preventing session delays 4. Integration pattern documentation for hook system flow and CNS processing chain 5. Security considerations and file permission documentation updates 6. Future extensibility planning with plugin architecture framework EVIDENCE OF TECHNICAL UNCERTAINTY RESOLUTION: - Eliminated documentation inconsistencies between described vs actual architecture - Resolved missing subsystem documentation causing workflow integration confusion - Addressed outdated TTS references conflicting with current CNS-only implementation - Corrected file path specifications for reliable automation system operation Files: docs/ARCHITECTURE.md (+97/-40 lines) Timestamp: 2025-07-28 1327 PDT Author: Terry Li <operations@eonlabs.ca>
 
 - **cns**: Eliminate glass sound legacy terminology across workspace architecture - Knowledge Gap: Workspace documentation contained obsolete 'glass sound' references that no longer matched actual CNS notification system implementation using Toy Story audio with folder name TTS - Motivation: Ensure documentation accuracy for audit trail compliance and eliminate technical debt from previous audio system naming conventions - Hypothesis: Systematic terminology replacement across 11 documentation files and configuration references would align workspace architecture with current CNS notification implementation - Investigation: Analyzed complete workspace for 'glass' references using systematic grep search, identified 14 files requiring updates across CLAUDE.md, ARCHITECTURE.md, README files, configuration JSON, and shell scripts - Result: Updated 11 files with accurate 'CNS notification' terminology, removed 2 obsolete scripts (glass_sound_wrapper.sh, bin/glass-sound), added 3 new files (cns_notification_hook.sh, bin/cns-notify, media/ directory) establishing consistent naming convention - Authenticity: Comprehensive workspace terminology audit performed Monday 2025-07-28 14:37 PDT, systematic replacement of deprecated audio system references with current Toy Story notification + folder name TTS implementation Monday 2025-07-28 1432 PDT -0700
 
@@ -307,7 +309,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📝 Other Changes
 
-- Initial commit: Claude Code configuration backup - APCF audit-proof commit format system for SR&ED evidence - Text-to-speech hook system with audio feedback - Custom slash commands for workflow automation - Project memory and session state tracking - Shell snapshot history for development context - Sound assets for audio notifications 🤖 Generated with Claude Code (https://claude.ai/code) Co-Authored-By: Claude [noreply@anthropic.com](mailto:noreply@anthropic.com) Thursday 2025-07-24 2108 PDT -0700
+- Initial commit: Claude Code configuration backup - APCF audit-proof commit format system for SR&ED evidence - Text-to-speech hook system with audio feedback - Custom slash commands for workflow automation - Project memory and session state tracking - Shell snapshot history for development context - Sound assets for audio notifications 🤖 Generated with Claude Code (https://claude.ai/code) Co-Authored-By: Claude <noreply@anthropic.com> Thursday 2025-07-24 2108 PDT -0700
 
 - **attribution**: Disable automatic Claude attribution in commit messages - Knowledge Gap: Claude Code automatically injects attribution footers into commit messages without user control, creating undesired corporate branding in personal repositories and disrupting custom commit message formats - Motivation: Historical commit analysis revealed 100% of previous commits contained unwanted attribution lines disrupting APCF message formatting and professional repository appearance requiring systematic suppression mechanism - Hypothesis: Official `includeCoAuthoredBy: false` setting will cleanly disable attribution injection while preserving all other Claude Code functionality and hook integrations - Investigation: Researched Claude Code documentation at docs.anthropic.com, confirmed setting existence and syntax, validated JSON configuration format compatibility with existing hooks and model definitions, tested setting isolation without side effects - Result: Added `includeCoAuthoredBy: false` to `settings.json` configuration, preserved all existing hook definitions, maintained model settings, validated JSON syntax correctness, established clean commit message workflow for future operations - Authenticity: Configuration work performed 2025-07-24 22:29 PDT after systematic documentation research confirming official suppression mechanism availability Thursday 2025-07-24 2218 PDT -0700
 
@@ -447,6 +449,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Merge origin/main with Kitty terminal documentation
 
+- Version 2.8.0 → 2.9.0
+
 
 ### 🧰 Maintenance
 
@@ -492,105 +496,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve session history and update file path conventions - Preserve Claude Code session history (213 files: file-history/, todos/) - Add file path convention for Ghostty Cmd+click compatibility - Update CLAUDE.md with absolute path formatting requirement
 
-## v2.9.0 (2025-10-12)
-
-### Feat
-
-- **hooks,docs**: add session ID display and ccstatusline integration
-- enable Claude Code session history tracking
-- **cns**: add configurable Pushover notification sound
-- **cns**: enable dual SSH tunnel and Pushover notifications
-- **cns**: complete Pushover integration with git-based credentials
-- **tools**: add git-cliff release automation templates and AI agent workflow
-- Pushover notification integration with emergency retry system
-- CNS Remote Alert System production implementation
-- implement CNS Remote Alert System with hybrid SSH tunnel architecture
-- add context-bound-planner agent with todo state sync
-- add agent todo management system and workspace sync capability
-- implement zero-tolerance temporal integrity mandate for quantitative finance
-- consolidate quantitative development standards after c9c968a merge
-- add comprehensive quantitative development standards and CCXT mandate
-- integrate comprehensive workspace system improvements
-- **uv**: enforce module-only execution pattern
-- **fdap**: Add Fail-Fast Data Authenticity Precept to user memory
-- **EPMS**: Add Universal Workspace Integration principles
-- **tmux**: add smart detach command with session auto-detection EL-1009
-- **sync**: implement bidirectional sync with official session format
-- **tools**: add Claude session sync utility for cross-platform session management
-- **architecture**: implement CAAP-compliant APCF agent with command delegation
-- **enhancement**: implement sophisticated research-scout with multi-perspective analysis
-- **consolidation**: implement Python QA consolidation with unified quality assurance
-- **architecture**: implement CAAP framework with comprehensive agent standards
-- **infrastructure**: implement bulletproof SAGE sync v2.0 with emergency backup system
-- **infrastructure**: implement SAGE development aliases with universal access pattern and dual-environment workflow integration
-- **qa**: implement comprehensive command validation and Python code quality automation tools
-- **tools**: implement GitHub Flavored Markdown link integrity validation with intelligent auto-fix
-- **automation**: implement comprehensive CNS notification system with asynchronous hook architecture
-- **agents**: implement Python import validation agent with comprehensive static analysis pipeline
-- **commands**: implement command extension documentation consolidation with workflow integration
-- **sync**: implement comprehensive SAGE dual-environment synchronization tool with error handling and validation
-- **tools**: implement SAGE development productivity tool with comprehensive alias system
-- **link-checker**: implement sub-repository ignore functionality with case-insensitive pattern matching
-- **utilities**: implement direct execution utilities with structured documentation framework
-- **gfm-checker**: implement README completeness validation with workspace navigation repairs
-- **infrastructure**: establish organizational repository foundation with migration audit trail
-- **cns**: add configurable volume control for notification audio
-- **cns**: optimize audio timing and enhance dot-folder pronunciation
-- **cns**: update notification sound from Mac IIx to Toy Story audio
-- **tools**: implement automated Python code quality system with ruff integration
-- **cns**: expand documentation architecture and enhance Mac IIx sound notification system
-- **hooks**: implement automated conversation export system with claude-code-exporter integration
-- **tts**: implement ultra-aggressive content filtering with dual-mode clipboard integration
-- **tts**: implement intelligent command detection with content-type differentiation for enhanced audio feedback
-- **tts**: implement separated content-type processing with JSON-driven configuration management
-- **commands**: implement comprehensive command validation infrastructure with auto-fix capabilities
-- **gfm-checker**: implement comprehensive short flag compatibility for command-line interface
-- **commands**: implement comprehensive APCF slash command documentation
-- **tts**: implement Phase 1 modular TTS foundation with comprehensive architecture
-- **agents**: create `research-scout` agent with comprehensive research direction generation
-- **monitoring**: capture GitHub Flavored Markdown link checker session analytics
-- **tooling**: implement GitHub Flavored Markdown link checker with user memory updates
-- **sessions**: organize session data structure and agent todo system management
-- **monitoring**: capture comprehensive session analytics with extended followup trigger data
-- **development**: integrate comprehensive tmux workspace management system
-
-### Fix
-
-- **sage**: update hardcoded paths after directory restructure
-- **command-interface**: resolve flag completeness gap with comprehensive wrapper synchronization
-- **tts**: enhance slash command detection and clipboard filtering for command workflows
-- **tts**: resolve clipboard debug functionality for user content capture and refine command detection accuracy
-- **tts**: correct automation script path after directory reorganization
-- **hooks**: update settings.json paths after automation script reorganization
-
-### Refactor
-
-- implement agent session handoff with todo list continuity
-- externalize extension specifications to YAML files
-- **agents**: rename mhr-refactor to workspace-refactor
-- **agents**: update milestone-commit-logger for workplace agnosticism
-- **exception-only**: implement strict exception-only failure principles across workspace
-- **agents**: restructure agent system and workspace configuration EL-1009
-- **commands**: streamline APCF command for CAAP delegation efficiency
-- **agents**: migrate to official Claude Code agent directory structure
-- **workspace**: implement systematic workspace organization with documentation consolidation architecture
-- **tools**: implement development tool integration research with documentation consolidation
-- **integration**: consolidate cross-platform system integration documentation
-- **docs**: systematic documentation architecture optimization for maintainability
-- **agents**: optimize agent definitions through complexity reduction investigation
-- **tmux**: eliminate complex automation and implement simple session management
-- **automation**: implement cross-platform compatibility for CNS system
-- **automation**: eliminate non-CNS hook system and consolidate to pure CNS architecture
-- **cns**: eliminate TTS legacy contamination and optimize workspace architecture
-- complete TTS to CNS rename - eliminate misleading terminology across entire system
-- **tts**: remove TTS functionality and implement clipboard-only system with glass sound
-- **tts**: simplify clipboard functionality to preserve raw conversation content
-- **config**: streamline APCF documentation in user memory file
-- **agents**: standardize all agent configurations to consistent YAML frontmatter template
-- **automation**: organize scripts into logical subdirectories
-- **structure**: rename scripts directory to tools for clarity
-- **architecture**: implement hierarchical configuration management system
-
-### Perf
-
-- **cns**: implement asynchronous hook architecture to eliminate session delays
