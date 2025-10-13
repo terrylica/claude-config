@@ -1,0 +1,421 @@
+# v1.10 Real Perpetual Price Implementation Specification
+
+**Version:** 2.0.0
+**Status:** Implementation In Progress
+**Supersedes:** v1.9-modular.py (synthetic calculation)
+**Created:** 2025-10-03
+**Updated:** 2025-10-03
+
+---
+
+## Root Cause Analysis
+
+**Issue:** v1.9-modular.py:358-361 enforces `perp_pnl = -spot_pnl` mathematically
+**Impact:** Market P&L variance = $0.00 (synthetic, not real hedging)
+**Evidence:** INVESTIGATION_FINDINGS.md Phase 1
+**Resolution:** Implement dual price providers with real perpetual data
+
+---
+
+## Service Level Objectives
+
+### Correctness SLO
+**Target:** `|actual_perp_price - spot_price| >= 0` (real price divergence exists)
+**Metric:** `market_pnl_variance > 0` AND `basis_std_dev > 0`
+**Violation:** Zero variance in market P&L across all periods
+**Validation:** Compare v1.9 (variance=0) vs v1.10 (variance>0)
+
+### Availability SLO
+**Target:** Both spot and perp price data accessible for 99% of settlement periods
+**Metric:** `(perp_prices_available / total_periods) >= 0.99`
+**Violation:** Missing perp price data for >1% of periods
+**Error Handling:** Raise exception if perp price unavailable (no fallback to spot)
+
+### Observability SLO
+**Target:** Basis tracking for all executed periods
+**Metric:** `basis_entry_bps`, `basis_exit_bps`, `basis_pnl` populated for 100% of trades
+**Violation:** Missing basis metrics in output
+**Validation:** Verify parquet output contains new columns
+
+### Maintainability SLO
+**Target:** Price provider abstraction unchanged (same interface)
+**Metric:** No breaking changes to `BarPriceProvider.get_prices()` signature
+**Violation:** Modified price provider interface
+**Benefit:** Drop-in replacement for v1.9
+
+---
+
+## Implementation Changes
+
+### 1. Dual Price Provider Initialization
+
+**File:** v1.10-modular.py
+**Lines:** 111-120 (modified from v1.9:112-116)
+
+```python
+# v1.9 (REMOVE):
+# self.price_provider = BarPriceProvider(bar_data_dir, market_type="spot")
+
+# v1.10 (ADD):
+spot_bar_dir = Path("data/1min_bars")
+perp_bar_dir = Path("data/1min_bars_swap")
+
+print(f"Initializing SPOT price provider from {spot_bar_dir}...")
+self.spot_provider = BarPriceProvider(spot_bar_dir, market_type="spot")
+
+print(f"Initializing PERP price provider from {perp_bar_dir}...")
+self.perp_provider = BarPriceProvider(perp_bar_dir, market_type="spot")
+
+print("Price providers ready (SPOT + PERP)")
+```
+
+**Error Handling:**
+```python
+if not spot_bar_dir.exists():
+    raise FileNotFoundError(f"SPOT data not found: {spot_bar_dir}")
+if not perp_bar_dir.exists():
+    raise FileNotFoundError(f"PERP data not found: {perp_bar_dir}")
+```
+
+---
+
+### 2. Perpetual Price Accessor Method
+
+**File:** v1.10-modular.py
+**Lines:** 255-268 (new method after get_spot_prices)
+
+```python
+def get_perp_prices(self, symbols, start_time, end_time, freq='1min'):
+    """
+    Get perpetual (SWAP) prices for symbols over time period.
+
+    Args:
+        symbols: List of SWAP symbols (e.g., ['BTC-USDT-SWAP'])
+        start_time: pd.Timestamp
+        end_time: pd.Timestamp
+        freq: str, default '1min'
+
+    Returns:
+        pd.DataFrame with columns: timestamp, symbol, price
+
+    Raises:
+        FileNotFoundError: If perp data directory not found
+        ValueError: If no price data returned for requested period
+    """
+    prices = self.perp_provider.get_prices(
+        symbols=symbols,
+        start_date=start_time,
+        end_date=end_time,
+        freq=freq,
+        method='vwap'
+    )
+
+    if prices is None or len(prices) == 0:
+        raise ValueError(
+            f"No perp prices returned for {symbols} "
+            f"between {start_time} and {end_time}"
+        )
+
+    return prices
+```
+
+---
+
+### 3. Real Perpetual Price Loading
+
+**File:** v1.10-modular.py
+**Lines:** 287-335 (modified execute_period logic)
+
+**v1.9 Pattern (REMOVE):**
+```python
+# Line 287: spot_symbols = [s.replace('-SWAP', '') for s in symbols]
+# Line 295: entry_prices_df = self.get_spot_prices(spot_symbols, ...)
+# Line 311: exit_prices_df = self.get_spot_prices(spot_symbols, ...)
+```
+
+**v1.10 Pattern (ADD):**
+```python
+# Separate spot and perp symbols
+spot_symbols = [s.replace('-SWAP', '') for s in symbols]
+perp_symbols = symbols  # Keep SWAP suffix
+
+# Load SPOT prices (entry + exit)
+entry_spot_df = self.get_spot_prices(spot_symbols, entry_time, entry_time, freq='1min')
+exit_spot_df = self.get_spot_prices(spot_symbols, exit_time, exit_time, freq='1min')
+
+# Load PERP prices (entry + exit)
+entry_perp_df = self.get_perp_prices(perp_symbols, entry_time, entry_time, freq='1min')
+exit_perp_df = self.get_perp_prices(perp_symbols, exit_time, exit_time, freq='1min')
+
+# Extract into dictionaries with validation
+entry_spot_prices = {}
+entry_perp_prices = {}
+exit_spot_prices = {}
+exit_perp_prices = {}
+
+for swap_sym, spot_sym in zip(perp_symbols, spot_symbols):
+    # SPOT entry
+    spot_data = entry_spot_df[entry_spot_df['symbol'] == spot_sym]
+    if len(spot_data) == 0:
+        raise ValueError(f"No SPOT entry price for {spot_sym} at {entry_time}")
+    entry_spot_prices[swap_sym] = spot_data['price'].iloc[0]
+
+    # PERP entry
+    perp_data = entry_perp_df[entry_perp_df['symbol'] == swap_sym]
+    if len(perp_data) == 0:
+        raise ValueError(f"No PERP entry price for {swap_sym} at {entry_time}")
+    entry_perp_prices[swap_sym] = perp_data['price'].iloc[0]
+
+    # SPOT exit
+    spot_data = exit_spot_df[exit_spot_df['symbol'] == spot_sym]
+    if len(spot_data) == 0:
+        raise ValueError(f"No SPOT exit price for {spot_sym} at {exit_time}")
+    exit_spot_prices[swap_sym] = spot_data['price'].iloc[0]
+
+    # PERP exit
+    perp_data = exit_perp_df[exit_perp_df['symbol'] == swap_sym]
+    if len(perp_data) == 0:
+        raise ValueError(f"No PERP exit price for {swap_sym} at {exit_time}")
+    exit_perp_prices[swap_sym] = perp_data['price'].iloc[0]
+```
+
+**Error Policy:** No silent fallbacks. Raise on missing data.
+
+---
+
+### 4. Real Delta-Neutral P&L Calculation
+
+**File:** v1.10-modular.py
+**Lines:** 358-380 (modified P&L calculation)
+
+**v1.9 (REMOVE):**
+```python
+entry_price = entry_prices[symbol]
+exit_price = exit_prices[symbol]
+position_size = allocation_per_symbol / entry_price
+
+spot_pnl = (exit_price - entry_price) * position_size
+perp_pnl = (entry_price - exit_price) * position_size  # SYNTHETIC
+```
+
+**v1.10 (ADD):**
+```python
+# Extract prices for this symbol
+spot_entry = entry_spot_prices[symbol]
+spot_exit = exit_spot_prices[symbol]
+perp_entry = entry_perp_prices[symbol]
+perp_exit = exit_perp_prices[symbol]
+
+# Position sizing based on SPOT entry price
+position_size = allocation_per_symbol / spot_entry
+
+# SPOT P&L (long position)
+spot_pnl = (spot_exit - spot_entry) * position_size
+
+# PERP P&L (short position) - REAL PRICES
+perp_pnl = (perp_entry - perp_exit) * position_size
+
+# Basis tracking (new metrics)
+basis_entry_bps = (perp_entry - spot_entry) / spot_entry * 10000
+basis_exit_bps = (perp_exit - spot_exit) / spot_exit * 10000
+basis_change_bps = basis_exit_bps - basis_entry_bps
+
+# Basis P&L (impact of basis movement)
+basis_pnl = (basis_exit_bps - basis_entry_bps) / 10000 * allocation_per_symbol
+```
+
+**Validation:**
+```python
+# Sanity check: perp_pnl should NOT equal -spot_pnl exactly
+if abs(perp_pnl + spot_pnl) < 1e-10:
+    raise ValueError(
+        f"Synthetic calculation detected: perp_pnl=-spot_pnl for {symbol}"
+    )
+```
+
+---
+
+### 5. Enhanced Trade Recording
+
+**File:** v1.10-modular.py
+**Lines:** 370-400 (modified trade dict)
+
+**v1.9 Columns (KEEP):**
+- symbol, entry_time, exit_time
+- predicted_rate, current_rate_at_T, actual_rate
+- entry_price, exit_price (spot)
+- funding, spot_pnl, perp_pnl, symbol_pnl, position_size
+
+**v1.10 New Columns (ADD):**
+```python
+trades.append({
+    # ... existing columns ...
+
+    # SPOT prices (renamed for clarity)
+    'spot_entry_price': spot_entry,
+    'spot_exit_price': spot_exit,
+
+    # PERP prices (NEW)
+    'perp_entry_price': perp_entry,
+    'perp_exit_price': perp_exit,
+
+    # Basis metrics (NEW)
+    'basis_entry_bps': basis_entry_bps,
+    'basis_exit_bps': basis_exit_bps,
+    'basis_change_bps': basis_change_bps,
+    'basis_pnl': basis_pnl,
+
+    # ... existing P&L columns ...
+})
+```
+
+---
+
+## Data Pipeline Requirements
+
+### SWAP Data Directory Structure
+```
+data/
+├── 1min_bars/           # Existing SPOT bars
+│   ├── 2023/
+│   │   ├── 01.parquet
+│   │   └── ...
+│   └── 2024/
+│       └── ...
+└── 1min_bars_swap/      # NEW: PERP bars
+    ├── 2023/
+    │   ├── 01.parquet
+    │   └── ...
+    └── 2024/
+        └── ...
+```
+
+### Download Command
+```bash
+# Download SWAP data for single month
+uv run --active python scripts/download_month.py 2024 1 \
+  --ticks --market-type swap --data-dir data/
+
+# Aggregate to 1-min bars
+uv run --active python scripts/aggregate_month.py 2024 1 \
+  --data-dir data/ \
+  --input-dir raw_ticks_swap \
+  --output-dir 1min_bars_swap
+```
+
+---
+
+## Testing Protocol
+
+### Small-Scale Test (Jan 2024)
+
+**Prerequisites:**
+```bash
+# Verify test data exists
+ls -lh /tmp/swap_test/1min_bars/2024/01.parquet  # 152 MB expected
+```
+
+**Test Execution:**
+```bash
+# Create symlink for test (avoid copying 152 MB)
+mkdir -p data/1min_bars_swap/2024
+ln -s /tmp/swap_test/1min_bars/2024/01.parquet \
+  data/1min_bars_swap/2024/01.parquet
+
+# Run v1.10 for Jan 2024 only
+uv run --active python v1.10-modular.py \
+  --start 2024-01-01 --end 2024-01-31 --capital 1000000 \
+  2>&1 | tee /tmp/v1.10_jan2024_test.log
+```
+
+**Validation Criteria:**
+```python
+# Load results
+import pandas as pd
+df = pd.read_parquet('results/v1.10-modular-20240101-20240131.parquet')
+
+# SLO: Correctness
+assert df['market_pnl'].std() > 0, "Market P&L variance must be > 0"
+assert df['basis_entry_bps'].notna().all(), "Basis entry must be populated"
+assert df['perp_entry_price'].notna().all(), "Perp prices must be populated"
+
+# SLO: Observability
+required_cols = [
+    'perp_entry_price', 'perp_exit_price',
+    'basis_entry_bps', 'basis_exit_bps', 'basis_pnl'
+]
+assert all(col in df.columns for col in required_cols), "Missing new columns"
+
+# Sanity: Perp ≠ -Spot
+synthetic_periods = df[abs(df['perp_pnl'] + df['spot_pnl']) < 1e-6]
+assert len(synthetic_periods) == 0, f"Found {len(synthetic_periods)} synthetic calculations"
+```
+
+---
+
+## Expected Results
+
+### v1.9 (Synthetic) Baseline
+```
+Market P&L: mean=$0.00, std=$0.00, positive=0%
+APY: 2.26% (32 months)
+```
+
+### v1.10 (Real) Expected
+```
+Market P&L: mean~$0, std=$500-$2000, positive=40-60%
+APY: 1.9-2.2% (reduction due to basis risk)
+Basis std dev: 5-20 bps typical
+```
+
+---
+
+## Error Handling Policy
+
+**Rule:** Fail fast on all data inconsistencies
+
+**Examples:**
+```python
+# CORRECT
+if perp_price is None:
+    raise ValueError(f"Perp price not found for {symbol} at {timestamp}")
+
+# INCORRECT (NO FALLBACKS)
+if perp_price is None:
+    perp_price = spot_price  # FORBIDDEN
+```
+
+**Propagation:** All exceptions bubble up to caller (no try/except without re-raise)
+
+---
+
+## Version History
+
+### v2.0.0 (2025-10-03) - Real Perpetual Implementation
+- Dual price providers (spot + perp)
+- Real perpetual price loading
+- Basis tracking metrics
+- Error handling: no fallbacks
+- SLOs: correctness, availability, observability, maintainability
+
+### v1.0.0 (Reference)
+- Synthetic calculation (perp_pnl = -spot_pnl)
+- Single spot price provider
+- See: v1.9-modular.py
+
+---
+
+## References
+
+**Investigation:**
+- INVESTIGATION_PLAN.md (Phase 2, Option B selected)
+- INVESTIGATION_FINDINGS.md (Phase 1, root cause identified)
+- AUDIT_SUMMARY.md (Section 7.1, synthetic calculation)
+
+**Validation:**
+- /tmp/swap_test/TEST_RESULTS.txt (infrastructure validation)
+- /tmp/option_b_implementation/ (design artifacts)
+
+**Code:**
+- v1.9-modular.py:358-361 (synthetic P&L calculation)
+- libs/okx-price-provider/src/okx_price_provider/cdn_downloader.py:206 (msg_type="allswap")

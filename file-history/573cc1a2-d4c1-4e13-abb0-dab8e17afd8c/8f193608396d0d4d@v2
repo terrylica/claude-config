@@ -1,0 +1,171 @@
+# ATR-Adaptive-Laguerre V4 Status Summary
+
+**Date:** 2025-10-07
+**Branch:** `feat/atr-adaptive-laguerre/EL-1009`
+**Package Version:** v1.0.6 (reports as 0.2.1 internally)
+**Feature Set:** `ohlcv_atr-adaptive-laguerre_size79_v4.py`
+
+---
+
+## ✅ What We've Accomplished
+
+### 1. Validation Framework Fix Applied
+- **File:** `ml_feature_set/validate_feature_set.py`
+- **Fix:** Added `.reset_index(drop=True)` at line 197
+- **Purpose:** Ensures DataFrames have 0-based indices for vectorized packages
+- **Status:** ✅ Committed to branch
+
+### 2. Package Upgrade & Enhancement Request
+- **Upgraded:** v1.0.5 → v1.0.6
+- **Discovery:** Maintainer implemented several of our recommendations!
+  - ✅ Added `.multi_interval()` helper method
+  - ✅ Added `.single_interval()` helper method
+  - ✅ Added runtime warning for single-interval mode
+  - ✅ Default `filter_redundancy=True` (79 features)
+
+### 3. Enhancement Request Documents Created
+- **Initial request:** `/tmp/atr-adaptive-laguerre-enhancement-request.md`
+- **v1.0.6 update:** `/tmp/atr-adaptive-laguerre-v1.0.6-enhancement-update.md`
+- **Final ask:** Make multi-interval the default (not just helper method)
+
+### 4. Feature Set V4 Created
+- **File:** `ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size79_v4.py`
+- **Features:** 79 (optimized, filter_redundancy=True)
+- **Prefix:** `aal_` (ATR-Adaptive Laguerre)
+- **Lookback:** 360 periods
+- **Config:** Uses `.multi_interval()` helper method
+- **Status:** ✅ Staged for commit
+
+---
+
+## ⚠️ Current Issue: Validation Failures
+
+### Validation Results
+```
+Validation summary: 0/30 validation steps passed, 30 failed
+Time taken: 42.97 seconds
+```
+
+### Error Pattern Analysis
+
+**Affected features:** Primarily `mult2` (12x interval) features
+
+**Consistent errors across all 30 steps:**
+```
+aal_abs_dist_overbought_mult2: full_data=0.6306, pred_data=0.6134
+aal_abs_dist_oversold_mult2: full_data=0.0694, pred_data=0.0866
+aal_bars_since_overbought_mult2: full_data=50.0, pred_data=11.0  ← LARGE DISCREPANCY
+aal_rsi_percentile_20_mult2: full_data=80.0, pred_data=30.0      ← LARGE DISCREPANCY
+```
+
+**Observation:** `mult2` features show systematic differences, suggesting boundary/resampling issues
+
+---
+
+## 🔍 Root Cause Investigation
+
+### Hypothesis 1: Package Internal Resampling Issue ❓
+- Package handles mult2 (12x) resampling internally
+- Might not respect `availability_column` properly for mult2
+- Package's own `validate_non_anticipative()` passes ✓
+- But framework validation fails ✗
+
+### Hypothesis 2: Data Provision Issue ❓
+- Framework might not provide enough historical data for mult2
+- mult2 requires 360 periods, but prediction slicing might be insufficient
+- Need to verify `data_buffers[source_name]` calculation
+
+### Hypothesis 3: Version Inconsistency ❓
+- Package reports version "0.2.1" internally but PyPI shows "1.0.6"
+- Possible version mismatch causing unexpected behavior
+
+---
+
+## 📊 Comparison: Package Self-Validation vs Framework Validation
+
+| Test | Method | Result | Note |
+|------|--------|--------|------|
+| **Package internal** | `indicator.validate_non_anticipative(df, n_shuffles=10)` | ✅ Pass | Package thinks it's correct |
+| **Framework validation** | 30-step prediction validation | ❌ Fail 0/30 | mult2 features inconsistent |
+
+**Conclusion:** Disconnect between package's self-validation and framework's real-world usage
+
+---
+
+## 🎯 Next Steps (Priority Order)
+
+### Immediate (Debug Validation Failure)
+
+**Option A: Deep Dive into mult2 Boundary**
+1. Create minimal test comparing package's internal mult2 vs framework's mult2
+2. Check if `availability_column` works correctly for mult2 interval
+3. Verify lookback calculation for mult2 in validation framework
+
+**Option B: Test with filter_redundancy=False (121 features)**
+1. Change v4 to use all 121 features (unfiltered)
+2. See if validation passes with raw features
+3. Determine if filtering process causes issues
+
+**Option C: Downgrade to Single-Interval Mode**
+1. Create v4-single with 27 features (no mult1/mult2)
+2. Test if single-interval passes validation
+3. Use as baseline to isolate multi-interval issues
+
+### Medium Term (Package Communication)
+
+**Option D: Report to Maintainer**
+1. Document mult2 validation failures
+2. Provide minimal reproducible example
+3. Ask about `availability_column` behavior for mult2
+
+**Option E: Hybrid Approach**
+1. Use framework's `resample_factors=[1, 4, 12]`  instead of package mult1/mult2
+2. Call package in single-interval mode 3 times
+3. Manually combine features (no cross-interval features)
+
+---
+
+## 📁 File Status
+
+### Committed
+- ✅ `ml_feature_set/validate_feature_set.py` (framework fix)
+
+### Staged
+- ✅ `ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size79_v4.py`
+
+### Untracked
+- `ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size121_v3.py` (restored)
+- `ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size27_v2.py` (restored)
+
+### Enhancement Requests (Ready to Send)
+- `/tmp/atr-adaptive-laguerre-enhancement-request.md`
+- `/tmp/atr-adaptive-laguerre-v1.0.6-enhancement-update.md`
+
+---
+
+## 💡 Recommendations
+
+### Short Term
+1. **Investigate mult2 boundary issue** - This is blocking production use
+2. **Test single-interval mode** - Verify 27 features work correctly
+3. **Contact package maintainer** - Share mult2 validation failures
+
+### Long Term
+1. **Align package defaults** - Push for multi-interval as default
+2. **Documentation improvements** - Help other users avoid our discoveries
+3. **Alternative implementation** - Consider framework-based multi-timeframe if package issues persist
+
+---
+
+## Decision Point
+
+**Question for team:** How should we proceed?
+
+**A)** Debug mult2 issue with package maintainer (best features, but blocked)
+**B)** Use single-interval mode (27 features, works now)
+**C)** Use framework multi-timeframe (81 features, no cross-interval analysis)
+**D)** Combination approach (different strategies for different needs)
+
+---
+
+**Current recommendation:** Option A (debug mult2) because the 31 cross-interval features are valuable for production ML.

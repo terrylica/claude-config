@@ -1,0 +1,111 @@
+"""Reproduce the validation framework failure with real BTC data"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+print("=" * 80)
+print("ROOT CAUSE ANALYSIS: Validation Framework Failures")
+print("=" * 80)
+
+# Load real BTC data
+data = pd.read_csv("/workspace/ml_feature_set/sample_data/resampled_binance_BTC-2h.csv")
+data["date"] = pd.to_datetime(data["date"])
+data["actual_ready_time"] = data["date"] + timedelta(hours=2)
+
+print(f"\nDataset: {len(data)} rows")
+print(f"Date range: {data['date'].min()} to {data['date'].max()}")
+
+# Use validation point from framework
+validation_time = pd.to_datetime("2025-03-17 02:00:00")
+validation_ready_time = validation_time + timedelta(hours=2)
+
+print(f"\nValidation time: {validation_time}")
+print(f"Validation ready time: {validation_ready_time}")
+
+# Configure indicator
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column="actual_ready_time"
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"\nGenerating features on full dataset...")
+features_full = indicator.fit_transform_features(data)
+print(f"Features shape: {features_full.shape}")
+
+# Get prediction features
+print(f"\nFiltering data by availability <= {validation_ready_time}...")
+pred_data = data[data["actual_ready_time"] <= validation_ready_time].copy()
+print(f"Prediction data: {len(pred_data)} rows")
+
+print(f"\nGenerating features on prediction dataset...")
+features_pred = indicator.fit_transform_features(pred_data)
+print(f"Prediction features shape: {features_pred.shape}")
+
+# Find matching row
+matching_row = data[data["actual_ready_time"] == validation_ready_time]
+if len(matching_row) == 0:
+    print(f"\nERROR: No matching row for {validation_ready_time}")
+    exit(1)
+
+match_idx = matching_row.index[0]
+print(f"\nMatching index: {match_idx}")
+
+# Compare features
+print("\n" + "=" * 80)
+print("FEATURE COMPARISON")
+print("=" * 80)
+
+features_to_check = [
+    ("rsi_base", "Base RSI"),
+    ("rsi_mult1", "Mult1 (4x) RSI"),
+    ("rsi_mult2", "Mult2 (12x) RSI"),
+    ("atr_laguerre_bars_since_overbought_mult2", "Bars Since Overbought (mult2)"),
+    ("atr_laguerre_rsi_percentile_20_mult2", "RSI Percentile 20 (mult2)"),
+    ("atr_laguerre_rsi_zscore_20_mult2", "RSI Z-Score 20 (mult2)"),
+]
+
+failures = []
+
+for feature, name in features_to_check:
+    if feature not in features_full.columns:
+        print(f"\n{name}: MISSING")
+        continue
+
+    full_val = features_full.iloc[match_idx][feature]
+    pred_val = features_pred.iloc[-1][feature]
+    diff = abs(full_val - pred_val)
+
+    status = "PASS" if diff < 1e-5 else "FAIL"
+
+    print(f"\n{name}:")
+    print(f"  Full:       {full_val}")
+    print(f"  Prediction: {pred_val}")
+    print(f"  Difference: {diff:.10f}")
+    print(f"  Status:     {status}")
+
+    if diff >= 1e-5:
+        failures.append((feature, name, full_val, pred_val, diff))
+
+print("\n" + "=" * 80)
+print("ANALYSIS")
+print("=" * 80)
+
+if len(failures) == 0:
+    print("\nALL FEATURES PASS!")
+else:
+    print(f"\n{len(failures)}/{len(features_to_check)} features FAILED")
+
+    core_failures = [f for f in failures if f[0] in ["rsi_base", "rsi_mult1", "rsi_mult2"]]
+    if len(core_failures) > 0:
+        print("\nCRITICAL: Core RSI features failing - DATA LEAKAGE DETECTED")
+        for f in core_failures:
+            print(f"  - {f[1]}: {f[4]:.6f} difference")
+    else:
+        print("\nCore RSI features: PASS")
+        print("Derivative features: FAIL")
+        print("\nThis is the mult2 context sensitivity issue")

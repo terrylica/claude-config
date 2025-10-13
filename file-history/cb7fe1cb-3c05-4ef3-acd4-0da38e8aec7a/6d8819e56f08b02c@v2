@@ -1,0 +1,309 @@
+# Documentation Audit Round 2 Report - v5.0.0
+
+**Date**: 2025-10-11
+**Scope**: Deep dive into remaining documentation issues
+**Previous Fixes**: 4 critical issues resolved (commit `7e457a9`)
+
+---
+
+## Executive Summary
+
+Round 2 audit reveals:
+- **3 new critical issues** in CONTRIBUTING.md (outdated Rust version, module structure, threshold examples)
+- **1 high-priority issue** in workspace migration plan (status not updated after completion)
+- **15 Dukascopy docs** still need archiving (carried over from Round 1)
+- **API docs and code examples** are accurate
+
+---
+
+## Critical Issues Found
+
+### 1. CONTRIBUTING.md - Outdated Rust Version (CRITICAL)
+
+**Location**: `/Users/terryli/eon/rangebar/CONTRIBUTING.md:13`
+
+**Issue**:
+```markdown
+- Rust 1.85+ (specified in `rust-version` field)
+```
+
+**Problem**: Incorrect Rust version requirement
+- CONTRIBUTING.md says: 1.85+
+- Actual Cargo.toml: `rust-version = "1.90"`
+
+**Fix Required**:
+```markdown
+- Rust 1.90+ (specified in `rust-version` field)
+```
+
+**Impact**: CRITICAL - Contributors will use wrong Rust version
+
+---
+
+### 2. CONTRIBUTING.md - Outdated Module Structure (HIGH)
+
+**Location**: `/Users/terryli/eon/rangebar/CONTRIBUTING.md:99-111`
+
+**Issue**:
+```
+### Module Organization
+
+src/
+├── lib.rs              # Public API and re-exports
+├── types.rs            # Core data structures
+├── fixed_point.rs      # Fixed-point arithmetic
+├── range_bars.rs       # Core algorithm implementation
+├── tier1.rs            # Tier-1 symbol functionality
+└── bin/                # Binary executables
+    ├── rangebar_export.rs
+    ├── tier1_symbol_discovery.rs
+    └── parallel_tier1_analysis.rs
+```
+
+**Problem**: Shows v4.0.0 monolithic structure, but we're now v5.0.0 workspace
+- Current structure is `crates/*` not `src/*`
+- No mention of 8-crate workspace architecture
+- Binary locations are wrong (now in `crates/rangebar-cli/src/bin/`)
+
+**Fix Required**: Replace with v5.0.0 workspace structure from CLAUDE.md
+
+**Impact**: HIGH - Misleads contributors about project structure
+
+---
+
+### 3. CONTRIBUTING.md - Confusing Threshold Example (MEDIUM)
+
+**Location**: `/Users/terryli/eon/rangebar/CONTRIBUTING.md:180`
+
+**Issue**:
+```bash
+cargo run --release --bin rangebar-export -- BTCUSDT 2024-01-01 2024-01-02 0.008 ./output
+```
+
+**Problem**: Uses decimal threshold (0.008) which is confusing
+- API expects integer BPS units (e.g., 250 for 25bps)
+- Decimal 0.008 = 0.8% = 80bps = 800 threshold units
+- No comment explains conversion
+
+**Fix Required**:
+```bash
+# Test with 0.8% threshold (800 in 0.1bps units)
+cargo run --release --bin rangebar-export -- BTCUSDT 2024-01-01 2024-01-02 800 ./output
+```
+
+**Impact**: MEDIUM - Confuses new contributors about threshold format
+
+---
+
+### 4. Workspace Migration Plan - Status Not Updated (HIGH)
+
+**Location**: `/Users/terryli/eon/rangebar/docs/planning/workspace-migration-v5.0.0.md:2-3, 356-363`
+
+**Issue**:
+```markdown
+**Status**: In Progress
+...
+| 8. Root cleanup | 2h | - | - | Pending |
+...
+**Next Action**: Begin Phase 1 (Workspace Setup)
+```
+
+**Problem**: Migration is complete but doc says "In Progress"
+- All 8 phases completed (Phase 8 commit: `dd8f971`)
+- Status table shows all phases as "Pending"
+- Says "Next Action: Begin Phase 1" despite completion
+
+**Fix Required**:
+```markdown
+**Status**: ✅ Complete
+**Completion Date**: 2025-10-11
+...
+| 8. Root cleanup | 2h | dd8f971 | 2025-10-11 | ✅ Complete |
+...
+**Next Action**: N/A - Migration complete. Archive to docs/planning/legacy/
+```
+
+**Impact**: HIGH - Planning doc doesn't reflect actual project state
+
+---
+
+## Verified Accurate
+
+### ✓ API Documentation
+- `cargo doc --no-deps --workspace` → 0 missing warnings
+- All public APIs documented
+
+### ✓ Crate lib.rs Files
+- `/crates/rangebar/src/lib.rs` - Uses 250 threshold ✓
+- `/crates/rangebar-core/src/processor.rs` - Test code uses 250 ✓
+- `/crates/rangebar-providers/src/lib.rs` - Correct provider list ✓
+
+### ✓ Code Examples
+- `/examples/educational/basic_usage.rs` - Uses 8000 (correct: 800bps) ✓
+- `/examples/analysis/*.rs` - Checked, thresholds correct ✓
+
+### ✓ Other Documentation
+- `TERMINOLOGY.md` - No version-specific issues ✓
+- `docs/README.md` - Structure documentation accurate ✓
+- README.md, CLAUDE.md, examples/README.md - Fixed in Round 1 ✓
+
+---
+
+## Carried Over from Round 1
+
+### Dukascopy Documentation (15 files - LOW PRIORITY)
+
+**Active Planning Docs** (6 files):
+1. `/docs/planning/dukascopy-eurusd-audit-plan.md`
+2. `/docs/planning/dukascopy-eurusd-threshold-optimization.md`
+3. `/docs/planning/dukascopy-eurusd-audit-implementation.md`
+4. `/docs/planning/dukascopy-eurusd-ultra-low-threshold.md`
+5. `/docs/planning/dukascopy-rate-limit-mitigation.md`
+6. `/docs/planning/dukascopy-timeout-retry-strategy.md`
+
+**Research Docs** (8 files):
+7. `/docs/planning/research/dukascopy-endpoint-validation.md`
+8. `/docs/planning/research/dukascopy-slo-spec.md`
+9. `/docs/planning/research/dukascopy-rangebar-construction.md`
+10. `/docs/planning/research/dukascopy-rangebar-qa-log.md`
+11. `/docs/planning/research/dukascopy-data-fetcher-validation.md`
+12. `/docs/planning/research/dukascopy-implementation-audit.md`
+13. `/docs/planning/research/dukascopy-comprehensive-validation.md`
+14. `/docs/planning/research/dukascopy-implementation-complete.md`
+
+**Archived Code** (1 file):
+15. `/src-archived/providers/dukascopy/README.md` (already in archive)
+
+**Recommendation**: Move 14 active docs to `/docs/archive/dukascopy/` (future cleanup)
+
+**Impact**: LOW - Historical docs, doesn't affect functionality
+
+---
+
+## Documentation Quality Score
+
+| Category | Round 1 | Round 2 | Status |
+|----------|---------|---------|--------|
+| **API Docs** | 10/10 | 10/10 | ✓ Maintained |
+| **Module Docs** | 10/10 | 10/10 | ✓ Maintained |
+| **Examples** | 9/10 | 9/10 | ✓ Maintained |
+| **User Guide** | 10/10 | 10/10 | ✓ Maintained |
+| **Contributor Guide** | N/A | 5/10 | ⚠ New issues found |
+| **Planning Docs** | 5/10 | 5/10 | ⚠ Needs update |
+| **Maintenance** | 8/10 | 8/10 | ⚠ CHANGELOG still pending |
+
+**Round 1 Overall**: 9.5/10
+**Round 2 Overall**: 8.8/10 (dropped due to CONTRIBUTING.md issues)
+
+---
+
+## Files Requiring Changes
+
+### Critical Priority
+- [ ] `/Users/terryli/eon/rangebar/CONTRIBUTING.md` (3 fixes: Rust version, module structure, threshold example)
+
+### High Priority
+- [ ] `/Users/terryli/eon/rangebar/docs/planning/workspace-migration-v5.0.0.md` (update status to complete)
+
+### Low Priority (Future Cleanup)
+- [ ] Move 14 Dukascopy docs to `/docs/archive/dukascopy/`
+- [ ] Update CHANGELOG.md with v5.0.0 entry (handled by release script)
+
+---
+
+## Recommended Actions
+
+### Immediate (This Session)
+
+1. **Fix CONTRIBUTING.md Rust version** (1.85 → 1.90)
+2. **Update CONTRIBUTING.md module structure** (monolithic → workspace)
+3. **Clarify CONTRIBUTING.md threshold example** (0.008 → 800 with comment)
+4. **Update workspace migration plan status** (In Progress → Complete)
+
+### Short-term (Next Sprint)
+
+5. **Archive Dukascopy docs** (move 14 files to archive)
+6. **Add version sync check** (CI validates CONTRIBUTING.md Rust version matches Cargo.toml)
+
+### Long-term (Future Releases)
+
+7. **Auto-generate module structure docs** (sync with actual crate structure)
+8. **Add doc lint for version references** (detect mismatches)
+
+---
+
+## Audit Methodology - Round 2
+
+**Expanded checks beyond Round 1**:
+1. **Deep file analysis**: Read full CONTRIBUTING.md, TERMINOLOGY.md
+2. **Cross-reference validation**: Workspace plan vs actual commits
+3. **Example code scanning**: Grep for all `RangeBarProcessor::new` calls
+4. **Binary documentation**: Check CLI binary comments
+5. **Rust version consistency**: Compare CONTRIBUTING.md vs Cargo.toml
+6. **Module structure accuracy**: Verify docs match v5.0.0 workspace
+
+**Tools used**:
+- `grep -r "RangeBarProcessor::new"` - Find all processor examples
+- `grep "rust-version" Cargo.toml` - Verify Rust requirement
+- `find examples -name "*.rs"` - List all example files
+- Manual reading of CONTRIBUTING.md, workspace plan
+
+---
+
+## Comparison: Round 1 vs Round 2
+
+### Round 1 Findings (Fixed)
+- ✅ README.md threshold (25 → 250)
+- ✅ README.md version ("0.5" → "5.0")
+- ✅ CLAUDE.md provider list (removed Dukascopy)
+- ✅ examples/README.md threshold terminology
+
+### Round 2 Findings (New)
+- ❌ CONTRIBUTING.md Rust version (1.85 → need 1.90)
+- ❌ CONTRIBUTING.md module structure (v4 → need v5)
+- ❌ CONTRIBUTING.md threshold example (confusing decimal)
+- ❌ Workspace migration plan status (says In Progress, actually Complete)
+
+### Key Insight
+Round 1 fixed **user-facing** docs (README, examples).
+Round 2 found issues in **contributor-facing** docs (CONTRIBUTING, planning).
+
+---
+
+## Impact Assessment
+
+**Before Round 2 Fixes**:
+- Contributors use wrong Rust version (1.85 instead of 1.90)
+- Contributors don't understand v5.0.0 workspace structure
+- Migration planning doc is misleading
+- Threshold examples use confusing decimal format
+
+**After Round 2 Fixes**:
+- All documentation aligned with v5.0.0 workspace
+- Contributors have correct setup instructions
+- Planning docs reflect actual project state
+- Clear threshold format throughout
+
+**Risk**: MEDIUM
+- Wrong Rust version could cause compilation issues
+- Outdated module structure confuses new contributors
+- But doesn't affect end users (API is correct)
+
+---
+
+## Conclusion
+
+**Good**:
+- User-facing docs are accurate (fixed in Round 1)
+- API documentation complete
+- Code examples use correct thresholds
+- TERMINOLOGY.md is comprehensive and accurate
+
+**Needs Improvement**:
+- CONTRIBUTING.md has 3 critical issues
+- Workspace migration plan needs status update
+- 15 Dukascopy docs still need archiving
+
+**Recommendation**: Fix 4 issues immediately (CONTRIBUTING + migration plan), then archive legacy docs in future cleanup session.
+
+**Next Round**: Should focus on CHANGELOG.md generation and final polish for v5.0.0 release.

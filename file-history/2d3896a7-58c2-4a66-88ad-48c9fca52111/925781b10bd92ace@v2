@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""
+Systematic probe: skorch dependency in attention_layer.py
+
+Goal: Understand if skorch can be made optional and how it's used
+"""
+
+import sys
+
+print("=== Probe 1: Check if skorch is installed ===")
+try:
+    import skorch
+    print(f"✅ skorch installed: {skorch.__version__}")
+    HAS_SKORCH = True
+except ImportError as e:
+    print(f"❌ skorch not installed: {e}")
+    HAS_SKORCH = False
+
+print("\n=== Probe 2: What is skorch? ===")
+print("skorch: sklearn-compatible neural network library wrapping PyTorch")
+print("Purpose: Makes PyTorch models usable in sklearn pipelines")
+print("Dependencies: torch (PyTorch)")
+
+print("\n=== Probe 3: Where is skorch used? ===")
+print("File: evolutionary_forest/model/attention_layer.py")
+print("Usage:")
+print("  - Line 13: from skorch import NeuralNetRegressor")
+print("  - Line 14: from skorch.callbacks import EarlyStopping")
+print("  - Line 38: class SkorchAttentionNet(NeuralNetRegressor)")
+print("  - Line 53: class AttentionMetaWrapper(BaseEstimator, RegressorMixin)")
+
+print("\n=== Probe 4: What is AttentionMetaWrapper? ===")
+print("Purpose: Neural network-based ensemble meta-learner")
+print("Functionality:")
+print("  - Takes multiple base models (e.g., Ridge, DT, GBDT)")
+print("  - Trains an attention network to weight their predictions")
+print("  - Uses skorch to make PyTorch model sklearn-compatible")
+
+print("\n=== Probe 5: Who imports attention_layer.py? ===")
+print("Imported by: evolutionary_forest/component/archive_operators/meta_learner/meta_base.py:7")
+print("  from evolutionary_forest.model.attention_layer import AttentionMetaWrapper")
+print("")
+print("Which is imported by: evolutionary_forest/forest.py:102")
+print("  from evolutionary_forest.component.archive_operators.meta_learner.meta_base import ...")
+
+print("\n=== Probe 6: Is AttentionMetaWrapper actually used? ===")
+print("Used in meta_base.py line 68:")
+print("  self.attention_model = AttentionMetaWrapper(models, attention_net_params, True)")
+print("")
+print("Context: Only used when meta-learning mode is enabled")
+print("Trigger: Specific configuration option for neural ensemble methods")
+
+print("\n=== Probe 7: Idiomatic fix pattern ===")
+print("Option 1: Make skorch optional at import (RECOMMENDED)")
+print("""
+# At top of attention_layer.py
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from skorch import NeuralNetRegressor
+    from skorch.callbacks import EarlyStopping
+    HAS_SKORCH = True
+except ImportError:
+    # Dummy classes to prevent NameError
+    NeuralNetRegressor = object
+    EarlyStopping = object
+    HAS_SKORCH = False
+
+# In AttentionMetaWrapper.__init__
+def __init__(self, models, attention_net_params, use_original_X):
+    if not HAS_SKORCH:
+        raise ImportError(
+            "skorch and torch are required for AttentionMetaWrapper. "
+            "Install with: uv pip install torch skorch"
+        )
+    # ... rest of init
+""")
+
+print("\nOption 2: Lazy import when class is instantiated")
+print("""
+# Set module-level variables
+AttentionNet = None
+SkorchAttentionNet = None
+
+def _ensure_skorch_loaded():
+    global AttentionNet, SkorchAttentionNet
+    if AttentionNet is None:
+        try:
+            import torch
+            import torch.nn as nn
+            from skorch import NeuralNetRegressor
+            # ... define classes here
+        except ImportError as e:
+            raise ImportError("skorch required") from e
+""")
+
+print("\n=== Probe 8: Check torch dependency ===")
+try:
+    import torch
+    print(f"✅ torch installed: {torch.__version__}")
+except ImportError:
+    print("❌ torch not installed (required by skorch)")
+
+print("\n=== Conclusion ===")
+print("✅ skorch can be made optional")
+print("✅ Only used for neural meta-learning (advanced feature)")
+print("✅ Most users don't need it")
+print("✅ Fix: try/except at module top + runtime check in __init__")
+print("⚠️  Requires torch anyway (skorch wraps PyTorch)")

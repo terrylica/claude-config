@@ -1,0 +1,192 @@
+"""
+ATR-Adaptive Laguerre RSI Feature Set (v3 - Multi-Interval, 121 Features)
+
+Full multi-interval implementation using atr-adaptive-laguerre v1.0.5+ with data leakage fix.
+Leverages package's built-in multi-interval processing for optimal feature generation.
+
+Features (121 total):
+- Base Interval (27): All single-interval features with _base suffix
+- Multiplier 1 - 4x (28): Features at 4x timeframe with _mult1 suffix (forward-filled)
+- Multiplier 2 - 12x (29): Features at 12x timeframe with _mult2 suffix (forward-filled)
+- Cross-Interval (37): Regime alignment, divergence, momentum patterns, temporal coherence
+
+Architecture:
+- Uses package's built-in multi-interval mode (multiplier_1=4, multiplier_2=12)
+- Package internally handles resampling and forward-filling
+- Only requires base 1x data as input
+- Generates 37 sophisticated cross-interval features (not available via framework resampling)
+- Uses availability_column='actual_ready_time' to respect data availability (v1.0.5 fix)
+
+Package: atr-adaptive-laguerre>=1.0.5
+Reference: https://pypi.org/project/atr-adaptive-laguerre/
+
+Changelog:
+- v3.1: Updated to v1.0.5 (BOUNDARY BUG FIXED - mult1/mult2 data leakage at exact timestamps)
+- v3: Multi-interval (121 features) using v1.0.1 with availability_column (data leakage fixed)
+- v2: Single-interval (27 features) optimized for v0.2.0 API
+- v1: Initial implementation with workarounds for v0.1.x limitations
+"""
+
+import numpy as np
+import pandas as pd
+from ml_feature_set.feature_set import FeatureSet
+
+
+class CustomFeatureSet(FeatureSet):
+    """
+    ATR-Adaptive Laguerre RSI Feature Set (Multi-Interval - 121 Features)
+
+    This feature set uses the atr-adaptive-laguerre package's built-in multi-interval
+    processing to generate 121 sophisticated momentum and regime features across multiple
+    timeframes with cross-interval interactions.
+
+    Key differences from standard multi-timeframe FeatureSets:
+    - Does NOT use framework's resample_factors (package handles internally)
+    - Only requests base 1x data
+    - Generates cross-interval features (regime alignment, divergence, etc.)
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._indicator = None
+
+    def _get_indicator(self):
+        """Lazy initialization of ATR-Adaptive Laguerre RSI indicator"""
+        if self._indicator is None:
+            try:
+                from atr_adaptive_laguerre import (
+                    ATRAdaptiveLaguerreRSI,
+                    ATRAdaptiveLaguerreRSIConfig
+                )
+
+                # Use v1.0.5 multi-interval mode (121 features)
+                # NOTE: filter_redundancy=False to get all 121 features
+                # NOTE: availability_column='actual_ready_time' fixes data leakage (v1.0.5+)
+                config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+                    multiplier_1=4,   # 4x base timeframe
+                    multiplier_2=12,  # 12x base timeframe
+                    atr_period=14,
+                    smoothing_period=5,
+                    smoothing_method='ema',
+                    level_up=0.85,
+                    level_down=0.15,
+                    adaptive_offset=0.75,
+                    filter_redundancy=False,  # Keep all 121 features
+                    availability_column='actual_ready_time'  # v1.0.5: Fix data leakage
+                )
+                self._indicator = ATRAdaptiveLaguerreRSI(config)
+
+                # Validate configuration
+                assert self._indicator.n_features == 121, \
+                    f"Expected 121 features, config will generate {self._indicator.n_features}"
+
+            except ImportError as e:
+                raise ImportError(
+                    "atr-adaptive-laguerre>=1.0.5 required. "
+                    "Install: pip install 'atr-adaptive-laguerre>=1.0.5'"
+                ) from e
+        return self._indicator
+
+    @property
+    def data_dependencies(self):
+        """
+        Return data source dependencies information.
+
+        Note: Only requests base 1x data. The atr-adaptive-laguerre package
+        internally handles multi-interval processing (4x and 12x timeframes).
+        """
+        return [
+            {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+        ]
+
+    def get_source_lookback_length(self, source_name):
+        """
+        Get required historical data length for specific data source.
+
+        Uses package's min_lookback property (v0.2.1+) for accurate multi-interval requirements.
+
+        Args:
+            source_name: Data source name (e.g., ohlcv_1x)
+
+        Returns:
+            Required historical data length (360 for multi-interval config)
+        """
+        # Parse source name
+        parts = source_name.split("_")
+
+        if len(parts) > 1 and parts[-1].endswith("x"):
+            try:
+                int(parts[-1].replace("x", ""))
+                base_source = "_".join(parts[:-1])
+            except ValueError:
+                base_source = source_name
+        else:
+            base_source = source_name
+
+        if base_source == "ohlcv":
+            # Use package's min_lookback property (v0.2.1: returns 360 for multi-interval)
+            # This is significantly higher than single-interval (30) due to internal resampling
+            indicator = self._get_indicator()
+            return indicator.min_lookback
+
+        raise ValueError(f"Unsupported data source: {source_name}")
+
+    def extract_feature(self):
+        """Extract ATR-Adaptive Laguerre RSI multi-interval features (121 total)"""
+
+        # Get OHLCV data source
+        ohlcv_source = self.get_data_source("ohlcv_1x")
+        df = ohlcv_source["data_df"].copy()
+
+        # Validate framework requirements
+        if "actual_ready_time" not in df.columns:
+            raise ValueError(
+                "Data source missing 'actual_ready_time' column "
+                "(required by ml-feature-set framework)"
+            )
+
+        # Validate OHLCV columns
+        required_columns = ["open", "high", "low", "close", "volume"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                f"Data source missing required columns: {', '.join(missing_columns)}"
+            )
+
+        # v1.0.5: No longer need date column workaround - availability_column handles this
+
+        # Get indicator and compute features
+        indicator = self._get_indicator()
+
+        # Validate sufficient data
+        if len(df) < indicator.min_lookback:
+            raise ValueError(
+                f"Insufficient data: {len(df)} rows provided, "
+                f"{indicator.min_lookback} required for multi-interval mode "
+                f"(multiplier_1=4, multiplier_2=12)"
+            )
+
+        features_df = indicator.fit_transform_features(df)
+
+        # Validate output shape
+        if features_df.shape[0] != df.shape[0]:
+            raise ValueError(
+                f"Feature output length mismatch: "
+                f"expected {df.shape[0]}, got {features_df.shape[0]}"
+            )
+
+        # Validate feature count (should be 121)
+        if features_df.shape[1] != 121:
+            raise ValueError(
+                f"Feature count mismatch: expected 121 features, got {features_df.shape[1]}"
+            )
+
+        # Prefix feature names to avoid conflicts
+        feature_columns = {col: f"atr_laguerre_{col}" for col in features_df.columns}
+        features_df = features_df.rename(columns=feature_columns)
+
+        # Handle NaN values (ensure no missing data for validation)
+        features_df = features_df.fillna(0.0)
+
+        # Set features using batch method (avoids DataFrame fragmentation)
+        self.set_features_batch(features_df.to_dict('list'))

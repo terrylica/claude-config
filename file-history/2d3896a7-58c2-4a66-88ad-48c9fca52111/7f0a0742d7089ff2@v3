@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+"""Minimal test to verify code fixes are syntactically correct."""
+import sys
+import ast
+
+print("Testing code fixes...")
+
+# Test 1: Verify OneHotEncoder fixes are syntactically correct
+print("\n1. Testing OneHotEncoder syntax fixes...")
+files_to_check = [
+    "evolutionary_forest/utility/tree_parsing.py",
+    "evolutionary_forest/component/pre_processing/binning_encoder.py",
+]
+
+for filepath in files_to_check:
+    try:
+        with open(filepath, 'r') as f:
+            code = f.read()
+            ast.parse(code)
+        # Check for correct API
+        if "sparse_output=False" in code:
+            print(f"   ✅ {filepath}: Uses correct sparse_output=False API")
+        if "sparse=False" in code and "OneHotEncoder" in code:
+            print(f"   ⚠️  {filepath}: Still contains deprecated sparse=False")
+    except SyntaxError as e:
+        print(f"   ❌ {filepath}: Syntax error: {e}")
+        sys.exit(1)
+
+# Test 2: Verify MSE/RMSE implementation syntax
+print("\n2. Testing MSE/RMSE implementation syntax...")
+try:
+    with open("evolutionary_forest/forest.py", 'r') as f:
+        code = f.read()
+        ast.parse(code)
+
+    # Check for MSE implementation
+    if 'elif self.score_func == "MSE":' in code:
+        print("   ✅ MSE objective implementation found")
+    else:
+        print("   ❌ MSE objective implementation NOT found")
+        sys.exit(1)
+
+    # Check for RMSE implementation
+    if 'elif self.score_func == "RMSE":' in code:
+        print("   ✅ RMSE objective implementation found")
+    else:
+        print("   ❌ RMSE objective implementation NOT found")
+        sys.exit(1)
+
+    # Check for case_values implementations
+    if 'elif self.score_func == "MSE":' in code and 'individual.case_values =' in code:
+        print("   ✅ MSE case_values implementation found")
+
+    if 'elif self.score_func == "RMSE":' in code and 'individual.case_values =' in code:
+        print("   ✅ RMSE case_values implementation found")
+
+except SyntaxError as e:
+    print(f"   ❌ forest.py: Syntax error: {e}")
+    sys.exit(1)
+
+# Test 3: Verify Accuracy implementation syntax
+print("\n3. Testing Accuracy implementation syntax...")
+try:
+    with open("evolutionary_forest/classifier.py", 'r') as f:
+        code = f.read()
+        ast.parse(code)
+
+    # Check for Accuracy in calculate_case_values
+    if 'self.score_func == "Accuracy"' in code:
+        print("   ✅ Accuracy objective implementation found in classifier")
+    else:
+        print("   ❌ Accuracy objective implementation NOT found")
+        sys.exit(1)
+
+except SyntaxError as e:
+    print(f"   ❌ classifier.py: Syntax error: {e}")
+    sys.exit(1)
+
+# Test 4: Verify imports work
+print("\n4. Testing basic imports...")
+try:
+    import numpy as np
+    from sklearn.preprocessing import OneHotEncoder
+    print("   ✅ NumPy and sklearn imports work")
+
+    # Test OneHotEncoder API
+    enc = OneHotEncoder(sparse_output=False)
+    data = np.array([[1], [2], [3]])
+    result = enc.fit_transform(data)
+    if result.shape == (3, 3):
+        print("   ✅ OneHotEncoder sparse_output=False API works correctly")
+
+except ImportError as e:
+    print(f"   ❌ Import failed: {e}")
+    sys.exit(1)
+
+print("\n✅ All code fix validations passed!")
+print("   - OneHotEncoder API updated to sparse_output=False")
+print("   - MSE/RMSE objectives implemented")
+print("   - Accuracy objective implemented")
+print("\nNote: Full integration tests require all dependencies (torch, shap, etc.)")

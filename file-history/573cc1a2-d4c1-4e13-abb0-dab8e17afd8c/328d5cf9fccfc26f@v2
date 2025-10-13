@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""
+Find the actual minimum lookback for mult2 features by testing different data lengths.
+The package reports min_lookback=360, actual crash minimum=366, but validation still fails.
+This suggests mult2 features need even more data for correct calculation.
+"""
+
+import sys
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load validation data
+sample_data_dir = "/Users/terryli/eon/ml-feature-set/ml_feature_set/sample_data"
+df_full = pd.read_csv(f"{sample_data_dir}/resampled_binance_BTC-2h.csv")
+
+# Add required columns
+df_full['date'] = pd.to_datetime(df_full['date'])
+df_full['actual_ready_time'] = df_full['date'] + timedelta(hours=2)
+
+print(f"Full dataset: {len(df_full)} rows")
+print()
+
+# Configure package
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    availability_column='actual_ready_time',
+    filter_redundancy=True
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"Package config:")
+print(f"  min_lookback: {indicator.min_lookback}")
+print(f"  multiplier_2: {config.multiplier_2}")
+print()
+
+# Choose a test timestamp (same as validation)
+test_time = pd.to_datetime("2025-03-19 12:00:00")
+test_idx = df_full[df_full['actual_ready_time'] == test_time].index[0]
+
+# Get reference features from full data
+print("Computing reference features from full data...")
+features_full = indicator.fit_transform_features(df_full)
+mult2_cols = [c for c in features_full.columns if 'mult2' in c]
+
+# Reference values at test point
+reference_values = {}
+for col in mult2_cols:
+    reference_values[col] = features_full.iloc[test_idx][col]
+
+print(f"Reference values computed from full data ({len(df_full)} rows)")
+print()
+
+# Test different data lengths
+test_lengths = [366, 400, 500, 600, 800, 1000, 1500, 2000, 3000, 5000]
+
+print("=" * 80)
+print("Testing different data lengths for mult2 feature accuracy")
+print("=" * 80)
+
+results = []
+
+for length in test_lengths:
+    # Calculate start index to get exactly 'length' rows ending at test_idx
+    start_idx = test_idx - length + 1
+
+    if start_idx < 0:
+        print(f"\nLength {length}: Skipping (not enough data)")
+        continue
+
+    # Slice data
+    df_sliced = df_full.iloc[start_idx:test_idx + 1].reset_index(drop=True)
+
+    try:
+        # Compute features
+        features_sliced = indicator.fit_transform_features(df_sliced)
+
+        # Compare mult2 features at last row
+        mismatches = 0
+        max_diff = 0
+        max_diff_feature = None
+
+        for col in mult2_cols:
+            ref_val = reference_values[col]
+            sliced_val = features_sliced.iloc[-1][col]
+            diff = abs(ref_val - sliced_val)
+
+            if diff >= 1e-4:
+                mismatches += 1
+                if diff > max_diff:
+                    max_diff = diff
+                    max_diff_feature = col
+
+        match_pct = 100.0 * (len(mult2_cols) - mismatches) / len(mult2_cols)
+        status = "✓ PERFECT" if mismatches == 0 else f"✗ {mismatches}/{len(mult2_cols)} errors"
+
+        results.append({
+            'length': length,
+            'status': status,
+            'mismatches': mismatches,
+            'match_pct': match_pct,
+            'max_diff': max_diff,
+            'max_diff_feature': max_diff_feature
+        })
+
+        print(f"\nLength {length:5d}: {status} ({match_pct:.1f}% match)")
+        if mismatches > 0:
+            print(f"  Worst: {max_diff_feature} (diff={max_diff:.4f})")
+
+    except Exception as e:
+        print(f"\nLength {length:5d}: ✗ FAILED - {type(e).__name__}: {e}")
+        results.append({
+            'length': length,
+            'status': 'FAILED',
+            'error': str(e)
+        })
+
+print()
+print("=" * 80)
+print("SUMMARY")
+print("=" * 80)
+
+# Find first working length
+working_lengths = [r for r in results if r.get('mismatches') == 0]
+if working_lengths:
+    first_working = working_lengths[0]['length']
+    print(f"\n✓ First working length: {first_working} rows")
+    print(f"  Package reports min_lookback: {indicator.min_lookback}")
+    print(f"  Actual minimum for correct mult2: {first_working}")
+    print(f"  Discrepancy: {first_working - indicator.min_lookback} rows")
+else:
+    print("\n✗ No tested length produces perfect matches!")
+    print("  Largest tested: {max(test_lengths)} rows")
+    print("  Recommendation: Test even larger lengths or investigate package bug")
+
+print()

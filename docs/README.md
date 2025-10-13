@@ -58,13 +58,13 @@ Project reports and analysis documentation:
 ## Tools & Components
 
 ### SAGE Development Suite
-- **Location**: `tools/sage-aliases/`
-- **Documentation**: [SAGE Tools Documentation](../tools/sage-aliases/docs/README.md)
+- **Location**: `sage-aliases/`
+- **Documentation**: [SAGE Tools Documentation](../sage-aliases/docs/README.md)
 - **Commands**: `sage-dev`, `sage-sync`, `sage-status`, `gpu-ws`
 
 ### Documentation & Quality Tools
-- **GFM Link Checker**: `tools/gfm-link-checker/`
-- **Documentation**: [GFM Checker Documentation](../tools/gfm-link-checker/docs/README.md)
+- **GFM Link Checker**: `gfm-link-checker/`
+- **Documentation**: [GFM Checker Documentation](../gfm-link-checker/docs/README.md)
 - **Command**: `gfm-check`
 
 ### Release Automation

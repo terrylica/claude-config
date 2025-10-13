@@ -1,0 +1,716 @@
+# Phase 4-5: Statistical Tests & Survivorship Bias Investigation
+
+**Version:** 1.0.0
+**Created:** 2025-10-05
+**Status:** Planning
+**Dependencies:** Phase 2-3 v1.0.6 corrected results
+**Input Data:** `mean_reversion_results.csv`, `volatility_model_results.csv` (16 months)
+
+---
+
+## Service Level Objectives (SLOs)
+
+### Availability
+- Test execution success rate: 100% (all tests must complete or fail explicitly)
+- Data dependency: Requires Phase 2-3 corrected results (16/16 months available)
+
+### Correctness
+- Statistical test reproducibility: p-values within ±0.001 variance across runs
+- Null hypothesis precision: Exact match to scipy/statsmodels reference implementations
+- Survivorship bias quantification: ±0.1% absolute error tolerance
+
+### Security
+- No data leakage: Results saved only to workspace (non-ephemeral for publication)
+- No credential exposure: No external APIs, local computation only
+
+### Observability
+- Test output: p-values, test statistics, confidence intervals logged to stdout
+- Diagnostic plots: Saved as PNG with 300 DPI for publication quality
+- Error propagation: Exception raised with test name, input data shape, error type
+
+### Maintainability
+- Out-of-the-box tools: scipy 1.16.2, statsmodels 0.14.4 (no custom implementations)
+- Function isolation: One test per function, pure (no side effects)
+- Documentation: Null/alternative hypotheses documented inline
+
+---
+
+## Phase 4: Formal Statistical Tests
+
+**Objective:** Validate temporal trends and regime shift with rigorous hypothesis testing
+
+### Phase 4.1: Mann-Kendall Trend Test (Mean Reversion)
+
+**Null Hypothesis (H₀):** No monotonic trend in mean reversion rates over 16 months
+
+**Alternative Hypothesis (H₁):** Significant monotonic trend exists (upward or downward)
+
+**Test Rationale:**
+- Visual inspection suggests 2025 > 2024 (+5.3pp)
+- Need statistical validation of temporal trend (not random fluctuation)
+- Mann-Kendall is non-parametric (no normality assumption required)
+
+**Implementation:**
+
+```python
+import pandas as pd
+from scipy import stats
+import statsmodels.api as sm
+
+def mann_kendall_trend_test(csv_path: str, metric: str = 'toward_5s') -> dict:
+    """
+    Mann-Kendall trend test for temporal monotonicity.
+
+    Args:
+        csv_path: Path to mean_reversion_results.csv
+        metric: Column to test (toward_5s, full_5s, toward_60s, etc.)
+
+    Returns:
+        {
+            'metric': str,
+            'tau': float,        # Kendall's tau statistic
+            'p_value': float,    # Two-tailed p-value
+            'trend': str,        # 'increasing', 'decreasing', 'no trend'
+            'alpha': float,      # Significance level (0.05)
+            'n_months': int
+        }
+
+    Raises:
+        ValueError: If metric not found in CSV
+        InsufficientDataError: If n < 4 months
+    """
+    df = pd.read_csv(csv_path)
+
+    if metric not in df.columns:
+        raise ValueError(f"Metric '{metric}' not found. Available: {df.columns.tolist()}")
+
+    if len(df) < 4:
+        raise InsufficientDataError(f"Need ≥4 months, got {len(df)}")
+
+    # Extract time series (chronological order assumed)
+    values = df[metric].values
+
+    # Mann-Kendall test (out-of-the-box from scipy)
+    # Note: scipy.stats.kendalltau can be used for MK test
+    # Alternative: pymannkendall library (more explicit)
+    tau, p_value = stats.kendalltau(range(len(values)), values)
+
+    # Interpret trend
+    alpha = 0.05
+    if p_value < alpha:
+        trend = 'increasing' if tau > 0 else 'decreasing'
+    else:
+        trend = 'no trend'
+
+    return {
+        'metric': metric,
+        'tau': tau,
+        'p_value': p_value,
+        'trend': trend,
+        'alpha': alpha,
+        'n_months': len(values)
+    }
+```
+
+**Metrics to Test:**
+1. `toward_5s` - Primary mean reversion metric
+2. `full_5s` - Full reversion rate
+3. `toward_60s` - Longer-horizon reversion
+
+**Expected Outcome:**
+- **toward_5s:** Significant increasing trend (p < 0.05) if 2025 > 2024 is real
+- **toward_60s:** Similar trend (correlated with 5s horizon)
+
+**Error Handling:**
+- Missing CSV → raise FileNotFoundError
+- Insufficient data → raise InsufficientDataError (need ≥4 months)
+- NaN values → raise ValueError with row indices
+
+**Output:** `phase4_mann_kendall_results.csv`
+
+| metric | tau | p_value | trend | alpha | n_months | interpretation |
+|--------|-----|---------|-------|-------|----------|----------------|
+| toward_5s | 0.45 | 0.003 | increasing | 0.05 | 16 | Significant upward trend |
+
+---
+
+### Phase 4.2: Chow Test for Structural Break (Volatility Model)
+
+**Null Hypothesis (H₀):** No structural break between 2024 and 2025 (single regime)
+
+**Alternative Hypothesis (H₁):** Significant structural break exists (regime shift)
+
+**Test Rationale:**
+- Visual inspection: 2024 R²=0.379, 2025 R²=0.249 (52% drop)
+- Need statistical validation of regime change (not random variance)
+- Chow test compares model stability across two periods
+
+**Implementation:**
+
+```python
+import numpy as np
+import pandas as pd
+from statsmodels.stats.diagnostic import breaks_cusumolsresid
+from scipy import stats
+
+def chow_test_regime_shift(csv_path: str, breakpoint_month: int = 8) -> dict:
+    """
+    Chow test for structural break in volatility model R².
+
+    Test if OLS regression model changed between 2024 and 2025.
+
+    Args:
+        csv_path: Path to volatility_model_results.csv
+        breakpoint_month: Month index for break (8 = between Aug 2024 and Jan 2025)
+
+    Returns:
+        {
+            'breakpoint': str,           # '2024-08 / 2025-01'
+            'f_statistic': float,
+            'p_value': float,
+            'n_before': int,
+            'n_after': int,
+            'r2_before': float,
+            'r2_after': float,
+            'regime_shift': bool,        # True if p < 0.05
+            'alpha': float
+        }
+
+    Raises:
+        ValueError: If breakpoint out of range
+        InsufficientDataError: If either period has <3 months
+    """
+    df = pd.read_csv(csv_path)
+
+    if breakpoint_month < 1 or breakpoint_month >= len(df):
+        raise ValueError(f"Breakpoint {breakpoint_month} out of range [1, {len(df)-1}]")
+
+    # Split into two periods
+    period1 = df.iloc[:breakpoint_month]  # 2024 (months 0-7)
+    period2 = df.iloc[breakpoint_month:]  # 2025 (months 8-15)
+
+    if len(period1) < 3 or len(period2) < 3:
+        raise InsufficientDataError(
+            f"Need ≥3 months per period, got {len(period1)} and {len(period2)}"
+        )
+
+    # Prepare regression data (R² ~ month index as simple proxy)
+    # More sophisticated: R² ~ feature_importance_metrics
+    # For now, test if mean R² differs significantly
+
+    r2_before = period1['r_squared'].values
+    r2_after = period2['r_squared'].values
+
+    # Chow test formula:
+    # F = [(SSR_pooled - (SSR_1 + SSR_2)) / k] / [(SSR_1 + SSR_2) / (n1 + n2 - 2k)]
+    # where k = number of parameters (for mean test, k=1)
+
+    # Simplified approach: Use F-test for equality of variances + t-test for means
+    # More rigorous: Fit OLS on combined data, compare with separate fits
+
+    # Calculate pooled and individual residuals
+    mean_pooled = df['r_squared'].mean()
+    ssr_pooled = np.sum((df['r_squared'] - mean_pooled) ** 2)
+
+    mean_before = r2_before.mean()
+    mean_after = r2_after.mean()
+    ssr_before = np.sum((r2_before - mean_before) ** 2)
+    ssr_after = np.sum((r2_after - mean_after) ** 2)
+
+    k = 1  # Number of parameters (intercept only for mean comparison)
+    n1, n2 = len(period1), len(period2)
+
+    numerator = (ssr_pooled - (ssr_before + ssr_after)) / k
+    denominator = (ssr_before + ssr_after) / (n1 + n2 - 2*k)
+
+    f_stat = numerator / denominator
+    p_value = 1 - stats.f.cdf(f_stat, k, n1 + n2 - 2*k)
+
+    return {
+        'breakpoint': f"{period1.iloc[-1]['month']} / {period2.iloc[0]['month']}",
+        'f_statistic': f_stat,
+        'p_value': p_value,
+        'n_before': n1,
+        'n_after': n2,
+        'r2_before': mean_before,
+        'r2_after': mean_after,
+        'regime_shift': p_value < 0.05,
+        'alpha': 0.05
+    }
+```
+
+**Expected Outcome:**
+- **Regime shift:** p < 0.05 (reject H₀, structural break confirmed)
+- **F-statistic:** Large positive value indicating model instability
+
+**Error Handling:**
+- Invalid breakpoint → raise ValueError
+- Insufficient data → raise InsufficientDataError
+- NaN in R² → raise ValueError with month
+
+**Output:** `phase4_chow_test_results.json`
+
+```json
+{
+  "breakpoint": "2024-08 / 2025-01",
+  "f_statistic": 12.34,
+  "p_value": 0.003,
+  "n_before": 8,
+  "n_after": 8,
+  "r2_before": 0.379,
+  "r2_after": 0.249,
+  "regime_shift": true,
+  "alpha": 0.05,
+  "interpretation": "Significant structural break detected (p=0.003 < 0.05)"
+}
+```
+
+---
+
+### Phase 4.3: Alternative Breakpoint Analysis
+
+**Objective:** Test if breakpoint is truly at 2024/2025 boundary or elsewhere
+
+**Implementation:**
+
+```python
+def find_optimal_breakpoint(csv_path: str) -> dict:
+    """
+    Iterate through all possible breakpoints, find maximum F-statistic.
+
+    Returns:
+        {
+            'optimal_breakpoint_index': int,
+            'optimal_breakpoint_month': str,
+            'max_f_statistic': float,
+            'min_p_value': float,
+            'all_tests': List[dict]  # All Chow test results
+        }
+    """
+    df = pd.read_csv(csv_path)
+    results = []
+
+    # Test all possible breakpoints (leave ≥3 months on each side)
+    for bp in range(3, len(df) - 3):
+        result = chow_test_regime_shift(csv_path, breakpoint_month=bp)
+        result['breakpoint_index'] = bp
+        results.append(result)
+
+    # Find optimal (maximum F-statistic)
+    optimal = max(results, key=lambda x: x['f_statistic'])
+
+    return {
+        'optimal_breakpoint_index': optimal['breakpoint_index'],
+        'optimal_breakpoint_month': optimal['breakpoint'],
+        'max_f_statistic': optimal['f_statistic'],
+        'min_p_value': optimal['p_value'],
+        'all_tests': results
+    }
+```
+
+**Expected Outcome:**
+- Optimal breakpoint at index 7-8 (Aug 2024 / Jan 2025)
+- Validates that observed regime shift is not arbitrary date selection
+
+**Output:** `phase4_breakpoint_scan.csv` (10+ rows, one per tested breakpoint)
+
+---
+
+## Phase 5: Survivorship Bias Investigation
+
+**Objective:** Quantify impact of ~4% excluded cases on mean reversion estimates
+
+### Background
+
+From Phase 2 results, we observe:
+- Sampling process: deviation_count → sample_size → n_5s (valid future quotes)
+- Exclusion rate: (sample_size - n_5s) / sample_size ≈ 4%
+- These are cases where future position could not be calculated (no quote at t+5s)
+- Potential bias: Excluded cases may have systematically different reversion behavior
+
+**Example (2024-01):**
+- `total_zero_spread`: 1,148,406 (all zero-spread ticks)
+- `deviation_count`: 526,091 (filtered to |pos_ratio - 0.5| > threshold)
+- `sample_size`: 5,000 (random sample for analysis)
+- `n_5s`: 4,804 (valid future quotes at 5s)
+- **Excluded**: 196 (3.92% of sample)
+
+**Objective:** Quantify impact of 196/5000 excluded cases on mean reversion estimates
+
+---
+
+### Phase 5.1: Exclusion Reason Taxonomy
+
+**Implementation:**
+
+```python
+def analyze_exclusion_reasons(std_df, raw_df, horizon_sec=5) -> dict:
+    """
+    Categorize why zero-spread deviations are excluded from reversion analysis.
+
+    Potential reasons:
+    1. Insufficient future data (event near end of dataset)
+    2. Missing Standard quote at t+horizon (data gap)
+    3. Zero-spread duration < horizon (spread widened before measurement)
+    4. Other (to be determined)
+
+    Returns:
+        {
+            'total_zero_spread': int,
+            'analyzed': int,
+            'excluded': int,
+            'exclusion_reasons': {
+                'end_of_dataset': int,
+                'missing_future_quote': int,
+                'spread_widened': int,
+                'other': int
+            },
+            'exclusion_rate': float
+        }
+    """
+    # Merge and filter zero-spread
+    merged = pd.merge_asof(
+        raw_df.sort_values('Timestamp'),
+        std_df.sort_values('Timestamp'),
+        on='Timestamp',
+        direction='backward',
+        tolerance=pd.Timedelta(seconds=10),
+        suffixes=('_raw', '_std')
+    )
+
+    zero_spread = merged[merged['raw_spread'] <= 0.00001].copy()
+    total = len(zero_spread)
+
+    # Calculate position ratio
+    zero_spread['position_ratio'] = (
+        (zero_spread['raw_mid'] - zero_spread['std_bid']) /
+        (zero_spread['std_ask'] - zero_spread['std_bid'])
+    )
+
+    # Attempt to find future position for each event
+    reasons = {
+        'end_of_dataset': 0,
+        'missing_future_quote': 0,
+        'spread_widened': 0,
+        'other': 0
+    }
+
+    analyzed = 0
+
+    for idx, row in zero_spread.iterrows():
+        future_time = row['Timestamp'] + pd.Timedelta(seconds=horizon_sec)
+
+        # Reason 1: Beyond dataset range
+        if future_time > std_df['Timestamp'].max():
+            reasons['end_of_dataset'] += 1
+            continue
+
+        # Find future Standard quote
+        future_std = std_df[std_df['Timestamp'] >= future_time].iloc[0:1]
+
+        if len(future_std) == 0:
+            reasons['missing_future_quote'] += 1
+            continue
+
+        # Check if Raw_Spread still zero at future time
+        future_raw = raw_df[
+            (raw_df['Timestamp'] >= row['Timestamp']) &
+            (raw_df['Timestamp'] <= future_time)
+        ]
+
+        if len(future_raw) > 0:
+            if (future_raw['raw_spread'] > 0.00001).any():
+                reasons['spread_widened'] += 1
+                continue
+
+        # Successfully analyzed
+        analyzed += 1
+
+    excluded = total - analyzed
+    reasons['other'] = excluded - sum(reasons.values())
+
+    return {
+        'total_zero_spread': total,
+        'analyzed': analyzed,
+        'excluded': excluded,
+        'exclusion_reasons': reasons,
+        'exclusion_rate': excluded / total
+    }
+```
+
+**Expected Outcome:**
+- Identify dominant exclusion reason (likely "spread_widened" if zero-spread is transient)
+- Exclusion_rate ≈ 4% based on Phase 2 results (sample_size - n_5s)
+- Most common reason: Spread widened before 5s horizon (zero-spread is transient)
+
+**Output:** `phase5_exclusion_taxonomy.csv`
+
+| month | sample_size | analyzed (n_5s) | excluded | end_of_dataset | missing_quote | spread_widened | other | exclusion_rate |
+|-------|-------------|-----------------|----------|----------------|---------------|----------------|-------|----------------|
+| 2024-01 | 5000 | 4804 | 196 | 50 | 20 | 120 | 6 | 0.0392 |
+
+---
+
+### Phase 5.2: Survivorship Bias Quantification
+
+**Hypothesis:** Excluded cases (spread widened quickly) have lower reversion rates
+
+**Test:**
+
+```python
+def estimate_survivorship_bias(std_df, raw_df, horizon_sec=5) -> dict:
+    """
+    Compare reversion rates between:
+    1. Analyzed cases (spread remained zero for ≥ horizon)
+    2. Excluded cases (spread widened before horizon)
+
+    Returns:
+        {
+            'analyzed_reversion_rate': float,
+            'excluded_reversion_rate': float,  # Estimated
+            'bias_magnitude': float,            # Difference
+            'bias_direction': str,              # 'upward' or 'downward'
+            'corrected_estimate': float         # Weighted average
+        }
+    """
+    # For excluded cases, measure reversion at actual spread-widening time
+    # (not full horizon, but best available proxy)
+
+    # Implementation requires more sophisticated tracking
+    # Placeholder for now
+
+    return {
+        'analyzed_reversion_rate': 0.836,
+        'excluded_reversion_rate': 0.42,  # Hypothetical (spread widened = reversion?)
+        'bias_magnitude': 0.416,
+        'bias_direction': 'upward',
+        'corrected_estimate': 0.82
+    }
+```
+
+**Expected Outcome:**
+- If excluded cases have lower reversion (spread widened = away from mid):
+  - **Upward bias** in current 83.6% estimate
+  - True population reversion rate may be lower
+- If excluded cases have similar reversion:
+  - **No bias** - current estimate is valid
+
+**Output:** `phase5_survivorship_bias_results.json`
+
+---
+
+### Phase 5.3: Sensitivity Analysis
+
+**Objective:** Test if conclusions change with different exclusion handling
+
+**Scenarios:**
+1. **Baseline:** Exclude all cases where future quote unavailable (current)
+2. **Pessimistic:** Assume excluded cases never revert (0% reversion)
+3. **Optimistic:** Assume excluded cases revert at same rate as analyzed
+4. **Realistic:** Use partial-horizon reversion for spread-widened cases
+
+**Implementation:**
+
+```python
+def sensitivity_analysis_exclusions(csv_path: str) -> pd.DataFrame:
+    """
+    Recalculate mean reversion under different exclusion assumptions.
+
+    Returns DataFrame with columns:
+    - month
+    - baseline_5s (current 83.6%)
+    - pessimistic_5s (assume 0% for excluded)
+    - optimistic_5s (assume 83.6% for excluded)
+    - realistic_5s (use partial horizon)
+    """
+    # Implementation details
+    pass
+```
+
+**Expected Outcome:**
+- Range of plausible estimates (e.g., 78%-86%)
+- If range is narrow (< 5pp), conclusions robust
+- If range is wide (> 10pp), survivorship bias is critical
+
+**Output:** `phase5_sensitivity_analysis.csv`
+
+---
+
+## Execution Plan
+
+### Prerequisites
+- Phase 2-3 v1.0.6 corrected results available ✅
+- Python environment: scipy 1.16.2, statsmodels 0.14.4, pandas 2.0+
+
+### Phase 4 Execution Order
+1. **Phase 4.1:** Mann-Kendall trend test (5 metrics × 16 months)
+2. **Phase 4.2:** Chow test at 2024/2025 boundary
+3. **Phase 4.3:** Breakpoint scan (10 possible breakpoints)
+
+**Estimated runtime:** ~5 minutes (statistical tests are fast)
+
+### Phase 5 Execution Order
+1. **Phase 5.1:** Exclusion taxonomy (16 months, ~10 min per month = 160 min)
+2. **Phase 5.2:** Survivorship bias quantification (sample 3 months for speed)
+3. **Phase 5.3:** Sensitivity analysis (16 months, fast computation)
+
+**Estimated runtime:** ~3 hours (intensive data processing)
+
+### Error Handling Protocol
+- All exceptions propagate (no silent failures)
+- Log test name + input shape + error message
+- Save partial results if failure occurs mid-batch
+
+### Success Criteria
+- Phase 4: All tests complete, p-values logged, regime shift validated
+- Phase 5: Exclusion rate quantified, bias magnitude < 5pp (acceptable)
+
+---
+
+## Expected Findings
+
+### Phase 4: Statistical Tests
+
+**Mann-Kendall (Mean Reversion):**
+- **toward_5s:** Significant increasing trend (p < 0.05)
+  - Interpretation: Mean reversion strengthening over time (not random)
+  - Tau ≈ 0.3-0.5 (moderate positive correlation with time)
+
+**Chow Test (Volatility Model):**
+- **Regime shift:** p < 0.01 (strong evidence)
+  - Interpretation: 2024/2025 structural break is statistically significant
+  - F-statistic > 10 (large difference between periods)
+
+**Breakpoint Scan:**
+- **Optimal breakpoint:** Aug 2024 / Jan 2025 (confirms visual inspection)
+  - Alternative breakpoints have weaker F-statistics
+  - Validates that regime shift is not arbitrary date selection
+
+### Phase 5: Survivorship Bias
+
+**Confirmed Understanding:**
+- Sampling process: 5,000 deviations randomly sampled per month
+- Exclusion: ~196/5000 (3.92%) where future quote unavailable at t+5s
+- Likely reason: Zero-spread widened before 5s horizon (transient zero-spread)
+
+**Hypothesis:**
+- Excluded cases: Spread widened quickly (< 5s duration)
+- Bias direction: Likely upward (excluded cases = non-reverting, spread widened = away from mid?)
+- Bias magnitude: < 5pp (acceptable for conclusions)
+
+**Test:**
+- Quantify reversion behavior of excluded cases using partial-horizon data
+- Compare analyzed (n=4804) vs excluded (n=196) reversion rates
+- Sensitivity analysis: Recalculate under pessimistic/optimistic assumptions
+
+---
+
+## SLO Validation Checklist
+
+### Phase 4
+- [ ] All statistical tests complete (100% availability)
+- [ ] p-values reproducible within ±0.001 (correctness)
+- [ ] Diagnostic plots saved at 300 DPI (observability)
+- [ ] Out-of-the-box scipy/statsmodels used (maintainability)
+
+### Phase 5
+- [ ] Exclusion taxonomy complete for 16 months (availability)
+- [ ] Survivorship bias quantified ±0.1% (correctness)
+- [ ] Sensitivity analysis shows <5pp range (robustness)
+- [ ] No custom statistical methods (maintainability)
+
+---
+
+## Next Steps After Phase 4-5
+
+1. **Update findings reports** with statistical test results
+2. **Revise master plan** to v1.0.7 with Phase 4-5 results
+3. **Proceed to Phase 6:** Regime detection cluster analysis (2024 vs 2025)
+   - Use validated regime shift from Chow test
+   - Apply k-means clustering to feature space
+   - Characterize 2024 vs 2025 market regimes
+
+---
+
+---
+
+## Version 1.0.1 - Phase 5 Methodology Correction (2025-10-05)
+
+**Date:** 2025-10-05 23:35
+**Status:** CORRECTIVE ACTION
+
+### Critical Discovery
+
+Phase 5 v1.0.0 implementation used INCORRECT methodology:
+- **Flaw:** Exact timestamp matching `df_indexed.loc[future_time:future_time]`
+- **Impact:** 99.8% exclusion rate (only 7-12 cases analyzed per month)
+- **Root cause:** Misunderstood Phase 2 windowed lookup implementation
+
+### Phase 2 Actual Implementation
+
+```python
+# Phase 2 uses WINDOWED lookup (correct)
+future = df_indexed.loc[t0:t1]  # All data from t0 to t0+window_sec
+if len(future) < 2:
+    continue  # Need at least 2 points (initial + final)
+final_pos = future['position_ratio'].iloc[-1]  # Last point in window
+```
+
+### Phase 5 v1.0.0 Implementation (INCORRECT)
+
+```python
+# Phase 5 v1.0.0 used exact timestamp matching (wrong)
+future_std = std_df_indexed.loc[future_time:future_time]
+if len(future_std) == 0:
+    continue  # Fails 99.8% - no exact timestamp match
+```
+
+### Corrected Phase 5 v1.0.1 Implementation
+
+```python
+# Phase 5 v1.0.1 uses windowed lookup (matches Phase 2)
+t0 = row['Timestamp']
+t1 = t0 + pd.Timedelta(seconds=horizon_sec)
+
+# Get all data in window [t0, t1]
+future = zero_spread_indexed.loc[t0:t1]
+if len(future) < 2:
+    continue  # Need at least initial + final point
+
+# Use last point in window (matches Phase 2 exactly)
+final_row = future.iloc[-1]
+```
+
+### Expected Outcomes (v1.0.1)
+
+**Exclusion Rate:**
+- v1.0.0: 99.8% (INVALID - exact matching)
+- v1.0.1: ~4% (expected - windowed lookup)
+
+**Survivorship Bias:**
+- v1.0.0: -18.2% (invalid comparison)
+- v1.0.1: Expected < 5pp (acceptable if windowed lookup works correctly)
+
+### SLO Validation Checks (v1.0.1)
+
+1. **Exclusion Rate < 10%:** Must pass, else methodology still flawed
+2. **Analyzed Count > 90% of Sample:** n_analyzed ≥ 4,500 (out of 5,000)
+3. **Reversion Rate ≈ Phase 2:** Within ±5pp of 83.6%
+
+### Implementation Changes Required
+
+**File:** `phase5_survivorship_bias.py`
+
+**Changes:**
+1. Replace exact timestamp matching with windowed lookup
+2. Match Phase 2 logic exactly: `df_indexed.loc[t0:t1]`
+3. Require `len(future) >= 2` (initial + final point)
+4. Use `iloc[-1]` for final position (last point in window)
+5. Add SLO validation: raise error if exclusion_rate > 10%
+
+---
+
+**Plan Version:** 1.0.1
+**Status:** CORRECTIVE ACTION PLANNED - Ready for Re-implementation
+**Dependencies:** Phase 2-3 v1.0.6 ✅
+**SLO Coverage:** All 5 dimensions defined + exclusion rate validation ✅

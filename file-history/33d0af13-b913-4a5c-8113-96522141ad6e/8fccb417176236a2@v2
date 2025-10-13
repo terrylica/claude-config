@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""
+BID-Only OHLC Construction with Dual-Spread Tracking
+
+Demonstrates OHLC bar construction using BID prices exclusively from Exness
+Raw_Spread variant, with spread tracking from both Raw_Spread and Standard variants.
+
+Plan: /Users/terryli/eon/gapless-crypto-data/docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.0.0.md
+
+SLOs:
+- Availability: 100% (fail explicitly on missing files)
+- Correctness: OHLC from BID only, spreads to 5 decimals
+- Observability: Log all processing steps
+- Maintainability: Use pandas built-in resample()
+
+Error Handling: Raise and propagate—no fallbacks, defaults, retries, or silent handling.
+"""
+
+import zipfile
+from pathlib import Path
+from typing import Tuple
+
+import pandas as pd
+
+
+def load_exness_data(zip_path: Path, time_start: str, time_end: str) -> pd.DataFrame:
+    """
+    Load Exness tick data from ZIP file and filter to time window.
+
+    Args:
+        zip_path: Path to Exness ZIP file
+        time_start: Start time (ISO format)
+        time_end: End time (ISO format)
+
+    Returns:
+        DataFrame with Timestamp (UTC), Bid, Ask columns
+
+    Raises:
+        FileNotFoundError: If ZIP file does not exist
+        ValueError: If CSV format is invalid
+    """
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Data file missing: {zip_path}")
+
+    print(f"Loading: {zip_path.name} ({zip_path.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    # Extract CSV from ZIP (Exness ZIPs contain single CSV with same base name)
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        csv_name = zip_path.stem + '.csv'
+        with zf.open(csv_name) as csv_file:
+            # Exness format: "Exness","Symbol","Timestamp","Bid","Ask"
+            df = pd.read_csv(
+                csv_file,
+                usecols=['Timestamp', 'Bid', 'Ask'],
+                parse_dates=['Timestamp']
+            )
+
+    print(f"  Loaded {len(df):,} rows")
+
+    # Validate columns
+    required_cols = {'Timestamp', 'Bid', 'Ask'}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(
+            f"Invalid CSV format. Expected columns: {required_cols}. "
+            f"Got: {set(df.columns)}"
+        )
+
+    # Convert to UTC timezone-aware
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
+
+    # Filter to time window
+    start_dt = pd.to_datetime(time_start, utc=True)
+    end_dt = pd.to_datetime(time_end, utc=True)
+    df_filtered = df[(df['Timestamp'] >= start_dt) & (df['Timestamp'] <= end_dt)].copy()
+
+    print(f"  Filtered to {len(df_filtered):,} rows ({time_start} to {time_end})")
+
+    if len(df_filtered) == 0:
+        raise IndexError(
+            f"No data in time window. Available range: "
+            f"{df['Timestamp'].min()} to {df['Timestamp'].max()}"
+        )
+
+    return df_filtered
+
+
+def construct_bid_ohlc(df: pd.DataFrame, freq: str = '1min') -> pd.DataFrame:
+    """
+    Construct OHLC bars from BID prices only.
+
+    Args:
+        df: DataFrame with Timestamp, Bid columns
+        freq: Resampling frequency (default: '1min')
+
+    Returns:
+        DataFrame with Timestamp index and Open, High, Low, Close columns
+
+    Raises:
+        IndexError: If insufficient data for requested bars
+    """
+    print(f"\nConstructing OHLC from BID prices (freq={freq})...")
+
+    # Set index for resampling
+    df_indexed = df.set_index('Timestamp')
+
+    # Resample BID column to OHLC using pandas built-in aggregations
+    ohlc = df_indexed['Bid'].resample(freq).agg(['first', 'max', 'min', 'last'])
+    ohlc.columns = ['Open', 'High', 'Low', 'Close']
+
+    # Drop incomplete bars (NaN values)
+    ohlc = ohlc.dropna()
+
+    print(f"  Generated {len(ohlc)} bars")
+    print(f"  Time range: {ohlc.index.min()} to {ohlc.index.max()}")
+
+    # Validate OHLC integrity
+    high_valid = (ohlc['High'] >= ohlc[['Open', 'Close']].max(axis=1)).all()
+    low_valid = (ohlc['Low'] <= ohlc[['Open', 'Close']].min(axis=1)).all()
+
+    if not high_valid or not low_valid:
+        raise ValueError("OHLC integrity check failed: High/Low constraints violated")
+
+    print(f"  OHLC integrity: PASS")
+
+    return ohlc
+
+
+def calculate_spreads(
+    df: pd.DataFrame,
+    freq: str = '1min'
+) -> Tuple[pd.Series, float, float, float]:
+    """
+    Calculate average spread (Ask - Bid) per interval.
+
+    Args:
+        df: DataFrame with Timestamp, Bid, Ask columns
+        freq: Resampling frequency
+
+    Returns:
+        Tuple of (spread_series, min_spread, max_spread, mean_spread)
+    """
+    df_indexed = df.set_index('Timestamp')
+    df_indexed['spread'] = df_indexed['Ask'] - df_indexed['Bid']
+
+    # Calculate mean spread per interval
+    spread_avg = df_indexed['spread'].resample(freq).mean()
+
+    # Validate non-negativity
+    if (spread_avg < 0).any():
+        raise ValueError("Negative spreads detected—data corruption likely")
+
+    min_spread = spread_avg.min()
+    max_spread = spread_avg.max()
+    mean_spread = spread_avg.mean()
+
+    return spread_avg, min_spread, max_spread, mean_spread
+
+
+def main():
+    """Generate 2 consecutive 1-minute BID-OHLC bars with dual-spread tracking."""
+
+    # Configuration
+    RAW_SPREAD_ZIP = Path('/tmp/Exness_EURUSD_Raw_Spread_2024_08.zip')
+    STANDARD_ZIP = Path('/tmp/Exness_EURUSD_2024_08.zip')
+    OUTPUT_CSV = Path('/tmp/demo_exness_bid_ohlc.csv')
+
+    # Time window: 2 consecutive minutes
+    TIME_START = '2024-08-05 07:00:00'
+    TIME_END = '2024-08-05 07:01:59'
+
+    print("=== BID-Only OHLC Construction Demo ===\n")
+
+    # Step 1: Load Raw_Spread data (primary source for OHLC)
+    print("Step 1: Loading Raw_Spread variant...")
+    df_raw = load_exness_data(RAW_SPREAD_ZIP, TIME_START, TIME_END)
+
+    # Step 2: Load Standard data (reference for spread comparison)
+    print("\nStep 2: Loading Standard variant...")
+    df_standard = load_exness_data(STANDARD_ZIP, TIME_START, TIME_END)
+
+    # Step 3: Construct OHLC from BID prices
+    print("\nStep 3: Constructing OHLC from Raw_Spread BID...")
+    ohlc = construct_bid_ohlc(df_raw, freq='1min')
+
+    if len(ohlc) < 2:
+        raise IndexError(
+            f"Expected 2 bars, got {len(ohlc)}. "
+            f"Time range: {df_raw['Timestamp'].min()} to {df_raw['Timestamp'].max()}"
+        )
+
+    # Step 4: Calculate spreads from both variants
+    print("\nStep 4: Calculating spreads...")
+
+    print("  Raw_Spread variant:")
+    raw_spread_avg, raw_min, raw_max, raw_mean = calculate_spreads(df_raw, freq='1min')
+    print(f"    Min: {raw_min:.5f}, Max: {raw_max:.5f}, Mean: {raw_mean:.5f}")
+
+    print("  Standard variant:")
+    std_spread_avg, std_min, std_max, std_mean = calculate_spreads(df_standard, freq='1min')
+    print(f"    Min: {std_min:.5f}, Max: {std_max:.5f}, Mean: {std_mean:.5f}")
+
+    # Step 5: Combine into final dataframe
+    print("\nStep 5: Merging results...")
+    ohlc['raw_spread_avg'] = raw_spread_avg.round(5)
+    ohlc['standard_spread_avg'] = std_spread_avg.round(5)
+
+    # Ensure exactly 2 bars
+    ohlc = ohlc.head(2)
+
+    # Step 6: Write output
+    print(f"\nStep 6: Writing output to {OUTPUT_CSV}...")
+    ohlc.to_csv(OUTPUT_CSV)
+    print(f"  Wrote {len(ohlc)} bars")
+
+    # Display result
+    print("\n=== Result ===")
+    print(ohlc.to_string())
+
+    print(f"\n✓ Output saved: {OUTPUT_CSV}")
+
+
+if __name__ == '__main__':
+    main()

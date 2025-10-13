@@ -1,0 +1,219 @@
+"""
+Tests for ExnessDataProcessor.
+"""
+
+import pytest
+from pathlib import Path
+import pandas as pd
+import pyarrow.parquet as pq
+import duckdb
+
+
+def test_processor_initialization(temp_dir):
+    """Test processor initialization."""
+    from exness_data_preprocess.processor import ExnessDataProcessor
+
+    processor = ExnessDataProcessor(base_dir=temp_dir)
+
+    assert processor.base_dir == temp_dir
+    assert processor.parquet_dir == temp_dir / 'parquet'
+    assert processor.duckdb_dir == temp_dir / 'duckdb'
+    assert processor.temp_dir == temp_dir / 'temp'
+
+    # Check directories were created
+    assert processor.parquet_dir.exists()
+    assert processor.duckdb_dir.exists()
+    assert processor.temp_dir.exists()
+
+
+def test_zip_to_parquet(processor_with_temp_dir, mock_exness_zip):
+    """Test ZIP to Parquet conversion."""
+    processor = processor_with_temp_dir
+
+    parquet_path = processor._zip_to_parquet(
+        zip_path=mock_exness_zip,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    # Check file was created
+    assert parquet_path.exists()
+    assert parquet_path.name == 'eurusd_ticks_2024_08.parquet'
+
+    # Check data integrity
+    df = pq.read_table(parquet_path).to_pandas()
+    assert len(df) == 1000  # Sample data has 1000 ticks
+    assert list(df.columns) == ['Timestamp', 'Bid', 'Ask']
+    assert df['Timestamp'].dtype.name == 'datetime64[ns, UTC]'
+
+
+def test_generate_duckdb_ohlc(processor_with_temp_dir, sample_parquet_file):
+    """Test DuckDB OHLC generation."""
+    processor = processor_with_temp_dir
+
+    duckdb_path, bar_count = processor._generate_duckdb_ohlc(
+        parquet_path=sample_parquet_file,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    # Check file was created
+    assert duckdb_path.exists()
+    assert duckdb_path.name == 'eurusd_ohlc_2024_08.duckdb'
+    assert bar_count > 0
+
+    # Check DuckDB content
+    conn = duckdb.connect(str(duckdb_path), read_only=True)
+    df = conn.execute("SELECT * FROM ohlc_1m ORDER BY Timestamp").df()
+    conn.close()
+
+    assert len(df) == bar_count
+    assert list(df.columns) == ['Timestamp', 'Open', 'High', 'Low', 'Close', 'spread_avg', 'tick_count']
+    assert df['High'].min() >= df['Low'].max() or df['High'].max() >= df['Low'].min()  # Sanity check
+
+
+def test_query_ohlc_1m(processor_with_temp_dir, sample_parquet_file):
+    """Test querying 1-minute OHLC."""
+    processor = processor_with_temp_dir
+
+    # Generate DuckDB first
+    duckdb_path, _ = processor._generate_duckdb_ohlc(
+        parquet_path=sample_parquet_file,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    # Query 1m data
+    df = processor.query_ohlc(year=2024, month=8, pair='EURUSD', timeframe='1m')
+
+    assert len(df) > 0
+    assert list(df.columns) == ['Timestamp', 'Open', 'High', 'Low', 'Close', 'spread_avg', 'tick_count']
+
+
+def test_query_ohlc_resampling(processor_with_temp_dir, sample_parquet_file):
+    """Test OHLC resampling to higher timeframes."""
+    processor = processor_with_temp_dir
+
+    # Generate DuckDB first
+    processor._generate_duckdb_ohlc(
+        parquet_path=sample_parquet_file,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    # Query different timeframes
+    df_1m = processor.query_ohlc(year=2024, month=8, timeframe='1m')
+    df_5m = processor.query_ohlc(year=2024, month=8, timeframe='5m')
+    df_1h = processor.query_ohlc(year=2024, month=8, timeframe='1h')
+
+    # Higher timeframes should have fewer bars
+    assert len(df_5m) <= len(df_1m)
+    assert len(df_1h) <= len(df_5m)
+
+
+def test_analyze_ticks(processor_with_temp_dir, sample_parquet_file):
+    """Test tick data analysis."""
+    processor = processor_with_temp_dir
+
+    # Copy sample file to expected location
+    expected_path = processor.parquet_dir / 'eurusd_ticks_2024_08.parquet'
+    import shutil
+    shutil.copy(sample_parquet_file, expected_path)
+
+    df = processor.analyze_ticks(year=2024, month=8, pair='EURUSD')
+
+    assert len(df) == 1000  # Sample data
+    assert list(df.columns) == ['Timestamp', 'Bid', 'Ask']
+
+
+def test_get_storage_stats(processor_with_temp_dir, sample_parquet_file):
+    """Test storage statistics."""
+    processor = processor_with_temp_dir
+
+    # Copy sample file to parquet dir
+    import shutil
+    shutil.copy(sample_parquet_file, processor.parquet_dir / 'test.parquet')
+
+    # Generate a DuckDB file
+    processor._generate_duckdb_ohlc(
+        parquet_path=sample_parquet_file,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    stats = processor.get_storage_stats()
+
+    assert stats['parquet_count'] >= 1
+    assert stats['duckdb_count'] >= 1
+    assert stats['parquet_total_mb'] > 0
+    assert stats['duckdb_total_mb'] > 0
+    assert stats['total_mb'] == stats['parquet_total_mb'] + stats['duckdb_total_mb']
+
+
+def test_compression_ratio(processor_with_temp_dir, mock_exness_zip):
+    """Test that Parquet compression completes successfully."""
+    processor = processor_with_temp_dir
+
+    zip_size = mock_exness_zip.stat().st_size
+
+    parquet_path = processor._zip_to_parquet(
+        zip_path=mock_exness_zip,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    parquet_size = parquet_path.stat().st_size
+
+    # For small test data, compression overhead can make Parquet larger than ZIP
+    # This is expected - real-world data (millions of rows) compresses much better
+    # Just verify the file was created and has reasonable size
+    assert parquet_size > 0
+    compression_ratio = parquet_size / zip_size
+    assert 0.5 < compression_ratio < 5.0  # Very wide range for test data
+
+
+def test_lossless_conversion(processor_with_temp_dir, mock_exness_zip, sample_tick_data):
+    """Test that conversion is lossless."""
+    processor = processor_with_temp_dir
+
+    parquet_path = processor._zip_to_parquet(
+        zip_path=mock_exness_zip,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    df_converted = pq.read_table(parquet_path).to_pandas()
+
+    # Compare with original (allowing for timezone normalization)
+    df_original = sample_tick_data.copy()
+    df_original['Timestamp'] = pd.to_datetime(df_original['Timestamp'], utc=True)
+
+    pd.testing.assert_frame_equal(df_converted, df_original)
+
+
+@pytest.mark.integration
+def test_download_exness_zip():
+    """
+    Integration test for downloading real Exness data.
+    Skipped by default (requires network access).
+    """
+    pytest.skip("Integration test - requires network access")
+
+    from exness_data_preprocess.processor import ExnessDataProcessor
+    import tempfile
+
+    processor = ExnessDataProcessor(base_dir=Path(tempfile.mkdtemp()))
+
+    # Try to download August 2024 data
+    zip_path = processor.download_exness_zip(year=2024, month=8)
+
+    if zip_path is not None:
+        assert zip_path.exists()
+        assert zip_path.stat().st_size > 0

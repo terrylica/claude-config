@@ -1,0 +1,153 @@
+"""
+Tests for API functions.
+"""
+
+import pytest
+from pathlib import Path
+from unittest.mock import Mock, patch
+import pandas as pd
+
+
+def test_process_month_api(temp_dir, monkeypatch):
+    """Test process_month API function."""
+    from exness_data_preprocess import api
+
+    # Mock the processor to avoid actual download
+    mock_result = {
+        'parquet_path': temp_dir / 'test.parquet',
+        'duckdb_path': temp_dir / 'test.duckdb',
+        'tick_count': 1000,
+        'ohlc_bar_count': 60,
+        'parquet_size_mb': 0.5,
+        'duckdb_size_mb': 0.1,
+        'compression_ratio': 0.91,
+    }
+
+    with patch('exness_data_preprocess.processor.ExnessDataProcessor.process_month', return_value=mock_result):
+        result = api.process_month(year=2024, month=8, base_dir=temp_dir)
+
+    assert result['tick_count'] == 1000
+    assert result['parquet_size_mb'] == 0.5
+
+
+def test_process_date_range_api(temp_dir):
+    """Test process_date_range API function."""
+    from exness_data_preprocess import api
+
+    mock_result = {
+        'parquet_path': temp_dir / 'test.parquet',
+        'duckdb_path': temp_dir / 'test.duckdb',
+        'tick_count': 1000,
+        'ohlc_bar_count': 60,
+        'parquet_size_mb': 0.5,
+        'duckdb_size_mb': 0.1,
+        'compression_ratio': 0.91,
+    }
+
+    with patch('exness_data_preprocess.processor.ExnessDataProcessor.process_month', return_value=mock_result):
+        results = api.process_date_range(
+            start_year=2024,
+            start_month=1,
+            end_year=2024,
+            end_month=3,
+            base_dir=temp_dir
+        )
+
+    assert len(results) == 3  # Jan, Feb, Mar
+    assert all(r['tick_count'] == 1000 for r in results)
+
+
+def test_query_ohlc_api(processor_with_temp_dir, sample_parquet_file):
+    """Test query_ohlc API function."""
+    from exness_data_preprocess import api
+
+    processor = processor_with_temp_dir
+
+    # Generate DuckDB
+    processor._generate_duckdb_ohlc(
+        parquet_path=sample_parquet_file,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    df = api.query_ohlc(
+        year=2024,
+        month=8,
+        timeframe='1m',
+        base_dir=processor.base_dir
+    )
+
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) > 0
+    assert 'Timestamp' in df.columns
+
+
+def test_analyze_ticks_api(processor_with_temp_dir, sample_parquet_file):
+    """Test analyze_ticks API function."""
+    from exness_data_preprocess import api
+    import shutil
+
+    processor = processor_with_temp_dir
+
+    # Copy sample file to expected location
+    expected_path = processor.parquet_dir / 'eurusd_ticks_2024_08.parquet'
+    shutil.copy(sample_parquet_file, expected_path)
+
+    df = api.analyze_ticks(
+        year=2024,
+        month=8,
+        base_dir=processor.base_dir
+    )
+
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 1000
+    assert list(df.columns) == ['Timestamp', 'Bid', 'Ask']
+
+
+def test_get_storage_stats_api(processor_with_temp_dir, sample_parquet_file):
+    """Test get_storage_stats API function."""
+    from exness_data_preprocess import api
+    import shutil
+
+    processor = processor_with_temp_dir
+
+    # Copy sample file
+    shutil.copy(sample_parquet_file, processor.parquet_dir / 'test.parquet')
+
+    # Generate DuckDB
+    processor._generate_duckdb_ohlc(
+        parquet_path=sample_parquet_file,
+        year=2024,
+        month=8,
+        pair='EURUSD'
+    )
+
+    stats = api.get_storage_stats(base_dir=processor.base_dir)
+
+    assert 'parquet_count' in stats
+    assert 'duckdb_count' in stats
+    assert 'total_mb' in stats
+    assert stats['parquet_count'] >= 1
+    assert stats['duckdb_count'] >= 1
+
+
+def test_api_singleton_processor():
+    """Test that API reuses processor instance."""
+    from exness_data_preprocess import api
+
+    # Reset singleton
+    api._processor = None
+
+    processor1 = api._get_processor()
+    processor2 = api._get_processor()
+
+    # Should be same instance
+    assert processor1 is processor2
+
+    # But different if base_dir specified
+    import tempfile
+    temp_dir = Path(tempfile.mkdtemp())
+    processor3 = api._get_processor(base_dir=temp_dir)
+
+    assert processor3 is not processor1

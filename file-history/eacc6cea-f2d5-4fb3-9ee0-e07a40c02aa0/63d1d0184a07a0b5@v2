@@ -1,0 +1,327 @@
+# Modern LaTeX Workflow for macOS (2025)
+
+## Stack Overview
+
+- **Build System**: `latexmk` (v4.86a, Dec 2024) - Intelligent LaTeX automation
+- **PDF Viewer**: `Skim` (v1.7.11) - Open-source viewer with SyncTeX support
+- **Typography**: `tabularray` package - Modern LaTeX3 table system
+- **Distribution**: MacTeX 2025 (TeX Live 2025)
+
+## Why This Stack?
+
+### latexmk
+- **Intelligent**: Auto-detects dependencies, runs correct number of times
+- **Continuous**: Live preview mode watches files and auto-recompiles
+- **Future-proof**: Actively maintained, latest release Dec 2024
+- **Standard**: Bundled with MacTeX, MiKTeX, most Linux distros
+
+### Skim
+- **SyncTeX**: Forward search (LaTeX → PDF) and inverse search (PDF → LaTeX)
+- **Auto-reload**: Instantly updates when PDF changes
+- **Only option**: Only widely-available macOS viewer with full SyncTeX support
+- **Open source**: Free, actively maintained
+
+### tabularray
+- **Modern**: LaTeX3-based, clean syntax
+- **Precise**: Fixed-width columns (`X[4.8cm,l]`) guarantee alignment
+- **Powerful**: Replaces multiple old packages (tabular, tabularx, longtable, booktabs)
+
+---
+
+## Installation
+
+### 1. Install MacTeX (if not already installed)
+```bash
+brew install --cask mactex-no-gui
+```
+
+### 2. Install Skim
+```bash
+brew install --cask skim
+```
+
+### 3. Configure Skim for auto-reload
+```bash
+defaults write -app Skim SKAutoReloadFileUpdate -boolean true
+```
+
+---
+
+## Configuration
+
+### Create `.latexmkrc` in your project directory:
+
+```perl
+# latexmk configuration for macOS with Skim
+
+# Use pdflatex by default
+$pdf_mode = 1;
+
+# Use Skim as PDF previewer
+$pdf_previewer = 'open -a Skim';
+
+# Enable synctex for forward/inverse search
+$pdflatex = '/Library/TeX/texbin/pdflatex -synctex=1 -interaction=nonstopmode %O %S';
+
+# Continuous preview update method
+$preview_continuous_mode = 1;
+
+# Clean up auxiliary files
+$clean_ext = 'synctex.gz synctex.gz(busy) run.xml tex.bbl bcf fdb_latexmk run tdo %R-blx.bib';
+
+# Extra options
+$bibtex_use = 2;  # Run bibtex/biber when needed
+$force_mode = 1;  # Force completion even with errors
+```
+
+**Global config**: Copy to `~/.latexmkrc` to use for all projects
+
+---
+
+## Usage
+
+### Basic Workflow
+
+#### 1. Start continuous preview mode:
+```bash
+cd /path/to/project
+latexmk -pdf -pvc document.tex
+```
+
+This will:
+- Compile your LaTeX document
+- Open it in Skim
+- **Watch for changes** and auto-recompile
+- Skim auto-updates when PDF changes
+
+#### 2. Edit your `.tex` file in any editor (Helix, VS Code, etc.)
+
+#### 3. Save → Automatic recompilation → Skim updates instantly
+
+#### 4. Stop watching: Press `Ctrl+C` in terminal
+
+---
+
+### One-time Compilation
+
+```bash
+latexmk -pdf document.tex
+```
+
+### Clean auxiliary files
+
+```bash
+latexmk -c document.tex  # Clean most auxiliary files
+latexmk -C document.tex  # Clean ALL generated files (including PDF)
+```
+
+---
+
+## SyncTeX: Forward and Inverse Search
+
+### Forward Search: LaTeX source → PDF location
+
+**Command line**:
+```bash
+displayline <line-number> <pdf-file> <tex-file>
+```
+
+Example:
+```bash
+displayline 42 document.pdf document.tex
+```
+
+This opens Skim and highlights the PDF location corresponding to line 42 in your .tex file.
+
+**In most editors**: Usually Cmd+Click or keyboard shortcut
+
+### Inverse Search: PDF → LaTeX source
+
+**In Skim**:
+1. Cmd+Shift+Click on any text in the PDF
+2. Your editor jumps to the corresponding line in the .tex file
+
+**Configuration**: Skim → Preferences → Sync
+- Preset: Custom
+- Command: `/opt/homebrew/bin/hx` (for Helix)
+- Arguments: `%file:%line`
+
+---
+
+## Editor Integration
+
+### Helix
+
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[[language]]
+name = "latex"
+auto-format = false
+formatter = { command = "latexindent", args = ["-"] }
+
+[language-server.texlab.config.build]
+executable = "latexmk"
+args = ["-pdf", "-interaction=nonstopmode", "-synctex=1", "%f"]
+
+[language-server.texlab.config.forwardSearch]
+executable = "displayline"
+args = ["%l", "%p", "%f"]
+```
+
+### VS Code
+
+Install: **LaTeX Workshop** extension
+- Auto-compiles with latexmk
+- Built-in SyncTeX support
+- Most popular LaTeX extension (>10M downloads)
+
+### Vim/Neovim
+
+Use **VimTeX** plugin
+- Full latexmk integration
+- SyncTeX with Skim "just works"
+- Most mature LaTeX plugin for Vim
+
+---
+
+## Tips & Best Practices
+
+### 1. Keep latexmk running in background
+
+Use terminal multiplexer (tmux) or separate terminal window:
+```bash
+# In dedicated terminal
+cd ~/latex-project
+latexmk -pdf -pvc document.tex
+```
+
+### 2. Use absolute paths in .latexmkrc
+
+```perl
+$pdflatex = '/Library/TeX/texbin/pdflatex -synctex=1 -interaction=nonstopmode %O %S';
+```
+
+This ensures latexmk works regardless of PATH configuration.
+
+### 3. Skim keyboard shortcuts
+
+- `Cmd+Shift+Click`: Inverse search (jump to source)
+- `Cmd+L`: Go to page
+- `Cmd+Option+G`: Go to next page
+- `Cmd+Option+Shift+G`: Go to previous page
+
+### 4. For printing: High-quality PDF output
+
+Already enabled by default with pdflatex. For even better typography:
+
+```latex
+\usepackage{microtype}  % Micro-typography improvements
+\usepackage[T1]{fontenc}  % Better font encoding
+```
+
+### 5. Version control: .gitignore for LaTeX
+
+```gitignore
+# LaTeX auxiliary files
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.synctex.gz(busy)
+*.toc
+*.lof
+*.lot
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+
+# Keep .latexmkrc
+!.latexmkrc
+```
+
+---
+
+## Troubleshooting
+
+### Skim not auto-reloading
+
+1. Check Preferences → Sync → "Check for file changes" is enabled
+2. Or run: `defaults write -app Skim SKAutoReloadFileUpdate -boolean true`
+
+### latexmk can't find pdflatex
+
+Use absolute path in `.latexmkrc`:
+```perl
+$pdflatex = '/Library/TeX/texbin/pdflatex -synctex=1 -interaction=nonstopmode %O %S';
+```
+
+### Compilation errors
+
+Check `document.log` for details:
+```bash
+tail -50 document.log
+```
+
+### Force clean rebuild
+
+```bash
+latexmk -C document.tex  # Remove all generated files
+latexmk -pdf -pvc document.tex  # Rebuild from scratch
+```
+
+---
+
+## Example: Your Ghostty Cheat Sheet
+
+**Files**:
+- `/tmp/ghostty-keybindings.tex` - LaTeX source
+- `/tmp/.latexmkrc` - Configuration
+- `/tmp/ghostty-keybindings.pdf` - Output
+
+**Workflow**:
+```bash
+cd /tmp
+latexmk -pdf -pvc ghostty-keybindings.tex
+```
+
+Now editing `ghostty-keybindings.tex` in Helix:
+1. Save file (`:w`)
+2. latexmk auto-detects change and recompiles
+3. Skim auto-refreshes PDF
+4. See changes in <1 second
+
+**For printing**:
+```bash
+# Stop continuous mode (Ctrl+C)
+latexmk -pdf ghostty-keybindings.tex
+cp ghostty-keybindings.pdf ~/Downloads/
+open ~/Downloads/ghostty-keybindings.pdf
+```
+
+---
+
+## Resources
+
+- **latexmk manual**: `texdoc latexmk` or https://ctan.org/pkg/latexmk
+- **Skim homepage**: https://skim-app.sourceforge.io/
+- **tabularray manual**: `texdoc tabularray` or https://ctan.org/pkg/tabularray
+- **SyncTeX docs**: `texdoc synctex`
+
+---
+
+## Summary
+
+This modern LaTeX workflow gives you:
+
+✅ **Fast**: Instant recompilation (typically <1 second)
+✅ **Precise**: Pixel-perfect table alignment with tabularray
+✅ **Interactive**: SyncTeX forward/inverse search
+✅ **Future-proof**: All tools actively maintained (2024-2025)
+✅ **Standard**: Industry-standard toolchain
+✅ **Free**: 100% open-source (except macOS itself)
+
+**Bottom line**: Edit → Save → See results instantly. Perfect for iterative document refinement.

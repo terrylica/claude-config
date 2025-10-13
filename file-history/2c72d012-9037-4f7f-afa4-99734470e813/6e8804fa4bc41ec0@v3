@@ -1,0 +1,171 @@
+# Claude Code User Memory
+
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure (essentials only, each doc links deeper, single source of truth per topic)
+
+**Navigation Index**: [`docs/INDEX.md`](docs/INDEX.md) - Hub-and-spoke documentation architecture
+
+**Quick Links**: [Tools](tools/) | [Specifications](specifications/) | [Agents](agents/) | [Commands](commands/) | [Docs](docs/)
+
+---
+
+## Conventions
+
+- Apply neutral, promotional-free language to generated docs/comments and new identifiers only; never alter user text
+- Use SemVer 2.0.0 (init 1.0.0 if stable else 0.1.0); bump MAJOR for breaking, MINOR for additive, PATCH for fixes
+- Update versions consistently across README/docstrings/metadata
+- **File Paths**: ALWAYS output absolute paths starting with `/` with space after extension before punctuation (e.g., `/path/to/file.md ` not `path/to/file.md.`) - Ghostty Cmd+click requires this, no exceptions
+
+## Planning
+
+- **Machine-Readable**: Define and maintain OpenAPI 3.1.1 spec for persistent planning files
+- **Logical Dependencies**: Organize by capabilities, not time-based roadmapping - use Success Gates/Sluices for validation checkpoints
+- **Dynamic Evolution**: Objectives and implementations evolve dynamically
+
+## System Architecture & Environment
+
+### Platform & Path Conventions
+- **Target Platform**: Unix-like systems (macOS, Linux) - not Windows compatible
+- **Standards**: `$HOME/.claude/` workspace, POSIX shells, use Unix conventions (`$HOME`, `$USER`) for portability
+
+### Universal Tool Access & Working Directory Preservation
+- **Hybrid Architecture**: `$HOME/.local/bin/` for executables, `$HOME/.claude/tools/` for configs - scripts use absolute paths and preserve working directory
+- **PATH Standard**: Only `$HOME/.local/bin` in PATH, cross-platform consistency, avoid `cd` operations that change user context
+
+### Current User Context
+- Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
+
+## Development Environment & Tools
+
+### Primary Toolchain
+- **Python Stack**: `uv` (management), `uv run --active python -m` (execution), `hatchling` (build backend), `maturin` (Rust integration), 3.12+ - **Avoid**: pip, conda, setuptools, poetry, standalone execution
+- **Rust Stack**: `cargo`, cross-platform compilation, `cargo nextest run`, `cargo deny check`, coexists with Python
+- **Python Packages**: Prefer `httpx`, `platformdirs`, `orjson`, `ciso8601` over `requests`, `json`, `dateutil`, `arrow`, `maya`
+- **Claude Code Tools**: `Read`, `LS`, `Glob`, `Grep` over MCP
+- **Text Editor**: Helix (https://github.com/helix-editor/helix) - modern modal editor with built-in LSP, tree-sitter syntax highlighting
+- **Analysis**: `Semgrep`, `ast-grep`, `ShellCheck` - **GPU**: `tensorflow-metal`, `jax`, `torch`, `cupy`
+- **PDF Processing**: `mupdf-tools` (`mutool draw -F html`) for born-digital PDFs with clean HTML/block grouping; Poppler `pdftohtml -xml` for exact coordinates or complex column layouts
+- **PDF Generation**: LaTeX with `tabularray` for precise table alignment - **Avoid**: Typst X-columns (broken alignment), Quarto/Pandoc (slow)
+- **LaTeX Stack**: MacTeX 2025 (TeX Live), `latexmk -pdf -pvc` (live preview), Skim (SyncTeX viewer), TeXShop (integrated IDE)
+- **Table Alignment**: Use `p{width}X[l]` not `X[width,l]` - fixed paragraph columns guarantee alignment, X-columns are flexible
+- **Finance**: `backtesting.py` ONLY, `rangebar` crate - **Prohibited**: bt, vectorbt, mlfinlab, commercial libs
+- **Indicators (when needed)**: Reference talipp pattern (github.com/nardew/talipp) for O(1) incremental updates when rolling metrics are required
+- **Documentation**: ALL examples must use `uv run --active python -m` format, never standalone execution
+- **Data Storage**: Prefer Parquet (zstd-9 compression) over CSV for tabular data
+- **LaTeX Workflow**: See [`docs/setup/latex-workflow.md`](docs/setup/latex-workflow.md) - Modern LaTeX stack for professional PDFs
+
+### Python API Documentation (Industry Standard)
+**Specification**: [`specifications/pydantic-api-documentation-standard.yaml`](specifications/pydantic-api-documentation-standard.yaml)
+**Pattern**: Pydantic v2 models + Rich docstrings = Single source of truth for data contracts, JSON Schema, validation, and AI-discoverable documentation
+**Industry Adoption**: 8,000+ PyPI packages, 360M monthly downloads, all FAANG companies, OpenAI/Anthropic/Google SDKs, FastAPI/LangChain (verified 2025-01-12)
+**Performance**: Pydantic v2 is 4-50x faster than v1 (17x average, 5x real-world), Rust-powered validation core with continued 2024 optimizations
+**Architecture**: Three-layer pattern (Literal types → Pydantic models with Field descriptions → Methods with rich docstrings) eliminates README.md/AGENTS.md/llms.txt fragmentation
+**AI Agent Discovery**: Automatic via `help()`, `inspect.signature()`, `Model.model_json_schema()`, `get_args(Literal)` - supported by Claude Code, Copilot, Cursor, FastAPI auto-docs
+
+
+### Mandatory Rust Code Quality Enforcement (2025 Best Practices)
+- **Zero Tolerance Policy**: All commits blocked unless passing `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`
+- **Enforcement**: Pre-commit hooks, VS Code auto-format, GitHub Actions validation
+- **Setup**: `chmod +x .git/hooks/pre-commit && pre-commit install`
+
+## Documentation Standards
+
+### LLM-Optimized Documentation Architecture
+- **Machine-Readable Priority**: OpenAPI 3.1.0 specs, JSON Schema, YAML specifications take precedence over human documentation
+- **Integration Targets**: Cursor IDE, Claude Code CLI, AI coding assistants
+
+### Claude Code Markdown Restrictions & README Policies
+- **Markdown Files**: Global `~/.claude/` allowed, project `.claude/` prohibited (slash command conflicts)
+- **README Policy**: Use `docs/README.md`, not root `README.md` - alternative naming for non-global docs
+
+## Claude Code User Custom Extensions
+
+### CNS (Conversation Notification System)
+**Specification**: [`specifications/cns-conversation-notification-system.yaml`](specifications/cns-conversation-notification-system.yaml)
+
+### Session ID Display Hook
+**Script**: [`automation/session_id_display.sh`](automation/session_id_display.sh)
+**Purpose**: Appends session ID to end of Claude Code responses via Stop hook
+**Output**: `Session ID: <session-id>` in default system color (no custom styling)
+**Hook Config**: Configured in `settings.json` Stop hooks array, runs after CNS hook
+
+### GitHub Flavored Markdown Link Checker
+**Specification**: [`specifications/gfm-link-checker.yaml`](specifications/gfm-link-checker.yaml)
+**Tool**: [`gfm-link-checker/`](gfm-link-checker/)
+**Slash Command**: `/gfm-check [path] [--fix]` - validate and auto-fix markdown links
+
+### Pushover Integration
+**Specification**: [`specifications/pushover-integration.yaml`](specifications/pushover-integration.yaml)
+**Credentials**: Doppler (`claude-config/dev` → `PUSHOVER_TOKEN`, `PUSHOVER_USER`)
+
+### PyPI Publishing
+**Specification**: [`specifications/pypi-publishing-methods.yaml`](specifications/pypi-publishing-methods.yaml)
+**Token Storage**: Doppler (`claude-config/dev` → `PYPI_TOKEN`)
+**Usage**: `doppler run --project claude-config --config dev -- uv publish --token "$PYPI_TOKEN"`
+**Token Details**:
+  - Name: `terrylica-entire-account`
+  - ID: `2b59ad01-34b4-4425-b7a0-9ab49046ea4e`
+  - Scope: Entire account (all projects)
+  - Regenerate at: https://pypi.org/manage/account/token/
+
+### git-cliff Release Automation
+**Workflow**: [`tools/git-cliff/README.md`](tools/git-cliff/README.md)
+**Templates**: [`tools/git-cliff/templates/`](tools/git-cliff/templates/) - cliff.toml, cliff-release-notes.toml, cz.toml
+**Features**: Commitizen + git-cliff, language-agnostic version detection, 125K GitHub limit handling
+
+### Process Monitoring (noti)
+**Wrapper**: `$HOME/.local/bin/noti-monitor <PID>` (auto-injects Pushover credentials)
+**Config**: `~/.config/noti/noti.yaml`
+**Documentation**: [`tools/noti/README.md`](tools/noti/README.md)
+
+## Credential Management & Security
+
+**Primary Method**: Doppler CLI for zero-config credential injection
+**Specification**: [`specifications/doppler-integration.yaml`](specifications/doppler-integration.yaml)
+
+### Doppler Projects
+
+**claude-config** (configs: `dev`, `dev_personal`, `stg`, `prd`)
+- `PUSHOVER_TOKEN`, `PUSHOVER_USER` - Pushover notification credentials
+- `PYPI_TOKEN` - PyPI publishing token (entire account scope)
+- `ATUIN_USERNAME`, `ATUIN_EMAIL`, `ATUIN_KEY` - Atuin shell history sync credentials
+
+**aws-credentials** (config: `dev`)
+- **Specification**: [`specifications/aws-credentials-management.yaml`](specifications/aws-credentials-management.yaml)
+- **Setup Guide**: [`docs/setup/aws-credentials-doppler.md`](docs/setup/aws-credentials-doppler.md) - Rotation and usage workflows
+- **Elimination Plan**: [`docs/setup/aws-credentials-elimination.md`](docs/setup/aws-credentials-elimination.md) - Reference implementation for ml-feature-experiments
+- **Account**: `050214414362` (EonLabs), IAM user: `terryli`, Region: `us-west-2`
+- **Features**: Zero-exposure rotation, dual-key testing, read-only audits, comprehensive documentation
+- **Usage**: `doppler run --project aws-credentials --config dev -- aws <command>`
+
+**Usage Pattern**: `doppler run --project <project> --config <config> -- <command>`
+
+## Terminal & Shell Configuration
+
+**Ghostty Terminal**: [`docs/setup/terminal-setup.md`](docs/setup/terminal-setup.md) - Session management, emoji tab titles, Claude Code title integration, focus tracking fixes
+**Kitty Terminal**: [`docs/setup/terminal-setup.md`](docs/setup/terminal-setup.md) - Session management, split configuration
+**Shell Functions**: [`shell-functions/`](shell-functions/) - Custom shell utilities
+**Text Editor**: Helix (`hx`) - Modal editor with LSP, tree-sitter
+
+### Claude Code Status Line (ccstatusline)
+**Implementation**: `bunx ccstatusline@latest` via `settings.json`
+**Repository**: https://github.com/sirmalloc/ccstatusline
+**Features**: Powerline-style status bar with model name, git branch, git changes (+/-), context length
+**Config**: `~/.config/ccstatusline/settings.json` - widget configuration, colors, powerline separators
+**Installation**: Bun-based, zero local files, always latest version
+
+### Ghostty Session & Tab Management
+- **Session Restore**: `window-save-state = always` - Restores tabs, splits, directories on restart
+- **Tab Titles**: Emoji-based directory identification (`🧪 Exp`, `🤖 ML`, `📊 Backtest`) via zsh `precmd` hook
+- **Window Merging**: `macos-titlebar-style = native` - Drag windows to merge as tabs
+- **Claude Code Integration**: Disable title updates via `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in `~/.claude/settings.json`
+
+### Shell History Sync (Atuin)
+**Specification**: [`specifications/atuin-shell-history.yaml`](specifications/atuin-shell-history.yaml)
+**Tool**: [`tools/atuin/README.md`](tools/atuin/README.md)
+**Credentials**: Doppler (`claude-config/dev` → `ATUIN_USERNAME`, `ATUIN_EMAIL`, `ATUIN_KEY`)
+**Features**: End-to-end encrypted cloud sync, SQLite backend, fuzzy search (Ctrl+R), multi-machine history
+
+### SSH Clipboard Integration (OSC 52)
+**Enable**: Claude Code `/export` copies to macOS clipboard over SSH/tmux (`~/.local/bin/xclip` wrapper emits OSC 52 to `>&2`, not `/dev/tty`)
+**Doc**: [`docs/setup/ssh-clipboard-osc52.md`](docs/setup/ssh-clipboard-osc52.md)
+

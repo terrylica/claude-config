@@ -1,0 +1,53 @@
+"""Benchmark availability_column performance optimization"""
+
+import time
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+def benchmark(n_rows):
+    """Benchmark feature generation for n_rows"""
+    start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    timestamps = [start_time + timedelta(hours=2*i) for i in range(n_rows)]
+
+    data = pd.DataFrame({
+        'date': timestamps,
+        'actual_ready_time': timestamps,
+        'open': [100 + 5*np.sin(i/10) for i in range(n_rows)],
+        'high': [105 + 5*np.sin(i/10) for i in range(n_rows)],
+        'low': [95 + 5*np.sin(i/10) for i in range(n_rows)],
+        'close': [100 + 5*np.sin(i/10) for i in range(n_rows)],
+        'volume': [1000000] * n_rows
+    })
+
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        filter_redundancy=False,
+        availability_column='actual_ready_time'
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    start = time.time()
+    features = indicator.fit_transform_features(data)
+    elapsed = time.time() - start
+
+    return elapsed, features.shape
+
+print("=" * 80)
+print("PERFORMANCE BENCHMARK: O(n) Optimization")
+print("=" * 80)
+print()
+
+for n_rows in [500, 1000, 2000, 5000]:
+    elapsed, shape = benchmark(n_rows)
+    print(f"{n_rows:>5} rows: {elapsed:>6.2f}s  (shape: {shape})")
+
+print()
+print("Expected with O(n²) (500 rows = 13.86s):")
+print("  1000 rows: ~55s")
+print("  2000 rows: ~220s")
+print("  5000 rows: ~870s (14.5 min)")
+print()
+print("With O(n) optimization, should be nearly linear scaling")

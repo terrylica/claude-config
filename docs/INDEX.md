@@ -21,12 +21,13 @@ Central navigation point for all workspace documentation with direct links to mo
 
 ## **🔧 Configuration & Setup**
 - **[Setup Guide](setup/TEAM_SETUP.md)** - Team onboarding and workspace setup
+- **[Credential Management](setup/aws-credentials-doppler.md)** - AWS credentials with Doppler (rotation, usage, elimination)
 - **[Session Management](standards/CLAUDE_SESSION_STORAGE_STANDARD.md)** - Session storage standards
 - **[Sync Strategy](sync/claude-code-sync-strategy.md)** - Cross-environment synchronization
 
 ## **📊 Project Management**
 - **[SAGE Aliases](../sage-aliases/)** - Development environment shortcuts
-- **[Command System](commands/)** - Available commands and their usage
+- **[Command System](commands/commands.md)** - Available commands and their usage
 - **[Todo Management](../todos/)** - Task tracking and progress management
 
 ## **📈 Reports & Analysis**
@@ -45,7 +46,7 @@ Central navigation point for all workspace documentation with direct links to mo
 - **Agents**: [Registry](agents/AGENTS.md) | [Development](agents/)
 - **Tools**: [Installation](../install-all-tools) | [Tmux](../tmux/) | [GFM Checker](../gfm-link-checker/)
 - **Configuration**: [Standards](standards/) | [Setup](setup/) | [Sync](sync/)
-- **Commands**: [Available Commands](commands/) | [Usage Examples](commands/)
+- **Commands**: [Available Commands](commands/commands.md) | [Usage Examples](commands/command-extensions.md)
 
 ### By Task Type
 - **Getting Started**: [Team Setup](setup/TEAM_SETUP.md) → [Architecture](architecture/ARCHITECTURE.md) → [Standards](standards/)

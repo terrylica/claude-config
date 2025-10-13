@@ -1,0 +1,464 @@
+#!/usr/bin/env python3
+"""
+Test unified DuckDB architecture with both variants.
+
+Tests storing irregular ticks and regular OHLC bars in a single DuckDB file.
+
+Usage:
+    python test_unified_architecture.py [--keep]
+
+Arguments:
+    --keep: Keep test files after completion (default: delete)
+"""
+
+import sys
+import time
+import json
+import zipfile
+from pathlib import Path
+from datetime import datetime, timezone
+from urllib.request import urlretrieve
+from urllib.error import URLError
+
+import pandas as pd
+import duckdb
+
+
+def download_variant(year: int, month: int, variant: str, output_dir: Path) -> Path:
+    """Download Exness variant ZIP file."""
+    if variant == "raw_spread":
+        filename = f"Exness_EURUSD_Raw_Spread_{year}_{month:02d}.zip"
+    elif variant == "standard":
+        filename = f"Exness_EURUSD_{year}_{month:02d}.zip"
+    else:
+        raise ValueError(f"Unknown variant: {variant}")
+
+    url = f"https://ticks.ex2archive.com/{filename}"
+    zip_path = output_dir / filename
+
+    if zip_path.exists():
+        print(f"  ✓ Already exists: {filename}")
+        return zip_path
+
+    try:
+        print(f"  Downloading: {filename}")
+        urlretrieve(url, zip_path)
+        size_mb = zip_path.stat().st_size / 1024 / 1024
+        print(f"  ✓ Downloaded: {size_mb:.2f} MB")
+        return zip_path
+    except URLError as e:
+        raise RuntimeError(f"Download failed: {e}")
+
+
+def extract_ticks_from_zip(zip_path: Path) -> pd.DataFrame:
+    """Extract tick data from Exness ZIP file."""
+    print(f"  Extracting: {zip_path.name}")
+
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        csv_name = zip_path.stem + '.csv'
+        with zf.open(csv_name) as csv_file:
+            df = pd.read_csv(
+                csv_file,
+                usecols=['Timestamp', 'Bid', 'Ask'],
+                parse_dates=['Timestamp']
+            )
+
+    # Convert to UTC timezone-aware
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
+
+    print(f"  ✓ Extracted: {len(df):,} ticks")
+    return df
+
+
+def create_unified_duckdb(
+    raw_spread_df: pd.DataFrame,
+    standard_df: pd.DataFrame,
+    output_path: Path
+) -> dict:
+    """Create unified DuckDB with both tick types."""
+    print("\n" + "=" * 70)
+    print("Creating Unified DuckDB")
+    print("=" * 70)
+
+    # Remove existing database
+    if output_path.exists():
+        output_path.unlink()
+
+    # Create DuckDB connection
+    conn = duckdb.connect(str(output_path))
+
+    # Step 1: Create irregular tick tables
+    print("\nStep 1: Loading irregular ticks...")
+    start = time.time()
+
+    conn.execute("""
+        CREATE TABLE raw_spread_ticks (
+            Timestamp TIMESTAMP WITH TIME ZONE,
+            Bid DOUBLE,
+            Ask DOUBLE
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE standard_ticks (
+            Timestamp TIMESTAMP WITH TIME ZONE,
+            Bid DOUBLE,
+            Ask DOUBLE
+        )
+    """)
+
+    # Insert data
+    conn.register('raw_spread_temp', raw_spread_df)
+    conn.register('standard_temp', standard_df)
+
+    conn.execute("INSERT INTO raw_spread_ticks SELECT * FROM raw_spread_temp")
+    conn.execute("INSERT INTO standard_ticks SELECT * FROM standard_temp")
+
+    conn.unregister('raw_spread_temp')
+    conn.unregister('standard_temp')
+
+    tick_load_time = time.time() - start
+
+    raw_count = conn.execute("SELECT COUNT(*) FROM raw_spread_ticks").fetchone()[0]
+    std_count = conn.execute("SELECT COUNT(*) FROM standard_ticks").fetchone()[0]
+
+    print(f"  ✓ raw_spread_ticks: {raw_count:,} rows ({tick_load_time:.2f}s)")
+    print(f"  ✓ standard_ticks: {std_count:,} rows")
+
+    # Step 2: Create regular OHLC table (phase7 methodology)
+    print("\nStep 2: Generating regular OHLC (1-minute bars)...")
+    start = time.time()
+
+    conn.execute("""
+        CREATE TABLE ohlc_1m AS
+        SELECT
+            DATE_TRUNC('minute', r.Timestamp) as Timestamp,
+            FIRST(r.Bid ORDER BY r.Timestamp) as Open,
+            MAX(r.Bid) as High,
+            MIN(r.Bid) as Low,
+            LAST(r.Bid ORDER BY r.Timestamp) as Close,
+            AVG(r.Ask - r.Bid) as raw_spread_avg,
+            AVG(s.Ask - s.Bid) as standard_spread_avg,
+            COUNT(r.Timestamp) as tick_count_raw_spread,
+            COUNT(s.Timestamp) as tick_count_standard
+        FROM raw_spread_ticks r
+        LEFT JOIN standard_ticks s
+            ON DATE_TRUNC('minute', r.Timestamp) = DATE_TRUNC('minute', s.Timestamp)
+        GROUP BY DATE_TRUNC('minute', r.Timestamp)
+        ORDER BY Timestamp
+    """)
+
+    ohlc_time = time.time() - start
+    ohlc_count = conn.execute("SELECT COUNT(*) FROM ohlc_1m").fetchone()[0]
+
+    print(f"  ✓ ohlc_1m: {ohlc_count:,} bars ({ohlc_time:.2f}s)")
+
+    # Step 3: Add metadata
+    print("\nStep 3: Adding embedded metadata...")
+
+    conn.execute(f"""
+        COMMENT ON TABLE raw_spread_ticks IS
+        'EURUSD Raw_Spread variant tick data (irregular, event-driven). Source: Exness via ex2archive.com. Created: {datetime.now(timezone.utc).isoformat()}'
+    """)
+
+    conn.execute(f"""
+        COMMENT ON TABLE standard_ticks IS
+        'EURUSD Standard variant tick data (irregular, event-driven). Source: Exness via ex2archive.com. Created: {datetime.now(timezone.utc).isoformat()}'
+    """)
+
+    conn.execute(f"""
+        COMMENT ON TABLE ohlc_1m IS
+        'EURUSD 1-minute OHLC with dual-variant tracking (regular, fixed intervals). Methodology: Phase7 v1.1.0 BID-only OHLC from Raw_Spread, dual spreads and tick counts from both variants. Created: {datetime.now(timezone.utc).isoformat()}'
+    """)
+
+    conn.execute("""
+        COMMENT ON COLUMN ohlc_1m.raw_spread_avg IS
+        'Average spread from Raw_Spread variant (Ask-Bid) in base units'
+    """)
+
+    conn.execute("""
+        COMMENT ON COLUMN ohlc_1m.standard_spread_avg IS
+        'Average spread from Standard variant (Ask-Bid) in base units'
+    """)
+
+    print("  ✓ Metadata added (SQL COMMENT statements)")
+
+    conn.close()
+
+    return {
+        "raw_spread_ticks": raw_count,
+        "standard_ticks": std_count,
+        "ohlc_1m": ohlc_count,
+        "tick_load_time": tick_load_time,
+        "ohlc_time": ohlc_time
+    }
+
+
+def run_benchmarks(db_path: Path) -> dict:
+    """Run performance benchmarks."""
+    print("\n" + "=" * 70)
+    print("Running Benchmarks")
+    print("=" * 70)
+
+    conn = duckdb.connect(str(db_path), read_only=True)
+    results = {}
+
+    # Benchmark 1: Count irregular ticks
+    print("\nBenchmark 1: Count raw ticks")
+    start = time.time()
+    count = conn.execute("SELECT COUNT(*) FROM raw_spread_ticks").fetchone()[0]
+    elapsed = time.time() - start
+    results['tick_count_query_ms'] = elapsed * 1000
+    print(f"  Result: {count:,} ticks")
+    print(f"  Time: {elapsed*1000:.2f}ms")
+
+    # Benchmark 2: Query regular OHLC
+    print("\nBenchmark 2: Query all OHLC bars")
+    start = time.time()
+    df = conn.execute("SELECT * FROM ohlc_1m").df()
+    elapsed = time.time() - start
+    results['ohlc_query_ms'] = elapsed * 1000
+    print(f"  Result: {len(df):,} bars")
+    print(f"  Time: {elapsed*1000:.2f}ms")
+
+    # Benchmark 3: On-demand 5m resample from irregular ticks
+    print("\nBenchmark 3: On-demand 5m OHLC resample from ticks")
+    start = time.time()
+    df_5m = conn.execute("""
+        SELECT
+            TIME_BUCKET(INTERVAL '5 minutes', Timestamp) as Timestamp,
+            FIRST(Bid ORDER BY Timestamp) as Open,
+            MAX(Bid) as High,
+            MIN(Bid) as Low,
+            LAST(Bid ORDER BY Timestamp) as Close,
+            AVG(Ask - Bid) as spread_avg,
+            COUNT(*) as tick_count
+        FROM raw_spread_ticks
+        GROUP BY TIME_BUCKET(INTERVAL '5 minutes', Timestamp)
+        ORDER BY Timestamp
+    """).df()
+    elapsed = time.time() - start
+    results['resample_5m_ms'] = elapsed * 1000
+    print(f"  Result: {len(df_5m):,} bars")
+    print(f"  Time: {elapsed*1000:.2f}ms")
+
+    # Benchmark 4: On-demand 1h resample
+    print("\nBenchmark 4: On-demand 1h OHLC resample from ticks")
+    start = time.time()
+    df_1h = conn.execute("""
+        SELECT
+            DATE_TRUNC('hour', Timestamp) as Timestamp,
+            FIRST(Bid ORDER BY Timestamp) as Open,
+            MAX(Bid) as High,
+            MIN(Bid) as Low,
+            LAST(Bid ORDER BY Timestamp) as Close,
+            AVG(Ask - Bid) as spread_avg,
+            COUNT(*) as tick_count
+        FROM raw_spread_ticks
+        GROUP BY DATE_TRUNC('hour', Timestamp)
+        ORDER BY Timestamp
+    """).df()
+    elapsed = time.time() - start
+    results['resample_1h_ms'] = elapsed * 1000
+    print(f"  Result: {len(df_1h):,} bars")
+    print(f"  Time: {elapsed*1000:.2f}ms")
+
+    conn.close()
+    return results
+
+
+def validate_phase7_methodology(db_path: Path) -> dict:
+    """Validate phase7 dual-variant OHLC methodology."""
+    print("\n" + "=" * 70)
+    print("Validating Phase7 Methodology")
+    print("=" * 70)
+
+    conn = duckdb.connect(str(db_path), read_only=True)
+    results = {}
+
+    # Check 1: OHLC integrity (High >= max(Open, Close), Low <= min(Open, Close))
+    print("\nCheck 1: OHLC integrity")
+    invalid = conn.execute("""
+        SELECT COUNT(*) FROM ohlc_1m
+        WHERE High < GREATEST(Open, Close) OR Low > LEAST(Open, Close)
+    """).fetchone()[0]
+    results['ohlc_integrity'] = invalid == 0
+    print(f"  Invalid bars: {invalid}")
+    print(f"  Status: {'✓ PASS' if invalid == 0 else '✗ FAIL'}")
+
+    # Check 2: Spread non-negativity
+    print("\nCheck 2: Spread non-negativity")
+    negative = conn.execute("""
+        SELECT COUNT(*) FROM ohlc_1m
+        WHERE raw_spread_avg < 0 OR standard_spread_avg < 0
+    """).fetchone()[0]
+    results['spread_non_negative'] = negative == 0
+    print(f"  Negative spreads: {negative}")
+    print(f"  Status: {'✓ PASS' if negative == 0 else '✗ FAIL'}")
+
+    # Check 3: Tick counts positive
+    print("\nCheck 3: Tick counts positive")
+    zero_ticks = conn.execute("""
+        SELECT COUNT(*) FROM ohlc_1m
+        WHERE tick_count_raw_spread <= 0 OR tick_count_standard <= 0
+    """).fetchone()[0]
+    results['tick_counts_positive'] = zero_ticks == 0
+    print(f"  Zero/negative tick counts: {zero_ticks}")
+    print(f"  Status: {'✓ PASS' if zero_ticks == 0 else '✗ FAIL'}")
+
+    # Check 4: Temporal ordering (minute alignment)
+    print("\nCheck 4: Temporal ordering (minute alignment)")
+    unaligned = conn.execute("""
+        SELECT COUNT(*) FROM ohlc_1m
+        WHERE EXTRACT(second FROM Timestamp) != 0
+    """).fetchone()[0]
+    results['minute_aligned'] = unaligned == 0
+    print(f"  Unaligned bars: {unaligned}")
+    print(f"  Status: {'✓ PASS' if unaligned == 0 else '✗ FAIL'}")
+
+    # Check 5: Verify 9-column schema
+    print("\nCheck 5: Schema validation (9 columns)")
+    columns = conn.execute("""
+        SELECT column_name FROM duckdb_columns()
+        WHERE table_name = 'ohlc_1m'
+        ORDER BY column_index
+    """).df()
+    expected = ['Timestamp', 'Open', 'High', 'Low', 'Close',
+                'raw_spread_avg', 'standard_spread_avg',
+                'tick_count_raw_spread', 'tick_count_standard']
+    results['schema_correct'] = columns['column_name'].tolist() == expected
+    print(f"  Columns: {columns['column_name'].tolist()}")
+    print(f"  Expected: {expected}")
+    print(f"  Status: {'✓ PASS' if results['schema_correct'] else '✗ FAIL'}")
+
+    # Check 6: Dual-variant comparison
+    print("\nCheck 6: Dual-variant spread comparison")
+    spread_stats = conn.execute("""
+        SELECT
+            AVG(raw_spread_avg) as raw_avg,
+            AVG(standard_spread_avg) as std_avg,
+            AVG(raw_spread_avg) / AVG(standard_spread_avg) as ratio
+        FROM ohlc_1m
+    """).df()
+    print(f"  Raw_Spread avg: {spread_stats['raw_avg'].iloc[0]:.6f}")
+    print(f"  Standard avg: {spread_stats['std_avg'].iloc[0]:.6f}")
+    print(f"  Ratio: {spread_stats['ratio'].iloc[0]:.4f}")
+
+    conn.close()
+    return results
+
+
+def main():
+    """Main test workflow."""
+    print("=" * 70)
+    print("Unified DuckDB Architecture Test")
+    print("=" * 70)
+    print(f"Test directory: /tmp/exness-duckdb-test")
+    print(f"Test month: EURUSD September 2024")
+    print()
+
+    test_dir = Path("/tmp/exness-duckdb-test")
+    keep_files = "--keep" in sys.argv
+
+    # Step 1: Download both variants
+    print("\n" + "=" * 70)
+    print("Step 1: Downloading Both Variants")
+    print("=" * 70)
+
+    raw_zip = download_variant(2024, 9, "raw_spread", test_dir)
+    std_zip = download_variant(2024, 9, "standard", test_dir)
+
+    # Step 2: Extract ticks
+    print("\n" + "=" * 70)
+    print("Step 2: Extracting Tick Data")
+    print("=" * 70)
+
+    raw_df = extract_ticks_from_zip(raw_zip)
+    std_df = extract_ticks_from_zip(std_zip)
+
+    # Step 3: Create unified DuckDB
+    db_path = test_dir / "eurusd_2024_09.duckdb"
+    db_stats = create_unified_duckdb(raw_df, std_df, db_path)
+
+    # Step 4: Run benchmarks
+    bench_results = run_benchmarks(db_path)
+
+    # Step 5: Validate phase7 methodology
+    validation_results = validate_phase7_methodology(db_path)
+
+    # Step 6: Final results
+    print("\n" + "=" * 70)
+    print("Final Results")
+    print("=" * 70)
+
+    db_size_mb = db_path.stat().st_size / 1024 / 1024
+    raw_zip_mb = raw_zip.stat().st_size / 1024 / 1024
+    std_zip_mb = std_zip.stat().st_size / 1024 / 1024
+
+    print(f"\nStorage:")
+    print(f"  Unified DuckDB: {db_size_mb:.2f} MB")
+    print(f"  Raw_Spread ZIP: {raw_zip_mb:.2f} MB")
+    print(f"  Standard ZIP: {std_zip_mb:.2f} MB")
+    print(f"  Total ZIPs: {raw_zip_mb + std_zip_mb:.2f} MB")
+    print(f"  Compression: {db_size_mb / (raw_zip_mb + std_zip_mb):.2f}x vs ZIPs")
+
+    print(f"\nData Counts:")
+    print(f"  Raw_Spread ticks: {db_stats['raw_spread_ticks']:,}")
+    print(f"  Standard ticks: {db_stats['standard_ticks']:,}")
+    print(f"  OHLC 1m bars: {db_stats['ohlc_1m']:,}")
+
+    print(f"\nQuery Performance:")
+    print(f"  Tick count query: {bench_results['tick_count_query_ms']:.2f}ms")
+    print(f"  OHLC query: {bench_results['ohlc_query_ms']:.2f}ms")
+    print(f"  5m resample: {bench_results['resample_5m_ms']:.2f}ms")
+    print(f"  1h resample: {bench_results['resample_1h_ms']:.2f}ms")
+
+    print(f"\nPhase7 Validation:")
+    all_pass = all(validation_results.values())
+    print(f"  OHLC integrity: {'✓' if validation_results['ohlc_integrity'] else '✗'}")
+    print(f"  Spread non-negative: {'✓' if validation_results['spread_non_negative'] else '✗'}")
+    print(f"  Tick counts positive: {'✓' if validation_results['tick_counts_positive'] else '✗'}")
+    print(f"  Minute aligned: {'✓' if validation_results['minute_aligned'] else '✗'}")
+    print(f"  Schema correct: {'✓' if validation_results['schema_correct'] else '✗'}")
+    print(f"  Overall: {'✓ ALL PASS' if all_pass else '✗ SOME FAILURES'}")
+
+    # Save results
+    results = {
+        "test_date": datetime.now(timezone.utc).isoformat(),
+        "storage": {
+            "duckdb_mb": db_size_mb,
+            "raw_zip_mb": raw_zip_mb,
+            "std_zip_mb": std_zip_mb,
+            "compression_ratio": db_size_mb / (raw_zip_mb + std_zip_mb)
+        },
+        "data_counts": db_stats,
+        "benchmarks": bench_results,
+        "validation": validation_results,
+        "success": all_pass
+    }
+
+    results_path = test_dir / "benchmark_results.json"
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\n✓ Results saved: {results_path}")
+
+    # Cleanup
+    if not keep_files:
+        print(f"\nCleaning up...")
+        raw_zip.unlink()
+        std_zip.unlink()
+        print(f"  ✓ Deleted ZIPs (freed {raw_zip_mb + std_zip_mb:.2f} MB)")
+        print(f"  Keeping: {db_path.name}, {results_path.name}")
+    else:
+        print(f"\nKeeping all files (--keep flag)")
+
+    print("\n" + "=" * 70)
+    print("Test Complete!")
+    print("=" * 70)
+
+    return 0 if all_pass else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

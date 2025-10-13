@@ -1,0 +1,450 @@
+# Data Architecture Recommendation for Quantitative Research
+
+## Your Requirements
+
+- 3 years of EURUSD 1-minute OHLC data
+- Occasional tick-level analysis
+- Hate storing lots of raw data locally
+- Want good compression
+- Need fast query speed
+- Want hierarchical structure
+
+## Recommended Approach: Three-Tier Architecture
+
+### Tier 1: Archive Layer (Raw Tick Data)
+
+**Storage**: Keep Exness ZIP files (or delete after processing)
+**Size**: ~100 MB/month compressed → 3.6 GB for 3 years
+**Access**: Download on-demand when needed
+
+```
+data/
+├── archives/
+│   ├── 2022/
+│   │   ├── Exness_EURUSD_Raw_Spread_2022_01.zip
+│   │   ├── Exness_EURUSD_Raw_Spread_2022_02.zip
+│   │   └── ...
+│   ├── 2023/
+│   └── 2024/
+```
+
+**Strategy**:
+
+- Keep last 3-6 months of ZIPs for quick reprocessing
+- Delete older ZIPs (can re-download from Exness if needed)
+- Total storage: 300-600 MB (vs 3.6 GB for all)
+
+### Tier 2: Working Layer (DuckDB OHLC)
+
+**Storage**: DuckDB database with aggregated OHLC
+**Size**: ~28 MB for 3 years of 1-minute data
+**Access**: Instant SQL queries
+
+```
+data/
+├── duckdb/
+│   ├── eurusd_1m_2022-2024.duckdb        (28 MB - 3 years OHLC)
+│   ├── strategy_v1.duckdb                 (your indicators)
+│   └── strategy_v2.duckdb                 (next iteration)
+```
+
+**Benefits**:
+
+- 130x smaller than raw tick data
+- Instant queries (no decompression)
+- Embedded metadata (comments on columns)
+- Perfect for your 31K rows/month × 36 months = 1.1M rows
+
+### Tier 3: Analysis Layer (Parquet Cache - Optional)
+
+**Storage**: Parquet files for active tick-level analysis
+**Size**: ~45 MB/month uncompressed → 1.6 GB for 3 years
+**Access**: Fast columnar reads
+
+```
+data/
+├── parquet_cache/
+│   ├── eurusd_ticks_2024_08.parquet      (45 MB)
+│   └── eurusd_ticks_2024_09.parquet      (45 MB)
+```
+
+**Strategy**:
+
+- Only create for months you're actively analyzing
+- DuckDB can query Parquet directly (no loading needed!)
+- Delete after analysis complete
+
+---
+
+## DuckDB Hierarchical Approach
+
+### Option A: Single Database with Multiple Tables (Recommended)
+
+```python
+import duckdb
+
+conn = duckdb.connect('eurusd_master.duckdb')
+
+# Create schema for organization
+conn.execute("CREATE SCHEMA IF NOT EXISTS ohlc")
+conn.execute("CREATE SCHEMA IF NOT EXISTS indicators")
+conn.execute("CREATE SCHEMA IF NOT EXISTS signals")
+
+# Create tables in each schema
+conn.execute("""
+    CREATE TABLE ohlc.m1_2022 AS
+    SELECT * FROM read_csv('processed/eurusd_1m_2022.csv')
+""")
+
+conn.execute("""
+    CREATE TABLE ohlc.m1_2023 AS
+    SELECT * FROM read_csv('processed/eurusd_1m_2023.csv')
+""")
+
+conn.execute("""
+    CREATE TABLE ohlc.m1_2024 AS
+    SELECT * FROM read_csv('processed/eurusd_1m_2024.csv')
+""")
+
+# Create view for unified access
+conn.execute("""
+    CREATE VIEW ohlc.m1_all AS
+    SELECT * FROM ohlc.m1_2022
+    UNION ALL
+    SELECT * FROM ohlc.m1_2023
+    UNION ALL
+    SELECT * FROM ohlc.m1_2024
+    ORDER BY Timestamp
+""")
+
+# Query across all years instantly
+df = conn.execute("SELECT * FROM ohlc.m1_all WHERE rsi_14 < 30").df()
+```
+
+**Benefits**:
+
+- Hierarchical organization (schemas)
+- Single database file
+- Fast queries across all years
+- ~28 MB total for 3 years
+
+### Option B: Multiple Databases with ATTACH (Alternative)
+
+```python
+import duckdb
+
+conn = duckdb.connect('strategy_2024.duckdb')
+
+# Attach other years
+conn.execute("ATTACH 'eurusd_2022.duckdb' AS db_2022 (READ_ONLY)")
+conn.execute("ATTACH 'eurusd_2023.duckdb' AS db_2023 (READ_ONLY)")
+
+# Query across databases
+conn.execute("""
+    SELECT * FROM db_2022.ohlc
+    UNION ALL
+    SELECT * FROM db_2023.ohlc
+    UNION ALL
+    SELECT * FROM main.ohlc
+    WHERE rsi_14 < 30
+""")
+```
+
+---
+
+## DuckDB's Killer Feature: Direct Parquet Queries
+
+**You don't need to load Parquet into DuckDB!**
+
+```python
+# Query Parquet files directly (no loading)
+conn = duckdb.connect()
+
+# Single file
+df = conn.execute("""
+    SELECT * FROM 'data/parquet_cache/eurusd_ticks_2024_08.parquet'
+    WHERE Bid > 1.08 AND Ask - Bid < 0.0001
+""").df()
+
+# Multiple files with glob pattern
+df = conn.execute("""
+    SELECT
+        DATE_TRUNC('month', Timestamp) as month,
+        AVG(Ask - Bid) as avg_spread
+    FROM 'data/parquet_cache/eurusd_ticks_2024_*.parquet'
+    GROUP BY DATE_TRUNC('month', Timestamp)
+""").df()
+
+# Mix DuckDB tables with Parquet files
+df = conn.execute("""
+    SELECT
+        ohlc.Timestamp,
+        ohlc.Close,
+        AVG(ticks.Ask - ticks.Bid) as avg_spread_during_bar
+    FROM 'eurusd_1m_2024.duckdb'.ohlc
+    LEFT JOIN 'data/parquet_cache/eurusd_ticks_2024_*.parquet' ticks
+        ON DATE_TRUNC('minute', ticks.Timestamp) = ohlc.Timestamp
+    GROUP BY ohlc.Timestamp, ohlc.Close
+""").df()
+```
+
+---
+
+## Storage Comparison for 3 Years
+
+| Storage Method             | Size      | Query Speed       | Use Case         |
+| -------------------------- | --------- | ----------------- | ---------------- |
+| **Exness ZIP (raw ticks)** | 3.6 GB    | Slow (decompress) | Archive only     |
+| **Parquet (all ticks)**    | 1.6 GB    | Fast              | Tick analysis    |
+| **DuckDB (1m OHLC)**       | **28 MB** | **Fastest**       | **Daily work** ✓ |
+| **CSV (1m OHLC)**          | 180 MB    | Slow              | Not recommended  |
+
+**Recommendation**:
+
+- Keep DuckDB OHLC (28 MB) for daily work
+- Create Parquet tick data only when needed
+- Delete Exness ZIPs after processing (can re-download)
+
+---
+
+## Complete Workflow Example
+
+```python
+import duckdb
+from pathlib import Path
+
+# 1. Setup master database
+conn = duckdb.connect('data/duckdb/eurusd_master.duckdb')
+
+# 2. Process one month at a time
+def process_month(year, month):
+    """Process Exness ZIP → DuckDB OHLC"""
+    zip_path = f'data/archives/{year}/Exness_EURUSD_Raw_Spread_{year}_{month:02d}.zip'
+
+    # Load and process (your existing code)
+    df_ticks = load_exness_data(zip_path)
+    ohlc = construct_bid_ohlc(df_ticks, freq='1min')
+
+    # Insert into DuckDB
+    table_name = f'ohlc_{year}_{month:02d}'
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM ohlc")
+    conn.execute(f"COMMENT ON TABLE {table_name} IS 'EURUSD 1m OHLC for {year}-{month:02d}'")
+
+    # Optional: Save tick data as Parquet if needed
+    if need_tick_analysis:
+        parquet_path = f'data/parquet_cache/eurusd_ticks_{year}_{month:02d}.parquet'
+        df_ticks.to_parquet(parquet_path, compression='zstd')
+
+    # Delete ZIP to save space (can re-download)
+    # Path(zip_path).unlink()
+
+# 3. Create unified view
+conn.execute("""
+    CREATE OR REPLACE VIEW ohlc_all AS
+    SELECT * FROM ohlc_2022_*
+    UNION ALL BY NAME
+    SELECT * FROM ohlc_2023_*
+    UNION ALL BY NAME
+    SELECT * FROM ohlc_2024_*
+    ORDER BY Timestamp
+""")
+
+# 4. Query across all 3 years (1.1M rows) instantly
+signals = conn.execute("""
+    SELECT
+        DATE_TRUNC('month', Timestamp) as month,
+        COUNT(*) as total_bars,
+        COUNT(*) FILTER (WHERE rsi_14 < 30) as oversold_signals
+    FROM ohlc_all
+    GROUP BY DATE_TRUNC('month', Timestamp)
+    ORDER BY month
+""").df()
+
+print(signals)
+```
+
+---
+
+## Disk Space Estimate
+
+### Minimal Setup (Recommended)
+
+```
+data/
+├── duckdb/
+│   └── eurusd_master.duckdb              28 MB  (3 years OHLC)
+└── archives/ (last 3 months)            300 MB  (can re-download older)
+                                        ─────────
+                                Total:   328 MB  ✓
+```
+
+### Full Archive Setup
+
+```
+data/
+├── duckdb/
+│   └── eurusd_master.duckdb              28 MB
+├── archives/ (all 36 months)          3,600 MB
+└── parquet_cache/ (optional)          1,600 MB
+                                        ─────────
+                                Total:  5,228 MB
+```
+
+---
+
+## Query Speed Comparison
+
+**Test**: Count rows where RSI < 30 across 3 years (1.1M rows)
+
+| Method              | Time       | Notes                           |
+| ------------------- | ---------- | ------------------------------- |
+| **DuckDB OHLC**     | **~5 ms**  | Columnar, compressed, indexed ✓ |
+| Parquet (all files) | ~50 ms     | Need to read multiple files     |
+| CSV (all files)     | ~500 ms    | Row-based, slow parsing         |
+| ZIP archives        | ~5 seconds | Decompress → parse → filter     |
+
+---
+
+## Final Recommendation
+
+### For Your Use Case (Occasional Tick Analysis):
+
+**Tier 1: Archive (Optional)**
+
+- Keep last 3-6 months of Exness ZIPs
+- Delete older (can re-download)
+- Cost: 300-600 MB
+
+**Tier 2: Working Data (Required)**
+
+- Single DuckDB with 3 years OHLC
+- Cost: 28 MB ✓
+
+**Tier 3: Analysis Cache (On-Demand)**
+
+- Create Parquet tick data only when needed
+- Delete after analysis
+- Cost: 0-200 MB (transient)
+
+**Total Disk Usage: 300-800 MB** (vs 3.6 GB for everything)
+
+**Query Speed**: Instant (DuckDB columnar OHLC)
+**Flexibility**: Can analyze ticks on-demand
+**Scalability**: Easily add more years
+
+---
+
+## DuckDB Advantages for Hierarchical Data
+
+1. **Schemas**: Organize tables logically
+
+   ```sql
+   CREATE SCHEMA ohlc;
+   CREATE SCHEMA indicators;
+   CREATE SCHEMA signals;
+   ```
+
+2. **Views**: Abstract complexity
+
+   ```sql
+   CREATE VIEW ohlc_all AS SELECT * FROM ohlc_*
+   ```
+
+3. **Direct Parquet queries**: No loading needed
+
+   ```sql
+   SELECT * FROM 'data/*.parquet' WHERE ...
+   ```
+
+4. **Multiple database ATTACH**: Reference other databases
+
+   ```sql
+   ATTACH 'other.duckdb' AS other_db
+   ```
+
+5. **Excellent compression**: 130x smaller than raw ticks
+
+6. **Metadata**: Document every column
+   ```sql
+   COMMENT ON COLUMN ohlc.rsi_14 IS '14-period RSI'
+   ```
+
+---
+
+## When to Use Each Format
+
+| Format      | When to Use                                    |
+| ----------- | ---------------------------------------------- |
+| **DuckDB**  | Daily analysis (OHLC, indicators, signals) ✓   |
+| **Parquet** | Tick-level analysis (temporary cache)          |
+| **ZIP**     | Long-term archive (or delete after processing) |
+| **CSV**     | Never (slow, large, no benefits)               |
+
+---
+
+## Migration Path
+
+**Phase 1**: Convert to DuckDB OHLC
+
+```bash
+# Process all 36 months → single DuckDB
+python process_historical_data.py --years 2022-2024
+# Result: 28 MB eurusd_master.duckdb
+```
+
+**Phase 2**: Add indicators iteratively
+
+```python
+conn = duckdb.connect('eurusd_master.duckdb')
+conn.execute("ALTER TABLE ohlc_all ADD COLUMN rsi_14 DOUBLE")
+# ...
+```
+
+**Phase 3**: Query for signals
+
+```python
+signals = conn.execute("""
+    SELECT * FROM ohlc_all
+    WHERE rsi_14 < 30 AND macd_histogram > 0
+""").df()
+```
+
+**Phase 4**: Tick analysis (only when needed)
+
+```python
+# Create Parquet cache for specific month
+df_ticks = load_exness_zip('2024_08.zip')
+df_ticks.to_parquet('cache/2024_08.parquet')
+
+# Query directly
+conn.execute("""
+    SELECT AVG(Ask - Bid) as spread
+    FROM 'cache/2024_08.parquet'
+    WHERE HOUR(Timestamp) BETWEEN 8 AND 16
+""")
+
+# Delete cache when done
+Path('cache/2024_08.parquet').unlink()
+```
+
+---
+
+## Conclusion
+
+**Use DuckDB for OHLC** (your primary workflow):
+
+- ✓ 28 MB for 3 years
+- ✓ Instant queries
+- ✓ Embedded metadata
+- ✓ Hierarchical organization
+- ✓ Can query Parquet directly when needed
+
+**Keep raw ticks minimal**:
+
+- ✗ Don't store all 3.6 GB of ZIPs
+- ✓ Keep last 3-6 months only
+- ✓ Create Parquet cache on-demand
+- ✓ Delete after analysis
+
+**Total disk usage: 300-800 MB** (vs 3.6 GB)
+**Query speed: 5 ms** (vs 5 seconds from ZIPs)

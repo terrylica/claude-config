@@ -1,0 +1,175 @@
+"""
+Investigate why mult2 RSI is biased so high (mean 0.9756).
+
+This could indicate a bug in the multi-interval resampling logic.
+"""
+import numpy as np
+import pandas as pd
+import sys
+sys.path.insert(0, '/Users/terryli/eon/atr-adaptive-laguerre/src')
+
+from atr_adaptive_laguerre.features.atr_adaptive_rsi import (
+    ATRAdaptiveLaguerreRSI,
+    ATRAdaptiveLaguerreRSIConfig,
+)
+
+# Generate various datasets to test mult2 RSI bias
+test_cases = [
+    ("Random Walk", lambda n: 100 + np.cumsum(np.random.randn(n) * 2)),
+    ("Sine Wave", lambda n: 100 + 10 * np.sin(np.linspace(0, 10*np.pi, n))),
+    ("Linear Up", lambda n: 100 + np.linspace(0, 50, n)),
+    ("Linear Down", lambda n: 150 - np.linspace(0, 50, n)),
+    ("Flat", lambda n: np.ones(n) * 100),
+]
+
+np.random.seed(42)
+n_bars = 1000
+
+results = []
+
+for name, price_func in test_cases:
+    dates = pd.date_range("2024-01-01", periods=n_bars, freq="2h")
+    price = price_func(n_bars)
+
+    data = pd.DataFrame({
+        "date": dates,
+        "open": price,
+        "high": price + np.abs(np.random.randn(n_bars) * 0.5),
+        "low": price - np.abs(np.random.randn(n_bars) * 0.5),
+        "close": price + np.random.randn(n_bars) * 0.1,
+        "volume": np.ones(n_bars) * 1000000,
+    })
+
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        filter_redundancy=False,
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+    features = indicator.fit_transform_features(data)
+
+    # Extract RSI stats
+    rsi_base = features['rsi_base']
+    rsi_mult1 = features['rsi_mult1']
+    rsi_mult2 = features['rsi_mult2']
+
+    results.append({
+        'name': name,
+        'base_mean': rsi_base.mean(),
+        'base_std': rsi_base.std(),
+        'mult1_mean': rsi_mult1.mean(),
+        'mult1_std': rsi_mult1.std(),
+        'mult2_mean': rsi_mult2.mean(),
+        'mult2_std': rsi_mult2.std(),
+    })
+
+print("="*80)
+print("MULT2 RSI BIAS INVESTIGATION")
+print("="*80)
+
+print("\nRSI Statistics Across Different Price Patterns:\n")
+print(f"{'Pattern':<20} {'Base Mean':<12} {'Mult1 Mean':<12} {'Mult2 Mean':<12}")
+print("-" * 80)
+for r in results:
+    print(f"{r['name']:<20} {r['base_mean']:>11.4f} {r['mult1_mean']:>11.4f} {r['mult2_mean']:>11.4f}")
+
+print("\n" + "="*80)
+print("ANALYSIS")
+print("="*80)
+
+# Check if there's a systematic bias
+mult2_means = [r['mult2_mean'] for r in results]
+if all(m > 0.8 for m in mult2_means):
+    print("\n⚠️  CRITICAL FINDING: Mult2 RSI is SYSTEMATICALLY BIASED HIGH!")
+    print(f"   All test cases show mult2_mean > 0.8")
+    print(f"   Range: {min(mult2_means):.4f} - {max(mult2_means):.4f}")
+    print("\n   POTENTIAL CAUSES:")
+    print("   1. Laguerre filter initialization bias with long periods")
+    print("   2. Bug in mult2 resampling/alignment logic")
+    print("   3. Insufficient warmup period for 12× multiplier")
+    print("   4. Incorrect handling of aligned timestamps")
+else:
+    print("\n✓ Mult2 RSI responds normally to different patterns")
+
+# Deep dive into warmup period
+print("\n" + "="*80)
+print("WARMUP PERIOD ANALYSIS")
+print("="*80)
+
+# Test with random walk
+dates = pd.date_range("2024-01-01", periods=n_bars, freq="2h")
+price = 100 + np.cumsum(np.random.randn(n_bars) * 2)
+data = pd.DataFrame({
+    "date": dates,
+    "open": price,
+    "high": price + np.abs(np.random.randn(n_bars) * 0.5),
+    "low": price - np.abs(np.random.randn(n_bars) * 0.5),
+    "close": price + np.random.randn(n_bars) * 0.1,
+    "volume": np.ones(n_bars) * 1000000,
+})
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+features = indicator.fit_transform_features(data)
+
+# Check RSI evolution over time
+rsi_mult2 = features['rsi_mult2']
+
+print(f"\nMult2 RSI evolution (Random Walk):")
+print(f"  First 100 bars: mean={rsi_mult2.iloc[:100].mean():.4f}, std={rsi_mult2.iloc[:100].std():.4f}")
+print(f"  Bars 100-500:   mean={rsi_mult2.iloc[100:500].mean():.4f}, std={rsi_mult2.iloc[100:500].std():.4f}")
+print(f"  Last 500 bars:  mean={rsi_mult2.iloc[500:].mean():.4f}, std={rsi_mult2.iloc[500:].std():.4f}")
+
+# Check if mult2 is stuck at initialization value
+if rsi_mult2.std() < 0.01:
+    print("\n⚠️  CRITICAL: Mult2 RSI has near-zero variance!")
+    print(f"   std={rsi_mult2.std():.6f}")
+    print(f"   This indicates mult2 is not properly updating")
+else:
+    print(f"\n   Mult2 RSI variance: {rsi_mult2.std():.4f} (OK)")
+
+# Check unique values
+n_unique = rsi_mult2.nunique()
+print(f"   Unique values: {n_unique}/{len(rsi_mult2)} ({100*n_unique/len(rsi_mult2):.1f}%)")
+
+if n_unique < 10:
+    print("   ⚠️  Very few unique values - mult2 may not be updating properly")
+    print(f"   Values: {sorted(rsi_mult2.unique())[:10]}")
+
+print("\n" + "="*80)
+print("CONCLUSION")
+print("="*80)
+
+avg_mult2_mean = np.mean(mult2_means)
+if avg_mult2_mean > 0.9:
+    print(f"""
+⚠️  SEVERE BUG SUSPECTED in mult2 RSI calculation!
+
+Average mult2 RSI across all patterns: {avg_mult2_mean:.4f}
+
+Expected behavior:
+- RSI should oscillate between 0 and 1
+- Mean should be ~0.5 for random walk
+- Different patterns should produce different RSI distributions
+
+Observed behavior:
+- Mult2 RSI stuck near 1.0 regardless of price pattern
+- Indicates Laguerre filter or resampling logic is broken
+
+RECOMMENDATION:
+1. Check MultiIntervalProcessor._resample_to_base_bars()
+2. Verify Laguerre filter initialization for long periods
+3. Test with longer datasets (>10,000 bars) to rule out warmup
+4. These 6 "constant" features may actually work IF mult2 RSI is fixed
+""")
+else:
+    print(f"""
+✓ Mult2 RSI appears to function correctly (mean={avg_mult2_mean:.4f})
+
+The 6 constant features are genuinely rare event detectors.
+Removal is appropriate for typical market conditions.
+""")

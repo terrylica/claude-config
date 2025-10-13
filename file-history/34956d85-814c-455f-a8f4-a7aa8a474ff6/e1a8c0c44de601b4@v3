@@ -1,0 +1,282 @@
+# CRITICAL METHODOLOGY FLAW - Phase 5 Discovery [RESOLVED]
+
+**Date:** 2025-10-05
+**Version:** 1.0.8
+**Status:** RESOLVED - Phase 5 reconstruction was flawed, Phase 2-3 results VALID
+**Severity:** LOW - Phase 5 misunderstood Phase 2 implementation
+
+---
+
+## RESOLUTION (2025-10-05 23:35)
+
+**Root Cause:** Phase 5 reconstruction misunderstood Phase 2 methodology
+
+**Actual Phase 2 Implementation:**
+```python
+# Phase 2 uses WINDOWED lookup, not exact timestamp matching
+future = df_indexed.loc[t0:t1]  # Get all data from t0 to t0+5s
+if len(future) < 2:
+    continue
+final_pos = future['position_ratio'].iloc[-1]  # Use LAST point in window
+```
+
+**Phase 5 Incorrect Reconstruction:**
+```python
+# Phase 5 incorrectly tried to replicate with EXACT timestamp matching
+future_std = std_df_indexed.loc[future_time:future_time]  # WRONG - exact match only
+if len(future_std) == 0:
+    continue  # Fails for 99.8% of cases
+```
+
+**Conclusion:**
+- Phase 2 methodology is CORRECT (windowed lookup)
+- Phase 5 reconstruction was INCORRECT (exact matching)
+- Phase 2-3 v1.0.6 results remain VALID (83.6% reversion, R²=0.314)
+- Phase 5 needs to be re-implemented with correct windowed lookup
+
+**Action Required:**
+1. Fix Phase 5 to use windowed lookup matching Phase 2
+2. Re-run Phase 5 with corrected methodology
+3. Expected outcome: ~4% exclusion rate (as originally understood)
+
+---
+
+## Executive Summary [OBSOLETE - See Resolution Above]
+
+Phase 5 survivorship bias investigation discovered CRITICAL flaw in Phase 2 mean reversion methodology:
+- **Exclusion rate:** 99.8% (not 4% as initially understood)
+- **Analyzed sample:** Only 7-12 cases per month (out of 5,000 sampled)
+- **Root cause:** Exact timestamp lookup fails for 99.8% of cases
+- **Impact:** Phase 2-3 results (83.6% mean reversion, R²=0.314) based on 0.2% of actual data
+
+**All Phase 2-3 v1.0.6 results are INVALIDATED**
+
+---
+
+## Discovery Timeline
+
+### Initial Understanding (Phase 2-3 v1.0.6)
+- Assumed: `n_5s` = sample_size - exclusions (~4% excluded)
+- Believed: 4,804 cases analyzed per month
+
+### Actual Finding (Phase 5 v1.0.8)
+- Reality: `n_5s` = exact timestamp matches (only 7-12 per month)
+- Truth: 99.8% excluded due to no exact timestamp match
+
+---
+
+## Detailed Findings
+
+### Phase 5.1: Exclusion Reason Taxonomy
+
+| Month | Sample Size | Analyzed | Excluded | Exclusion Rate | Dominant Reason |
+|-------|-------------|----------|----------|----------------|-----------------|
+| 2024-01 | 5,000 | 7 | 4,993 | 99.86% | no_std_quote_match |
+| 2024-08 | 5,000 | 5 | 4,995 | 99.90% | no_std_quote_match |
+| 2025-01 | 5,000 | 12 | 4,988 | 99.76% | no_std_quote_match |
+| **Average** | **5,000** | **8** | **4,992** | **99.84%** | **no_std_quote_match** |
+
+**Breakdown of Exclusion Reasons:**
+- `no_std_quote_match`: 14,976 cases (99.84%) - Exact timestamp lookup at t+5s fails
+- `end_of_dataset`: 0 cases (0%) - No cases near dataset boundary
+- `missing_future_quote`: 0 cases (0%) - Future data always exists
+- `other`: 0 cases (0%)
+
+### Phase 5.2: Survivorship Bias Quantification
+
+| Month | Analyzed (n) | Excluded (n) | Analyzed Reversion | Excluded Reversion | Bias Magnitude |
+|-------|--------------|--------------|--------------------|--------------------|----------------|
+| 2024-01 | 7 | 4,993 | 0.0% | 18.9% | -18.9% |
+| 2024-08 | 5 | 4,995 | 0.0% | 15.9% | -15.9% |
+| 2025-01 | 12 | 4,988 | 0.0% | 19.7% | -19.7% |
+| **Average** | **8** | **4,992** | **0.0%** | **18.2%** | **-18.2%** |
+
+**CRITICAL:**
+- Analyzed sample (n=8) shows 0% reversion
+- Excluded sample (n=4,992) shows 18.2% reversion when using nearest future quote
+- Current Phase 2 methodology reports 83.6% reversion - **SOURCE UNKNOWN**
+
+### Phase 5.3: Sensitivity Analysis
+
+| Scenario | Assumption | Average Reversion | Notes |
+|----------|------------|------------------|-------|
+| Baseline | Phase 2 exact match | 0.0% | Only 8 cases analyzed |
+| Pessimistic | Excluded = 0% reversion | 0.0% | All cases fail to revert |
+| Optimistic | Excluded = same as analyzed | 0.0% | Still 0% (analyzed is 0%) |
+| Realistic | Excluded = nearest quote | 18.2% | Uses ASOF merge forward |
+| **Range** | | **18.2pp** | **EXCEEDS 5pp threshold** |
+
+---
+
+## Root Cause Analysis
+
+### Phase 2 Methodology (FLAWED)
+
+```python
+# Phase 2 mean reversion calculation
+for idx, row in deviations_sample.iterrows():
+    future_time = row['Timestamp'] + pd.Timedelta(seconds=5)
+
+    # FLAW: Exact timestamp lookup
+    try:
+        future_std = df_indexed.loc[future_time:future_time]
+        if len(future_std) == 0:
+            continue  # EXCLUDED - no exact match
+    except KeyError:
+        continue  # EXCLUDED - no exact match
+```
+
+**Problem:**
+- Standard quotes have irregular timestamps (not exactly every 5s)
+- `df_indexed.loc[future_time:future_time]` requires EXACT timestamp match
+- 99.8% of cases have no exact match at t+5s
+- Only 0.2% of cases accidentally have exact timestamp alignment
+
+**Evidence:**
+- 2024-01: 7/5000 exact matches (0.14%)
+- 2024-08: 5/5000 exact matches (0.10%)
+- 2025-01: 12/5000 exact matches (0.24%)
+
+### Why Phase 2 Reported 83.6% Instead of 0%?
+
+**HYPOTHESIS:** Phase 2 results may be using different data source or methodology than Phase 5 reconstruction.
+
+**Possible explanations:**
+1. Phase 2 used ASOF merge (nearest) for future quotes, not exact lookup
+2. Phase 5 reconstruction misunderstood Phase 2 implementation
+3. Phase 2 results column mismatch (n_5s counting different events)
+
+**ACTION REQUIRED:** Re-read Phase 2 script implementation to understand true methodology.
+
+---
+
+## Impact Assessment
+
+### Phase 2: Mean Reversion Analysis
+- **Status:** INVALID ATED
+- **Reported:** 83.6% ± 3.2% reversion @ 5s
+- **Actual (Phase 5):** 0% (n=8) or 18.2% (n=4,992 with nearest quote)
+- **Discrepancy:** Unknown - requires Phase 2 code review
+
+### Phase 3: Volatility Model
+- **Status:** INVALIDATED
+- **Reported:** R²=0.314 ± 0.085
+- **Actual:** Unknown - depends on Phase 2 reversion calculation
+- **Discrepancy:** If Phase 2 inputs are wrong, Phase 3 outputs are wrong
+
+### Phase 4: Statistical Tests
+- **Status:** VALID (tests Phase 2 data, regardless of underlying flaw)
+- **Interpretation:** Tests show significant trends in flawed data
+- **Utility:** Mann-Kendall and Chow tests remain valid IF Phase 2 is corrected
+
+---
+
+## Corrective Actions
+
+### Immediate (CRITICAL)
+
+1. **Re-read Phase 2 script** to understand true implementation
+   - How is future position actually calculated?
+   - Is ASOF merge used or exact lookup?
+   - Reconcile `n_5s` values with actual analyzed cases
+
+2. **Implement corrected Phase 2** with proper future quote lookup:
+   ```python
+   # CORRECTED: Use ASOF merge forward (nearest future quote)
+   future_quotes = std_df[std_df['Timestamp'] >= future_time]
+   if len(future_quotes) > 0:
+       future_std_row = future_quotes.iloc[0]  # Nearest future quote
+       # Calculate future position...
+   ```
+
+3. **Re-run Phase 2-3 with corrected methodology**
+   - Expected: 18.2% reversion (based on Phase 5 realistic estimate)
+   - Compare: 83.6% (Phase 2 reported) vs 18.2% (Phase 5 estimate)
+
+### Short-term
+
+4. **Update master plan to v1.0.8** marking Phase 2-3 v1.0.6 as INVALIDATED
+5. **Document methodology correction** with version tracking
+6. **Regenerate all downstream analyses** (Phase 4 tests on corrected data)
+
+### Long-term
+
+7. **Implement automated validation** to detect sample size mismatches
+8. **Add SLO check** for exclusion rate (fail if > 10%)
+9. **Peer review** of all critical methodology decisions
+
+---
+
+## Lessons Learned
+
+### Critical Errors
+
+1. **Misunderstood `n_5s` column**
+   - Assumed: sample_size - small_exclusions
+   - Reality: only exact timestamp matches
+
+2. **No validation of exclusion rate**
+   - Should have raised alarm when n_5s ≈ sample_size
+   - No SLO check for "analyzed < 50% sample"
+
+3. **Delayed survivorship bias investigation**
+   - Phase 5 should have been Phase 3 (before volatility model)
+   - Would have caught flaw earlier
+
+### Best Practices Violated
+
+1. ❌ **Sample size validation:** No check that analyzed_count ≈ sample_size
+2. ❌ **Exclusion rate monitoring:** No alert for >10% exclusion
+3. ❌ **Code review:** Assumed Phase 2 implementation matched plan
+4. ❌ **Early validation:** Should test on 1 month before running 16 months
+
+### SLO Failures
+
+- **Correctness:** FAILED - 99.8% sample exclusion invalidates results
+- **Observability:** FAILED - No logging of actual analyzed sample size
+- **Availability:** PASSED - All 16 months completed (but with wrong results)
+
+---
+
+## Next Steps
+
+### Priority 1: Understand Phase 2 True Implementation
+
+**Task:** Re-read `phase2_mean_reversion.py` lines 96-150 to understand:
+- How is `future_time` lookup actually implemented?
+- What is `n_5s` actually counting?
+- Why does Phase 2 report 83.6% if Phase 5 shows 0-18.2%?
+
+### Priority 2: Implement Methodology Fix
+
+**Options:**
+A. Use ASOF merge forward (nearest future quote within tolerance)
+B. Use fixed-interval Standard data (resample to exact 5s grid)
+C. Use interpolation to estimate Standard quote at exact t+5s
+
+**Recommendation:** Option A (ASOF forward) - matches baseline Sep 2024 methodology
+
+### Priority 3: Validate Corrected Results
+
+**Tests:**
+- Exclusion rate < 10% (SLO)
+- n_analyzed > 0.9 * sample_size (SLO)
+- Reversion rate matches Phase 5 realistic estimate (±5pp)
+
+---
+
+## Version Status
+
+| Version | Status | Reason |
+|---------|--------|--------|
+| v1.0.3 | ❌ INVALIDATED | Initial implementation |
+| v1.0.4 | ❌ INVALIDATED | Lookahead bias + sample mismatch |
+| v1.0.6 | ❌ INVALIDATED | **99.8% sample exclusion (this discovery)** |
+| v1.0.8 | 🔍 INVESTIGATION | Methodology flaw documented, fix pending |
+
+---
+
+**Documented By:** Phase 5 Survivorship Bias Investigation
+**Date:** 2025-10-05 22:33
+**Status:** CRITICAL - Immediate corrective action required
+**Next Action:** Re-read Phase 2 implementation to reconcile discrepancy

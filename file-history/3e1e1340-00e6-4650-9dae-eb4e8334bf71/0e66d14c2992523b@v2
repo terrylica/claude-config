@@ -1,0 +1,40 @@
+#!/bin/bash
+# Sequential download (one at a time)
+set -e
+WORK_DIR="/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis"
+
+cd "$WORK_DIR"
+
+echo "Sequential download: 1 month at a time"
+echo "Remaining: 2023-08,10,11,12 + 2024-01 to 2024-12"
+echo ""
+
+MONTHS=(
+    "2023 8"
+    "2023 10"
+    "2023 11"
+    "2023 12"
+    "2024 1" "2024 2" "2024 3" "2024 4" "2024 5" "2024 6"
+    "2024 7" "2024 8" "2024 9" "2024 10" "2024 11" "2024 12"
+)
+
+START=$(date +%s)
+count=0
+
+for month_pair in "${MONTHS[@]}"; do
+    year=$(echo $month_pair | cut -d' ' -f1)
+    month=$(echo $month_pair | cut -d' ' -f2)
+    count=$((count + 1))
+
+    echo "[$(date +%H:%M:%S)] [$count/16] Downloading $year-$(printf "%02d" $month)..."
+
+    uv run --active python scripts/download_month.py $year $month \
+        --ticks --market-type swap --data-dir data/ 2>&1 | \
+        grep -E "(✓ Saved|ERROR)"
+
+    echo "  ✓ Complete"
+done
+
+echo ""
+echo "Total time: $(( ($(date +%s) - START) / 60 )) minutes"
+echo "Files: $(find data/raw_ticks_swap -name "*.parquet" | wc -l | tr -d " ")/21"

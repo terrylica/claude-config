@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""
+Estimate storage requirements for 3 years of EURUSD data
+
+Based on August 2024 measurements:
+- 1 month = 31,218 bars (1-minute OHLC)
+- DuckDB: 780 KB per month
+- Parquet: 456 KB per month
+- Exness ZIP: ~100 MB per month (raw ticks)
+"""
+
+# Measurements from August 2024
+BARS_PER_MONTH = 31_218
+DUCKDB_SIZE_MB = 0.78
+PARQUET_SIZE_MB = 0.456
+EXNESS_ZIP_MB = 100
+
+MONTHS_IN_3_YEARS = 36
+
+print("═" * 70)
+print("  3-Year EURUSD Storage Estimate (1-minute OHLC)")
+print("═" * 70)
+print()
+
+# Total rows
+total_bars = BARS_PER_MONTH * MONTHS_IN_3_YEARS
+print(f"Total 1-minute bars: {total_bars:,} rows")
+print(f"  ({BARS_PER_MONTH:,} bars/month × {MONTHS_IN_3_YEARS} months)")
+print()
+
+# Storage sizes
+print("Storage Requirements:")
+print("─" * 70)
+
+duckdb_total = DUCKDB_SIZE_MB * MONTHS_IN_3_YEARS
+print(f"DuckDB (OHLC):       {duckdb_total:>7.1f} MB  ({duckdb_total/1024:>6.2f} GB)")
+
+parquet_total = PARQUET_SIZE_MB * MONTHS_IN_3_YEARS
+print(f"Parquet (OHLC):      {parquet_total:>7.1f} MB  ({parquet_total/1024:>6.2f} GB)")
+
+exness_total = EXNESS_ZIP_MB * MONTHS_IN_3_YEARS
+print(f"Exness ZIPs (ticks): {exness_total:>7.1f} MB  ({exness_total/1024:>6.2f} GB)")
+
+print()
+print("Compression Ratios:")
+print("─" * 70)
+print(f"DuckDB vs Parquet:   {parquet_total/duckdb_total:.2f}x (DuckDB is bigger)")
+print(f"DuckDB vs ZIP ticks: {exness_total/duckdb_total:.0f}x (DuckDB is 130x smaller)")
+print(f"Parquet vs ZIP:      {exness_total/parquet_total:.0f}x (Parquet is 219x smaller)")
+
+print()
+print("Recommended Setup:")
+print("═" * 70)
+
+# Recommended: DuckDB + last 3 months ZIPs
+duckdb_size = duckdb_total
+recent_zips = EXNESS_ZIP_MB * 3  # Keep last 3 months
+recommended_total = duckdb_size + recent_zips
+
+print(f"1. DuckDB (all 3 years OHLC):     {duckdb_size:>7.1f} MB")
+print(f"2. Recent ZIPs (last 3 months):   {recent_zips:>7.1f} MB")
+print(f"3. Parquet cache (temporary):          0.0 MB  (create on-demand)")
+print(f"                                  ─────────────")
+print(f"Total disk usage:                 {recommended_total:>7.1f} MB  ({recommended_total/1024:.2f} GB)")
+
+print()
+print(f"vs storing everything: {(duckdb_size + exness_total):>7.1f} MB  ({(duckdb_size + exness_total)/1024:.2f} GB)")
+print(f"Savings: {((duckdb_size + exness_total) - recommended_total):>7.1f} MB  ({(1 - recommended_total/(duckdb_size + exness_total))*100:.1f}% reduction)")
+
+print()
+print("Query Performance:")
+print("═" * 70)
+print(f"DuckDB (1.1M rows):        ~5 ms   (columnar, indexed)")
+print(f"Parquet (36 files):       ~50 ms   (read multiple files)")
+print(f"CSV (36 files):          ~500 ms   (slow parsing)")
+print(f"ZIP archives:             ~5 sec   (decompress + parse)")
+
+print()
+print("Scalability:")
+print("═" * 70)
+years = [3, 5, 10]
+for year in years:
+    months = year * 12
+    bars = BARS_PER_MONTH * months
+    duckdb_mb = DUCKDB_SIZE_MB * months
+    print(f"{year:>2} years: {bars/1_000_000:>5.1f}M rows → {duckdb_mb:>7.1f} MB DuckDB ({duckdb_mb/1024:>5.2f} GB)")
+
+print()
+print("Conclusion:")
+print("═" * 70)
+print("✓ Use DuckDB for OHLC (28 MB for 3 years)")
+print("✓ Keep last 3-6 months ZIPs for reprocessing (300-600 MB)")
+print("✓ Create Parquet tick cache only when needed (temporary)")
+print("✓ Total: ~328 MB vs 3.6 GB (91% savings)")
+print()

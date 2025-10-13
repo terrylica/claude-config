@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""
+Benchmark DuckDB vs Parquet: Read/Write Performance
+
+Tests:
+1. Write speed (initial creation)
+2. Full read speed (all columns)
+3. Partial read speed (3 columns)
+4. Filter query speed (WHERE clause)
+"""
+
+import time
+from pathlib import Path
+import pandas as pd
+import duckdb
+
+
+def benchmark_write(df: pd.DataFrame, runs: int = 5):
+    """Benchmark write performance."""
+    print("█ WRITE PERFORMANCE (Creating files from DataFrame)")
+    print("━" * 70)
+
+    # DuckDB write
+    duckdb_times = []
+    for i in range(runs):
+        db_path = Path(f'/tmp/bench_write_{i}.duckdb')
+        if db_path.exists():
+            db_path.unlink()
+
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path))
+        conn.execute("CREATE TABLE ohlc AS SELECT * FROM df")
+        conn.close()
+        elapsed = time.perf_counter() - start
+        duckdb_times.append(elapsed)
+        db_path.unlink()
+
+    duckdb_avg = sum(duckdb_times) / len(duckdb_times)
+
+    # Parquet write
+    parquet_times = []
+    for i in range(runs):
+        pq_path = Path(f'/tmp/bench_write_{i}.parquet')
+
+        start = time.perf_counter()
+        df.to_parquet(pq_path, index=False, compression='zstd')
+        elapsed = time.perf_counter() - start
+        parquet_times.append(elapsed)
+        pq_path.unlink()
+
+    parquet_avg = sum(parquet_times) / len(parquet_times)
+
+    print(f"DuckDB:  {duckdb_avg*1000:.1f} ms (avg of {runs} runs)")
+    print(f"Parquet: {parquet_avg*1000:.1f} ms (avg of {runs} runs)")
+    print(f"Winner:  {'DuckDB' if duckdb_avg < parquet_avg else 'Parquet'} "
+          f"({min(duckdb_avg, parquet_avg) / max(duckdb_avg, parquet_avg):.2f}x)")
+
+    return duckdb_avg, parquet_avg
+
+
+def benchmark_full_read(db_path: Path, pq_path: Path, runs: int = 5):
+    """Benchmark full table read."""
+    print("\n█ FULL READ PERFORMANCE (All 9 columns)")
+    print("━" * 70)
+
+    # DuckDB read
+    duckdb_times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+        df = conn.execute("SELECT * FROM ohlc").df()
+        conn.close()
+        elapsed = time.perf_counter() - start
+        duckdb_times.append(elapsed)
+
+    duckdb_avg = sum(duckdb_times) / len(duckdb_times)
+
+    # Parquet read
+    parquet_times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path)
+        elapsed = time.perf_counter() - start
+        parquet_times.append(elapsed)
+
+    parquet_avg = sum(parquet_times) / len(parquet_times)
+
+    print(f"DuckDB:  {duckdb_avg*1000:.1f} ms (avg of {runs} runs)")
+    print(f"Parquet: {parquet_avg*1000:.1f} ms (avg of {runs} runs)")
+    print(f"Winner:  {'DuckDB' if duckdb_avg < parquet_avg else 'Parquet'} "
+          f"({min(duckdb_avg, parquet_avg) / max(duckdb_avg, parquet_avg):.2f}x)")
+
+    return duckdb_avg, parquet_avg
+
+
+def benchmark_partial_read(db_path: Path, pq_path: Path, runs: int = 5):
+    """Benchmark reading only 3 columns (columnar advantage test)."""
+    print("\n█ PARTIAL READ PERFORMANCE (3 of 9 columns)")
+    print("━" * 70)
+
+    columns = ['Timestamp', 'Close', 'tick_count_raw_spread']
+
+    # DuckDB partial read
+    duckdb_times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+        df = conn.execute(f"SELECT {', '.join(columns)} FROM ohlc").df()
+        conn.close()
+        elapsed = time.perf_counter() - start
+        duckdb_times.append(elapsed)
+
+    duckdb_avg = sum(duckdb_times) / len(duckdb_times)
+
+    # Parquet partial read
+    parquet_times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path, columns=columns)
+        elapsed = time.perf_counter() - start
+        parquet_times.append(elapsed)
+
+    parquet_avg = sum(parquet_times) / len(parquet_times)
+
+    print(f"DuckDB:  {duckdb_avg*1000:.1f} ms (avg of {runs} runs)")
+    print(f"Parquet: {parquet_avg*1000:.1f} ms (avg of {runs} runs)")
+    print(f"Winner:  {'DuckDB' if duckdb_avg < parquet_avg else 'Parquet'} "
+          f"({min(duckdb_avg, parquet_avg) / max(duckdb_avg, parquet_avg):.2f}x)")
+
+    return duckdb_avg, parquet_avg
+
+
+def benchmark_filtered_read(db_path: Path, pq_path: Path, runs: int = 5):
+    """Benchmark reading with WHERE filter."""
+    print("\n█ FILTERED READ PERFORMANCE (WHERE Close > 1.085)")
+    print("━" * 70)
+
+    # DuckDB filtered read (SQL WHERE)
+    duckdb_times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+        df = conn.execute("SELECT * FROM ohlc WHERE Close > 1.085").df()
+        conn.close()
+        elapsed = time.perf_counter() - start
+        duckdb_times.append(elapsed)
+
+    duckdb_avg = sum(duckdb_times) / len(duckdb_times)
+
+    # Parquet filtered read (must read all then filter in pandas)
+    parquet_times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path)
+        df_filtered = df[df['Close'] > 1.085]
+        elapsed = time.perf_counter() - start
+        parquet_times.append(elapsed)
+
+    parquet_avg = sum(parquet_times) / len(parquet_times)
+
+    print(f"DuckDB:  {duckdb_avg*1000:.1f} ms (SQL WHERE, pushed down)")
+    print(f"Parquet: {parquet_avg*1000:.1f} ms (read all → filter in pandas)")
+    print(f"Winner:  {'DuckDB' if duckdb_avg < parquet_avg else 'Parquet'} "
+          f"({min(duckdb_avg, parquet_avg) / max(duckdb_avg, parquet_avg):.2f}x)")
+
+    return duckdb_avg, parquet_avg
+
+
+def main():
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║       DuckDB vs Parquet: Read/Write Performance Benchmark     ║")
+    print("║                    Dataset: August 2024                        ║")
+    print("║                    31,218 bars × 9 columns                     ║")
+    print("╚═══════════════════════════════════════════════════════════════╝\n")
+
+    # Load existing data
+    print("Loading test dataset...")
+    conn = duckdb.connect('/tmp/eurusd_1m_2024_08.duckdb', read_only=True)
+    df = conn.execute("SELECT * FROM ohlc").df()
+    conn.close()
+    print(f"Loaded {len(df):,} rows × {len(df.columns)} columns\n")
+
+    # Create test files
+    db_path = Path('/tmp/bench_test.duckdb')
+    pq_path = Path('/tmp/bench_test.parquet')
+
+    if db_path.exists():
+        db_path.unlink()
+    if pq_path.exists():
+        pq_path.unlink()
+
+    # Create DuckDB
+    conn = duckdb.connect(str(db_path))
+    conn.execute("CREATE TABLE ohlc AS SELECT * FROM df")
+    conn.close()
+
+    # Create Parquet
+    df.to_parquet(pq_path, index=False, compression='zstd')
+
+    # Run benchmarks
+    write_duck, write_pq = benchmark_write(df, runs=5)
+    full_duck, full_pq = benchmark_full_read(db_path, pq_path, runs=10)
+    partial_duck, partial_pq = benchmark_partial_read(db_path, pq_path, runs=10)
+    filtered_duck, filtered_pq = benchmark_filtered_read(db_path, pq_path, runs=10)
+
+    # Summary
+    print("\n╔═══════════════════════════════════════════════════════════════╗")
+    print("║                         SUMMARY                                ║")
+    print("╚═══════════════════════════════════════════════════════════════╝\n")
+
+    print("Operation           DuckDB      Parquet     Winner")
+    print("─" * 70)
+    print(f"Write (create)      {write_duck*1000:6.1f} ms   {write_pq*1000:6.1f} ms    "
+          f"{'DuckDB' if write_duck < write_pq else 'Parquet':>10}")
+    print(f"Full Read (all)     {full_duck*1000:6.1f} ms   {full_pq*1000:6.1f} ms    "
+          f"{'DuckDB' if full_duck < full_pq else 'Parquet':>10}")
+    print(f"Partial Read (3)    {partial_duck*1000:6.1f} ms   {partial_pq*1000:6.1f} ms    "
+          f"{'DuckDB' if partial_duck < partial_pq else 'Parquet':>10}")
+    print(f"Filtered Read       {filtered_duck*1000:6.1f} ms   {filtered_pq*1000:6.1f} ms    "
+          f"{'DuckDB' if filtered_duck < filtered_pq else 'Parquet':>10}")
+
+    # Cleanup
+    db_path.unlink()
+    pq_path.unlink()
+
+
+if __name__ == '__main__':
+    main()

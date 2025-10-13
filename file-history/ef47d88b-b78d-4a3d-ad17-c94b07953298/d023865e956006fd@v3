@@ -1,0 +1,306 @@
+# Usage Patterns for Crypto Feature Engineering
+
+**Workflow**: `Raw OHLCV → Temporal Features → EvolutionaryForest → Seq-to-Seq Input`
+
+---
+
+## Complete Example: Binance 5-Minute Data
+
+### Step 1: Load Data
+```python
+import pandas as pd
+import numpy as np
+
+# Current data format (OHLCV only)
+df = pd.read_csv('binance_spot_SOLUSDT-5m_20210806-20250831_4.1y.csv',
+                 comment='#', parse_dates=['date'], index_col='date')
+# Columns: open, high, low, close, volume
+print(f"Loaded: {len(df):,} bars from {df.index[0]} to {df.index[-1]}")
+```
+
+### Step 2: Create Temporal Features (Manual Pre-Processing)
+
+**CRITICAL**: EvolutionaryForest only combines features in the SAME row. You MUST create temporal features first.
+
+```python
+# Lagged prices (access to previous bars)
+for lag in [1, 2, 3, 5, 10, 20]:
+    df[f'close_lag{lag}'] = df['close'].shift(lag)
+    df[f'volume_lag{lag}'] = df['volume'].shift(lag)
+    df[f'high_lag{lag}'] = df['high'].shift(lag)
+    df[f'low_lag{lag}'] = df['low'].shift(lag)
+
+# Rolling statistics (past N bars)
+for window in [5, 10, 20, 50]:
+    df[f'close_sma{window}'] = df['close'].rolling(window).mean()
+    df[f'close_std{window}'] = df['close'].rolling(window).std()
+    df[f'volume_sma{window}'] = df['volume'].rolling(window).mean()
+    df[f'high_max{window}'] = df['high'].rolling(window).max()
+    df[f'low_min{window}'] = df['low'].rolling(window).min()
+
+# Returns (non-anticipative - uses past data)
+for lag in [1, 2, 3, 5]:
+    df[f'return_{lag}bar'] = (df['close'] / df['close'].shift(lag) - 1)
+
+# Technical indicators (example - you implement these)
+def compute_rsi(prices, period=14):
+    """Compute RSI indicator."""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+df['rsi_14'] = compute_rsi(df['close'], 14)
+
+# Create targets (k-step ahead returns - uses FUTURE data, only for y_train)
+for k in [1, 5, 10, 20]:
+    df[f'target_{k}step'] = (df['close'].shift(-k) / df['close'] - 1)
+
+# Drop NaN rows created by rolling/shifting
+print(f"Before dropna: {len(df):,} bars")
+df = df.dropna()
+print(f"After dropna: {len(df):,} bars")
+```
+
+### Step 3: Run Preflight Checks
+
+**See**: [PREFLIGHT_CHECKLIST.md](PREFLIGHT_CHECKLIST.md)
+
+```python
+# Load preflight function from docs/PREFLIGHT_CHECKLIST.md
+def preflight_check(df, feature_cols, target_col='target_5step'):
+    """Run all 8 checks."""
+    assert df.isna().sum().sum() == 0, "❌ NaN values!"
+    assert np.isinf(df[feature_cols].values).sum() == 0, "❌ Inf values!"
+    assert df.index.is_monotonic_increasing, "❌ Not time-ordered!"
+    assert not df.index.duplicated().any(), "❌ Duplicate times!"
+    assert target_col not in feature_cols, "❌ Target leakage!"
+    X = df[feature_cols].values
+    assert (X.std(axis=0) == 0).sum() == 0, "❌ Zero-variance!"
+    print(f"✅ {X.shape[0]:,} samples × {X.shape[1]} features READY")
+    return True
+
+# Select features (all temporal features you created)
+feature_cols = [col for col in df.columns if col.startswith((
+    'close_', 'volume_', 'return_', 'rsi', 'atr', 'high_', 'low_'
+))]
+
+# Run preflight
+preflight_check(df, feature_cols, target_col='target_5step')
+```
+
+### Step 4: Train/Test Split (TEMPORAL!)
+
+```python
+# ✅ CORRECT: Temporal split (respects time order)
+split_idx = int(len(df) * 0.8)
+train = df.iloc[:split_idx]   # Earlier 80%
+test = df.iloc[split_idx:]     # Future 20% (OOD)
+
+print(f"Train: {train.index[0]} to {train.index[-1]} ({len(train):,} bars)")
+print(f"Test:  {test.index[0]} to {test.index[-1]} ({len(test):,} bars)")
+
+# Prepare X, y
+X_train = train[feature_cols].values
+y_train = train['target_5step'].values  # 5-step ahead returns
+
+X_test = test[feature_cols].values
+y_test = test['target_5step'].values
+```
+
+### Step 5: EvolutionaryForest Feature Engineering
+
+```python
+from evolutionary_forest.forest import EvolutionaryForestRegressor
+
+ef = EvolutionaryForestRegressor(
+    score_func='RMSE',  # ✅ Now works (was broken)
+    n_gen=50,           # 50 generations (increase for better features)
+    n_pop=200,          # Population size
+    max_height=4,       # Feature complexity (4 = reasonable)
+    normalize=True,     # Auto-normalize different scales
+    n_jobs=-1,          # Use all CPU cores
+    verbose=True
+)
+
+print(f"Training EvolutionaryForest on {len(feature_cols)} temporal features...")
+ef.fit(X_train, y_train)
+
+# Generate engineered features
+train_features = ef.transform(X_train)
+test_features = ef.transform(X_test)
+
+print(f"Generated {train_features.shape[1]} engineered features")
+
+# Example discovered features:
+# - (close - close_sma20) / close_std20           # Normalized distance from MA
+# - log(volume / volume_sma20) * return_1bar      # Volume surge × momentum
+# - (close_lag1 / close_sma20) * sqrt(volume / volume_lag1)  # Position × volume change
+```
+
+### Step 6: Validate Feature Quality (OOD)
+
+```python
+from sklearn.linear_model import Ridge
+
+# Proxy test: Can a simple linear model predict returns from these features?
+ridge = Ridge(alpha=1.0)
+ridge.fit(train_features, y_train)
+
+train_r2 = ridge.score(train_features, y_train)
+test_r2 = ridge.score(test_features, y_test)  # OOD generalization
+
+print(f"\nFeature Quality (5-step-ahead returns):")
+print(f"  Train R²: {train_r2:.4f}")
+print(f"  Test R² (OOD): {test_r2:.4f}")
+
+# Interpretation:
+if test_r2 > 0.20:
+    print("✅ Excellent features for crypto forecasting!")
+elif test_r2 > 0.15:
+    print("✅ Very good features")
+elif test_r2 > 0.10:
+    print("✅ Good features - captures meaningful signal")
+else:
+    print("⚠️  Features may need tuning (try more generations)")
+```
+
+### Step 7: Export for Seq-to-Seq Model
+
+```python
+# Save engineered features
+output_df = pd.DataFrame(
+    train_features,
+    columns=[f'ef_feature_{i}' for i in range(train_features.shape[1])],
+    index=train.index
+)
+output_df['target_5step'] = y_train
+
+# Export to parent workspace
+output_path = '~/eon/ml-feature-experiments/engineered_features/SOLUSDT_5m_ef_features.parquet'
+output_df.to_parquet(output_path)
+
+print(f"\n✅ Exported {train_features.shape[1]} features to:")
+print(f"   {output_path}")
+print(f"   Ready for seq-to-seq multi-horizon forecasting!")
+```
+
+---
+
+## Performance Expectations
+
+**Input**: 40-80 pre-computed temporal features (from OHLCV)
+**Output**: 50-100 non-linear engineered features
+**Time**: 5-10 minutes (50 gen, 200 pop, 4 cores)
+**Quality Proxy**: R² > 0.15 on OOD data = good crypto features
+
+---
+
+## Multi-Horizon Forecasting Setup
+
+```python
+# Create multiple horizons
+horizons = [1, 5, 10, 20]  # 1, 5, 10, 20 steps ahead
+
+for k in horizons:
+    df[f'target_{k}step'] = (df['close'].shift(-k) / df['close'] - 1)
+
+# Train separate EvolutionaryForest for each horizon
+models = {}
+for k in horizons:
+    print(f"\n=== Training for {k}-step ahead ===")
+
+    ef = EvolutionaryForestRegressor(
+        score_func='RMSE',
+        n_gen=50,
+        n_pop=200,
+        max_height=4,
+        normalize=True,
+        n_jobs=-1
+    )
+
+    y_train_k = train[f'target_{k}step'].values
+    ef.fit(X_train, y_train_k)
+
+    models[k] = ef
+
+    # Validate
+    features_k = ef.transform(X_test)
+    ridge_k = Ridge().fit(ef.transform(X_train), y_train_k)
+    score_k = ridge_k.score(features_k, test[f'target_{k}step'].values)
+
+    print(f"  {k}-step OOD R²: {score_k:.4f}")
+
+print("\n✅ Multi-horizon feature engineering complete!")
+```
+
+---
+
+## Alternative Objectives
+
+```python
+# Try different objectives to see which produces best OOD features:
+
+for objective in ['R2', 'MSE', 'RMSE', 'MAE']:
+    ef = EvolutionaryForestRegressor(
+        score_func=objective,  # ✅ All work now (MSE/RMSE were broken)
+        n_gen=30,
+        n_pop=150,
+        max_height=4,
+        normalize=True,
+        n_jobs=-1
+    )
+
+    ef.fit(X_train, y_train)
+    features = ef.transform(X_test)
+
+    # Validate
+    ridge = Ridge().fit(ef.transform(X_train), y_train)
+    score = ridge.score(features, y_test)
+
+    print(f"{objective:6s}: OOD R² = {score:.4f}")
+
+# Pick the objective with best OOD generalization
+```
+
+---
+
+## Troubleshooting
+
+### Issue: OOD R² is negative or very low
+
+**Causes**:
+- Not enough generations (increase `n_gen` to 100+)
+- Features not predictive of target (check correlation)
+- Target too noisy (crypto 5-step returns are very noisy)
+- Data leakage in temporal features (run preflight checks)
+
+**Solutions**:
+1. Try longer horizons (10-step instead of 5-step)
+2. Add more technical indicators to feature pool
+3. Increase population size and generations
+4. Check for data leakage with preflight checks
+
+### Issue: Training takes too long
+
+**Solutions**:
+- Reduce `n_gen` to 20-30 for initial experiments
+- Reduce `n_pop` to 100
+- Subsample data: `df_sample = df.iloc[::10]` (every 10th row)
+- Use fewer features (top 30 by variance or correlation)
+
+### Issue: NaN in generated features
+
+**Causes**:
+- Division by zero in feature engineering
+- Log of negative numbers
+
+**Solutions**:
+- Run preflight checks (detects NaN/Inf before training)
+- Add epsilon to denominators: `(a / (b + 1e-8))`
+- Use `normalize=True` to handle scale issues
+
+---
+
+**Last Updated**: 2025-10-05

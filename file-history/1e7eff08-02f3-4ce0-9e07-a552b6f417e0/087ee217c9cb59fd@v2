@@ -1,0 +1,59 @@
+#!/bin/bash
+# Download Exness tick data variants
+# Usage: ./download_exness_variants.sh PAIR YEAR MONTH [VARIANT]
+# Example: ./download_exness_variants.sh EURUSD 2024 09 Raw_Spread
+
+set -euo pipefail
+
+PAIR="${1:-EURUSD}"
+YEAR="${2:-2024}"
+MONTH="${3:-09}"
+VARIANT="${4:-}"  # Optional: "", "Raw_Spread", "Standart_Plus", "Zero_Spread"
+
+# Construct symbol name
+if [ -z "$VARIANT" ]; then
+    SYMBOL="$PAIR"
+else
+    SYMBOL="${PAIR}_${VARIANT}"
+fi
+
+# Construct URL
+URL="https://ticks.ex2archive.com/ticks/${SYMBOL}/${YEAR}/${MONTH}/Exness_${SYMBOL}_${YEAR}_${MONTH}.zip"
+OUTPUT="Exness_${SYMBOL}_${YEAR}_${MONTH}.zip"
+
+echo "Downloading ${SYMBOL} for ${YEAR}-${MONTH}..."
+echo "URL: ${URL}"
+echo
+
+# Check if file exists
+if [ -f "$OUTPUT" ]; then
+    echo "⚠️  File already exists: $OUTPUT"
+    read -p "Overwrite? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+fi
+
+# Download
+if curl -f -L --progress-bar "$URL" -o "$OUTPUT"; then
+    SIZE=$(du -h "$OUTPUT" | cut -f1)
+    echo
+    echo "✅ Downloaded: $OUTPUT ($SIZE)"
+
+    # Show ZIP contents
+    echo
+    echo "ZIP contents:"
+    unzip -l "$OUTPUT"
+else
+    echo
+    echo "❌ Download failed. Check if the variant/date exists."
+    echo
+    echo "Available variants:"
+    echo "  - (empty)         : Standard variant"
+    echo "  - Raw_Spread      : Execution prices, 98% zero-spreads"
+    echo "  - Standart_Plus   : Wider spread variant"
+    echo "  - Zero_Spread     : Similar to Raw_Spread"
+    exit 1
+fi

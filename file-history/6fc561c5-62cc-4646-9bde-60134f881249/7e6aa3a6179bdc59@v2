@@ -1,0 +1,63 @@
+#!/bin/bash
+# Comprehensive Claude Code statusline based on official docs
+# Shows: Model, Directory, Git Branch, Version, Output Style, Context, Cost, Session Time
+
+# Read JSON input from stdin
+input=$(cat)
+
+# Extract data using jq
+model=$(echo "$input" | jq -r '.model.display_name // "Unknown"')
+current_dir=$(echo "$input" | jq -r '.workspace.current_dir // ""')
+dir_name=$(basename "$current_dir" 2>/dev/null || echo "~")
+version=$(echo "$input" | jq -r '.version // "Unknown"')
+output_style=$(echo "$input" | jq -r '.output_style.name // "default"')
+session_id=$(echo "$input" | jq -r '.session_id // "unknown"')
+session_short="${session_id:0:8}"
+
+# Note: Context information is not available in Claude Code's statusline JSON input
+
+# Cost information (if available from ccusage)
+total_cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+cost_display=$(printf "\$%.2f" "$total_cost")
+
+# Session time information
+duration_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
+duration_sec=$((duration_ms / 1000))
+duration_min=$((duration_sec / 60))
+duration_hr=$((duration_min / 60))
+
+# Format session time
+if [ $duration_hr -gt 0 ]; then
+    time_display="${duration_hr}h ${duration_min}m"
+elif [ $duration_min -gt 0 ]; then
+    time_display="${duration_min}m"
+else
+    time_display="${duration_sec}s"
+fi
+
+# Git branch detection with diff stats
+git_info=""
+if git -C "$current_dir" rev-parse --git-dir >/dev/null 2>&1; then
+    branch=$(git -C "$current_dir" --no-optional-locks branch --show-current 2>/dev/null || echo "detached")
+    if [ -n "$branch" ]; then
+        # Get diff stats for all uncommitted changes
+        diff_stats=$(git -C "$current_dir" --no-optional-locks diff HEAD --shortstat 2>/dev/null)
+
+        # Parse insertions and deletions if changes exist
+        if [ -n "$diff_stats" ]; then
+            insertions=$(echo "$diff_stats" | grep -o '[0-9]\+ insertion' | cut -d' ' -f1)
+            deletions=$(echo "$diff_stats" | grep -o '[0-9]\+ deletion' | cut -d' ' -f1)
+
+            # Use 0 if no insertions or deletions found
+            insertions=${insertions:-0}
+            deletions=${deletions:-0}
+
+            git_info=" | 🌿 $branch +$insertions -$deletions"
+        else
+            git_info=" | 🌿 $branch"
+        fi
+    fi
+fi
+
+# Build status line
+echo "🤖 $model | 🆔 $session_short | 📁 $dir_name$git_info | ⏱️ $time_display | 💰 $cost_display | 📟 v$version | 🎨 $output_style"

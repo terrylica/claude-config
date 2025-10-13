@@ -1,0 +1,236 @@
+import numpy as np
+import pandas as pd
+
+from ml_feature_set.feature_constructor import FeatureConstructor
+from ml_feature_set.helpers.demo_helpers import compare_dicts, extract_info_from_file_path, sample_data_loader
+from ml_feature_set.helpers.feature_set_utils import prepare_data_sources_for_feature_set, verify_primary_data_source
+
+
+def validate(feature_set_path, sample_data_paths, logger):
+    """
+    Validate the correctness of a feature set
+
+    Args:
+        feature_set_path: Feature set path
+        sample_data_paths: Sample data path or list of paths
+        logger: Logger
+
+    Returns:
+        True if validation successful, False otherwise
+    """
+    # Extract basic information from filename or path
+    if isinstance(sample_data_paths, list) and len(sample_data_paths) > 0:
+        primary_path = next((path for path in sample_data_paths if "ohlcv_1x" in path or "ohlcv-1x" in path), sample_data_paths[0])
+    else:
+        primary_path = sample_data_paths
+
+    info = extract_info_from_file_path(primary_path)
+    base_interval = info.get("interval", "1h")
+    exchange = info.get("source_descriptor", "").split("-")[0] if "-" in info.get("source_descriptor", "") else "binance"
+    symbol = (
+        info.get("source_descriptor", "").split("-")[1]
+        if "-" in info.get("source_descriptor", "") and len(info.get("source_descriptor", "").split("-")) > 1
+        else "BTC/USDT"
+    )
+
+    # Use prepare_data_sources_for_feature_set to prepare data source list
+    logger.info("Preparing feature set data")
+    if sample_data_paths is None:
+        raise ValueError("sample_data_paths must be provided for validation")
+
+    logger.info("Loading data sources using feature_set_utils.prepare_data_sources_for_feature_set")
+
+    # Define function to load data from sample data paths, for prepare_data_sources_for_feature_set
+    def custom_data_loader(template):
+        return sample_data_loader(template, sample_data_paths, logger)
+
+    logger.info("Loading data sources using feature_set_utils.prepare_data_sources_for_feature_set")
+    logger.info(f"Basic settings: interval={base_interval}, exchange={exchange}, symbol={symbol}")
+
+    # Verify that the primary data source is explicitly marked, and there is only one primary data source
+    verify_primary_data_source(feature_set_path)
+    logger.info("Verified primary data source is correctly marked in feature_set")
+
+    # Prepare data sources
+    source_data_list = prepare_data_sources_for_feature_set(
+        feature_set_path=feature_set_path,
+        data_loader_func=custom_data_loader,
+        source_to_interval={"ohlcv": base_interval, "fear_greed_index": "1d", "btc_dominance": "1d"},
+        moving_window_size=30,
+        auto_resample=True,
+        filter_common_time_range=True,  # 启用时间范围过滤
+    )
+
+    # Ensure at least one data source was loaded
+    if not source_data_list:
+        raise ValueError("No data sources were successfully loaded")
+
+    # 使用正确的方法获取 primary data source
+    primary_source = FeatureConstructor.get_primary_data_source(feature_set_path, source_data_list)
+    primary_df = primary_source["data_df"]
+
+    # 检查过滤后的数据量
+    date_column = "actual_ready_time"  # 始终使用actual_ready_time进行时间对齐
+    if len(primary_df) < 100:  # 需要至少100个点进行有效验证
+        raise ValueError(f"Only {len(primary_df)} data points remain after filtering, insufficient for effective validation")
+
+    # Calculate validation and test start times using filtered primary data
+    validation_start_time = primary_df[date_column].iloc[len(primary_df) // 3]
+    test_start_time = primary_df[date_column].iloc[len(primary_df) * 2 // 3]
+
+    logger.info(f"Validation set start time: {validation_start_time}")
+    logger.info(f"Test set start time: {test_start_time}")
+
+    # Create FeatureConstructor instance directly with filtered data
+    fc = FeatureConstructor(
+        source_data_list=source_data_list,
+        feature_set_path=feature_set_path,
+        validation_start_time=validation_start_time,
+        test_start_time=test_start_time,
+        moving_window_size=30,
+    )
+
+    # 测试construct_moving_features方法
+    try:
+        # 构建特征
+        feature_df, labels = fc.feature_set.build_features(source_data_list)
+
+        # 获取日期列
+        if "actual_ready_time" in primary_df.columns:
+            dates = primary_df["actual_ready_time"].to_numpy()
+        elif "date" in primary_df.columns:
+            dates = primary_df["date"].to_numpy()
+        elif isinstance(primary_df.index, pd.DatetimeIndex):
+            dates = primary_df.index.to_numpy()
+        else:
+            dates = np.array([i for i in range(len(primary_df))])
+
+        # 使用construct_moving_features方法构建移动窗口特征
+        moving_features, moving_labels, feature_dates = fc.construct_moving_features(feature_df, labels, dates, for_pred=False)
+
+        if moving_features.shape[0] != moving_labels.shape[0]:
+            logger.error("测试construct_moving_features失败: 特征数组和标签数组长度不一致")
+            return False
+
+        logger.info(f"测试construct_moving_features成功: 生成形状为{moving_features.shape}的特征数组")
+    except Exception as e:
+        logger.error(f"测试construct_moving_features失败: {e!s}")
+        return False
+
+    # Data length for comparison
+    compare_data_length = 30
+
+    # First calculate complete feature_build_by_full_data with filtered data
+    feature_build_by_full_data, _ = fc.feature_set.build_features(source_data_list)
+
+    all_differences = False
+    # Initialize counter for successful validations
+    successful_validations = 0
+
+    # Loop to add new data points and make predictions
+    for i in range(compare_data_length):
+        # Create data source list for prediction
+        pred_source_list = []
+
+        # Find primary data source using the FeatureConstructor's primary data source
+        primary_source = fc.primary_data_source
+        primary_df = primary_source["data_df"]
+
+        # We're testing the time point corresponding to the (compare_data_length-i)th last row of the full data
+        # Always use actual_ready_time
+        date_column = "actual_ready_time"
+        current_time = primary_df[date_column].iloc[-(compare_data_length - i)]
+        logger.info(f"Step {i + 1}/{compare_data_length}: Validating time point {current_time}")
+
+        # Process each data source
+        for source in source_data_list:
+            source_df = source["data_df"].copy()
+            source_name = source["name"]
+
+            # Ensure date column exists and is in correct format
+            if "date" not in source_df.columns:
+                if isinstance(source_df.index, pd.DatetimeIndex):
+                    source_df = source_df.reset_index()
+                    source_df = source_df.rename(columns={"index": "date"})
+                else:
+                    raise ValueError(f"Data source {source_name} has no date column or time index")
+
+            # Convert date column to datetime format to ensure it can be compared
+            source_df["date"] = pd.to_datetime(source_df["date"])
+
+            # Ensure actual_ready_time is in datetime format if present
+            if "actual_ready_time" not in source_df.columns:
+                raise ValueError(f"Data source {source_name} missing 'actual_ready_time' column, which is required for feature calculation")
+            source_df["actual_ready_time"] = pd.to_datetime(source_df["actual_ready_time"])
+
+            # Get required historical data length for this data source
+            lookback_length = fc.data_buffers[source_name]
+
+            # Find the index of the last data point not exceeding current time point
+            # Always use actual_ready_time for time alignment
+            date_column = "actual_ready_time"
+            last_valid_idx = (source_df[date_column] <= current_time).sum() - 1
+            if last_valid_idx < 0:
+                raise ValueError(f"Data source {source_name} has no data points earlier than {current_time}")
+
+            # Calculate start index, ensuring sufficient historical data
+            start_idx = last_valid_idx - lookback_length + 1
+            if start_idx < 0:
+                raise ValueError(f"Data source {source_name} has insufficient historical data before time point {current_time}")
+
+            # Select lookback_length data points before current time point
+            current_df = source_df.iloc[start_idx : last_valid_idx + 1]
+
+            # Check if data length is sufficient
+            if len(current_df) < lookback_length:
+                logger.warning(
+                    f"Data source {source_name} has only {len(current_df)} data points before time point {current_time}, "
+                    f"less than required {lookback_length} points"
+                )
+
+            logger.debug(f"Data source {source_name}: Using data from {current_df['actual_ready_time'].min()} to {current_df['actual_ready_time'].max()}")
+
+            # Create prediction data source
+            pred_source_list.append(
+                {
+                    "name": source_name,
+                    "data_df": current_df,
+                    "interval": source["interval"],
+                    "type": source["type"],
+                    "resample_factor": source["resample_factor"],
+                    "source_descriptor": source["source_descriptor"],
+                    "ready_time_offset": source.get("ready_time_offset"),  # Pass through the time offset
+                }
+            )
+
+        # Build features using historical data before current time point
+        feature_build_by_pred_data, _ = fc.feature_set.build_features(pred_source_list)
+
+        # Get feature values from full data at current time point
+        full_data_idx = -(compare_data_length - i)  # Corresponding index in full data
+
+        # Compare features from full data with features predicted using historical data
+        differences = compare_dicts(
+            feature_build_by_full_data.iloc[full_data_idx, :].to_dict(),
+            feature_build_by_pred_data.iloc[-1, :].to_dict(),
+            threshold=1e-4,
+        )
+
+        if differences:
+            logger.error(f"Step {i + 1}/{compare_data_length}: Detected feature mismatch between full data and prediction data:")
+            for key, (full_val, pred_val) in differences.items():
+                logger.error(f"{key}: full_data={full_val}, pred_data={pred_val}")
+            all_differences = True
+        else:
+            successful_validations += 1
+            logger.info(f"Step {i + 1}/{compare_data_length}: Validation successful: Prediction data features match full data")
+
+    # Log validation summary
+    if successful_validations == compare_data_length:
+        logger.info(f"Validation summary: All {successful_validations}/{compare_data_length} validation steps passed successfully!")
+    else:
+        logger.warning(
+            f"Validation summary: {successful_validations}/{compare_data_length} validation steps passed, {compare_data_length - successful_validations} failed"
+        )
+
+    return not all_differences

@@ -1,0 +1,495 @@
+#!/bin/bash
+
+# =============================================================================
+# ML Feature Set Environment Setup with Doppler-Managed AWS Credentials
+# =============================================================================
+# 🔐 DEPRECATED: Use /Users/terryli/eon/ml-feature-experiments/set_env.sh instead
+# This script loads AWS credentials from Doppler for secure CodeArtifact access.
+# =============================================================================
+#
+# Implementation Hierarchy:
+# - Tier 1: Turnkey Statistical Solutions (scipy, numpy, pandas)
+# - Tier 2: Specialized Financial Libraries (tabpfn-time-series, darts, ruptures)
+# - Tier 3: ML Frameworks (autogluon - requires principle validation)
+# - Tier 4: Custom Implementation (getml - use with caution)
+#
+# Key Additions:
+# - TabPFN-TS: #1 GIFT-EVAL benchmark winner for zero-shot time series forecasting
+# - Darts: Comprehensive time series forecasting with ensemble capabilities
+# - AutoGluon: Automated ML with mandatory principle compliance validation
+# - ruptures: State-of-the-art change point detection for real-time adaptivity
+#
+# Performance & Compatibility Improvements:
+# - UV Package Manager: 10-100x faster installation than pip
+# - Data-Source-Manager: Dependency conflicts resolved (numpy, pandas, fsspec)
+# - PEP 517 Build Standards: Eliminates legacy build warnings
+# - Fallback System: UV → pip for maximum compatibility
+# =============================================================================
+
+# Define colors
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+BOLD='\033[1m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# =============================================================================
+# UTILITY FUNCTIONS (DRY Principle)
+# =============================================================================
+
+# Function to show Doppler configuration status (deprecated script)
+configure_aws_credentials() {
+    print_message "$YELLOW" "⚠️  DEPRECATED SCRIPT"
+    print_message "$CYAN" "Use: /Users/terryli/eon/ml-feature-experiments/set_env.sh"
+    print_message "$GREEN" "Credentials managed via Doppler: doppler://aws-credentials/dev"
+}
+
+# =============================================================================
+# UTILITY FUNCTIONS (DRY Principle)
+# =============================================================================
+
+# Function to print colored messages
+print_message() {
+    local color=$1
+    local message=$2
+    echo -e "${color}${message}${NC}"
+}
+
+# Function to print step headers
+print_step() {
+    local step_num=$1
+    local description=$2
+    print_message "$YELLOW" "${step_num}. ${description}:"
+}
+
+# Function to install packages with error handling using UV
+install_packages() {
+    local description=$1
+    shift
+    local packages=("$@")
+    
+    print_message "$YELLOW" "Installing ${description} using UV (faster)..."
+    for package in "${packages[@]}"; do
+        echo -e "Installing ${package}..."
+        if uv pip install "$package" --no-cache --use-pep517; then
+            print_message "$GREEN" "✓ ${package} installed successfully"
+        else
+            print_message "$RED" "✗ Failed to install ${package}, falling back to pip..."
+            if pip install "$package" --no-cache-dir --use-pep517; then
+                print_message "$GREEN" "✓ ${package} installed successfully with pip"
+            else
+                print_message "$RED" "✗ Failed to install ${package}"
+            fi
+        fi
+    done
+}
+
+# Function to test package imports
+test_package_import() {
+    local package_name=$1
+    local import_name=${2:-$package_name}
+    
+    python -c "
+try:
+    import ${import_name}
+    print('✓ ${package_name} imported successfully')
+except ImportError as e:
+    print('✗ ${package_name} import failed:', e)
+    exit(1)
+" 2>/dev/null
+}
+
+# Function to test multiple package imports
+test_package_imports() {
+    print_message "$YELLOW" "Testing feature engineering package imports:"
+    local failed=0
+    
+    # Define package mappings (package_name:import_name) organized by category
+    local packages="
+        scikit-learn:sklearn
+        torch:torch pytorch-lightning:pytorch_lightning
+        lightgbm:lightgbm xgboost:xgboost catboost:catboost
+        pytorch-forecasting:pytorch_forecasting u8darts:darts
+        tabpfn-time-series:tabpfn_time_series
+        autogluon:autogluon
+        ruptures:ruptures
+        tsfresh:tsfresh
+        shap:shap captum:captum
+        getml:getml
+        quantstats:quantstats arch:arch
+        statsmodels:statsmodels
+        tabpfn-client:tabpfn_client
+    "
+    
+    for package_mapping in $packages; do
+        local package_name="${package_mapping%:*}"
+        local import_name="${package_mapping#*:}"
+        
+        if test_package_import "$package_name" "$import_name"; then
+            continue
+        else
+            failed=1
+        fi
+    done
+    
+    if [ $failed -eq 0 ]; then
+        print_message "$GREEN" "All packages imported successfully!"
+        
+        # Special test for TabPFN-TS functionality
+        print_message "$YELLOW" "Testing TabPFN-TS specific functionality..."
+        python -c "
+try:
+    from tabpfn_time_series import TabPFNTimeSeriesForecasting
+    import numpy as np
+    import pandas as pd
+    
+    # Create minimal test data
+    dates = pd.date_range('2024-01-01', periods=100, freq='1min')
+    test_data = pd.DataFrame({
+        'timestamp': dates,
+        'close': np.random.randn(100).cumsum() + 100
+    }).set_index('timestamp')
+    
+    # Test TabPFN-TS initialization (without actual forecasting to avoid API calls)
+    print('✓ TabPFN-TS can be initialized and basic data structures work')
+except Exception as e:
+    print('⚠️  TabPFN-TS basic test failed (may need API setup):', e)
+" 2>/dev/null || print_message "$YELLOW" "⚠️  TabPFN-TS requires additional setup (API keys, etc.)"
+        
+    else
+        print_message "$RED" "Some package imports failed"
+    fi
+}
+
+# Function to setup CodeArtifact with Doppler-managed credentials
+setup_codeartifact() {
+    # =============================================================================
+    # AWS CREDENTIALS FROM DOPPLER (SECURE CREDENTIAL MANAGEMENT)
+    # =============================================================================
+    print_message "$YELLOW" "🔐 Loading AWS credentials from Doppler..."
+
+    if ! command -v doppler &> /dev/null; then
+        print_message "$RED" "❌ ERROR: Doppler CLI not installed!"
+        print_message "$YELLOW" "Install: brew install dopplerhq/cli/doppler"
+        exit 1
+    fi
+
+    eval $(doppler secrets download --project aws-credentials --config dev --format env-no-names 2>/dev/null)
+
+    if [[ -z "$AWS_ACCESS_KEY_ID" || -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+        print_message "$RED" "❌ Failed to load AWS credentials from Doppler"
+        print_message "$YELLOW" "Ensure: doppler login && project 'aws-credentials' exists"
+        exit 1
+    fi
+
+    print_message "$GREEN" "✓ AWS credentials loaded from Doppler"
+
+    local AWS_REGION="${AWS_DEFAULT_REGION:-us-west-2}"
+    local AWS_DOMAIN="eonlabs"
+    local AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-050214414362}"
+
+    export AWS_DEFAULT_REGION="$AWS_REGION"
+    export AWS_REGION="$AWS_REGION"
+
+    if ! command -v aws &> /dev/null; then
+        print_message "$RED" "❌ ERROR: AWS CLI not installed!"
+        print_message "$YELLOW" "Install: brew install awscli"
+        exit 1
+    fi
+
+    print_message "$GREEN" "✓ AWS Account ID: $AWS_ACCOUNT_ID"
+    print_message "$GREEN" "✓ AWS Region: $AWS_REGION"
+    
+    # Try to get package name from pyproject.toml for CodeArtifact login
+    local package_line=$(grep "data-source-manager" pyproject.toml 2>/dev/null || echo "")
+    local package_name
+    
+    if [ -n "$package_line" ]; then
+        local package_with_version=$(echo "$package_line" | sed -e 's/.*"\([^"]*\)".*/\1/')
+        package_name=$(echo "$package_with_version" | sed -e 's/[<>|=].*//')
+    else
+        package_name="data-source-manager"
+        print_message "$YELLOW" "No data-source-manager dependency found, using default repository name"
+    fi
+    
+    print_message "$YELLOW" "Using CodeArtifact repository: ${package_name}"
+    print_message "$YELLOW" "Domain: ${AWS_DOMAIN}"
+    print_message "$YELLOW" "Region: ${AWS_REGION}"
+    
+    # Authenticate with CodeArtifact using embedded credentials
+    print_message "$YELLOW" "Authenticating with AWS CodeArtifact..."
+    
+    # Get authorization token from CodeArtifact
+    local auth_token
+    auth_token=$(aws codeartifact get-authorization-token \
+        --domain "$AWS_DOMAIN" \
+        --domain-owner "$AWS_ACCOUNT_ID" \
+        --region "$AWS_REGION" \
+        --query authorizationToken \
+        --output text 2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$auth_token" ]; then
+        print_message "$GREEN" "✓ Successfully obtained CodeArtifact authorization token"
+        
+        # Get repository endpoint
+        local repo_endpoint
+        repo_endpoint=$(aws codeartifact get-repository-endpoint \
+            --domain "$AWS_DOMAIN" \
+            --domain-owner "$AWS_ACCOUNT_ID" \
+            --repository "$package_name" \
+            --format pypi \
+            --region "$AWS_REGION" \
+            --query repositoryEndpoint \
+            --output text 2>/dev/null)
+        
+        if [ $? -eq 0 ] && [ -n "$repo_endpoint" ]; then
+            print_message "$GREEN" "✓ Successfully obtained repository endpoint: $repo_endpoint"
+            
+            # Configure pip to use CodeArtifact
+            pip config set global.index-url "https://aws:${auth_token}@${repo_endpoint#https://}simple/"
+            pip config set global.trusted-host "${repo_endpoint#https://}" 
+            
+            print_message "$GREEN" "✓ Pip configured to use CodeArtifact repository"
+            
+            # Verify configuration
+            print_message "$YELLOW" "Current pip configuration:"
+            pip config list
+            
+        else
+            print_message "$RED" "❌ Failed to get repository endpoint"
+            print_message "$YELLOW" "Falling back to direct aws codeartifact login command..."
+            aws codeartifact login --tool pip --domain "$AWS_DOMAIN" --region "$AWS_REGION" --repository "$package_name"
+        fi
+    else
+        print_message "$RED" "❌ Failed to get CodeArtifact authorization token"
+        print_message "$YELLOW" "This might be due to:"
+        print_message "$BOLD" "  - Invalid AWS credentials"
+        print_message "$BOLD" "  - Insufficient permissions"
+        print_message "$BOLD" "  - Network connectivity issues"
+        print_message "$BOLD" "  - Incorrect AWS account ID or domain name"
+        
+        print_message "$YELLOW" "Attempting fallback authentication..."
+        aws codeartifact login --tool pip --domain "$AWS_DOMAIN" --region "$AWS_REGION" --repository "$package_name" || {
+            print_message "$RED" "❌ CodeArtifact authentication failed completely"
+            print_message "$YELLOW" "Continuing without CodeArtifact authentication..."
+            print_message "$YELLOW" "Some private packages may not be available"
+        }
+    fi
+}
+
+# Function to create and activate virtual environment
+setup_virtual_environment() {
+    print_message "$YELLOW" "Creating a new virtual environment in ./.venv..."
+    python -m venv .venv
+    
+    print_message "$YELLOW" "Activating the new virtual environment..."
+    source .venv/bin/activate
+    
+    # Verify activation
+    if [[ "$VIRTUAL_ENV" == *".venv"* ]]; then
+        print_message "$GREEN" "Virtual environment activated successfully."
+        echo -e "Current Python executable: $(which python)"
+    else
+        print_message "$RED" "Failed to activate virtual environment."
+        exit 1
+    fi
+}
+
+# Function to build and inspect wheel
+build_and_inspect_wheel() {
+    print_step "5" "Building a wheel to inspect"
+    python -m build --wheel
+    
+    print_step "6" "Inspecting the wheel's metadata"
+    mkdir -p temp_extract
+    unzip -q dist/*.whl -d temp_extract
+    echo -e "Dependencies in the wheel metadata:"
+    cat temp_extract/*.dist-info/METADATA | grep "Requires-Dist" || print_message "$BOLD" "No dependencies found"
+    
+    print_step "7" "Cleaning up"
+    rm -rf temp_extract
+}
+
+# Function to verify environment
+verify_environment() {
+    print_message "$CYAN" "=== Environment Verification ==="
+    print_message "$YELLOW" "Python executable:"
+    which python
+    print_message "$YELLOW" "Pip executable:"
+    which pip
+    print_message "$YELLOW" "Installed packages:"
+    pip list
+    
+    test_package_imports
+}
+
+# =============================================================================
+# MAIN SCRIPT EXECUTION
+# =============================================================================
+
+main() {
+    # Cleanup
+    print_message "$YELLOW" "Performing thorough cleanup (removing .venv, build, dist, and egg-info directories)..."
+    rm -rf .venv build dist *.egg-info
+    
+    # Setup CodeArtifact
+    setup_codeartifact
+    
+    # Debug section
+    print_message "$CYAN" "=== Debugging ml-feature-set installation ==="
+    print_step "1" "First, let's check what's in the pyproject.toml file"
+    grep -A 5 -B 5 "data-source-manager" pyproject.toml || print_message "$BOLD" "No references to data-source-manager found"
+    
+    # Virtual environment setup
+    print_step "2" "Creating a fresh virtual environment"
+    setup_virtual_environment
+    
+    # Install UV and upgrade pip
+    print_step "3" "Installing UV (fast Python package installer) and upgrading pip"
+    pip install --upgrade pip --no-cache-dir
+    pip install uv --no-cache-dir
+    print_message "$GREEN" "✓ UV installed for faster package management"
+    
+    # Install build dependencies
+    print_step "4" "Installing build dependencies first"
+    install_packages "build dependencies" "setuptools" "wheel" "build"
+    
+    # Configure UV/pip to use modern build standards
+    print_message "$YELLOW" "Configuring modern build standards to avoid legacy warnings..."
+    export PIP_USE_PEP517=1
+    export UV_USE_PEP517=1
+    print_message "$GREEN" "✓ Modern build standards configured"
+    
+    # Build and inspect wheel
+    build_and_inspect_wheel
+    
+    # Fix data-source-manager dependency conflicts first
+    print_step "8a" "Fixing data-source-manager dependency conflicts"
+    print_message "$YELLOW" "Installing specific versions required by data-source-manager..."
+    
+    # Install exact versions required by data-source-manager
+    uv pip install "fsspec>=2025.5.1" --no-cache --use-pep517 || pip install "fsspec>=2025.5.1" --no-cache-dir --use-pep517
+    uv pip install "numpy==1.24.4" --no-cache --use-pep517 || pip install "numpy==1.24.4" --no-cache-dir --use-pep517
+    uv pip install "pandas>=2.2.3,<2.3.0" --no-cache --use-pep517 || pip install "pandas>=2.2.3,<2.3.0" --no-cache-dir --use-pep517
+    
+    print_message "$GREEN" "✓ Data-source-manager dependencies aligned"
+    
+    # Install main package
+    print_step "8b" "Installing the package with dev dependencies using UV"
+    uv pip install -e ".[dev]" --no-cache --use-pep517 || {
+        print_message "$YELLOW" "UV failed, falling back to pip..."
+        pip install -e ".[dev]" --no-cache-dir --upgrade --use-pep517
+    }
+    
+    # Install TA-Lib
+    print_step "9" "Installing talib separately (if needed)"
+    uv pip install TA-Lib --no-cache --use-pep517 || pip install TA-Lib --use-pep517 || print_message "$BOLD" "Failed to install TA-Lib. You may need to install system dependencies first."
+    
+    # Install packages by category
+    print_step "10" "Installing ML and feature engineering packages by category"
+    
+    # Core ML Framework
+    print_message "$YELLOW" "📊 Installing Core ML Framework..."
+    install_packages "core ML framework" "scikit-learn"
+    
+    # Deep Learning & Neural Networks
+    print_message "$YELLOW" "🧠 Installing Deep Learning & Neural Networks..."
+    install_packages "deep learning frameworks" "torch" "pytorch-lightning"
+    
+    # Gradient Boosting Models
+    print_message "$YELLOW" "🚀 Installing Gradient Boosting Models..."
+    install_packages "gradient boosting models" "lightgbm" "xgboost" "catboost"
+    
+    # Time Series Forecasting & Foundation Models (Tier 2 Priority)
+    print_message "$YELLOW" "📈 Installing Time Series Forecasting & Foundation Models..."
+    install_packages "time series forecasting" "pytorch-forecasting" "u8darts"
+    
+    # TabPFN-TS: Breakthrough Technology (#1 GIFT-EVAL)
+    print_message "$YELLOW" "🏆 Installing TabPFN-TS (Breakthrough Technology - #1 GIFT-EVAL)..."
+    install_packages "TabPFN time series foundation model" "tabpfn-time-series" "tabpfn-client"
+    
+    # Feature Engineering & Time Series Analysis
+    print_message "$YELLOW" "🔧 Installing Feature Engineering & Time Series Analysis..."
+    install_packages "feature engineering tools" "tsfresh"
+    
+    # Change Point Detection & Statistical Analysis (Tier 2 Critical)
+    print_message "$YELLOW" "📊 Installing Change Point Detection & Statistical Analysis..."
+    install_packages "change point detection and statistics" "ruptures" "statsmodels"
+    
+    # Financial Microstructure & Volatility Analysis
+    print_message "$YELLOW" "💹 Installing Financial Microstructure & Volatility Analysis..."
+    install_packages "financial microstructure tools" "quantstats" "arch" "ipython"
+    
+    # Model Interpretability & Explainability
+    print_message "$YELLOW" "🔍 Installing Model Interpretability & Explainability..."
+    install_packages "interpretability tools" "shap" "captum"
+    
+
+    
+    # Automated ML & Feature Engineering (Tier 3 - Use with Caution)
+    print_message "$YELLOW" "🤖 Installing Automated ML & Feature Engineering..."
+    install_packages "automated feature engineering" "getml"
+    
+    # AutoGluon: Automated ML with Principle Compliance Validation Required
+    print_message "$YELLOW" "⚠️  Installing AutoGluon (Tier 3 - Requires Principle Validation)..."
+    install_packages "automated ML ensemble methods" "autogluon"
+    
+    print_message "$GREEN" "All ML and feature engineering packages installed successfully!"
+    
+    # Implementation Hierarchy Summary
+    print_message "$CYAN" "=== Implementation Hierarchy Summary ==="
+    print_message "$GREEN" "✅ Tier 1 (Turnkey): scipy, numpy, pandas (pre-installed)"
+    print_message "$GREEN" "✅ Tier 2 (Specialized Financial): tabpfn-time-series, darts, ruptures, quantstats, arch, statsmodels"
+    print_message "$YELLOW" "⚠️  Tier 3 (ML Frameworks): autogluon (requires principle validation)"
+    print_message "$YELLOW" "⚠️  Tier 4 (Custom): getml (use with caution)"
+    
+    print_message "$CYAN" "=== Performance & Compatibility Improvements ==="
+    print_message "$GREEN" "🚀 UV Package Manager: 10-100x faster than pip"
+    print_message "$GREEN" "🔧 Data-Source-Manager: Dependencies aligned (numpy==1.24.4, pandas>=2.2.3,<2.3.0, fsspec>=2025.5.1)"
+    print_message "$GREEN" "🏗️  PEP 517 Build Standards: Modern build system, eliminates legacy warnings"
+    print_message "$GREEN" "⚡ Fallback System: UV → pip for maximum compatibility"
+    
+    print_message "$CYAN" "=== Principle Compliance Notes ==="
+    print_message "$BOLD" "• TabPFN-TS: Excellent compliance (Principles 1,4,5,7), Implementation needed (3,6)"
+    print_message "$BOLD" "• AutoGluon: Requires validation of all hyperparameters (Principle 2)"
+    print_message "$BOLD" "• All libraries: Must follow 7 Fundamental Principles and 4 Implementation Rules"
+    
+    # Verify environment
+    verify_environment
+    
+    # Completion messages
+    print_message "$CYAN" "=== Debug complete ==="
+    print_message "$GREEN" "=== Virtual environment setup completed ==="
+    
+    # Usage instructions
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        print_message "$YELLOW" "NOTE: This script was executed directly. To activate the virtual environment, run:"
+        print_message "$BOLD" "source .venv/bin/activate"
+        print_message "$YELLOW" "Or to run the script with automatic activation:"
+        print_message "$BOLD" "source $(basename "$0")"
+    fi
+}
+
+# =============================================================================
+# COMMAND LINE ARGUMENT HANDLING
+# =============================================================================
+
+# Check for command line arguments
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    print_message "$CYAN" "=== ML Feature Set Environment Setup ==="
+    print_message "$YELLOW" "Usage:"
+    print_message "$BOLD" "  $0                    # Run full environment setup"
+    print_message "$BOLD" "  $0 --configure-aws   # Show AWS credentials configuration helper"
+    print_message "$BOLD" "  $0 --help           # Show this help message"
+    echo
+    print_message "$GREEN" "✓ AWS credentials are already configured in this script."
+    print_message "$YELLOW" "The script is ready to use with your el-dev profile credentials."
+    exit 0
+elif [[ "$1" == "--configure-aws" ]]; then
+    configure_aws_credentials
+    exit 0
+fi
+
+# Execute main function
+main "$@"

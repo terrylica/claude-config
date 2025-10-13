@@ -1,0 +1,30 @@
+#!/bin/bash
+# Download remaining SWAP months (c=13)
+set -e
+CONCURRENCY=13
+
+echo "Downloading remaining 16 months (c=$CONCURRENCY)..."
+echo "- 2023-08 (redo), 2023-10 to 2023-12"
+echo "- 2024-01 to 2024-12"
+echo ""
+
+MONTHS=(
+    "2023 8"
+    "2023 10"
+    "2023 11"
+    "2023 12"
+    "2024 1" "2024 2" "2024 3" "2024 4" "2024 5" "2024 6"
+    "2024 7" "2024 8" "2024 9" "2024 10" "2024 11" "2024 12"
+)
+
+download() {
+    uv run --active python scripts/download_month.py $1 $2 \
+        --ticks --market-type swap --data-dir data/ 2>&1 | \
+        grep -vE "^DEBUG|Unnecessary" | grep -E "(✓ Saved|ERROR)"
+}
+
+export -f download
+
+START=$(date +%s)
+printf '%s\n' "${MONTHS[@]}" | xargs -P $CONCURRENCY -n 2 bash -c 'download "$@"' _
+echo "Time: $(( ($(date +%s) - START) / 60 )) min"

@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""
+Analyze the 79 features from atr-adaptive-laguerre package for ML training suitability.
+
+Checks:
+1. Orthogonality: Feature correlations (should be low for redundancy filtering)
+2. Variability: Individual feature variance and range
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+print("=" * 80)
+print("Feature Quality Analysis: atr-adaptive-laguerre (79 features)")
+print("=" * 80)
+print()
+
+# Load data
+print("Loading validation data...")
+sample_data_dir = "/Users/terryli/eon/ml-feature-set/ml_feature_set/sample_data"
+df = pd.read_csv(f"{sample_data_dir}/resampled_binance_BTC-2h.csv")
+df['date'] = pd.to_datetime(df['date'])
+df['actual_ready_time'] = df['date'] + timedelta(hours=2)
+print(f"Data shape: {df.shape}")
+print()
+
+# Configure package (79 features with redundancy filtering)
+print("Configuring atr-adaptive-laguerre v1.0.7 (filter_redundancy=True)...")
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    smoothing_period=5,
+    smoothing_method='ema',
+    level_up=0.85,
+    level_down=0.15,
+    adaptive_offset=0.75,
+    filter_redundancy=True,  # 79 features (optimized)
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+print(f"Expected features: {indicator.n_features}")
+print()
+
+# Generate features
+print("Generating features...")
+features = indicator.fit_transform_features(df)
+print(f"Generated features shape: {features.shape}")
+print()
+
+# Remove any rows with NaN (warmup period)
+features_clean = features.dropna()
+print(f"Clean features (after removing NaN): {features_clean.shape}")
+print()
+
+# ============================================================================
+# 1. ORTHOGONALITY ANALYSIS (Correlation Matrix)
+# ============================================================================
+print("=" * 80)
+print("1. ORTHOGONALITY ANALYSIS (Feature Correlations)")
+print("=" * 80)
+print()
+
+# Compute correlation matrix
+corr_matrix = features_clean.corr()
+
+# Get absolute correlations (excluding diagonal)
+mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+upper_tri_corr = corr_matrix.where(mask)
+abs_corr = upper_tri_corr.abs().values.flatten()
+abs_corr = abs_corr[~np.isnan(abs_corr)]
+
+print(f"Total feature pairs: {len(abs_corr)}")
+print()
+
+# Correlation statistics
+print("Correlation statistics:")
+print(f"  Mean absolute correlation: {abs_corr.mean():.4f}")
+print(f"  Median absolute correlation: {np.median(abs_corr):.4f}")
+print(f"  Max absolute correlation: {abs_corr.max():.4f}")
+print(f"  Min absolute correlation: {abs_corr.min():.4f}")
+print()
+
+# Distribution of correlations
+thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+print("Correlation distribution:")
+for threshold in thresholds:
+    count = (abs_corr >= threshold).sum()
+    pct = (count / len(abs_corr)) * 100
+    print(f"  >= {threshold:.1f}: {count:5d} pairs ({pct:5.2f}%)")
+print()
+
+# Find highly correlated pairs (>0.9)
+high_corr_pairs = []
+for i in range(len(corr_matrix)):
+    for j in range(i+1, len(corr_matrix)):
+        if abs(corr_matrix.iloc[i, j]) >= 0.9:
+            high_corr_pairs.append({
+                'feature1': corr_matrix.columns[i],
+                'feature2': corr_matrix.columns[j],
+                'correlation': corr_matrix.iloc[i, j]
+            })
+
+if high_corr_pairs:
+    print(f"⚠️  Found {len(high_corr_pairs)} highly correlated pairs (|r| >= 0.9):")
+    for pair in high_corr_pairs[:10]:  # Show first 10
+        print(f"  {pair['feature1']} <-> {pair['feature2']}: {pair['correlation']:.4f}")
+    if len(high_corr_pairs) > 10:
+        print(f"  ... and {len(high_corr_pairs) - 10} more")
+else:
+    print("✅ No highly correlated pairs (|r| >= 0.9) found")
+print()
+
+# ============================================================================
+# 2. VARIABILITY ANALYSIS (Individual Feature Statistics)
+# ============================================================================
+print("=" * 80)
+print("2. VARIABILITY ANALYSIS (Individual Feature Statistics)")
+print("=" * 80)
+print()
+
+# Compute statistics for each feature
+stats = []
+for col in features_clean.columns:
+    data = features_clean[col]
+    stats.append({
+        'feature': col,
+        'mean': data.mean(),
+        'std': data.std(),
+        'min': data.min(),
+        'max': data.max(),
+        'range': data.max() - data.min(),
+        'variance': data.var(),
+        'cv': data.std() / abs(data.mean()) if data.mean() != 0 else np.inf,  # Coefficient of variation
+        'unique_ratio': len(data.unique()) / len(data)
+    })
+
+stats_df = pd.DataFrame(stats)
+
+# Identify potential issues
+print("Checking for potential issues...")
+print()
+
+# Low variance features
+low_var_threshold = 1e-6
+low_var = stats_df[stats_df['variance'] < low_var_threshold]
+if len(low_var) > 0:
+    print(f"⚠️  Found {len(low_var)} low variance features (var < {low_var_threshold}):")
+    for _, row in low_var.iterrows():
+        print(f"  {row['feature']}: var={row['variance']:.10f}, range={row['range']:.10f}")
+else:
+    print(f"✅ No low variance features (all var >= {low_var_threshold})")
+print()
+
+# Constant features
+constant = stats_df[stats_df['range'] == 0]
+if len(constant) > 0:
+    print(f"⚠️  Found {len(constant)} constant features:")
+    for _, row in constant.iterrows():
+        print(f"  {row['feature']}: value={row['mean']:.6f}")
+else:
+    print("✅ No constant features")
+print()
+
+# Low uniqueness features
+low_unique_threshold = 0.01  # Less than 1% unique values
+low_unique = stats_df[stats_df['unique_ratio'] < low_unique_threshold]
+if len(low_unique) > 0:
+    print(f"⚠️  Found {len(low_unique)} low uniqueness features (<{low_unique_threshold*100:.0f}% unique):")
+    for _, row in low_unique.iterrows():
+        print(f"  {row['feature']}: {row['unique_ratio']*100:.2f}% unique")
+else:
+    print(f"✅ No low uniqueness features (all >={low_unique_threshold*100:.0f}% unique)")
+print()
+
+# Summary statistics
+print("Overall variability summary:")
+print(f"  Mean std dev: {stats_df['std'].mean():.4f}")
+print(f"  Median std dev: {stats_df['std'].median():.4f}")
+print(f"  Mean range: {stats_df['range'].mean():.4f}")
+print(f"  Median range: {stats_df['range'].median():.4f}")
+print(f"  Mean unique ratio: {stats_df['unique_ratio'].mean():.4f}")
+print()
+
+# ============================================================================
+# 3. FEATURE GROUPS ANALYSIS
+# ============================================================================
+print("=" * 80)
+print("3. FEATURE GROUPS ANALYSIS")
+print("=" * 80)
+print()
+
+# Group features by type
+base_features = [col for col in features_clean.columns if '_base' in col]
+mult1_features = [col for col in features_clean.columns if '_mult1' in col]
+mult2_features = [col for col in features_clean.columns if '_mult2' in col]
+cross_features = [col for col in features_clean.columns if col not in base_features + mult1_features + mult2_features]
+
+print(f"Base features (1x):     {len(base_features):3d}")
+print(f"Mult1 features (4x):    {len(mult1_features):3d}")
+print(f"Mult2 features (12x):   {len(mult2_features):3d}")
+print(f"Cross-interval features: {len(cross_features):3d}")
+print(f"Total:                   {len(features_clean.columns):3d}")
+print()
+
+# Analyze cross-group correlations
+if len(base_features) > 0 and len(mult1_features) > 0:
+    base_mult1_corr = features_clean[base_features].corrwith(features_clean[mult1_features].mean(axis=1))
+    print(f"Avg correlation (base <-> mult1): {base_mult1_corr.abs().mean():.4f}")
+
+if len(base_features) > 0 and len(mult2_features) > 0:
+    base_mult2_corr = features_clean[base_features].corrwith(features_clean[mult2_features].mean(axis=1))
+    print(f"Avg correlation (base <-> mult2): {base_mult2_corr.abs().mean():.4f}")
+
+if len(mult1_features) > 0 and len(mult2_features) > 0:
+    mult1_mult2_corr = features_clean[mult1_features].corrwith(features_clean[mult2_features].mean(axis=1))
+    print(f"Avg correlation (mult1 <-> mult2): {mult1_mult2_corr.abs().mean():.4f}")
+print()
+
+# ============================================================================
+# 4. RECOMMENDATIONS
+# ============================================================================
+print("=" * 80)
+print("4. RECOMMENDATIONS")
+print("=" * 80)
+print()
+
+issues = []
+good_points = []
+
+# Check correlation
+if abs_corr.mean() < 0.3:
+    good_points.append(f"✅ Low average correlation ({abs_corr.mean():.4f}) indicates good orthogonality")
+elif abs_corr.mean() < 0.5:
+    good_points.append(f"✅ Moderate average correlation ({abs_corr.mean():.4f}) is acceptable")
+else:
+    issues.append(f"⚠️  High average correlation ({abs_corr.mean():.4f}) - features may be redundant")
+
+# Check high correlation pairs
+high_corr_pct = (len(high_corr_pairs) / len(abs_corr)) * 100
+if high_corr_pct < 1:
+    good_points.append(f"✅ Very few highly correlated pairs ({len(high_corr_pairs)}, {high_corr_pct:.2f}%)")
+elif high_corr_pct < 5:
+    good_points.append(f"✅ Low percentage of highly correlated pairs ({len(high_corr_pairs)}, {high_corr_pct:.2f}%)")
+else:
+    issues.append(f"⚠️  {len(high_corr_pairs)} highly correlated pairs ({high_corr_pct:.2f}%) - consider more filtering")
+
+# Check variance
+if len(low_var) == 0 and len(constant) == 0:
+    good_points.append("✅ All features have good variance (no constant or near-constant features)")
+else:
+    if len(constant) > 0:
+        issues.append(f"⚠️  {len(constant)} constant features found - should be removed")
+    if len(low_var) > 0:
+        issues.append(f"⚠️  {len(low_var)} low variance features - may not be useful")
+
+# Check uniqueness
+if len(low_unique) == 0:
+    good_points.append("✅ All features have good uniqueness (diverse values)")
+else:
+    issues.append(f"⚠️  {len(low_unique)} features with low uniqueness - may be categorical/binary")
+
+# Print summary
+if good_points:
+    print("Good qualities for ML training:")
+    for point in good_points:
+        print(f"  {point}")
+    print()
+
+if issues:
+    print("Potential issues:")
+    for issue in issues:
+        print(f"  {issue}")
+    print()
+else:
+    print("✅ No major issues found - features are suitable for ML training!")
+    print()
+
+# Overall assessment
+score = len(good_points) - len(issues)
+if score >= 3:
+    assessment = "EXCELLENT - Highly suitable for ML training"
+elif score >= 1:
+    assessment = "GOOD - Suitable for ML training with minor concerns"
+elif score >= -1:
+    assessment = "ACCEPTABLE - May need some feature engineering"
+else:
+    assessment = "NEEDS IMPROVEMENT - Significant issues detected"
+
+print(f"Overall assessment: {assessment}")
+print()
+
+# Save detailed stats
+output_file = "/tmp/feature_analysis_stats.csv"
+stats_df.to_csv(output_file, index=False)
+print(f"Detailed statistics saved to: {output_file}")
+print()
+
+# Save correlation matrix
+corr_output = "/tmp/feature_correlation_matrix.csv"
+corr_matrix.to_csv(corr_output)
+print(f"Correlation matrix saved to: {corr_output}")
+print()
+
+print("=" * 80)
+print("Analysis complete!")
+print("=" * 80)

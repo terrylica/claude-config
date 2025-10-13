@@ -1,0 +1,375 @@
+# Open Source Downie Alternatives for Video Stream Detection & Download
+
+Complete guide for detecting and downloading video streams from browsers, with mpv integration.
+
+**Test Date**: 2025-10-10
+**System**: macOS ARM64 (Apple Silicon)
+**Target**: Open-source alternatives to Downie with browser stream detection and mpv compatibility
+
+---
+
+## Core Tools Overview
+
+| Tool | Purpose | Status | Best For |
+|------|---------|--------|----------|
+| **yt-dlp** | Universal downloader | ✅ Installed | 1000+ sites, best all-rounder |
+| **Streamlink** | Live stream player | ✅ Installed | Twitch, live streams, direct play |
+| **N_m3u8DL-RE** | HLS/DASH specialist | ✅ Tested | Complex segmented streams |
+| **The Stream Detector** | Browser extension | 📦 Available | Auto-detect streams in browser |
+
+---
+
+## 1. yt-dlp - The Workhorse
+
+**Installation**:
+```bash
+brew install yt-dlp ffmpeg
+```
+
+**Current Version**: 2025.09.26
+
+### Basic Usage
+
+```bash
+# List available formats
+yt-dlp --list-formats "https://example.com/video"
+
+# Download best quality (auto-merges video+audio)
+yt-dlp "https://example.com/video"
+
+# Download specific format
+yt-dlp -f "bv*+ba/best" "https://example.com/video"
+
+# Custom filename
+yt-dlp -o "%(title).200s.%(ext)s" "https://example.com/video"
+```
+
+### Browser Cookie Integration
+
+Download authenticated/subscription content by importing browser cookies:
+
+```bash
+# Firefox cookies
+yt-dlp --cookies-from-browser firefox "https://example.com/video"
+
+# Chrome cookies
+yt-dlp --cookies-from-browser chrome "https://example.com/video"
+
+# Safari cookies
+yt-dlp --cookies-from-browser safari "https://example.com/video"
+```
+
+**Test Result**: Successfully extracted 1024 cookies from Firefox.
+
+### mpv Integration (Direct Play)
+
+```bash
+# Extract direct URL for mpv
+yt-dlp -g "https://example.com/video"
+
+# Play directly in mpv (ytdl_hook handles this automatically)
+mpv "https://youtube.com/watch?v=..."
+```
+
+**mpv's built-in `ytdl_hook` script automatically calls yt-dlp** - just open URLs directly:
+```bash
+mpv "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+### Supported Sites
+
+Thousands of sites including:
+- YouTube, Vimeo, Dailymotion
+- Twitter/X, Reddit, Instagram
+- Twitch, Kick, Bilibili
+- Educational platforms (Coursera, Udemy, etc.)
+- News sites (CNN, BBC, etc.)
+
+Full list: `yt-dlp --list-extractors`
+
+---
+
+## 2. Streamlink - Live Stream Player
+
+**Installation**:
+```bash
+brew install streamlink
+```
+
+**Current Version**: 7.6.0
+
+### Basic Usage
+
+```bash
+# List available qualities
+streamlink "https://twitch.tv/channel" --stream-url
+
+# Play directly in mpv (best quality)
+streamlink --player mpv "https://twitch.tv/channel" best
+
+# Save to file instead of playing
+streamlink -o output.mp4 "https://twitch.tv/channel" best
+```
+
+### Supported Platforms
+
+150+ plugins including:
+- **Live streaming**: Twitch, Kick, YouTube Live, TikTok Live
+- **VOD**: BBC iPlayer, Crunchyroll, Pluto TV
+- **Sports**: Stadium, Olympics Channel
+- **International**: Bilibili, Huya, Douyin, etc.
+
+Full list: `streamlink --plugins`
+
+### Limitations
+
+- YouTube support is limited (yt-dlp recommended instead)
+- Focused on live/streaming platforms, not general video sites
+
+---
+
+## 3. N_m3u8DL-RE - HLS/DASH Specialist
+
+**Installation** (manual download required):
+
+```bash
+cd ~/.local/bin
+curl -L -o N_m3u8DL-RE.tar.gz \
+  "https://github.com/nilaoda/N_m3u8DL-RE/releases/download/v0.3.0-beta/N_m3u8DL-RE_v0.3.0-beta_osx-arm64_20241203.tar.gz"
+tar -xzf N_m3u8DL-RE.tar.gz
+chmod +x N_m3u8DL-RE
+rm N_m3u8DL-RE.tar.gz
+```
+
+**Current Version**: v0.3.0-beta (2024-12-03)
+
+### When to Use
+
+Use N_m3u8DL-RE when:
+- yt-dlp or streamlink fails with HLS/DASH playlists
+- You need advanced segment control
+- Custom decryption is required
+- Weird M3U8/MPD playlist structures
+
+### Basic Usage
+
+```bash
+# Download M3U8 stream
+N_m3u8DL-RE "https://example.com/playlist.m3u8" --save-dir ./downloads
+
+# With custom headers
+N_m3u8DL-RE "https://example.com/playlist.m3u8" \
+  -H "Cookie: sessionid=xxx" \
+  -H "User-Agent: Mozilla/5.0..."
+
+# Auto-select best quality
+N_m3u8DL-RE "https://example.com/playlist.m3u8" --auto-select
+
+# Parallel download threads
+N_m3u8DL-RE "https://example.com/playlist.m3u8" --thread-count 32
+```
+
+### Advanced Features
+
+- **Decryption**: Supports AES-128, SAMPLE-AES, CENC, CHACHA20
+- **Format support**: M3U8 (HLS), MPD (DASH), ISM (Smooth Streaming)
+- **Binary merge**: Fast segment concatenation without re-encoding
+- **Subtitle extraction**: Auto-converts to SRT format
+
+---
+
+## 4. Browser Integration - The Stream Detector
+
+**The Stream Detector** is the open-source browser extension that replicates Downie's "detect streams in browser" functionality.
+
+### Installation
+
+- **Firefox**: https://addons.mozilla.org/firefox/addon/hls-stream-detector/
+- **Chrome**: Search "The Stream Detector" in Chrome Web Store
+- **Source**: https://github.com/54ac/stream-detector
+
+### Features
+
+✅ Auto-detects streaming protocols:
+- M3U8 (HLS)
+- MPD (DASH)
+- F4M (HDS)
+- ISM (Smooth Streaming)
+
+✅ Copies URLs as:
+- Raw URLs
+- Ready-made `yt-dlp` commands
+- Ready-made `FFmpeg` commands
+- Ready-made `Streamlink` commands
+- Ready-made `N_m3u8DL-CLI` commands
+
+✅ Captures request headers (User-Agent, Cookie, Referer)
+
+### Usage Workflow
+
+1. Install extension in Firefox/Chrome
+2. Browse to a video page
+3. Click extension icon to see detected streams
+4. Copy ready-made command with headers included
+5. Paste into terminal to download or play in mpv
+
+### Alternative Extensions
+
+- **Live Stream Downloader**: Multi-threaded HLS downloader
+- **MediaStream Downloader Pro**: Broad format support
+- **m3u8 Sniffer TV**: Chrome-focused M3U8 detector
+
+---
+
+## Comparison Matrix
+
+| Feature | yt-dlp | Streamlink | N_m3u8DL-RE | Browser Ext |
+|---------|--------|------------|-------------|-------------|
+| **Sites Supported** | 1000+ | 150+ | Any HLS/DASH | Browser-dependent |
+| **Live Streams** | ✅ Good | ✅ Excellent | ⚠️ Manual | ✅ Detect only |
+| **Browser Cookies** | ✅ Auto-extract | ⚠️ Manual | ⚠️ Manual | ✅ Auto-capture |
+| **mpv Integration** | ✅ Built-in | ✅ Direct pipe | ⚠️ Manual URL | ✅ Copy URL |
+| **DRM Content** | ❌ No | ❌ No | ⚠️ Limited | ❌ No |
+| **Complex Playlists** | ✅ Good | ⚠️ Limited | ✅ Excellent | N/A |
+
+---
+
+## Quick Start Recipes
+
+### Download YouTube Video
+
+```bash
+yt-dlp "https://www.youtube.com/watch?v=..."
+```
+
+### Watch Twitch Stream in mpv
+
+```bash
+streamlink --player mpv "https://twitch.tv/channel" best
+```
+
+### Download from Authenticated Site
+
+```bash
+# Use browser cookies
+yt-dlp --cookies-from-browser firefox "https://site.com/video"
+```
+
+### Download HLS Stream from Browser
+
+1. Install The Stream Detector extension
+2. Play video in browser
+3. Click extension → Copy `yt-dlp` command
+4. Paste in terminal
+
+### Play Any URL in mpv
+
+```bash
+# mpv uses yt-dlp automatically via ytdl_hook
+mpv "https://any-supported-site.com/video"
+```
+
+### Download Problematic M3U8
+
+```bash
+# When yt-dlp fails, try N_m3u8DL-RE
+N_m3u8DL-RE "https://example.com/stream.m3u8" \
+  --save-dir ~/Downloads \
+  --auto-select \
+  --thread-count 16
+```
+
+---
+
+## mpv Configuration for Stream Playback
+
+Add to `~/.config/mpv/mpv.conf`:
+
+```ini
+# Cache settings for streaming
+cache=yes
+demuxer-max-bytes=500M
+demuxer-max-back-bytes=100M
+
+# Hardware acceleration (macOS)
+hwdec=auto-safe
+
+# Resume playback position
+save-position-on-quit=yes
+```
+
+---
+
+## Limitations & DRM Content
+
+**None of these tools can download DRM-protected content**:
+- Netflix, Disney+, Amazon Prime Video
+- Apple TV+, HBO Max, Hulu
+- Paid streaming services with Widevine/FairPlay DRM
+
+For DRM content, you must use official apps or screen recording.
+
+---
+
+## Tool Selection Decision Tree
+
+```
+Start here:
+├─ Video on popular site (YouTube, Twitter, Reddit)?
+│  └─ Use: yt-dlp
+│
+├─ Live stream (Twitch, Kick, YouTube Live)?
+│  └─ Use: Streamlink
+│
+├─ Need to detect stream URL in browser?
+│  └─ Use: The Stream Detector extension + yt-dlp
+│
+├─ yt-dlp fails with "format not available" or playlist error?
+│  └─ Use: N_m3u8DL-RE
+│
+└─ Need browser login/cookies?
+   └─ Use: yt-dlp --cookies-from-browser
+```
+
+---
+
+## Installation Summary
+
+```bash
+# Core tools
+brew install yt-dlp ffmpeg streamlink mpv
+
+# N_m3u8DL-RE (manual)
+cd ~/.local/bin
+curl -L -o N_m3u8DL-RE.tar.gz \
+  "https://github.com/nilaoda/N_m3u8DL-RE/releases/download/v0.3.0-beta/N_m3u8DL-RE_v0.3.0-beta_osx-arm64_20241203.tar.gz"
+tar -xzf N_m3u8DL-RE.tar.gz
+chmod +x N_m3u8DL-RE
+rm N_m3u8DL-RE.tar.gz
+
+# Browser extension
+# Install "The Stream Detector" from Firefox Add-ons or Chrome Web Store
+```
+
+---
+
+## Resources
+
+- **yt-dlp**: https://github.com/yt-dlp/yt-dlp
+- **Streamlink**: https://streamlink.github.io
+- **N_m3u8DL-RE**: https://github.com/nilaoda/N_m3u8DL-RE
+- **The Stream Detector**: https://github.com/54ac/stream-detector
+- **mpv**: https://mpv.io
+
+---
+
+## Testing Results Summary
+
+All tools tested successfully on macOS ARM64 (2025-10-10):
+
+✅ **yt-dlp**: v2025.09.26 - Format listing, URL extraction, cookie import
+✅ **Streamlink**: v7.6.0 - Plugin listing, URL extraction
+✅ **N_m3u8DL-RE**: v0.3.0-beta - Help command, options validation
+✅ **mpv**: v0.40.0 - ytdl_hook integration confirmed
+
+Location: `/tmp/mpv/`

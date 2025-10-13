@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""
+Comprehensive Empirical Compression Benchmark for Exness EURUSD Tick Data
+
+Tests ALL available methods:
+1. Parquet (Snappy, Gzip, Brotli, Zstd, LZ4)
+2. Apache Arrow/Feather (uncompressed, LZ4, Zstd)
+3. Lance format
+4. Gorilla algorithm (Facebook time-series compression)
+5. Delta encoding
+6. Specialized float compression
+7. HDF5 with compression
+8. ORC format
+
+Only empirical results on actual Exness data.
+"""
+
+import zipfile
+from pathlib import Path
+import pandas as pd
+import numpy as np
+import time
+import sys
+
+
+def load_exness_data():
+    """Load actual Exness EURUSD tick data."""
+    zip_path = Path('/tmp/Exness_EURUSD_Raw_Spread_2024_08.zip')
+
+    if not zip_path.exists():
+        print(f"✗ Data not found: {zip_path}")
+        print("  Run parquet_primary_architecture.py first")
+        sys.exit(1)
+
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        csv_name = zip_path.stem + '.csv'
+        with zf.open(csv_name) as csv_file:
+            df = pd.read_csv(
+                csv_file,
+                usecols=['Timestamp', 'Bid', 'Ask'],
+                parse_dates=['Timestamp']
+            )
+
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
+    zip_size = zip_path.stat().st_size / 1024 / 1024
+
+    return df, zip_size
+
+
+class CompressionBenchmark:
+    """Benchmark all compression methods on Exness data."""
+
+    def __init__(self, df: pd.DataFrame, zip_size_mb: float):
+        self.df = df
+        self.zip_size_mb = zip_size_mb
+        self.test_dir = Path('/tmp/compression_benchmark')
+        self.test_dir.mkdir(exist_ok=True)
+        self.results = []
+
+    def benchmark_parquet(self):
+        """Test Parquet with all compression codecs."""
+        print("\n" + "="*70)
+        print("1. PARQUET FORMAT")
+        print("="*70)
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        # Test all compression methods
+        configs = [
+            ('snappy', None),
+            ('gzip', 9),
+            ('brotli', 11),
+            ('zstd', 1),
+            ('zstd', 9),
+            ('zstd', 22),
+            ('lz4', None),
+            ('uncompressed', None),
+        ]
+
+        for codec, level in configs:
+            try:
+                name = f"{codec}-{level}" if level else codec
+                path = self.test_dir / f'parquet_{name}.parquet'
+
+                print(f"   {name:<20}", end=' ', flush=True)
+
+                # Write
+                start = time.time()
+                table = pa.Table.from_pandas(self.df)
+                if level:
+                    pq.write_table(table, path, compression=codec, compression_level=level)
+                else:
+                    pq.write_table(table, path, compression=codec)
+                write_time = time.time() - start
+
+                size_mb = path.stat().st_size / 1024 / 1024
+
+                # Read
+                start = time.time()
+                _ = pq.read_table(path)
+                read_time = time.time() - start
+
+                self.results.append({
+                    'format': 'Parquet',
+                    'method': name,
+                    'size_mb': size_mb,
+                    'write_s': write_time,
+                    'read_s': read_time
+                })
+
+                print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+
+            except Exception as e:
+                print(f"FAILED: {e}")
+
+    def benchmark_feather(self):
+        """Test Apache Arrow Feather/IPC format."""
+        print("\n" + "="*70)
+        print("2. APACHE ARROW FEATHER")
+        print("="*70)
+
+        try:
+            import pyarrow.feather as feather
+
+            for compression in ['uncompressed', 'lz4', 'zstd']:
+                try:
+                    path = self.test_dir / f'feather_{compression}.arrow'
+
+                    print(f"   {compression:<20}", end=' ', flush=True)
+
+                    start = time.time()
+                    feather.write_feather(self.df, path, compression=compression)
+                    write_time = time.time() - start
+
+                    size_mb = path.stat().st_size / 1024 / 1024
+
+                    start = time.time()
+                    _ = feather.read_feather(path)
+                    read_time = time.time() - start
+
+                    self.results.append({
+                        'format': 'Feather',
+                        'method': compression,
+                        'size_mb': size_mb,
+                        'write_s': write_time,
+                        'read_s': read_time
+                    })
+
+                    print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+
+                except Exception as e:
+                    print(f"FAILED: {e}")
+
+        except ImportError:
+            print("   ✗ pyarrow not available")
+
+    def benchmark_lance(self):
+        """Test Lance format."""
+        print("\n" + "="*70)
+        print("3. LANCE FORMAT")
+        print("="*70)
+
+        try:
+            import lance
+
+            path = self.test_dir / 'lance_data.lance'
+
+            print(f"   {'lance':<20}", end=' ', flush=True)
+
+            start = time.time()
+            lance.write_dataset(self.df, path, mode='overwrite')
+            write_time = time.time() - start
+
+            # Calculate directory size
+            size_bytes = sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
+            size_mb = size_bytes / 1024 / 1024
+
+            start = time.time()
+            _ = lance.dataset(path).to_table()
+            read_time = time.time() - start
+
+            self.results.append({
+                'format': 'Lance',
+                'method': 'default',
+                'size_mb': size_mb,
+                'write_s': write_time,
+                'read_s': read_time
+            })
+
+            print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+
+        except ImportError:
+            print("   ✗ pylance not installed")
+        except Exception as e:
+            print(f"   FAILED: {e}")
+
+    def benchmark_delta_encoding(self):
+        """Test delta encoding with Parquet."""
+        print("\n" + "="*70)
+        print("4. DELTA ENCODING (Time-Series Specific)")
+        print("="*70)
+
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            # Prepare delta-encoded data
+            df_delta = self.df.copy()
+            df_delta['Timestamp'] = df_delta['Timestamp'].astype('int64')
+
+            # Delta encoding
+            df_delta['Timestamp_delta'] = df_delta['Timestamp'].diff().fillna(0).astype('int32')
+            df_delta['Bid_delta'] = (df_delta['Bid'].diff().fillna(0) * 100000).astype('int16')
+            df_delta['Ask_delta'] = (df_delta['Ask'].diff().fillna(0) * 100000).astype('int16')
+
+            df_delta = df_delta[['Timestamp_delta', 'Bid_delta', 'Ask_delta']]
+
+            for level in [9, 22]:
+                try:
+                    path = self.test_dir / f'delta_zstd{level}.parquet'
+
+                    print(f"   delta+zstd-{level:<11}", end=' ', flush=True)
+
+                    start = time.time()
+                    table = pa.Table.from_pandas(df_delta)
+                    pq.write_table(table, path, compression='zstd', compression_level=level)
+                    write_time = time.time() - start
+
+                    size_mb = path.stat().st_size / 1024 / 1024
+
+                    start = time.time()
+                    _ = pq.read_table(path)
+                    read_time = time.time() - start
+
+                    self.results.append({
+                        'format': 'Delta+Parquet',
+                        'method': f'zstd-{level}',
+                        'size_mb': size_mb,
+                        'write_s': write_time,
+                        'read_s': read_time
+                    })
+
+                    print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+
+                except Exception as e:
+                    print(f"FAILED: {e}")
+
+        except Exception as e:
+            print(f"   FAILED: {e}")
+
+    def benchmark_gorilla(self):
+        """Test Gorilla algorithm (Facebook time-series compression)."""
+        print("\n" + "="*70)
+        print("5. GORILLA ALGORITHM (Facebook Time-Series)")
+        print("="*70)
+
+        try:
+            from gorilla import Gorilla
+
+            # Gorilla works on timestamp-value pairs
+            timestamps = self.df['Timestamp'].astype('int64').values
+            bid_values = self.df['Bid'].values
+
+            print(f"   {'gorilla-bid':<20}", end=' ', flush=True)
+
+            start = time.time()
+
+            # Compress Bid prices
+            gorilla = Gorilla()
+            for ts, val in zip(timestamps, bid_values):
+                gorilla.add_point(ts, val)
+
+            compressed = gorilla.serialize()
+            write_time = time.time() - start
+
+            # Save compressed data
+            path = self.test_dir / 'gorilla_bid.bin'
+            path.write_bytes(compressed)
+
+            size_mb = len(compressed) / 1024 / 1024
+
+            # Decompress
+            start = time.time()
+            gorilla2 = Gorilla.deserialize(compressed)
+            _ = list(gorilla2.get_points())
+            read_time = time.time() - start
+
+            self.results.append({
+                'format': 'Gorilla',
+                'method': 'bid-only',
+                'size_mb': size_mb,
+                'write_s': write_time,
+                'read_s': read_time
+            })
+
+            print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+            print("   Note: Bid only, does not include Ask or original Timestamp")
+
+        except ImportError:
+            print("   ✗ gorilla-tsc not installed")
+        except Exception as e:
+            print(f"   FAILED: {e}")
+
+    def benchmark_hdf5(self):
+        """Test HDF5 with compression."""
+        print("\n" + "="*70)
+        print("6. HDF5 FORMAT")
+        print("="*70)
+
+        try:
+            import tables
+
+            for compression in ['zlib', 'blosc', 'blosc:lz4', 'blosc:zstd']:
+                try:
+                    path = self.test_dir / f'hdf5_{compression.replace(":", "_")}.h5'
+
+                    print(f"   {compression:<20}", end=' ', flush=True)
+
+                    start = time.time()
+                    self.df.to_hdf(path, key='data', mode='w', complevel=9, complib=compression.split(':')[0])
+                    write_time = time.time() - start
+
+                    size_mb = path.stat().st_size / 1024 / 1024
+
+                    start = time.time()
+                    _ = pd.read_hdf(path, key='data')
+                    read_time = time.time() - start
+
+                    self.results.append({
+                        'format': 'HDF5',
+                        'method': compression,
+                        'size_mb': size_mb,
+                        'write_s': write_time,
+                        'read_s': read_time
+                    })
+
+                    print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+
+                except Exception as e:
+                    print(f"FAILED: {e}")
+
+        except ImportError:
+            print("   ✗ tables (PyTables) not installed")
+
+    def benchmark_orc(self):
+        """Test ORC format."""
+        print("\n" + "="*70)
+        print("7. ORC FORMAT")
+        print("="*70)
+
+        try:
+            import pyarrow as pa
+            import pyarrow.orc as orc
+
+            path = self.test_dir / 'data.orc'
+
+            print(f"   {'orc':<20}", end=' ', flush=True)
+
+            start = time.time()
+            table = pa.Table.from_pandas(self.df)
+            orc.write_table(table, path)
+            write_time = time.time() - start
+
+            size_mb = path.stat().st_size / 1024 / 1024
+
+            start = time.time()
+            _ = orc.read_table(path)
+            read_time = time.time() - start
+
+            self.results.append({
+                'format': 'ORC',
+                'method': 'default',
+                'size_mb': size_mb,
+                'write_s': write_time,
+                'read_s': read_time
+            })
+
+            print(f"{size_mb:>6.2f} MB | W: {write_time:>5.2f}s | R: {read_time:>5.2f}s")
+
+        except Exception as e:
+            print(f"   FAILED: {e}")
+
+    def print_summary(self):
+        """Print comprehensive summary."""
+        if not self.results:
+            print("\n✗ No results to display")
+            return
+
+        df_results = pd.DataFrame(self.results)
+        df_results['vs_zip'] = df_results['size_mb'] / self.zip_size_mb
+        df_results['savings_%'] = (1 - df_results['vs_zip']) * 100
+        df_results = df_results.sort_values('size_mb')
+
+        print("\n" + "="*80)
+        print("COMPREHENSIVE RESULTS (Sorted by Size)")
+        print("="*80)
+        print(f"\nBaseline ZIP: {self.zip_size_mb:.2f} MB\n")
+
+        print(f"{'Format':<20} {'Method':<15} {'Size (MB)':<10} {'vs ZIP':<8} {'Write(s)':<10} {'Read(s)':<10}")
+        print("-"*80)
+
+        for _, row in df_results.iterrows():
+            savings = f"{row['savings_%']:+.1f}%" if abs(row['savings_%']) > 0.1 else "0.0%"
+            print(f"{row['format']:<20} {row['method']:<15} {row['size_mb']:>8.2f}   {row['vs_zip']:>6.2f}x  {row['write_s']:>8.2f}   {row['read_s']:>8.2f}")
+
+        # Winners
+        best = df_results.iloc[0]
+        fastest_write = df_results.loc[df_results['write_s'].idxmin()]
+        fastest_read = df_results.loc[df_results['read_s'].idxmin()]
+        best_balance = df_results[(df_results['size_mb'] < self.zip_size_mb) & (df_results['write_s'] < 2.0)]
+        if not best_balance.empty:
+            best_balance = best_balance.iloc[0]
+
+        print("\n" + "="*80)
+        print("WINNERS")
+        print("="*80)
+
+        print(f"\n🏆 SMALLEST SIZE: {best['format']} ({best['method']})")
+        print(f"    Size: {best['size_mb']:.2f} MB")
+        print(f"    vs ZIP: {best['vs_zip']:.2f}x ({abs(best['savings_%']):.1f}% {'smaller' if best['vs_zip'] < 1 else 'larger'})")
+        print(f"    Write: {best['write_s']:.2f}s | Read: {best['read_s']:.2f}s")
+
+        print(f"\n⚡ FASTEST WRITE: {fastest_write['format']} ({fastest_write['method']})")
+        print(f"    Time: {fastest_write['write_s']:.3f}s")
+        print(f"    Size: {fastest_write['size_mb']:.2f} MB ({fastest_write['vs_zip']:.2f}x vs ZIP)")
+
+        print(f"\n⚡ FASTEST READ: {fastest_read['format']} ({fastest_read['method']})")
+        print(f"    Time: {fastest_read['read_s']:.3f}s")
+        print(f"    Size: {fastest_read['size_mb']:.2f} MB ({fastest_read['vs_zip']:.2f}x vs ZIP)")
+
+        if not best_balance.empty:
+            print(f"\n⚖️  BEST BALANCE: {best_balance['format']} ({best_balance['method']})")
+            print(f"    Size: {best_balance['size_mb']:.2f} MB ({best_balance['vs_zip']:.2f}x vs ZIP)")
+            print(f"    Write: {best_balance['write_s']:.2f}s | Read: {best_balance['read_s']:.2f}s")
+            print(f"    (Smaller than ZIP + Write time < 2s)")
+
+        # 3-year extrapolation
+        print("\n" + "="*80)
+        print("3-YEAR STORAGE (36 months)")
+        print("="*80)
+
+        months = 36
+        print(f"\nZIP baseline:           {self.zip_size_mb * months:>8.1f} MB ({self.zip_size_mb * months / 1024:.2f} GB)")
+        print(f"{best['format']} ({best['method']}):  {best['size_mb'] * months:>8.1f} MB ({best['size_mb'] * months / 1024:.2f} GB)")
+
+        if not best_balance.empty:
+            print(f"{best_balance['format']} ({best_balance['method']}):  {best_balance['size_mb'] * months:>8.1f} MB ({best_balance['size_mb'] * months / 1024:.2f} GB)")
+
+        print(f"\n+ DuckDB OHLC:          {28.0:>8.1f} MB")
+        print("-"*40)
+        print(f"Total (best):           {best['size_mb'] * months + 28:>8.1f} MB ({(best['size_mb'] * months + 28) / 1024:.2f} GB)")
+        if not best_balance.empty:
+            print(f"Total (balanced):       {best_balance['size_mb'] * months + 28:>8.1f} MB ({(best_balance['size_mb'] * months + 28) / 1024:.2f} GB)")
+
+
+def main():
+    print("╔" + "═"*78 + "╗")
+    print("║" + " "*78 + "║")
+    print("║" + "  COMPREHENSIVE COMPRESSION BENCHMARK - EXNESS EURUSD TICK DATA".center(78) + "║")
+    print("║" + " "*78 + "║")
+    print("╚" + "═"*78 + "╝")
+
+    print("\nLoading Exness EURUSD tick data (August 2024)...")
+    df, zip_size = load_exness_data()
+
+    print(f"✓ Loaded {len(df):,} ticks")
+    print(f"✓ ZIP baseline: {zip_size:.2f} MB")
+    print(f"✓ Testing ALL compression methods...")
+
+    benchmark = CompressionBenchmark(df, zip_size)
+
+    benchmark.benchmark_parquet()
+    benchmark.benchmark_feather()
+    benchmark.benchmark_lance()
+    benchmark.benchmark_delta_encoding()
+    benchmark.benchmark_gorilla()
+    benchmark.benchmark_hdf5()
+    benchmark.benchmark_orc()
+
+    benchmark.print_summary()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,113 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+ML Feature Set is a specialized Python package for generating feature sets from resampled financial time series data. It's designed for machine learning pipelines and is part of Eon Labs' `el-prediction-pipeline` stored in AWS CodeArtifact. The package focuses on microstructure feature engineering for cryptocurrency markets (particularly SOL/USDT) with zero-magic-number principles.
+
+## Commands
+
+### Environment Setup
+```bash
+# Full environment setup with CodeArtifact auth and dependencies
+./set_env.sh
+
+# Activate virtual environment (after setup)
+source .venv/bin/activate
+```
+
+### Package Management
+```bash
+# Build package
+rm -rf dist build/ *.egg-info
+uv run --active python -m build
+
+# Install locally for development
+uv add -e ../ml-feature-set
+```
+
+### Code Quality
+```bash
+# Lint and format (use ruff for both)
+ruff check --fix .
+ruff format .
+
+# Manual testing of feature sets
+uv run --active python -m ml_feature_set.run_feature_set_validation
+uv run --active python -m ml_feature_set.validate_feature_set
+```
+
+### Feature Set Comparison
+```bash
+# Compare two feature sets for identical output
+python -m scripts.compare_feature_sets --feature_set_path1 <path1> --feature_set_path2 <path2>
+
+# Parse data for sample testing
+python -m scripts.parse_15m_to_sample_data
+```
+
+## Architecture
+
+### Core Components
+
+**Feature Constructor** (`ml_feature_set/feature_constructor.py`):
+- Main entry point for loading and executing feature sets
+- Handles dynamic loading of custom feature sets from `bundled/` directory
+- Manages data source dependencies and temporal alignment
+
+**Feature Set Base Class** (`ml_feature_set/feature_set.py`):
+- Abstract base requiring implementation of `extract_feature()` method
+- Defines `get_source_lookback_length()` for temporal data requirements
+- Manages `data_dependencies` for multi-source feature generation
+
+**Trading Feature Dataset** (`ml_feature_set/trading_feature_dataset.py`):
+- Integrates feature sets with resampled OHLCV data
+- Handles temporal alignment and data validation
+
+### Data Sources & Management
+
+**Sample Data**: `ml_feature_set/sample_data_v2/` - 11-column microstructure format spanning 3.0y (2022-2025)
+**Data Structure**: Complete Binance format (date,open,high,low,close,volume,close_time,quote_asset_volume,number_of_trades,taker_buy_base_asset_volume,taker_buy_quote_asset_volume)
+
+### Development Workflow
+
+**3-Stage Pipeline**:
+1. **Playground** (`feature_engineering/playground/`): Individual component experimentation
+2. **Experiment** (`feature_engineering/experiment/`): Integrated feature set validation
+3. **Production** (`feature_engineering/production/`): Production-ready deployments
+
+### Bundled Feature Sets
+
+Location: `ml_feature_set/bundled/`
+- All custom feature sets must define a `CustomFeatureSet` class inheriting from `FeatureSet`
+- Examples: `ohlcv_size79_v1`, `ohlcv_microstructure_v7_sota`, `ohlcv_comprehensive_sizex_v4`
+
+## Design Principles
+
+### Zero-Magic-Number Engineering
+- Reference: `.cursor/rules/unified-zero-magic-features-engineering.mdc`
+
+### Hierarchical Principle Framework
+- Reference: `.cursor/rules/hierarchical-principles-framework.mdc`
+
+## Key Libraries & Dependencies
+
+**Core**: numpy==1.24.4, pandas>=2.2.1, scipy>=1.14.0, talipp>=2.4.0
+**Advanced ML**: TabPFN-TS (foundation models), pytorch-forecasting, u8darts, sktime
+**Feature Engineering**: tsfresh, pycatch22, ruptures, ordpy
+**Signal Processing**: pysdkit, librosa
+
+## AWS CodeArtifact Integration
+
+The package integrates with AWS CodeArtifact for private dependencies like `data-source-manager`. Authentication is handled via `set_env.sh` script with embedded credentials for the `eonlabs` domain.
+
+## Testing & Validation
+
+**Feature Set Validation**: Validation pipeline in `run_feature_set_validation.py`
+**Comparison Testing**: Scripts in `scripts/` directory for regression testing
+**Sample Data**: Use `sample_data_v2/` 11-column microstructure format for development validation
+
+## Custom Fitness Framework
+
+Located in `feature_engineering/playground/custom_fitness/`, implements ATR-normalized, entropy-weighted fitness functions for feature quality assessment with directional trading support.

@@ -1,0 +1,378 @@
+"""
+Tail Risk Feature Orthogonality Validation
+
+Validates that the 6 new tail risk features are sufficiently orthogonal to
+existing features to justify inclusion in the feature set.
+
+Methodology:
+- Spearman correlation on 3 years of multi-symbol data
+- Compare tail risk features vs all 133 existing features
+- Threshold: |ρ| > 0.9 indicates redundancy
+- Output: Correlation matrix and decision recommendations
+
+SLOs:
+- Availability: 100% (all inputs validated)
+- Correctness: 100% (scipy Spearman reference implementation)
+- Observability: Structured CSV/JSON outputs
+- Maintainability: Single-responsibility functions
+
+Error Handling: raise_and_propagate
+- ValueError on missing data or validation failures
+"""
+
+import json
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import gapless_crypto_data as gcd
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, '/Users/terryli/eon/atr-adaptive-laguerre/src')
+
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+
+# New tail risk features to validate
+TAIL_RISK_FEATURES = [
+    "rsi_shock_1bar",
+    "rsi_shock_5bar",
+    "extreme_regime_persistence",
+    "rsi_volatility_spike",
+    "rsi_acceleration",
+    "tail_risk_score",
+]
+
+# Expected source features (potential overlap)
+EXPECTED_SOURCES = {
+    "rsi_shock_1bar": ["rsi_change_1_base", "rsi_change_1_mult1", "rsi_change_1_mult2"],
+    "rsi_shock_5bar": ["rsi_change_5_base", "rsi_change_5_mult1", "rsi_change_5_mult2"],
+    "extreme_regime_persistence": ["bars_in_regime_base", "bars_in_regime_mult1", "bars_in_regime_mult2", "regime_base", "regime_mult1", "regime_mult2"],
+    "rsi_volatility_spike": ["rsi_volatility_20_base", "rsi_volatility_20_mult1", "rsi_volatility_20_mult2"],
+    "rsi_acceleration": ["rsi_change_1_base", "rsi_velocity_base", "rsi_change_1_mult1", "rsi_velocity_mult1"],
+    "tail_risk_score": TAIL_RISK_FEATURES[:4],  # Composite of first 4
+}
+
+
+def load_multi_symbol_data(
+    symbols: list[str],
+    interval: str,
+    start_date: str,
+    end_date: str,
+) -> dict[str, pd.DataFrame]:
+    """
+    Load OHLCV data for multiple symbols.
+
+    Args:
+        symbols: List of trading pairs (e.g., ["BTCUSDT", "ETHUSDT"])
+        interval: Timeframe (e.g., "2h")
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+
+    Returns:
+        Dict mapping symbol → OHLCV DataFrame
+
+    Raises:
+        ValueError: If any symbol fails to load or has insufficient data
+    """
+    data = {}
+
+    for symbol in symbols:
+        print(f"[load_data] Fetching {symbol} {interval} from {start_date} to {end_date}")
+        df = gcd.download(symbol, timeframe=interval, start=start_date, end=end_date)
+
+        if df is None or df.empty:
+            raise ValueError(f"No data loaded for {symbol}")
+
+        if len(df) < 1000:
+            raise ValueError(f"Insufficient data for {symbol}: {len(df)} bars (need ≥1000)")
+
+        # Ensure 'date' column exists (gcd.download returns date as index)
+        if 'date' not in df.columns:
+            df = df.reset_index()
+            if 'index' in df.columns:
+                df = df.rename(columns={'index': 'date'})
+
+        print(f"[load_data] Loaded {len(df)} bars for {symbol}")
+        data[symbol] = df
+
+    return data
+
+
+def extract_features_all_symbols(
+    ohlcv_data: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """
+    Extract 139 features for all symbols and concatenate.
+
+    Args:
+        ohlcv_data: Dict mapping symbol → OHLCV DataFrame
+
+    Returns:
+        Concatenated feature DataFrame (all symbols stacked)
+        Columns: 139 features
+        Rows: sum of all symbol bar counts
+
+    Raises:
+        ValueError: If feature extraction fails for any symbol
+    """
+    all_features = []
+
+    config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        filter_redundancy=False,  # Get all 139 features
+    )
+    indicator = ATRAdaptiveLaguerreRSI(config)
+
+    for symbol, df_ohlcv in ohlcv_data.items():
+        print(f"[extract_features] Extracting features for {symbol}")
+
+        features = indicator.fit_transform_features(df_ohlcv)
+
+        if features.shape[1] != 139:
+            raise ValueError(
+                f"Expected 139 features for {symbol}, got {features.shape[1]}"
+            )
+
+        # Drop rows with any NaN (warmup period)
+        features_clean = features.dropna()
+        n_dropped = len(features) - len(features_clean)
+
+        print(f"[extract_features] {symbol}: {len(features_clean)} rows ({n_dropped} dropped for warmup)")
+        all_features.append(features_clean)
+
+    # Concatenate all symbols
+    combined = pd.concat(all_features, axis=0, ignore_index=True)
+    print(f"[extract_features] Combined: {len(combined)} total rows across {len(ohlcv_data)} symbols")
+
+    return combined
+
+
+def compute_tail_risk_correlations(
+    features: pd.DataFrame,
+    output_dir: Path,
+) -> pd.DataFrame:
+    """
+    Compute correlations between tail risk features and all other features.
+
+    Args:
+        features: Feature DataFrame (139 columns)
+        output_dir: Directory to save outputs
+
+    Returns:
+        DataFrame with columns: tail_risk_feature, correlated_feature, correlation
+        Sorted by abs(correlation) descending
+
+    Raises:
+        ValueError: If tail risk features not found in DataFrame
+    """
+    print("[correlations] Computing Spearman correlations for tail risk features")
+
+    # Separate tail risk features from others
+    tail_risk_cols = [f"{feat}_base" for feat in TAIL_RISK_FEATURES]
+
+    # Validate tail risk features present
+    missing = [f for f in tail_risk_cols if f not in features.columns]
+    if missing:
+        raise ValueError(f"Tail risk features not found: {missing}")
+
+    other_cols = [col for col in features.columns if col not in tail_risk_cols]
+
+    print(f"[correlations] Tail risk features: {len(tail_risk_cols)}")
+    print(f"[correlations] Other features: {len(other_cols)}")
+
+    # Compute cross-correlation matrix
+    # (tail risk features vs all other features)
+    corr_results = []
+
+    for tail_feat in tail_risk_cols:
+        if tail_feat not in features.columns:
+            # Try without _base suffix
+            tail_feat_clean = tail_feat.replace("_base", "")
+            if tail_feat_clean not in features.columns:
+                print(f"[correlations] WARNING: {tail_feat} not found, skipping")
+                continue
+            tail_feat = tail_feat_clean
+
+        for other_feat in features.columns:
+            if other_feat == tail_feat:
+                continue  # Skip self-correlation
+
+            # Compute Spearman correlation
+            corr = features[tail_feat].corr(features[other_feat], method="spearman")
+
+            corr_results.append({
+                "tail_risk_feature": tail_feat,
+                "correlated_feature": other_feat,
+                "correlation": corr,
+                "abs_correlation": abs(corr),
+            })
+
+    # Convert to DataFrame and sort
+    df_corr = pd.DataFrame(corr_results)
+    df_corr = df_corr.sort_values("abs_correlation", ascending=False)
+
+    # Save to CSV
+    output_path = output_dir / "tail_risk_correlation_matrix.csv"
+    df_corr.to_csv(output_path, index=False)
+    print(f"[correlations] Saved to {output_path}")
+
+    return df_corr
+
+
+def analyze_correlations_and_recommend(
+    corr_df: pd.DataFrame,
+    threshold_drop: float = 0.9,
+    threshold_investigate: float = 0.7,
+    output_dir: Path = Path("/tmp"),
+) -> pd.DataFrame:
+    """
+    Analyze correlations and generate drop/keep recommendations.
+
+    Args:
+        corr_df: Correlation matrix DataFrame
+        threshold_drop: |ρ| threshold for auto-drop (default: 0.9)
+        threshold_investigate: |ρ| threshold for manual review (default: 0.7)
+        output_dir: Directory to save outputs
+
+    Returns:
+        DataFrame with columns: feature, max_abs_corr, correlated_with,
+                                correlation, action, reason
+    """
+    print(f"[analysis] Analyzing correlations (drop_threshold={threshold_drop}, investigate_threshold={threshold_investigate})")
+
+    recommendations = []
+
+    for tail_feat in TAIL_RISK_FEATURES:
+        # Find rows for this tail risk feature
+        tail_feat_base = f"{tail_feat}_base" if f"{tail_feat}_base" in corr_df["tail_risk_feature"].values else tail_feat
+        feat_corrs = corr_df[corr_df["tail_risk_feature"] == tail_feat_base].copy()
+
+        if feat_corrs.empty:
+            print(f"[analysis] WARNING: No correlations found for {tail_feat}")
+            continue
+
+        # Find maximum absolute correlation
+        max_row = feat_corrs.iloc[0]  # Already sorted by abs_correlation desc
+        max_abs_corr = max_row["abs_correlation"]
+        correlated_with = max_row["correlated_feature"]
+        correlation = max_row["correlation"]
+
+        # Determine action
+        if max_abs_corr > threshold_drop:
+            action = "DROP"
+            reason = f"High correlation (|ρ| = {max_abs_corr:.3f}) with {correlated_with}"
+        elif max_abs_corr > threshold_investigate:
+            action = "INVESTIGATE"
+            reason = f"Moderate correlation (|ρ| = {max_abs_corr:.3f}) with {correlated_with}"
+        else:
+            action = "KEEP"
+            reason = f"Low correlation (max |ρ| = {max_abs_corr:.3f})"
+
+        # Check if correlated feature is an expected source
+        is_expected_source = False
+        if tail_feat in EXPECTED_SOURCES:
+            expected_sources = EXPECTED_SOURCES[tail_feat]
+            is_expected_source = any(src in correlated_with for src in expected_sources)
+
+        recommendations.append({
+            "feature": tail_feat_base,
+            "max_abs_corr": max_abs_corr,
+            "correlated_with": correlated_with,
+            "correlation": correlation,
+            "is_expected_source": is_expected_source,
+            "action": action,
+            "reason": reason,
+        })
+
+    df_recommendations = pd.DataFrame(recommendations)
+
+    # Save to CSV
+    output_path = output_dir / "tail_risk_recommendations.csv"
+    df_recommendations.to_csv(output_path, index=False)
+    print(f"[analysis] Saved recommendations to {output_path}")
+
+    # Print summary
+    print("\n" + "=" * 80)
+    print("TAIL RISK FEATURE VALIDATION SUMMARY")
+    print("=" * 80)
+    print(f"\nThresholds: DROP if |ρ| > {threshold_drop}, INVESTIGATE if |ρ| > {threshold_investigate}\n")
+    print(df_recommendations.to_string(index=False))
+    print("\n" + "=" * 80)
+
+    # Action counts
+    action_counts = df_recommendations["action"].value_counts()
+    print(f"\nActions: {action_counts.to_dict()}")
+    print(f"Features to DROP: {action_counts.get('DROP', 0)}")
+    print(f"Features to INVESTIGATE: {action_counts.get('INVESTIGATE', 0)}")
+    print(f"Features to KEEP: {action_counts.get('KEEP', 0)}")
+
+    return df_recommendations
+
+
+def main():
+    """Main execution."""
+    print("=" * 80)
+    print("TAIL RISK FEATURE ORTHOGONALITY VALIDATION")
+    print("=" * 80)
+
+    output_dir = Path("/tmp")
+
+    # Load 3 years of multi-symbol data
+    symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    interval = "2h"
+    end_date = "2025-09-30"
+    start_date = "2022-10-01"
+
+    print(f"\n[main] Loading {len(symbols)} symbols: {symbols}")
+    print(f"[main] Date range: {start_date} to {end_date}")
+
+    ohlcv_data = load_multi_symbol_data(symbols, interval, start_date, end_date)
+
+    # Extract all 139 features
+    print(f"\n[main] Extracting 139 features (filter_redundancy=False)")
+    features = extract_features_all_symbols(ohlcv_data)
+
+    # Compute correlations
+    print(f"\n[main] Computing correlations for {len(TAIL_RISK_FEATURES)} tail risk features")
+    corr_df = compute_tail_risk_correlations(features, output_dir)
+
+    # Analyze and recommend
+    print(f"\n[main] Analyzing correlations and generating recommendations")
+    recommendations = analyze_correlations_and_recommend(
+        corr_df,
+        threshold_drop=0.9,
+        threshold_investigate=0.7,
+        output_dir=output_dir,
+    )
+
+    # Save metadata
+    metadata = {
+        "analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "symbols": symbols,
+        "interval": interval,
+        "date_range": f"{start_date} to {end_date}",
+        "total_bars": len(features),
+        "n_features": features.shape[1],
+        "tail_risk_features": TAIL_RISK_FEATURES,
+        "threshold_drop": 0.9,
+        "threshold_investigate": 0.7,
+        "recommendations": recommendations.to_dict(orient="records"),
+    }
+
+    metadata_path = output_dir / "tail_risk_validation_metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    print(f"\n[main] Metadata saved to {metadata_path}")
+    print("\n" + "=" * 80)
+    print("VALIDATION COMPLETE")
+    print("=" * 80)
+
+    return recommendations
+
+
+if __name__ == "__main__":
+    main()

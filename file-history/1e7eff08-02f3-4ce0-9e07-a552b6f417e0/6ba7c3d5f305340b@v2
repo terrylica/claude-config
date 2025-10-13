@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+Test query methods on existing refactored database.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.home() / "eon" / "exness-data-preprocess" / "src"))
+
+from exness_data_preprocess.processor import ExnessDataProcessor
+import json
+
+
+def test_queries():
+    """Test query methods on existing database."""
+
+    test_dir = Path("/tmp/exness-duckdb-test/refactored")
+    processor = ExnessDataProcessor(base_dir=test_dir)
+
+    print("="*70)
+    print("Testing Query Methods")
+    print("="*70)
+
+    # Test 1: Query ticks with date range
+    print("\n" + "="*70)
+    print("Test 1: Query Ticks (Sep 2024, Raw_Spread)")
+    print("="*70)
+
+    df_ticks = processor.query_ticks(
+        pair="EURUSD",
+        variant="raw_spread",
+        start_date="2024-09-01",
+        end_date="2024-09-30"
+    )
+
+    print(f"Rows: {len(df_ticks):,}")
+    print(f"Columns: {list(df_ticks.columns)}")
+    print(f"\nFirst 3 ticks:")
+    print(df_ticks.head(3))
+    print(f"\nLast 3 ticks:")
+    print(df_ticks.tail(3))
+
+    assert len(df_ticks) > 0, "Should have ticks"
+    assert "Timestamp" in df_ticks.columns, "Should have Timestamp"
+    assert "Bid" in df_ticks.columns, "Should have Bid"
+    assert "Ask" in df_ticks.columns, "Should have Ask"
+    print("\n✅ Tick query successful")
+
+    # Test 2: Query OHLC with Phase7 schema
+    print("\n" + "="*70)
+    print("Test 2: Query OHLC (1m, Phase7 9-column schema)")
+    print("="*70)
+
+    df_ohlc = processor.query_ohlc(
+        pair="EURUSD",
+        timeframe="1m",
+        start_date="2024-09-01",
+        end_date="2024-09-01"
+    )
+
+    print(f"Rows: {len(df_ohlc):,}")
+    print(f"Columns: {list(df_ohlc.columns)}")
+    print(f"\nFirst 3 bars:")
+    print(df_ohlc.head(3))
+
+    # Verify Phase7 9-column schema
+    expected_cols = [
+        "Timestamp", "Open", "High", "Low", "Close",
+        "raw_spread_avg", "standard_spread_avg",
+        "tick_count_raw_spread", "tick_count_standard"
+    ]
+
+    for col in expected_cols:
+        assert col in df_ohlc.columns, f"Missing column: {col}"
+
+    print("\n✅ Phase7 9-column schema verified")
+
+    # Test 3: Resample to 1h
+    print("\n" + "="*70)
+    print("Test 3: Resample to 1h")
+    print("="*70)
+
+    df_1h = processor.query_ohlc(
+        pair="EURUSD",
+        timeframe="1h",
+        start_date="2024-09-01",
+        end_date="2024-09-01"
+    )
+
+    print(f"1h bars: {len(df_1h):,}")
+    print(f"\nFirst 3 bars:")
+    print(df_1h.head(3))
+
+    if len(df_ohlc) > 0:
+        assert len(df_1h) <= len(df_ohlc), "1h should have fewer or equal bars than 1m"
+        print("\n✅ Resampling works")
+    else:
+        print("\n⚠️  No OHLC data for Sep 1, 2024 (market closed)")
+
+    # Test 4: Final coverage
+    print("\n" + "="*70)
+    print("Test 4: Final Coverage")
+    print("="*70)
+
+    final_coverage = processor.get_data_coverage("EURUSD")
+    print(json.dumps(final_coverage, indent=2))
+
+    print("\n" + "="*70)
+    print("All Tests Passed! ✅")
+    print("="*70)
+
+    # Summary
+    print("\nSummary:")
+    print(f"  Database: {final_coverage['duckdb_path']}")
+    print(f"  Size: {final_coverage['duckdb_size_mb']:.2f} MB")
+    print(f"  Raw_Spread ticks: {final_coverage['raw_spread_ticks']:,}")
+    print(f"  Standard ticks: {final_coverage['standard_ticks']:,}")
+    print(f"  OHLC bars: {final_coverage['ohlc_bars']:,}")
+    print(f"  Coverage: {final_coverage['earliest_date']} to {final_coverage['latest_date']}")
+    print(f"  Range: {final_coverage['date_range_days']} days")
+
+    return final_coverage
+
+
+if __name__ == "__main__":
+    try:
+        coverage = test_queries()
+    except Exception as e:
+        print(f"\n❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

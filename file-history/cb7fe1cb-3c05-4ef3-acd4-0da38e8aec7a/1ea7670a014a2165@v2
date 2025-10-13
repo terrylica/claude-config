@@ -1,0 +1,240 @@
+# Documentation Audit Report - v5.0.0
+
+**Date**: 2025-10-11
+**Scope**: Complete repository documentation review
+**Status**: 6 critical issues, 15 legacy docs to archive
+
+---
+
+## Executive Summary
+
+The v5.0.0 workspace migration created documentation drift:
+- **README.md** uses incorrect threshold units (25 vs 250)
+- **CLAUDE.md** still lists Dukascopy as available provider
+- **15+ Dukascopy planning docs** remain active despite removal in Round 1
+- **CHANGELOG.md** lacks v5.0.0 entries (expected - just completed Phase 8)
+- **API documentation** is complete (0 missing doc warnings)
+- **Module docs** in crates are accurate
+
+---
+
+## Critical Issues (Requires Immediate Fix)
+
+### 1. README.md - Incorrect Threshold Example
+
+**Location**: `/Users/terryli/eon/rangebar/README.md:23-24`
+
+**Issue**:
+```rust
+// Create processor with 25 basis points threshold
+let mut processor = RangeBarProcessor::new(25);
+```
+
+**Problem**: Incorrect threshold units. In v3.0.0+, thresholds are in 0.1bps units.
+- Code says `25` but comment says "25 basis points"
+- Actual value: 25 × 0.1bps = 2.5bps = 0.025%
+- Intended value: 250 × 0.1bps = 25bps = 0.25%
+
+**Fix Required**:
+```rust
+// Create processor with 25 basis points (0.25%) threshold
+let mut processor = RangeBarProcessor::new(250);
+```
+
+**Impact**: HIGH - Misleads users about API usage
+
+---
+
+### 2. README.md - Outdated Version Number
+
+**Location**: `/Users/terryli/eon/rangebar/README.md:15`
+
+**Issue**:
+```toml
+rangebar = "0.5"
+```
+
+**Problem**: Version string "0.5" doesn't match current v5.0.0
+
+**Fix Required**:
+```toml
+rangebar = "5.0"
+```
+
+**Impact**: MEDIUM - Users get outdated version
+
+---
+
+### 3. CLAUDE.md - Lists Removed Provider
+
+**Location**: `/Users/terryli/eon/rangebar/CLAUDE.md:19`
+
+**Issue**:
+```markdown
+- `crates/rangebar-providers/` - Data providers (Binance, Exness, Dukascopy)
+```
+
+**Problem**: Dukascopy provider removed in Round 1 (commit `00dee3b`)
+
+**Fix Required**:
+```markdown
+- `crates/rangebar-providers/` - Data providers (Binance, Exness)
+```
+
+**Impact**: HIGH - AI assistant will reference non-existent provider
+
+---
+
+### 4. Examples README - Incorrect Threshold Terminology
+
+**Location**: `/Users/terryli/eon/rangebar/examples/README.md:41`
+
+**Issue**:
+```bash
+# Validate 25 BPS threshold
+cargo run --example validate-25bps-threshold
+```
+
+**Problem**: Uses "25 BPS" which is ambiguous (25bps or 2.5bps?)
+
+**Fix Required**:
+```bash
+# Validate 250 threshold (25 basis points = 0.25%)
+cargo run --example validate-25bps-threshold
+```
+
+**Impact**: MEDIUM - Terminology confusion
+
+---
+
+## Outdated Documentation (Requires Archiving)
+
+### Dukascopy Planning Documents (15 files)
+
+Dukascopy provider removed in Round 1, but planning docs remain active:
+
+**Active Planning Docs**:
+1. `/docs/planning/dukascopy-eurusd-audit-plan.md`
+2. `/docs/planning/dukascopy-eurusd-threshold-optimization.md`
+3. `/docs/planning/dukascopy-eurusd-audit-implementation.md`
+4. `/docs/planning/dukascopy-eurusd-ultra-low-threshold.md`
+5. `/docs/planning/dukascopy-rate-limit-mitigation.md`
+6. `/docs/planning/dukascopy-timeout-retry-strategy.md`
+
+**Research Docs**:
+7. `/docs/planning/research/dukascopy-endpoint-validation.md`
+8. `/docs/planning/research/dukascopy-slo-spec.md`
+9. `/docs/planning/research/dukascopy-rangebar-construction.md`
+10. `/docs/planning/research/dukascopy-rangebar-qa-log.md`
+11. `/docs/planning/research/dukascopy-data-fetcher-validation.md`
+12. `/docs/planning/research/dukascopy-implementation-audit.md`
+13. `/docs/planning/research/dukascopy-comprehensive-validation.md`
+14. `/docs/planning/research/dukascopy-implementation-complete.md`
+
+**Archived Code**:
+15. `/src-archived/providers/dukascopy/README.md` (already in archive)
+
+**Recommendation**: Move all 14 active docs to `/docs/archive/dukascopy/`
+
+**Impact**: LOW - Historical docs, but clutters planning directory
+
+---
+
+## Verified Accurate Documentation
+
+### ✓ API Documentation
+- **Status**: Complete
+- **Check**: `cargo doc --no-deps --workspace` → 0 missing doc warnings
+- **Coverage**: All public APIs documented
+
+### ✓ Crate Module Docs
+
+**Accurate module-level docs verified**:
+1. `/crates/rangebar/src/lib.rs` - Correct example (250 bps)
+2. `/crates/rangebar-providers/src/lib.rs` - Only Binance + Exness
+3. `/crates/rangebar-config/src/*.rs` - All modules documented
+4. `/crates/rangebar-core/src/lib.rs` - Core algorithm docs correct
+
+### ✓ Version Consistency
+- **Root Cargo.toml**: v5.0.0 ✓
+- **Workspace inheritance**: All crates use workspace version ✓
+- **Cargo.lock**: Consistent ✓
+
+---
+
+## Recommended Actions
+
+### Immediate (Before Next Commit)
+
+1. **Fix README.md threshold example** (25 → 250)
+2. **Update README.md version** ("0.5" → "5.0")
+3. **Remove Dukascopy from CLAUDE.md** (line 19)
+4. **Clarify examples README** (threshold terminology)
+
+### Short-term (Next Sprint)
+
+5. **Archive Dukascopy docs** (move 14 files to `/docs/archive/dukascopy/`)
+6. **Update CHANGELOG.md** (add v5.0.0 workspace migration entry)
+7. **Audit other examples** (verify threshold values in code examples)
+
+### Long-term (Future Releases)
+
+8. **Add version badge automation** (sync README version from Cargo.toml)
+9. **Add doc lint** (detect outdated version references)
+10. **Add CI check** (validate README examples compile)
+
+---
+
+## Documentation Quality Score
+
+| Category | Score | Notes |
+|----------|-------|-------|
+| **API Docs** | 10/10 | Complete coverage, no warnings |
+| **Module Docs** | 10/10 | Accurate crate-level documentation |
+| **Examples** | 7/10 | Working but some threshold confusion |
+| **User Guide** | 6/10 | README has critical errors |
+| **Planning Docs** | 5/10 | Contains 15 outdated files |
+| **Maintenance** | 8/10 | CHANGELOG needs v5.0.0 update |
+
+**Overall**: 7.7/10 (Good, but needs fixes for user-facing docs)
+
+---
+
+## Files Requiring Changes
+
+### Critical Priority
+- [ ] `/Users/terryli/eon/rangebar/README.md` (2 fixes)
+- [ ] `/Users/terryli/eon/rangebar/CLAUDE.md` (1 fix)
+- [ ] `/Users/terryli/eon/rangebar/examples/README.md` (1 fix)
+
+### Medium Priority
+- [ ] Move 14 Dukascopy docs to archive
+- [ ] Update CHANGELOG.md with v5.0.0 entry
+
+---
+
+## Audit Methodology
+
+1. **File Discovery**: Glob for all `*.md` files (73 files found)
+2. **Version Check**: Grep for version references in Cargo.toml
+3. **API Coverage**: `cargo doc` to check missing docs (0 found)
+4. **Accuracy Verification**: Manual review of core documentation
+5. **Consistency Check**: Cross-reference CLAUDE.md vs actual code
+6. **Example Validation**: Review README examples vs current API
+
+---
+
+## Conclusion
+
+**Good**:
+- API documentation is complete (0 missing doc warnings)
+- Crate-level module docs are accurate
+- CHANGELOG format follows Keep a Changelog standard
+
+**Needs Improvement**:
+- README.md has incorrect threshold example (critical)
+- CLAUDE.md references removed provider (high priority)
+- 15 Dukascopy planning docs should be archived
+- CHANGELOG.md needs v5.0.0 entry
+
+**Recommendation**: Fix 4 critical issues immediately, then archive legacy docs in next cleanup round.

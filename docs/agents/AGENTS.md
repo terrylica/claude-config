@@ -7,35 +7,10 @@
 ### [Research Scout](../../agents/research-scout.md) (`research-scout`)
 Explores research directions from seed keywords. Use when you need systematic exploration of topics.
 
-### [Compliance Auditor](../../agents/compliance-auditor.md) (`compliance-auditor`)
-Specialized agent for compliance auditing and regulatory analysis.
+### [Context-Bound Planner](../../agents/context-bound-planner.md) (`context-bound-planner`)
+Planning assistant that keeps solutions tied to explicit context, constraints, and invariants.
 
-### [SR&ED Evidence Extractor](../../agents/sred-evidence-extractor.md) (`sred-evidence-extractor`)
-Extracts and documents Scientific Research and Experimental Development evidence from codebases.
-
-### [APCF Agent](../../agents/apcf-agent.md) (`apcf-agent`)
-SR&ED-compliant commit message generator with automatic git hygiene and audit-proof formatting.
-
-### [Python QA Agent](../../agents/python-qa-agent.md) (`python-qa-agent`)
-Python import health validation using multi-tool static analysis approach.
-
-### [Workspace Refactor](../../agents/workspace-refactor.md) (`workspace-refactor`)
-Workspace refactoring and technical debt reduction specialist. Systematically refactors workspaces by eliminating inconsistencies, cleaning up legacy files, and strategically modularizing code with rollback safety.
-
-### [Workspace Sync](../../agents/workspace-sync.md) (`workspace-sync`)
-Specialized agent for Claude Code workspace and session synchronization with remote GPU workstation. Manages bidirectional sync operations and cross-environment development workflows.
-
-### [File Structure Organizer](../../agents/file-structure-organizer.md) (`file-structure-organizer`)
-Determines optimal file and directory placement within project structure for new scripts, configuration files, and documentation.
-
-### [Config Conformer](../../agents/config-conformer.md) (`config-conformer`)
-Identifies and fixes hardcoded values that bypass established configuration patterns. Detects magic numbers, hardcoded paths, and constants that should be externalized.
-
-### [Milestone Commit Logger](../../agents/milestone-commit-logger.md) (`milestone-commit-logger`)
-Creates git commits with AI/LLM-readable milestone logs that capture commit IDs as version freeze points and document hard-learned lessons.
-
-### [Fallback Removal Validator](../../agents/fallback-removal-validator.md) (`fallback-removal-validator`)
-Systematically removes fallback, failover, and failsafe mechanisms from scripts and validates changes don't introduce regressions.
+<!-- Pruned to only list agents present in /agents/ -->
 
 ## Usage
 Use agents with the Task tool:

@@ -1,0 +1,59 @@
+"""Test script to verify n_features property matches actual output."""
+
+import sys
+sys.path.insert(0, "/Users/terryli/eon/atr-adaptive-laguerre/src")
+
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+import pandas as pd
+import numpy as np
+
+# Create test data
+np.random.seed(42)
+df = pd.DataFrame({
+    'date': pd.date_range('2020-01-01', periods=500, freq='2h'),
+    'open': np.random.randn(500).cumsum() + 100,
+    'high': np.random.randn(500).cumsum() + 102,
+    'low': np.random.randn(500).cumsum() + 98,
+    'close': np.random.randn(500).cumsum() + 100,
+    'volume': np.random.randint(1000, 10000, 500)
+})
+
+print("="*80)
+print("Testing n_features property fix")
+print("="*80)
+
+# Test 1: Single-interval
+print("\n1. Single-interval mode:")
+config = ATRAdaptiveLaguerreRSIConfig.single_interval()
+indicator = ATRAdaptiveLaguerreRSI(config)
+features = indicator.fit_transform_features(df)
+print(f"   indicator.n_features: {indicator.n_features}")
+print(f"   Actual features: {features.shape[1]}")
+assert indicator.n_features == features.shape[1], f"MISMATCH: {indicator.n_features} != {features.shape[1]}"
+print("   ✓ PASS: n_features matches actual output")
+
+# Test 2: Multi-interval with filtering (default)
+print("\n2. Multi-interval with filter_redundancy=True (default):")
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(multiplier_1=4, multiplier_2=12)
+indicator = ATRAdaptiveLaguerreRSI(config)
+features = indicator.fit_transform_features(df)
+print(f"   indicator.n_features: {indicator.n_features}")
+print(f"   Actual features: {features.shape[1]}")
+assert indicator.n_features == features.shape[1], f"MISMATCH: {indicator.n_features} != {features.shape[1]}"
+print("   ✓ PASS: n_features matches actual output")
+
+# Test 3: Multi-interval without filtering
+print("\n3. Multi-interval with filter_redundancy=False:")
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4, multiplier_2=12, filter_redundancy=False
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+features = indicator.fit_transform_features(df)
+print(f"   indicator.n_features: {indicator.n_features}")
+print(f"   Actual features: {features.shape[1]}")
+assert indicator.n_features == features.shape[1], f"MISMATCH: {indicator.n_features} != {features.shape[1]}"
+print("   ✓ PASS: n_features matches actual output")
+
+print("\n" + "="*80)
+print("ALL TESTS PASSED ✓")
+print("="*80)

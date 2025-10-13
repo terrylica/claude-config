@@ -1,0 +1,175 @@
+# Enabling Fontconfig Support for mpv on macOS
+
+## The Problem
+
+On macOS, mpv's subtitle renderer (libass) defaults to using CoreText as the font provider. This causes issues:
+
+1. **Variable fonts**: libass can only read the thinnest style with CoreText
+2. **Bold styling**: The `sub-bold=yes` parameter doesn't work properly
+3. **Font weight**: Cannot access specific font weights (e.g., Roboto Bold 700)
+
+## The Solution
+
+Enable Fontconfig support by rebuilding libass with `--enable-fontconfig`.
+
+## Implementation
+
+### 1. Download and Build libass with Fontconfig
+
+```bash
+cd /tmp
+curl -L -o libass-0.17.4.tar.xz \
+  "https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.xz"
+tar -xf libass-0.17.4.tar.xz
+cd libass-0.17.4
+
+# Configure with fontconfig enabled
+./configure --prefix=/opt/homebrew --enable-fontconfig
+
+# Build
+make
+
+# Install (requires sudo)
+sudo make install
+```
+
+### 2. Verify Fontconfig is Linked
+
+```bash
+otool -L /opt/homebrew/lib/libass.9.dylib | grep fontconfig
+```
+
+**Expected output**:
+```
+/opt/homebrew/opt/fontconfig/lib/libfontconfig.1.dylib
+```
+
+### 3. Configure mpv to Use Fontconfig
+
+Add to `~/.config/mpv/mpv.conf`:
+
+```ini
+# Subtitle settings
+sub-font=Roboto
+sub-bold=yes
+sub-font-size=40
+sub-font-provider=fontconfig
+```
+
+**Key setting**: `sub-font-provider=fontconfig` tells mpv to use fontconfig instead of CoreText.
+
+### 4. Install Desired Font
+
+```bash
+brew install font-roboto
+```
+
+### 5. Verify Font Resolution
+
+```bash
+fc-match "Roboto:style=Bold"
+```
+
+**Expected output**:
+```
+Roboto[wdth,wght].ttf: "Roboto" "Bold"
+```
+
+## Testing
+
+Play any video with subtitles:
+
+```bash
+mpv --sub-file=subtitle.srt video.mkv
+```
+
+The subtitles should now render in Roboto Bold.
+
+## What Was Fixed
+
+**Before**:
+- ❌ libass built with `--disable-fontconfig` (CoreText only)
+- ❌ `sub-bold=yes` ignored
+- ❌ Variable fonts only showed thinnest weight
+- ❌ Font: DejaVu Sans (fallback)
+
+**After**:
+- ✅ libass built with fontconfig support
+- ✅ `sub-bold=yes` works correctly
+- ✅ Roboto Bold 700 renders properly
+- ✅ Font: Roboto Bold (as configured)
+
+## Dependencies Verified
+
+| Dependency | Status |
+|------------|--------|
+| fontconfig | ✅ 2.17.1 |
+| libass | ✅ 0.17.4 (rebuilt with fontconfig) |
+| Roboto font | ✅ Installed via Homebrew |
+| mpv | ✅ 0.40.0 (uses updated libass) |
+
+## Configuration Files
+
+**mpv config**: `~/.config/mpv/mpv.conf`
+```ini
+sub-font=Roboto
+sub-bold=yes
+sub-font-size=40
+sub-font-provider=fontconfig
+
+# Preserve ASS subtitle styling (don't override with custom settings)
+sub-ass-override=no
+```
+
+**fontconfig** (optional): `~/.config/fontconfig/fonts.conf`
+
+Can be used to customize font fallback order if needed.
+
+## Troubleshooting
+
+### ASS Subtitles Not Working
+
+**Problem**: After enabling fontconfig, ASS subtitles (anime/styled subtitles) don't render or use wrong fonts.
+
+**Cause**: The custom subtitle settings (`sub-font`, `sub-bold`, `sub-font-size`) override ASS subtitle styling by default.
+
+**Solution**: Add `sub-ass-override=no` to preserve ASS subtitle styling:
+
+```ini
+# ~/.config/mpv/mpv.conf
+sub-ass-override=no
+```
+
+**How it works**:
+- ASS subtitles have embedded fonts, colors, sizes, and effects
+- Setting `sub-ass-override=no` tells mpv to respect the ASS file's styling
+- Your Roboto Bold settings will still apply to simple subtitles (SRT, VTT, etc.)
+- ASS subtitles will render with their original fonts and styling
+
+### Library Linking Issues
+
+If mpv doesn't use the fontconfig-enabled libass:
+
+```bash
+# Check which libass mpv is using
+otool -L /opt/homebrew/bin/mpv | grep libass
+
+# Should show: /opt/homebrew/opt/libass/lib/libass.9.dylib
+
+# Verify fontconfig is linked
+otool -L /opt/homebrew/opt/libass/lib/libass.9.dylib | grep fontconfig
+
+# Should show: /opt/homebrew/opt/fontconfig/lib/libfontconfig.1.dylib
+```
+
+If fontconfig is missing, the Homebrew libass was reinstalled without fontconfig. Replace it:
+
+```bash
+sudo cp /opt/homebrew/lib/libass.9.dylib /opt/homebrew/opt/libass/lib/libass.9.dylib
+```
+
+## Reference
+
+- **libass source**: https://github.com/libass/libass
+- **Fontconfig**: https://www.freedesktop.org/wiki/Software/fontconfig/
+- **Original guide**: https://keo.xlog.app/enable-fontconfig-for-mpv-on-macos

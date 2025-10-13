@@ -1,0 +1,129 @@
+# Enabling Fontconfig Support for mpv on macOS
+
+## The Problem
+
+On macOS, mpv's subtitle renderer (libass) defaults to using CoreText as the font provider. This causes issues:
+
+1. **Variable fonts**: libass can only read the thinnest style with CoreText
+2. **Bold styling**: The `sub-bold=yes` parameter doesn't work properly
+3. **Font weight**: Cannot access specific font weights (e.g., Roboto Bold 700)
+
+## The Solution
+
+Enable Fontconfig support by rebuilding libass with `--enable-fontconfig`.
+
+## Implementation
+
+### 1. Download and Build libass with Fontconfig
+
+```bash
+cd /tmp
+curl -L -o libass-0.17.4.tar.xz \
+  "https://github.com/libass/libass/releases/download/0.17.4/libass-0.17.4.tar.xz"
+tar -xf libass-0.17.4.tar.xz
+cd libass-0.17.4
+
+# Configure with fontconfig enabled
+./configure --prefix=/opt/homebrew --enable-fontconfig
+
+# Build
+make
+
+# Install (requires sudo)
+sudo make install
+```
+
+### 2. Verify Fontconfig is Linked
+
+```bash
+otool -L /opt/homebrew/lib/libass.9.dylib | grep fontconfig
+```
+
+**Expected output**:
+```
+/opt/homebrew/opt/fontconfig/lib/libfontconfig.1.dylib
+```
+
+### 3. Configure mpv to Use Fontconfig
+
+Add to `~/.config/mpv/mpv.conf`:
+
+```ini
+# Subtitle settings
+sub-font=Roboto
+sub-bold=yes
+sub-font-size=40
+sub-font-provider=fontconfig
+```
+
+**Key setting**: `sub-font-provider=fontconfig` tells mpv to use fontconfig instead of CoreText.
+
+### 4. Install Desired Font
+
+```bash
+brew install font-roboto
+```
+
+### 5. Verify Font Resolution
+
+```bash
+fc-match "Roboto:style=Bold"
+```
+
+**Expected output**:
+```
+Roboto[wdth,wght].ttf: "Roboto" "Bold"
+```
+
+## Testing
+
+Play any video with subtitles:
+
+```bash
+mpv --sub-file=subtitle.srt video.mkv
+```
+
+The subtitles should now render in Roboto Bold.
+
+## What Was Fixed
+
+**Before**:
+- ❌ libass built with `--disable-fontconfig` (CoreText only)
+- ❌ `sub-bold=yes` ignored
+- ❌ Variable fonts only showed thinnest weight
+- ❌ Font: DejaVu Sans (fallback)
+
+**After**:
+- ✅ libass built with fontconfig support
+- ✅ `sub-bold=yes` works correctly
+- ✅ Roboto Bold 700 renders properly
+- ✅ Font: Roboto Bold (as configured)
+
+## Dependencies Verified
+
+| Dependency | Status |
+|------------|--------|
+| fontconfig | ✅ 2.17.1 |
+| libass | ✅ 0.17.4 (rebuilt with fontconfig) |
+| Roboto font | ✅ Installed via Homebrew |
+| mpv | ✅ 0.40.0 (uses updated libass) |
+
+## Configuration Files
+
+**mpv config**: `~/.config/mpv/mpv.conf`
+```ini
+sub-font=Roboto
+sub-bold=yes
+sub-font-size=40
+sub-font-provider=fontconfig
+```
+
+**fontconfig** (optional): `~/.config/fontconfig/fonts.conf`
+
+Can be used to customize font fallback order if needed.
+
+## Reference
+
+- **libass source**: https://github.com/libass/libass
+- **Fontconfig**: https://www.freedesktop.org/wiki/Software/fontconfig/
+- **Original guide**: https://keo.xlog.app/enable-fontconfig-for-mpv-on-macos

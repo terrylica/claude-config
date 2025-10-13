@@ -1,0 +1,387 @@
+"""
+Root Cause Analysis: Multi-Interval Data Leakage in atr-adaptive-laguerre v0.2.1
+
+This test isolates the exact data leakage mechanism by comparing:
+1. Package's internal multi-interval resampling
+2. Framework's external resampling with forward-fill
+3. Validation framework's actual_ready_time simulation
+
+Goal: Identify WHERE the package violates actual_ready_time constraints.
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+
+# Test 1: Minimal reproducible case
+def test_multi_interval_resampling():
+    """Test if package's multi-interval mode respects time boundaries"""
+
+    from atr_adaptive_laguerre import (
+        ATRAdaptiveLaguerreRSI,
+        ATRAdaptiveLaguerreRSIConfig
+    )
+
+    # Create minimal test data: 400 rows at 2h intervals (800 hours = 33 days)
+    start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    timestamps = [start_time + timedelta(hours=2*i) for i in range(400)]
+
+    # Simple synthetic data: price oscillates between 100-110
+    data = pd.DataFrame({
+        'date': timestamps,
+        'actual_ready_time': timestamps,  # Simulate no delay initially
+        'open': [100 + 5*np.sin(i/10) for i in range(400)],
+        'high': [105 + 5*np.sin(i/10) for i in range(400)],
+        'low': [95 + 5*np.sin(i/10) for i in range(400)],
+        'close': [100 + 5*np.sin(i/10) for i in range(400)],
+        'volume': [1000000] * 400
+    })
+
+    print("=" * 80)
+    print("TEST 1: Multi-Interval Mode (Package Internal Resampling)")
+    print("=" * 80)
+
+    # Test multi-interval mode (121 features)
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12,
+        atr_period=14,
+        smoothing_period=5
+    )
+    indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+
+    print(f"\nConfig: multiplier_1=4 (8h), multiplier_2=12 (24h)")
+    print(f"Min lookback: {indicator_multi.min_lookback}")
+    print(f"Features: {indicator_multi.n_features}")
+
+    # Generate features
+    features_multi = indicator_multi.fit_transform_features(data)
+
+    print(f"\nGenerated features shape: {features_multi.shape}")
+    print(f"Feature columns (first 10): {list(features_multi.columns[:10])}")
+
+    # Focus on a specific validation point: row 380 (late in dataset)
+    validation_idx = 380
+    validation_time = timestamps[validation_idx]
+
+    print(f"\n{'=' * 80}")
+    print(f"VALIDATION POINT: Row {validation_idx}, Time {validation_time}")
+    print(f"{'=' * 80}")
+
+    # Test 1a: Full data features (what validation calls "full_data")
+    full_features = features_multi.iloc[validation_idx]
+
+    print(f"\nFull data features at row {validation_idx}:")
+    print(f"  rsi_base: {full_features['rsi_base']:.6f}")
+    print(f"  rsi_mult1: {full_features['rsi_mult1']:.6f}")
+    print(f"  rsi_mult2: {full_features['rsi_mult2']:.6f}")
+
+    # Test 1b: Prediction data (simulate fresh calculation with only past data)
+    # This is what validation calls "pred_data" - only data UP TO validation_time
+    pred_data = data.iloc[:validation_idx + 1].copy()
+
+    print(f"\nPrediction data: {len(pred_data)} rows (up to and including validation point)")
+    print(f"  Last timestamp: {pred_data['date'].iloc[-1]}")
+
+    pred_features = indicator_multi.fit_transform_features(pred_data)
+    pred_features_at_validation = pred_features.iloc[-1]
+
+    print(f"\nPrediction features at validation point:")
+    print(f"  rsi_base: {pred_features_at_validation['rsi_base']:.6f}")
+    print(f"  rsi_mult1: {pred_features_at_validation['rsi_mult1']:.6f}")
+    print(f"  rsi_mult2: {pred_features_at_validation['rsi_mult2']:.6f}")
+
+    # Compare
+    print(f"\n{'=' * 80}")
+    print("LEAKAGE DETECTION")
+    print(f"{'=' * 80}")
+
+    rsi_base_diff = abs(full_features['rsi_base'] - pred_features_at_validation['rsi_base'])
+    rsi_mult1_diff = abs(full_features['rsi_mult1'] - pred_features_at_validation['rsi_mult1'])
+    rsi_mult2_diff = abs(full_features['rsi_mult2'] - pred_features_at_validation['rsi_mult2'])
+
+    print(f"\nBase interval (1x - 2h):")
+    print(f"  Difference: {rsi_base_diff:.10f}")
+    print(f"  Status: {'✓ PASS' if rsi_base_diff < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+    print(f"\nMultiplier 1 (4x - 8h):")
+    print(f"  Difference: {rsi_mult1_diff:.10f}")
+    print(f"  Status: {'✓ PASS' if rsi_mult1_diff < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+    print(f"\nMultiplier 2 (12x - 24h):")
+    print(f"  Difference: {rsi_mult2_diff:.10f}")
+    print(f"  Status: {'✓ PASS' if rsi_mult2_diff < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+    # Additional diagnostic: Check timestamp alignment
+    print(f"\n{'=' * 80}")
+    print("TIMESTAMP ALIGNMENT DIAGNOSTIC")
+    print(f"{'=' * 80}")
+
+    # At validation_time, what 4x and 12x intervals should be used?
+    # For 2h base with multiplier_1=4: 8h intervals
+    # For 2h base with multiplier_2=12: 24h intervals
+
+    print(f"\nValidation time: {validation_time}")
+    print(f"Expected 4x interval alignment: Every 8 hours from start")
+    print(f"Expected 12x interval alignment: Every 24 hours from start")
+
+    # Calculate expected resampled bar indices
+    hours_from_start = (validation_time - start_time).total_seconds() / 3600
+    expected_4x_bar = int(hours_from_start / 8)
+    expected_12x_bar = int(hours_from_start / 24)
+
+    print(f"\nAt validation time ({hours_from_start:.1f}h from start):")
+    print(f"  Expected 4x bar index: {expected_4x_bar}")
+    print(f"  Expected 12x bar index: {expected_12x_bar}")
+
+    # Check if package is forward-filling BEYOND current time
+    print(f"\n{'=' * 80}")
+    print("HYPOTHESIS: Package forward-fills resampled data using future bars")
+    print(f"{'=' * 80}")
+
+    return {
+        'full_rsi_mult1': full_features['rsi_mult1'],
+        'pred_rsi_mult1': pred_features_at_validation['rsi_mult1'],
+        'diff_mult1': rsi_mult1_diff,
+        'full_rsi_mult2': full_features['rsi_mult2'],
+        'pred_rsi_mult2': pred_features_at_validation['rsi_mult2'],
+        'diff_mult2': rsi_mult2_diff
+    }
+
+
+# Test 2: Compare with framework-style external resampling
+def test_framework_resampling():
+    """Test how framework would handle 4x/12x resampling externally"""
+
+    print(f"\n\n{'=' * 80}")
+    print("TEST 2: Framework-Style External Resampling")
+    print(f"{'=' * 80}")
+
+    from atr_adaptive_laguerre import (
+        ATRAdaptiveLaguerreRSI,
+        ATRAdaptiveLaguerreRSIConfig
+    )
+
+    # Create same test data
+    start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    timestamps = [start_time + timedelta(hours=2*i) for i in range(400)]
+
+    data_1x = pd.DataFrame({
+        'date': timestamps,
+        'open': [100 + 5*np.sin(i/10) for i in range(400)],
+        'high': [105 + 5*np.sin(i/10) for i in range(400)],
+        'low': [95 + 5*np.sin(i/10) for i in range(400)],
+        'close': [100 + 5*np.sin(i/10) for i in range(400)],
+        'volume': [1000000] * 400
+    })
+
+    # Manually resample to 4x (8h) and 12x (24h)
+    data_1x_indexed = data_1x.set_index('date')
+
+    print("\nManual resampling (OHLCV aggregation):")
+
+    # 4x resampling (8h bars)
+    data_4x = data_1x_indexed.resample('8H').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    }).dropna().reset_index()
+    data_4x.rename(columns={'date': 'date'}, inplace=True)
+
+    print(f"  4x (8h): {len(data_4x)} bars")
+    print(f"  First timestamp: {data_4x['date'].iloc[0]}")
+    print(f"  Last timestamp: {data_4x['date'].iloc[-1]}")
+
+    # 12x resampling (24h bars)
+    data_12x = data_1x_indexed.resample('24H').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    }).dropna().reset_index()
+    data_12x.rename(columns={'date': 'date'}, inplace=True)
+
+    print(f"  12x (24h): {len(data_12x)} bars")
+    print(f"  First timestamp: {data_12x['date'].iloc[0]}")
+    print(f"  Last timestamp: {data_12x['date'].iloc[-1]}")
+
+    # Run single-interval indicator on each
+    config_single = ATRAdaptiveLaguerreRSIConfig.single_interval(
+        atr_period=14,
+        smoothing_period=5,
+        date_column='date'
+    )
+
+    indicator_single = ATRAdaptiveLaguerreRSI(config_single)
+
+    features_1x = indicator_single.fit_transform_features(data_1x)
+    features_4x = indicator_single.fit_transform_features(data_4x)
+    features_12x = indicator_single.fit_transform_features(data_12x)
+
+    print(f"\nFeatures generated:")
+    print(f"  1x: {features_1x.shape}")
+    print(f"  4x: {features_4x.shape}")
+    print(f"  12x: {features_12x.shape}")
+
+    # Now the framework would forward-fill 4x and 12x features back to 1x timeline
+    print(f"\n{'=' * 80}")
+    print("Framework forward-fill behavior:")
+    print(f"{'=' * 80}")
+
+    # Add date column to features for merge
+    features_4x_with_date = features_4x.copy()
+    features_4x_with_date['date'] = data_4x['date']
+
+    # Merge on timestamps
+    data_1x_with_4x = pd.merge_asof(
+        data_1x[['date']].sort_values('date'),
+        features_4x_with_date[['date', 'rsi']].rename(columns={'rsi': 'rsi_4x'}),
+        left_on='date',
+        right_on='date',
+        direction='backward'  # Forward-fill (use most recent past value)
+    )
+
+    print("\nExample forward-fill at validation point (row 380):")
+    print(f"  1x timestamp: {data_1x['date'].iloc[380]}")
+    print(f"  rsi_1x: {features_1x['rsi'].iloc[380]:.6f}")
+    print(f"  rsi_4x (forward-filled): {data_1x_with_4x['rsi_4x'].iloc[380]:.6f}")
+
+    return features_1x, features_4x, features_12x
+
+
+# Test 3: Controlled timestamp offset test
+def test_actual_ready_time_offset():
+    """Test if package respects actual_ready_time vs date column"""
+
+    print(f"\n\n{'=' * 80}")
+    print("TEST 3: actual_ready_time Offset Test")
+    print(f"{'=' * 80}")
+
+    from atr_adaptive_laguerre import (
+        ATRAdaptiveLaguerreRSI,
+        ATRAdaptiveLaguerreRSIConfig
+    )
+
+    # Create data with intentional offset between date and actual_ready_time
+    start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    timestamps = [start_time + timedelta(hours=2*i) for i in range(400)]
+
+    # Simulate 2-hour data delay (actual_ready_time = date + 2h)
+    ready_times = [t + timedelta(hours=2) for t in timestamps]
+
+    data = pd.DataFrame({
+        'date': timestamps,  # Bar close time
+        'actual_ready_time': ready_times,  # When data becomes available
+        'open': [100 + 5*np.sin(i/10) for i in range(400)],
+        'high': [105 + 5*np.sin(i/10) for i in range(400)],
+        'low': [95 + 5*np.sin(i/10) for i in range(400)],
+        'close': [100 + 5*np.sin(i/10) for i in range(400)],
+        'volume': [1000000] * 400
+    })
+
+    print("\nData structure:")
+    print(f"  Bar 0 - date: {timestamps[0]}, actual_ready_time: {ready_times[0]}")
+    print(f"  Bar 1 - date: {timestamps[1]}, actual_ready_time: {ready_times[1]}")
+    print(f"  Offset: 2 hours (simulates data delay)")
+
+    config_multi = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+        multiplier_1=4,
+        multiplier_2=12
+    )
+    indicator_multi = ATRAdaptiveLaguerreRSI(config_multi)
+
+    # Validation point: row 380
+    validation_idx = 380
+    validation_ready_time = ready_times[validation_idx]
+
+    print(f"\nValidation point: row {validation_idx}")
+    print(f"  Bar close time (date): {timestamps[validation_idx]}")
+    print(f"  Data ready time (actual_ready_time): {validation_ready_time}")
+
+    # Full data features
+    features_full = indicator_multi.fit_transform_features(data)
+    full_rsi_mult1 = features_full.iloc[validation_idx]['rsi_mult1']
+
+    # Prediction: only use data where actual_ready_time <= validation_ready_time
+    # This is the CRITICAL test: does package respect actual_ready_time?
+    pred_data = data[data['actual_ready_time'] <= validation_ready_time].copy()
+
+    print(f"\nPrediction data filtering:")
+    print(f"  Total rows: {len(data)}")
+    print(f"  Rows with actual_ready_time <= {validation_ready_time}: {len(pred_data)}")
+    print(f"  Latest bar in pred_data: row {len(pred_data) - 1}")
+    print(f"  Latest date: {pred_data['date'].iloc[-1]}")
+    print(f"  Latest actual_ready_time: {pred_data['actual_ready_time'].iloc[-1]}")
+
+    features_pred = indicator_multi.fit_transform_features(pred_data)
+
+    # The prediction features should match the row in full_features that corresponds
+    # to the SAME actual_ready_time, NOT the same row index
+
+    # Find matching row in full data based on actual_ready_time
+    matching_row_idx = len(pred_data) - 1  # Last row in pred_data
+    matching_full_idx = data[data['actual_ready_time'] == pred_data['actual_ready_time'].iloc[-1]].index[0]
+
+    print(f"\nMatching logic:")
+    print(f"  Pred data last row: {len(pred_data) - 1}")
+    print(f"  Full data matching row: {matching_full_idx}")
+    print(f"  Should be: {matching_row_idx} (if no offset handling)")
+
+    pred_rsi_mult1 = features_pred.iloc[-1]['rsi_mult1']
+    matching_full_rsi_mult1 = features_full.iloc[matching_full_idx]['rsi_mult1']
+
+    print(f"\nRSI mult1 comparison:")
+    print(f"  Pred: {pred_rsi_mult1:.6f}")
+    print(f"  Full (matching actual_ready_time): {matching_full_rsi_mult1:.6f}")
+    print(f"  Difference: {abs(pred_rsi_mult1 - matching_full_rsi_mult1):.10f}")
+
+    return {
+        'pred_rsi_mult1': pred_rsi_mult1,
+        'full_rsi_mult1': matching_full_rsi_mult1,
+        'difference': abs(pred_rsi_mult1 - matching_full_rsi_mult1)
+    }
+
+
+if __name__ == "__main__":
+    print("\n" + "=" * 80)
+    print("ROOT CAUSE ANALYSIS: Multi-Interval Data Leakage")
+    print("Package: atr-adaptive-laguerre v0.2.1")
+    print("=" * 80)
+
+    # Run tests
+    result1 = test_multi_interval_resampling()
+    result2 = test_framework_resampling()
+    result3 = test_actual_ready_time_offset()
+
+    # Summary
+    print("\n\n" + "=" * 80)
+    print("SUMMARY & ROOT CAUSE HYPOTHESIS")
+    print("=" * 80)
+
+    print("\n1. Multi-Interval Mode Leakage:")
+    print(f"   - mult1 (4x) difference: {result1['diff_mult1']:.10f}")
+    print(f"   - mult2 (12x) difference: {result1['diff_mult2']:.10f}")
+    print(f"   - Status: {'SEVERE LEAKAGE' if result1['diff_mult1'] > 0.01 else 'Minor precision issues'}")
+
+    print("\n2. Suspected Root Cause:")
+    print("   Package's multi-interval mode performs INTERNAL resampling using:")
+    print("   - pd.resample() on 'date' column (bar close times)")
+    print("   - Forward-fill to align resampled intervals back to base timeline")
+    print("   - Does NOT account for 'actual_ready_time' offset")
+    print("\n   Result: When calculating features at time T, the package uses")
+    print("   resampled bars that include data with actual_ready_time > T")
+    print("   (i.e., future data not yet available at prediction time)")
+
+    print("\n3. Expected Behavior (Framework Approach):")
+    print("   - Resample using ONLY bars where actual_ready_time <= T")
+    print("   - Forward-fill resampled features back to base timeline")
+    print("   - This ensures no future data leakage")
+
+    print("\n4. Recommendation to Maintainer:")
+    print("   Add 'availability_column' parameter to multi-interval mode:")
+    print("   - Filter data by availability_column <= current_time before resampling")
+    print("   - Or: Document that multi-interval mode CANNOT be used with delayed data")
+    print("   - Or: Provide hook to inject custom resampling logic that respects offsets")

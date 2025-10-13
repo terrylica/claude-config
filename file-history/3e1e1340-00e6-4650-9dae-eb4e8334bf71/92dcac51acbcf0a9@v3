@@ -1,0 +1,121 @@
+# Portfolio Capital Manager
+
+**Universal portfolio capital allocation and position tracking for backtesting and live trading**
+
+## Features
+
+- ✅ **Real dollar tracking** - No normalized equity, actual USD positions
+- ✅ **Locked capital management** - Tracks available vs allocated cash
+- ✅ **Position sizing strategies** - Dollar-based, percent-based, risk-based
+- ✅ **Liquidity constraints** - Max position size, min position size
+- ✅ **Sequential deployment** - Model gradual capital deployment
+- ✅ **Multi-instrument support** - Share capital pool across positions
+- ✅ **Production-ready** - Type hints, comprehensive tests, proper error handling
+
+## Installation
+
+### For development (editable install)
+```bash
+cd libs/portfolio-capital-manager
+uv pip install -e .
+```
+
+### For use in other projects
+```bash
+uv pip install /path/to/libs/portfolio-capital-manager
+```
+
+### Or add to pyproject.toml
+```toml
+dependencies = [
+    "portfolio-capital-manager @ file:///Users/terryli/eon/funding-rate-arbitrage/libs/portfolio-capital-manager",
+]
+```
+
+## Quick Start
+
+```python
+from portfolio_capital_manager import PortfolioState, DollarAllocator
+
+# Initialize with $100k
+portfolio = PortfolioState(initial_capital=100_000)
+
+# Create allocator with constraints
+allocator = DollarAllocator(
+    max_position_usd=50_000,
+    min_position_usd=1_000
+)
+
+# Allocate based on target weights
+target_weights = {'BTC': 0.30, 'ETH': 0.25, 'SOL': 0.20}
+prices = {'BTC': 45000, 'ETH': 2500, 'SOL': 80}
+
+allocations = allocator.allocate(
+    target_weights=target_weights,
+    portfolio=portfolio,
+    prices=prices
+)
+
+# Execute positions
+for symbol, dollar_amount in allocations.items():
+    portfolio.open_position(
+        symbol=symbol,
+        quantity=dollar_amount / prices[symbol],
+        entry_price=prices[symbol],
+        side='long'
+    )
+
+print(f"Cash available: ${portfolio.get_available_cash():,.2f}")
+print(f"Total value: ${portfolio.get_total_value(prices):,.2f}")
+```
+
+## Architecture
+
+### Core Classes
+
+- **`PortfolioState`**: Tracks cash, positions, locked capital
+- **`BaseAllocator`**: Abstract base for allocation strategies
+- **`DollarAllocator`**: Fixed dollar amount per position
+- **`PercentAllocator`**: Percentage of portfolio value
+- **`RiskParityAllocator`**: Risk-weighted allocation
+- **`PositionConstraints`**: Min/max size, concentration limits
+
+## Use Cases
+
+### Backtesting
+```python
+# Test funding rate arbitrage with realistic capital
+portfolio = PortfolioState(100_000)
+for timestamp in backtest_dates:
+    allocations = allocator.allocate(weights, portfolio, prices)
+    # Execute and track P&L
+```
+
+### Live Trading
+```python
+# Production deployment with sequential capital deployment
+week1_portfolio = PortfolioState(25_000)  # Start with 25%
+week2_portfolio = PortfolioState(50_000)  # Scale to 50%
+```
+
+### Multi-Strategy
+```python
+# Allocate across multiple strategies
+total = PortfolioState(1_000_000)
+strat_a = total.create_sub_portfolio(0.40)  # 40% to strat A
+strat_b = total.create_sub_portfolio(0.30)  # 30% to strat B
+```
+
+## API Documentation
+
+See [examples/](examples/) for detailed usage patterns.
+
+## Testing
+
+```bash
+pytest tests/ -v --cov=src/portfolio_capital_manager
+```
+
+## License
+
+MIT

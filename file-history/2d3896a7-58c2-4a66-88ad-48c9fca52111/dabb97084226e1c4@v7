@@ -1,0 +1,234 @@
+# EvolutionaryForest Project Memory
+
+**Project Type**: Maintained fork fixing critical bugs in unmaintained upstream package
+**Primary Use Case**: Non-linear feature engineering for crypto futures seq-to-seq forecasting
+**Status**: ✅ Core regression objectives fixed and validated
+
+---
+
+## Project Purpose
+
+Generate **non-anticipative covariate representations** (engineered features) from Binance multi-interval OHLCV data to support **sequence-to-sequence multi-horizon forecasting** of k-step-ahead excess returns with emphasis on **OOD-robust generalization**.
+
+**Workflow Position**:
+```
+Raw OHLCV → [Manual: temporal features] → [EvolutionaryForest: non-linear combinations]
+  → Engineered Features → [Seq-to-Seq Model: multi-horizon forecasting]
+```
+
+---
+
+## Data Format
+
+**Source**: Binance spot/futures via `gapless-crypto-data` PyPI package
+**Format**: CSV with metadata header (Binance Public Data Repository v3.0.0)
+**Columns**: `date,open,high,low,close,volume` (basic OHLCV only)
+**Example**: `~/eon/ml-feature-experiments/ml_feature_set/sample_data/binance_spot_SOLUSDT-5m_20210806-20250831_4.1y.csv`
+**Coverage**: 428K bars, 4.1 years, 5-minute intervals
+
+**Critical Limitation**: Only OHLCV available - NO order-flow fields (bid_volume, ask_volume, trades) in current dataset
+
+---
+
+## Key Architecture Decisions
+
+### EvolutionaryForest Limitation: Same-Row Features ONLY
+
+**What it does**: Generates non-linear combinations of columns **within the same row** (timestamp)
+```python
+# Example: (close - open) / (high - low), log(volume) * (close/open)^2
+```
+
+**What it CANNOT do**: Access previous rows (lagged/rolling features)
+```python
+# ❌ Cannot: close[t] - close[t-1], rolling_mean(close, 20)
+```
+
+### Required Pre-Processing Pipeline
+
+**MUST manually create temporal features BEFORE EvolutionaryForest**:
+
+1. **Lagged prices**: `close_lag1, close_lag5, volume_lag1` (pandas `.shift()`)
+2. **Rolling statistics**: `close_sma20, close_std20, volume_sma20` (pandas `.rolling()`)
+3. **Returns**: `return_1bar, return_5bar` (manual calculation with `.shift()`)
+4. **Technical indicators**: RSI, ATR, etc. (custom implementations)
+
+Then EvolutionaryForest discovers non-linear combinations of these pre-computed temporal features.
+
+---
+
+## Documentation Structure
+
+### Project Documentation
+- **[docs/FORK_STATUS.md](docs/FORK_STATUS.md)** - ✅ **CURRENT STATUS** - Complete validation summary & GitHub push instructions
+- **[docs/QUICK_START.md](docs/QUICK_START.md)** - 🚀 **START HERE** - Installation, minimal example, Binance workflow
+- **[FORK_README.md](FORK_README.md)** - Fork rationale, upstream tracking, contribution guidelines
+- **[README.md](README.md)** - Original upstream README (preserved)
+- **This file (CLAUDE.md)** - Project memory and link farm (concise summaries + links)
+
+### Operational Guides
+- **[docs/PREFLIGHT_CHECKLIST.md](docs/PREFLIGHT_CHECKLIST.md)** - 8-point checklist before EvolutionaryForest (data validation)
+- **[docs/USAGE_PATTERNS.md](docs/USAGE_PATTERNS.md)** - Complete workflow: Binance OHLCV → engineered features
+- **[docs/DEPENDENCY_ARCHITECTURE.md](docs/DEPENDENCY_ARCHITECTURE.md)** - Deep import chain analysis & optional dependencies
+
+### Bug Fixes & Validation
+- **[docs/AGENT_CONSENSUS_REPORT.md](docs/AGENT_CONSENSUS_REPORT.md)** - 8-agent mathematical validation (unanimous consensus)
+- **[docs/fixes/COMPREHENSIVE_FIXES_SUMMARY.md](docs/fixes/COMPREHENSIVE_FIXES_SUMMARY.md)** - All bug fixes with code examples
+- **[docs/fixes/PROBE_REPORT.md](docs/fixes/PROBE_REPORT.md)** - Initial investigation findings
+- **[docs/fixes/FIXES_APPLIED.md](docs/fixes/FIXES_APPLIED.md)** - PyPI v0.2.4 patches
+
+### Testing & Examples
+- **[examples/validate_fixes_lightweight.py](examples/validate_fixes_lightweight.py)** - ✅ Objective validation (no torch, fast)
+- **[examples/binance_crypto_features.py](examples/binance_crypto_features.py)** - Complete Binance workflow (requires torch)
+- **[tests/test_fixes_minimal.py](tests/test_fixes_minimal.py)** - Syntax validation (<1 sec)
+- **[tests/test_objectives_quick.py](tests/test_objectives_quick.py)** - Integration tests (requires full deps)
+
+---
+
+## Fixed Bugs (Production Ready)
+
+### ✅ Working Regression Objectives
+1. **R²** - Default, explained variance
+2. **MSE** - Mean squared error (FIXED - was missing)
+3. **RMSE** - Root mean squared error (FIXED - was missing)
+4. **MAE** - Mean absolute error, outlier-robust
+
+### ✅ Working Classification Objectives
+- **Accuracy** - (FIXED - was missing)
+- **ZeroOne** - Original working objective
+
+### ⚠️ Known Issues
+- Classification shape mismatch bug `(2798,) vs (1399,)` - deeper pre-existing bug, not fixed
+
+---
+
+## ⚠️ PREFLIGHT CHECKLIST (Before EvolutionaryForest)
+
+**CRITICAL**: Run 8 checks BEFORE feeding data to EvolutionaryForest to avoid silent bugs (data leakage, NaN, Inf, temporal order, etc.)
+
+**Full Details**: **[docs/PREFLIGHT_CHECKLIST.md](docs/PREFLIGHT_CHECKLIST.md)** ← Complete guide with code
+
+**Quick Summary**:
+1. Non-anticipative verification (no future peeking)
+2. NaN/Inf check (rolling windows create NaN)
+3. Temporal order verification
+4. Train/test split (TEMPORAL not random!)
+5. Target variable verification (k-step ahead)
+6. Feature column selection (no target leakage)
+7. Memory check (subsample if >500K samples)
+8. Feature statistics sanity check
+
+**Ready-to-Use Function**: See [docs/PREFLIGHT_CHECKLIST.md](docs/PREFLIGHT_CHECKLIST.md#-complete-preflight-function)
+
+---
+
+## Usage Patterns
+
+**Complete Guide**: **[docs/USAGE_PATTERNS.md](docs/USAGE_PATTERNS.md)** ← Full workflow with code examples
+
+**Quick Workflow**:
+1. Load Binance OHLCV data (CSV format)
+2. Create temporal features (lags, rolling stats, returns) - **MANUAL STEP**
+3. Run preflight checks (8-point checklist)
+4. EvolutionaryForest generates non-linear combinations
+5. Validate OOD generalization (R² > 0.15 = good)
+6. Export features for seq-to-seq model
+
+**Key Pattern**:
+```python
+# You create temporal features (pandas):
+df['close_lag5'] = df['close'].shift(5)
+df['close_sma20'] = df['close'].rolling(20).mean()
+
+# EvolutionaryForest creates non-linear combinations:
+# e.g., (close - close_sma20) / close_std20
+```
+
+---
+
+## Installation
+
+```bash
+cd ~/eon/evolutionary-forest
+
+# RECOMMENDED: Full installation (includes torch for deep import chains)
+uv sync --extra full
+
+# Alternative: Minimal (only works for lightweight validation)
+uv sync
+
+# Validate fixes:
+uv run python tests/test_fixes_minimal.py  # ✅ Works (no torch needed)
+uv run python examples/validate_fixes_lightweight.py  # ✅ Works (no torch needed)
+```
+
+**Note**: Full `EvolutionaryForestRegressor` requires torch due to deep import chains (primitive_functions.py → torch). See `docs/DEPENDENCY_ARCHITECTURE.md` for details.
+
+---
+
+## Git Structure
+
+**Branch**: `fix/objective-functions-sklearn-api`
+**Remotes**:
+- `origin` → https://github.com/terrylica/EvolutionaryForest.git (fork)
+- `upstream` → https://github.com/hengzhe-zhang/EvolutionaryForest.git (original)
+
+**Recent Commits**:
+```
+15d7f98 Add FORK_STATUS.md with complete validation summary and GitHub instructions
+ddbd33d Add validation examples for fixed objectives (MSE/RMSE/MAE)
+4895a9e Fix critical MAE bug + add multi-agent validation consensus report
+006d079 Refactor CLAUDE.md as link farm + extract details to dedicated docs
+fef908c Add critical PREFLIGHT CHECKLIST section to CLAUDE.md
+```
+
+---
+
+## Integration with Existing Workspace
+
+**Related Repositories**:
+- **~/eon/ml-feature-experiments/** - Parent feature engineering experiments repo
+  - Contains sample data: `ml_feature_set/sample_data/binance_spot_SOLUSDT-5m_*.csv`
+  - This is where EvolutionaryForest-generated features should be exported
+
+**Recommended Workflow**:
+1. Load data from `~/eon/ml-feature-experiments/ml_feature_set/sample_data/`
+2. Pre-process temporal features (pandas)
+3. Run EvolutionaryForest feature engineering (this repo)
+4. Export engineered features back to `~/eon/ml-feature-experiments/` for seq-to-seq modeling
+
+---
+
+## Performance Expectations
+
+**Input**: 40-80 pre-computed temporal features (from basic OHLCV)
+**Output**: 50-100 non-linear engineered features
+**Time**: 5-10 minutes (50 generations, 200 population, 4 CPU cores)
+**Quality Proxy**: R² > 0.15 on OOD data = good features for crypto multi-step forecasting
+
+---
+
+## Future Enhancements
+
+**Priority 1**: Investigate classification shape mismatch bug if needed for categorical targets
+**Priority 2**: Benchmark against TPOT, FeatureTools for feature engineering quality
+**Priority 3**: Add automated temporal feature generation wrapper (reduce manual pre-processing)
+**Priority 4**: Integration example with seq-to-seq models (LSTM, Transformer)
+
+---
+
+## Contact & Upstream
+
+**Original Author**: Hengzhe Zhang (zhenlingcn@foxmail.com)
+**Fork Maintainer**: terrylica
+**Upstream Status**: Unmaintained (last commit ~2024)
+**Fork Purpose**: Production use while upstream is inactive
+**License**: BSD-3-Clause (same as upstream)
+
+---
+
+**Last Updated**: 2025-10-06
+**Previous Session**: cdc53c65-d0b4-4039-a019-d186603077a8
+**Current Session**: Data-First Debugging Protocol applied to dependency issues
+**Status**: ✅ All objectives validated + dependency architecture documented
+**Installation**: `uv sync --extra full` (required for torch import chains)

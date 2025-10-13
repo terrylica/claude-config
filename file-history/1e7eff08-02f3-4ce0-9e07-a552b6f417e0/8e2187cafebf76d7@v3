@@ -1,0 +1,327 @@
+"""
+Batch processing examples for exness-data-preprocess.
+
+This script demonstrates how to:
+1. Process multiple months in parallel or sequentially
+2. Process date ranges efficiently
+3. Implement error handling and retry logic
+4. Monitor progress with progress bars
+5. Optimize storage and cleanup
+
+For basic usage examples, see basic_usage.py.
+"""
+
+from pathlib import Path
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import exness_data_preprocess as edp
+
+# Optional: Configure base directory (defaults to ~/eon/exness-data/)
+BASE_DIR = Path.home() / "eon" / "exness-data"
+
+# ============================================================================
+# Example 1: Process Multiple Months Sequentially
+# ============================================================================
+print("=" * 80)
+print("Example 1: Process Multiple Months Sequentially")
+print("=" * 80)
+
+# Process Q3 2024 (July, August, September)
+months_to_process = [
+    (2024, 7),  # July
+    (2024, 8),  # August
+    (2024, 9),  # September
+]
+
+results = []
+for year, month in months_to_process:
+    print(f"\n📥 Processing {year}-{month:02d}...")
+    try:
+        result = edp.process_month(
+            year=year,
+            month=month,
+            pair="EURUSD",
+            base_dir=BASE_DIR,
+            delete_zip=True,
+        )
+        results.append(result)
+        print(f"   ✅ Success: {result['bar_count']:,} bars, {result['tick_count']:,} ticks")
+    except Exception as e:
+        print(f"   ❌ Failed: {e}")
+
+print(f"\n✅ Processed {len(results)} months successfully")
+
+# ============================================================================
+# Example 2: Process Date Range Using Helper Function
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 2: Process Date Range (Q3 2024)")
+print("=" * 80)
+
+# Process Q3 2024 using process_date_range helper
+results = edp.process_date_range(
+    start_year=2024,
+    start_month=7,
+    end_year=2024,
+    end_month=9,
+    pair="EURUSD",
+    base_dir=BASE_DIR,
+    delete_zip=True,
+)
+
+print(f"\n✅ Processed {len(results)} months:")
+for result in results:
+    print(f"   - {result['year']}-{result['month']:02d}: "
+          f"{result['bar_count']:,} bars, {result['tick_count']:,} ticks")
+
+# ============================================================================
+# Example 3: Parallel Processing with ThreadPoolExecutor
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 3: Parallel Processing (4 workers)")
+print("=" * 80)
+
+# Process Q1 2024 in parallel (4 months at a time)
+months_to_process = [
+    (2024, 1),  # January
+    (2024, 2),  # February
+    (2024, 3),  # March
+    (2024, 4),  # April
+]
+
+
+def process_month_worker(year, month):
+    """Worker function for parallel processing."""
+    try:
+        result = edp.process_month(
+            year=year,
+            month=month,
+            pair="EURUSD",
+            base_dir=BASE_DIR,
+            delete_zip=True,
+        )
+        return (year, month, result, None)
+    except Exception as e:
+        return (year, month, None, str(e))
+
+
+# Process in parallel with 4 workers
+with ThreadPoolExecutor(max_workers=4) as executor:
+    futures = {
+        executor.submit(process_month_worker, year, month): (year, month)
+        for year, month in months_to_process
+    }
+
+    for future in as_completed(futures):
+        year, month = futures[future]
+        year_result, month_result, result, error = future.result()
+
+        if error:
+            print(f"❌ {year_result}-{month_result:02d}: {error}")
+        else:
+            print(f"✅ {year_result}-{month_result:02d}: "
+                  f"{result['bar_count']:,} bars, {result['tick_count']:,} ticks")
+
+# ============================================================================
+# Example 4: Error Handling and Retry Logic
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 4: Error Handling and Retry Logic")
+print("=" * 80)
+
+
+def process_with_retry(year, month, max_retries=3):
+    """Process month with retry logic."""
+    for attempt in range(max_retries):
+        try:
+            print(f"   Attempt {attempt + 1}/{max_retries} for {year}-{month:02d}...")
+            result = edp.process_month(
+                year=year,
+                month=month,
+                pair="EURUSD",
+                base_dir=BASE_DIR,
+                delete_zip=True,
+            )
+            print(f"   ✅ Success on attempt {attempt + 1}")
+            return result
+        except Exception as e:
+            print(f"   ⚠️  Attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                print(f"   ❌ All {max_retries} attempts failed")
+                raise
+            print(f"   🔄 Retrying...")
+
+
+# Try processing May 2024 with retry logic
+try:
+    result = process_with_retry(2024, 5)
+    print(f"\n✅ Successfully processed May 2024: {result['bar_count']:,} bars")
+except Exception as e:
+    print(f"\n❌ Failed to process May 2024 after retries: {e}")
+
+# ============================================================================
+# Example 5: Progress Monitoring with tqdm
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 5: Progress Monitoring with tqdm")
+print("=" * 80)
+
+from tqdm import tqdm
+
+# Process entire 2024 year with progress bar
+months_2024 = [(2024, m) for m in range(1, 13)]  # All 12 months
+
+results = []
+with tqdm(total=len(months_2024), desc="Processing 2024", unit="month") as pbar:
+    for year, month in months_2024:
+        try:
+            result = edp.process_month(
+                year=year,
+                month=month,
+                pair="EURUSD",
+                base_dir=BASE_DIR,
+                delete_zip=True,
+            )
+            results.append(result)
+            pbar.set_postfix(
+                month=f"{year}-{month:02d}",
+                bars=f"{result['bar_count']:,}",
+            )
+        except Exception as e:
+            pbar.set_postfix(month=f"{year}-{month:02d}", status=f"FAILED: {e}")
+        finally:
+            pbar.update(1)
+
+print(f"\n✅ Processed {len(results)}/{len(months_2024)} months successfully")
+
+# ============================================================================
+# Example 6: Storage Optimization and Cleanup
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 6: Storage Optimization and Cleanup")
+print("=" * 80)
+
+# Check storage usage before cleanup
+stats_before = edp.get_storage_stats(base_dir=BASE_DIR)
+print(f"\nStorage before cleanup:")
+print(f"   Parquet: {stats_before['parquet_total_mb']:.1f} MB "
+      f"({stats_before['parquet_count']} files)")
+print(f"   DuckDB:  {stats_before['duckdb_total_mb']:.1f} MB "
+      f"({stats_before['duckdb_count']} files)")
+print(f"   Total:   {stats_before['total_mb']:.1f} MB")
+
+# Optional: Clean up old temp files (if any)
+import shutil
+
+temp_dir = BASE_DIR / "temp"
+if temp_dir.exists():
+    temp_size_mb = sum(f.stat().st_size for f in temp_dir.rglob('*') if f.is_file()) / (1024 * 1024)
+    print(f"\n🧹 Cleaning temp directory ({temp_size_mb:.1f} MB)...")
+    shutil.rmtree(temp_dir)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    print("   ✅ Temp directory cleaned")
+
+# Check storage after cleanup
+stats_after = edp.get_storage_stats(base_dir=BASE_DIR)
+print(f"\nStorage after cleanup:")
+print(f"   Total:   {stats_after['total_mb']:.1f} MB")
+print(f"   Saved:   {stats_before['total_mb'] - stats_after['total_mb']:.1f} MB")
+
+# ============================================================================
+# Example 7: Advanced - Process Multiple Pairs
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 7: Process Multiple Pairs (EURUSD, GBPUSD)")
+print("=" * 80)
+
+pairs_to_process = ["EURUSD", "GBPUSD"]
+months_to_process = [(2024, 8)]  # August 2024
+
+for pair in pairs_to_process:
+    print(f"\n📥 Processing {pair}...")
+    for year, month in months_to_process:
+        try:
+            result = edp.process_month(
+                year=year,
+                month=month,
+                pair=pair,
+                base_dir=BASE_DIR,
+                delete_zip=True,
+            )
+            print(f"   ✅ {year}-{month:02d}: {result['bar_count']:,} bars")
+        except Exception as e:
+            print(f"   ❌ {year}-{month:02d}: Failed - {e}")
+
+# ============================================================================
+# Example 8: Advanced - Custom Processing Pipeline
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 8: Custom Processing Pipeline")
+print("=" * 80)
+
+
+class CustomProcessor:
+    """Custom processor with additional features."""
+
+    def __init__(self, base_dir):
+        self.base_dir = base_dir
+        self.processor = edp.ExnessDataProcessor(base_dir=base_dir)
+
+    def process_with_validation(self, year, month, pair="EURUSD"):
+        """Process with data quality validation."""
+        print(f"\n📥 Processing {year}-{month:02d} {pair}...")
+
+        # Step 1: Process
+        result = edp.process_month(
+            year=year,
+            month=month,
+            pair=pair,
+            base_dir=self.base_dir,
+            delete_zip=False,  # Keep ZIP for validation
+        )
+
+        # Step 2: Validate data quality
+        df_ticks = edp.analyze_ticks(year=year, month=month, pair=pair, base_dir=self.base_dir)
+
+        # Check for missing timestamps (gaps > 1 minute)
+        df_ticks['TimeDelta'] = df_ticks['Timestamp'].diff()
+        max_gap = df_ticks['TimeDelta'].max()
+        print(f"   Max gap between ticks: {max_gap}")
+
+        # Check for invalid prices (negative or zero)
+        invalid_bids = (df_ticks['Bid'] <= 0).sum()
+        invalid_asks = (df_ticks['Ask'] <= 0).sum()
+        if invalid_bids > 0 or invalid_asks > 0:
+            print(f"   ⚠️  Found {invalid_bids} invalid bids, {invalid_asks} invalid asks")
+
+        # Check spread reasonableness (> 0, < 100 pips)
+        df_ticks['Spread'] = df_ticks['Ask'] - df_ticks['Bid']
+        invalid_spreads = ((df_ticks['Spread'] <= 0) | (df_ticks['Spread'] > 0.01)).sum()
+        if invalid_spreads > 0:
+            print(f"   ⚠️  Found {invalid_spreads} ticks with unreasonable spreads")
+
+        # Step 3: Delete ZIP after validation
+        zip_path = self.base_dir / "temp" / f"Exness_{pair}_Raw_Spread_{year}_{month:02d}.zip"
+        if zip_path.exists():
+            zip_path.unlink()
+            print(f"   🗑️  Deleted ZIP after validation")
+
+        print(f"   ✅ Validation complete: {result['tick_count']:,} ticks processed")
+
+        return result
+
+
+# Use custom processor
+custom_processor = CustomProcessor(base_dir=BASE_DIR)
+result = custom_processor.process_with_validation(2024, 8)
+
+print("\n" + "=" * 80)
+print("✅ All batch processing examples completed!")
+print("=" * 80)
+print("\nBest practices:")
+print("   - Use parallel processing for multiple months (4-8 workers)")
+print("   - Implement retry logic for network failures")
+print("   - Monitor progress with tqdm for long-running jobs")
+print("   - Validate data quality after processing")
+print("   - Clean up temp files periodically")
+print("   - Use delete_zip=True to save disk space")

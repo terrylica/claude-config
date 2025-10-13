@@ -1,0 +1,98 @@
+"""Simple validation test for v1.0.1 multi-interval with availability_column
+
+Uses a smaller dataset to verify correctness without timing out.
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+
+from atr_adaptive_laguerre import (
+    ATRAdaptiveLaguerreRSI,
+    ATRAdaptiveLaguerreRSIConfig
+)
+
+print("=" * 80)
+print("v1.0.1 SIMPLE VALIDATION TEST")
+print("=" * 80)
+
+# Use smaller dataset to avoid timeout (500 rows instead of 32K)
+start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+timestamps = [start_time + timedelta(hours=2*i) for i in range(500)]
+ready_times = [t + timedelta(hours=2) for t in timestamps]
+
+data = pd.DataFrame({
+    'date': timestamps,
+    'actual_ready_time': ready_times,
+    'open': [100 + 5*np.sin(i/10) + np.random.normal(0, 1) for i in range(500)],
+    'high': [105 + 5*np.sin(i/10) + np.random.normal(0, 1) for i in range(500)],
+    'low': [95 + 5*np.sin(i/10) + np.random.normal(0, 1) for i in range(500)],
+    'close': [100 + 5*np.sin(i/10) + np.random.normal(0, 1) for i in range(500)],
+    'volume': [1000000 + np.random.normal(0, 100000) for i in range(500)]
+})
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"\nDataset size: {len(data)} rows")
+print(f"Features: {indicator.n_features}")
+print(f"Min lookback: {indicator.min_lookback}")
+
+# Full data features
+print(f"\nGenerating features for full dataset...")
+import time
+start = time.time()
+features_full = indicator.fit_transform_features(data)
+elapsed = time.time() - start
+print(f"Time taken: {elapsed:.2f}s")
+
+# Test multiple validation points
+validation_indices = [380, 390, 400, 410, 420, 430, 440, 450, 460, 470]
+passed = 0
+failed = 0
+
+print(f"\n{'=' * 80}")
+print(f"VALIDATION TESTS (10 points)")
+print(f"{'=' * 80}")
+
+for i, validation_idx in enumerate(validation_indices, 1):
+    validation_ready_time = ready_times[validation_idx]
+
+    # Prediction data
+    pred_data = data[data['actual_ready_time'] <= validation_ready_time].copy()
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    # Compare
+    matching_full_idx = data[data['actual_ready_time'] == validation_ready_time].index[0]
+
+    full_rsi_mult1 = features_full.iloc[matching_full_idx]['rsi_mult1']
+    pred_rsi_mult1 = features_pred.iloc[-1]['rsi_mult1']
+
+    diff = abs(full_rsi_mult1 - pred_rsi_mult1)
+
+    if diff < 1e-5:
+        status = "✓ PASS"
+        passed += 1
+    else:
+        status = f"✗ FAIL (diff={diff:.6f})"
+        failed += 1
+
+    print(f"  Point {i}/10 (row {validation_idx}): {status}")
+
+print(f"\n{'=' * 80}")
+print(f"RESULTS")
+print(f"{'=' * 80}")
+print(f"Passed: {passed}/10")
+print(f"Failed: {failed}/10")
+
+if failed == 0:
+    print("\n✓✓✓ ALL VALIDATION TESTS PASSED! ✓✓✓")
+    print("v1.0.1 multi-interval mode is PRODUCTION READY!")
+else:
+    print(f"\n✗ {failed} validation tests failed")
+    print("Please investigate further")

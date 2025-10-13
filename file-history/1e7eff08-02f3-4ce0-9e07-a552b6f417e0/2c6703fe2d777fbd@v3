@@ -1,0 +1,348 @@
+# Phase 7: BID-Only OHLC Construction with Dual-Spread Tracking and Tick Counts
+
+**Version**: 1.1.0
+**Status**: Active
+**Created**: 2025-01-19
+**Updated**: 2025-10-11
+
+## Objective
+
+Demonstrate OHLC bar construction using BID prices exclusively from Exness Raw_Spread variant, with dual-spread tracking from both Raw_Spread and Standard variants, and tick count metrics for liquidity analysis. Output to DuckDB database with embedded metadata.
+
+## Changes from v1.0.0
+
+### Added Features
+- **Tick Counting**: Track number of ticks per 1-minute interval from both variants
+- **DuckDB Output**: Replace CSV output with DuckDB database containing embedded metadata
+- **Parquet Export**: Automatic export to Parquet format for data interchange
+- **Embedded Metadata**: Table and column-level metadata using SQL COMMENT statements
+
+### Output Format Change
+- **v1.0.0**: CSV file (`demo_exness_bid_ohlc.csv`) with 7 columns
+- **v1.1.0**: DuckDB file (`demo_exness_bid_ohlc.duckdb`) with 9 columns + embedded metadata
+
+## Input Requirements
+
+### Data Sources
+
+- **Primary**: `/tmp/Exness_EURUSD_Raw_Spread_2024_08.zip` - BID prices for OHLC construction
+- **Reference**: `/tmp/Exness_EURUSD_2024_08.zip` - Standard spread for comparison
+
+### CSV Format (Exness tick data)
+
+```
+"Exness","Symbol","Timestamp","Bid","Ask"
+```
+
+### Extraction Window
+
+- **Duration**: 2 consecutive minutes
+- **Timeframe**: 1-minute bars (2 bars total)
+- **Sample Window**: 2024-08-05 07:00:00 - 2024-08-05 07:01:59 UTC
+
+## Processing Pipeline
+
+### Step 1: Data Loading
+
+1. Extract CSV from both ZIP files using `zipfile` module
+2. Parse with `pandas.read_csv()` using standard datetime parsing
+3. Convert Timestamp column to UTC timezone-aware datetime
+4. Filter to 2-minute extraction window
+
+### Step 2: OHLC Construction from BID
+
+1. Select **BID column only** from Raw_Spread variant
+2. Set Timestamp as index
+3. Apply `df.resample('1min')` on BID column
+4. Compute OHLC using built-in aggregations:
+   - Open: `first()`
+   - High: `max()`
+   - Low: `min()`
+   - Close: `last()`
+
+### Step 3: Spread Calculation
+
+1. **Raw_Spread Variant**: Calculate `(Ask - Bid).mean()` per 1-minute interval
+2. **Standard Variant**: Calculate `(Ask - Bid).mean()` per 1-minute interval
+3. Add as columns: `raw_spread_avg`, `standard_spread_avg`
+
+### Step 4: Tick Counting (NEW in v1.1.0)
+
+1. **Raw_Spread Variant**: Calculate `pandas.resample('1min').size()` to count ticks
+2. **Standard Variant**: Calculate `pandas.resample('1min').size()` to count ticks
+3. Add as columns: `tick_count_raw_spread`, `tick_count_standard`
+
+### Step 5: DuckDB Database Creation (NEW in v1.1.0)
+
+1. Reset DataFrame index to make Timestamp a column
+2. Create DuckDB connection to `.duckdb` file
+3. Create table from DataFrame: `CREATE TABLE ohlc AS SELECT * FROM ohlc_df`
+4. Add table-level metadata using `COMMENT ON TABLE`
+5. Add column-level metadata using `COMMENT ON COLUMN`
+6. Export to Parquet: `COPY ohlc TO 'file.parquet' (FORMAT PARQUET, COMPRESSION ZSTD)`
+
+#### Metadata Structure
+
+**Table Metadata** (SQL COMMENT ON TABLE):
+- Version number (1.1.0)
+- Creation timestamp (ISO 8601 UTC)
+- Data source URLs (Raw_Spread and Standard variants)
+- Methodology details (OHLC construction, spread calculation, tick counting)
+- Validation criteria (OHLC integrity, spread non-negativity, temporal ordering)
+- References (plan document, methodology, research context)
+
+**Column Metadata** (SQL COMMENT ON COLUMN):
+- Timestamp: Bar start time description
+- Open/High/Low/Close: BID price descriptions
+- raw_spread_avg/standard_spread_avg: Spread calculation descriptions
+- tick_count_raw_spread/tick_count_standard: Tick count descriptions
+
+### Step 6: Output Generation
+
+- **Primary Format**: DuckDB database
+  - Path: `/tmp/demo_exness_bid_ohlc.duckdb`
+  - Size: ~524 KB (includes metadata and indexes)
+
+- **Interchange Format**: Parquet file
+  - Path: `/tmp/demo_exness_bid_ohlc.parquet`
+  - Size: ~1.4 KB (ZSTD compression)
+  - Use case: Import into other tools (pandas, polars, spark)
+
+## Output Schema
+
+### Database Structure
+
+**Table**: `ohlc`
+**Columns**: 9 (Timestamp + 4 OHLC + 2 spreads + 2 tick counts)
+
+| Column                  | Type                | Source               | Description                              |
+| ----------------------- | ------------------- | -------------------- | ---------------------------------------- |
+| Timestamp               | datetime64[ns, UTC] | Index (reset)        | Bar start time (minute boundary)         |
+| Open                    | float64             | Raw_Spread BID       | First BID price in interval              |
+| High                    | float64             | Raw_Spread BID       | Maximum BID price in interval            |
+| Low                     | float64             | Raw_Spread BID       | Minimum BID price in interval            |
+| Close                   | float64             | Raw_Spread BID       | Last BID price in interval               |
+| raw_spread_avg          | float64             | Raw_Spread (Ask-Bid) | Mean spread in Raw_Spread variant        |
+| standard_spread_avg     | float64             | Standard (Ask-Bid)   | Mean spread in Standard variant          |
+| tick_count_raw_spread   | int64               | Raw_Spread           | Number of ticks in Raw_Spread variant    |
+| tick_count_standard     | int64               | Standard             | Number of ticks in Standard variant      |
+
+### Querying the Database
+
+```python
+import duckdb
+
+# Connect and query
+conn = duckdb.connect('/tmp/demo_exness_bid_ohlc.duckdb')
+
+# View data
+df = conn.execute('SELECT * FROM ohlc').df()
+
+# View table metadata
+metadata = conn.execute("""
+    SELECT table_name, comment
+    FROM duckdb_tables()
+    WHERE table_name = 'ohlc'
+""").fetchall()
+
+# View column metadata
+columns = conn.execute("""
+    SELECT column_name, comment
+    FROM duckdb_columns()
+    WHERE table_name = 'ohlc'
+    ORDER BY column_index
+""").fetchall()
+
+conn.close()
+```
+
+## SLOs (Service Level Objectives)
+
+### Availability
+
+- **Target**: 100% processing success when input files exist
+- **Failure Mode**: Explicit `FileNotFoundError` if ZIP files missing
+- **Propagation**: No fallbacks, no defaults, no retries
+
+### Correctness
+
+- **OHLC Integrity**: Derived from BID prices only (no Ask, no midpoint)
+- **Spread Precision**: 5 decimal places (standard forex pip precision)
+- **Temporal Alignment**: Bars aligned to minute boundaries (00 seconds)
+- **Tick Counts**: Non-negative integers, validated per interval
+- **Metadata Persistence**: SQL COMMENT statements survive database restarts
+- **Validation**: High ≥ max(Open, Close), Low ≤ min(Open, Close)
+
+### Observability
+
+- **Logging Points**:
+  1. ZIP file loading with file sizes
+  2. CSV parsing with row counts
+  3. Time window filtering with resulting row counts
+  4. OHLC resampling with bar count
+  5. Spread calculations with min/max/mean values
+  6. Tick count calculations with min/max/mean values
+  7. DuckDB database creation with file size
+  8. Parquet export with file size
+
+### Maintainability
+
+- **Built-in Solutions**: Use `pandas.resample()`, DuckDB SQL, no custom aggregation logic
+- **Standard Libraries**: `zipfile`, `pandas`, `duckdb`, `pathlib` only
+- **No External Dependencies**: No `ta-lib`, no custom indicator libraries
+- **Error Messages**: Include timestamp ranges, row counts, file paths
+- **SQL Escaping**: Single quotes doubled for COMMENT statements
+
+## Error Handling Strategy
+
+### FileNotFoundError
+
+```python
+if not raw_spread_path.exists():
+    raise FileNotFoundError(f"Raw_Spread data missing: {raw_spread_path}")
+```
+
+### ValueError (CSV Format)
+
+```python
+if 'Bid' not in df.columns or 'Ask' not in df.columns:
+    raise ValueError(f"Invalid CSV format. Expected columns: Bid, Ask. Got: {df.columns.tolist()}")
+```
+
+### IndexError (Insufficient Data)
+
+```python
+if len(ohlc) < 2:
+    raise IndexError(f"Expected 2 bars, got {len(ohlc)}. Time range: {df.index.min()} to {df.index.max()}")
+```
+
+### SQL Escaping (NEW in v1.1.0)
+
+```python
+# Escape single quotes in metadata for SQL COMMENT statements
+escaped_comment = table_comment.replace("'", "''")
+conn.execute(f"COMMENT ON TABLE ohlc IS '{escaped_comment}'")
+```
+
+## Implementation Notes
+
+### Why BID-Only?
+
+- **Market Microstructure**: BID represents executable price for long positions
+- **Zero-Spread Context**: In Raw_Spread variant, Bid=Ask at deviation events
+- **Consistency**: Single price series eliminates bid-ask bounce in OHLC bars
+
+### Spread Tracking Rationale
+
+- **Raw_Spread**: Captures spread behavior during zero-spread deviation events
+- **Standard**: Baseline spread distribution for comparison
+- **Dual Tracking**: Enables analysis of spread compression patterns
+
+### Tick Count Rationale (NEW in v1.1.0)
+
+- **Liquidity Proxy**: Higher tick counts indicate more active trading
+- **Data Quality**: Tick counts validate completeness of both variants
+- **Burst Analysis**: Enables detection of high-frequency trading patterns
+- **Research Context**: Supports Phase 6 interval clustering analysis
+
+### DuckDB Rationale (NEW in v1.1.0)
+
+**Advantages over CSV**:
+- **Single File**: Data + metadata in one `.duckdb` file (vs. CSV + sidecar JSON)
+- **SQL Analytics**: Query data without loading into memory
+- **Embedded Metadata**: Standard SQL COMMENT statements (persistent across sessions)
+- **Zero Dependencies**: No frictionless-data framework required
+- **Compression**: Columnar storage with automatic compression at scale
+- **Type Safety**: Enforced schema with datetime timezone handling
+
+**Disadvantages**:
+- **Binary Format**: Not human-readable (but export to CSV/Parquet available)
+- **Tool Compatibility**: Requires DuckDB-aware tools (but Parquet solves this)
+
+## Validation Criteria
+
+### OHLC Integrity
+
+```python
+assert (ohlc['High'] >= ohlc[['Open', 'Close']].max(axis=1)).all()
+assert (ohlc['Low'] <= ohlc[['Open', 'Close']].min(axis=1)).all()
+```
+
+### Spread Non-Negativity
+
+```python
+assert (ohlc['raw_spread_avg'] >= 0).all()
+assert (ohlc['standard_spread_avg'] >= 0).all()
+```
+
+### Tick Count Validation (NEW in v1.1.0)
+
+```python
+assert (ohlc['tick_count_raw_spread'] > 0).all()
+assert (ohlc['tick_count_standard'] > 0).all()
+```
+
+### Temporal Ordering
+
+```python
+assert ohlc.index.is_monotonic_increasing
+assert (ohlc.index.second == 0).all()  # Aligned to minute boundaries
+```
+
+## Migration from v1.0.0
+
+### Breaking Changes
+
+1. **Output Format**: CSV → DuckDB (`.csv` → `.duckdb`)
+2. **Column Count**: 7 → 9 (added `tick_count_raw_spread`, `tick_count_standard`)
+3. **File Size**: 199 bytes (CSV) → 524 KB (DuckDB with indexes)
+
+### Backward Compatibility
+
+To export v1.1.0 data to v1.0.0 CSV format:
+
+```python
+import duckdb
+conn = duckdb.connect('/tmp/demo_exness_bid_ohlc.duckdb')
+
+# Export without tick counts (v1.0.0 schema)
+conn.execute("""
+    COPY (
+        SELECT Timestamp, Open, High, Low, Close,
+               raw_spread_avg, standard_spread_avg
+        FROM ohlc
+    ) TO '/tmp/demo_exness_bid_ohlc_v1.0.0.csv'
+    (HEADER, DELIMITER ',')
+""")
+
+conn.close()
+```
+
+## Performance Characteristics
+
+### File Sizes (2 bars)
+
+- **DuckDB**: 524 KB (includes indexes and metadata)
+- **Parquet**: 1.4 KB (ZSTD compression)
+- **CSV (v1.0.0)**: 199 bytes (no metadata)
+
+### Tick Density (Sample Data)
+
+- **Raw_Spread**: 156-193 ticks/minute (mean: 174.5)
+- **Standard**: 154-193 ticks/minute (mean: 173.5)
+- **Interpretation**: ~3 ticks/second during sample period
+
+## References
+
+- **Methodology**: `/Users/terryli/eon/exness-data-preprocess/docs/research/eurusd-zero-spread-deviations/01-methodology.md`
+- **Research Context**: Phase 6 interval clustering and burst analysis
+- **Visualization**: Phase 6 burst decay dashboard (`generate_lightweight_dashboard.py`)
+- **Data Source**: Exness via ex2archive.com
+- **Previous Version**: `phase7_bid_ohlc_construction_v1.0.0.md`
+---
+version: "1.1.0"
+status: "active"
+priority: "P2"
+updated: "2025-10-12T00:05:00Z"
+type: "research-plan"
+---

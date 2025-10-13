@@ -1,0 +1,272 @@
+# OKX Data Provider - Module Architecture Plan
+
+## Problem Statement
+
+Victor's funding rate arbitrage strategy needs:
+1. **Historical funding rates** to determine which symbols had best opportunities
+2. **Real spot prices** for those symbols at execution time
+3. **Efficient storage** (not downloading all 509 symbols unnecessarily)
+4. **Simple API** for backtesting workflow
+
+## Key Insights from Analysis
+
+### Funding Rates (October 2023):
+- Settlement frequency: **Every 8 hours** (00:00, 08:00, 16:00 UTC)
+- Top-5 changes: **100% of the time** between settlements
+- Unique symbols in top-5: **66 symbols**
+- Top 30 symbols cover: **87.3%** of all historical selections
+- **Critical finding**: Funding rate ≠ Trading volume (KISHU-USDT #1 despite low volume)
+
+### Price Data:
+- Full dataset: 801 MB (509 symbols, 44.7M trades)
+- Top 30 symbols: ~47 MB (**94% savings**)
+- Compression: zstd-9 already optimal (7.6x ratio)
+
+## Proposed Architecture
+
+### Module Structure
+
+```
+okx-price-provider/
+│
+├── funding_rate/                    # Funding rate analysis module
+│   ├── downloader.py               # Download funding rate history from CDN
+│   ├── analyzer.py                 # Analyze top symbols by time period
+│   └── advisor.py                  # Recommend rebalancing frequency
+│
+├── tick_data/                       # Tick data management module
+│   ├── cdn_downloader.py           # Download tick data from CDN (existing)
+│   ├── cache_manager.py            # Smart caching and incremental downloads
+│   └── provider.py                 # Load and resample tick data (existing)
+│
+├── unified_provider.py              # Main API interface
+│
+└── utils.py                         # Shared utilities
+```
+
+### API Design
+
+#### Funding Rate Analysis
+
+```python
+from okx_price_provider import FundingRateAnalyzer
+
+# Analyze funding rates for a time period
+analyzer = FundingRateAnalyzer(cache_dir="data/funding_rates")
+
+# Get top symbols for specific period
+analysis = analyzer.analyze_period(
+    start_date="2023-10-01",
+    end_date="2023-12-31",
+    top_n=30
+)
+
+print(f"Recommended symbols: {analysis.symbols}")
+print(f"Rebalancing frequency: {analysis.settlement_hours}h")
+print(f"Coverage: {analysis.coverage_pct}%")
+```
+
+#### Smart Price Provider
+
+```python
+from okx_price_provider import SmartPriceProvider
+
+# Provider automatically manages downloads
+provider = SmartPriceProvider(
+    funding_cache="data/funding_rates",
+    tick_cache="data/tick_data"
+)
+
+# Method 1: Auto-download based on funding rate analysis
+prices = provider.get_prices_auto(
+    start_date="2023-10-01",
+    end_date="2023-12-31",
+    top_n=30,              # Use top 30 symbols from funding rate analysis
+    freq="1min"
+)
+
+# Method 2: Explicit symbol list
+prices = provider.get_prices(
+    symbols=["KISHU-USDT", "TRB-USDT", "BTC-USDT"],
+    start_date="2023-10-01",
+    end_date="2023-12-31",
+    freq="1min"
+)
+
+# Provider automatically:
+# 1. Checks what's in cache
+# 2. Downloads only missing symbols/periods
+# 3. Caches for future use
+```
+
+#### Integrated Workflow
+
+```python
+from okx_price_provider import OKXDataProvider
+
+# Single unified interface
+provider = OKXDataProvider(cache_dir="data/okx")
+
+# Complete workflow in one call
+result = provider.prepare_backtest(
+    start_date="2023-10-01",
+    end_date="2023-12-31",
+    strategy="top5_funding_rate",
+    price_freq="1min"
+)
+
+# Returns:
+# - funding_analysis: Top symbols, rebalancing schedule
+# - prices: Tick data resampled to requested frequency
+# - metadata: Download stats, cache hits, etc.
+```
+
+## Implementation Plan
+
+### Phase 1: Consolidate Funding Rate Module (Priority: HIGH)
+
+**File**: `funding_rate/downloader.py`
+- Download funding rate history from CDN (already working)
+- Cache by month: `data/funding_rates/202310.parquet`
+
+**File**: `funding_rate/analyzer.py`
+- Analyze top symbols for given time period
+- Calculate stability metrics
+- Return structured analysis object
+
+**File**: `funding_rate/advisor.py`
+- Determine optimal rebalancing frequency
+- Recommend symbol pool size based on coverage
+
+**Deliverable**:
+```python
+analyzer = FundingRateAnalyzer()
+result = analyzer.analyze_period("2023-10-01", "2023-12-31", top_n=30)
+# Returns: symbols, settlement_hours, coverage, stability_metrics
+```
+
+### Phase 2: Smart Tick Data Manager (Priority: HIGH)
+
+**File**: `tick_data/cache_manager.py`
+- Track what's already downloaded
+- Determine what needs to be downloaded
+- Organize cache by time period and symbol set
+
+**File**: `tick_data/provider.py` (enhance existing)
+- Check cache before downloading
+- Download only missing data
+- Merge data from multiple cache files
+
+**Deliverable**:
+```python
+provider = TickDataProvider(cache_dir="data/tick_data")
+prices = provider.get_prices(
+    symbols=["KISHU-USDT", "TRB-USDT"],
+    start_date="2023-10-01",
+    end_date="2023-12-31"
+)
+# Automatically downloads if not cached
+```
+
+### Phase 3: Unified Provider (Priority: MEDIUM)
+
+**File**: `unified_provider.py`
+- Integrate funding rate analysis + price data
+- Single entry point for backtester
+- Handle data dependencies automatically
+
+**Deliverable**:
+```python
+provider = OKXDataProvider()
+data = provider.prepare_backtest("2023-10-01", "2023-12-31")
+# Everything ready for backtesting
+```
+
+### Phase 4: Clean Up (Priority: LOW)
+
+- Remove redundant analysis scripts
+- Consolidate into module
+- Write clear documentation
+- Add example workflows
+
+## Storage Strategy
+
+### Organized Cache Structure
+
+```
+data/
+├── funding_rates/              # Lightweight funding rate history
+│   ├── 202310.parquet         # ~1 MB per month
+│   ├── 202311.parquet
+│   └── 202312.parquet
+│
+└── tick_data/                  # Tick data by strategy
+    ├── top30_202310.parquet   # Top 30 symbols, Oct 2023 (~47 MB)
+    ├── top30_202311.parquet
+    ├── top30_202312.parquet
+    │
+    └── adhoc/                  # Additional symbols as needed
+        └── KISHU_202310.parquet
+```
+
+### Progressive Download Strategy
+
+1. **First run**: Download funding rates only (~3 MB for 3 months)
+2. **Analysis**: Determine top 30 symbols for period
+3. **Lazy download**: Download tick data for top 30 when requested (~150 MB for 3 months)
+4. **Incremental**: Add more symbols only if needed
+
+**Total storage for 3-month backtest**: ~150 MB vs 2.4 GB (all symbols)
+
+## Key Design Principles
+
+1. **Lazy Loading**: Don't download until needed
+2. **Smart Caching**: Never re-download what we have
+3. **Incremental**: Start with core symbols, expand as needed
+4. **Transparent**: User doesn't need to manage downloads
+5. **Flexible**: Support multiple strategies and time periods
+
+## Migration Path
+
+### Current State
+- Scattered scripts: `analyze_funding_rates.py`, `download_oct2023_full.py`, etc.
+- Multiple symbol lists: `viable_symbols.txt`, `funding_rate_top30.txt`, etc.
+- Manual workflow
+
+### Target State
+- Clean module structure
+- Simple API calls
+- Automatic data management
+- Clear documentation
+
+### Migration Steps
+1. Implement `FundingRateAnalyzer` (use existing `analyze_funding_corrected.py` as base)
+2. Implement `CacheManager` (new)
+3. Enhance `TickDataProvider` with cache awareness
+4. Create `UnifiedProvider` wrapper
+5. Add examples and documentation
+6. Archive old scripts
+
+## Success Criteria
+
+✅ **User can backtest any time period with one API call**
+✅ **Module automatically determines required symbols**
+✅ **No redundant downloads** (smart caching)
+✅ **Storage efficiency** (~95% savings vs downloading all)
+✅ **Clear documentation** and examples
+✅ **Type hints** and docstrings throughout
+
+## Next Steps
+
+1. Review and approve architecture
+2. Implement Phase 1 (FundingRateAnalyzer)
+3. Implement Phase 2 (CacheManager + enhanced TickDataProvider)
+4. Test with real backtest scenario
+5. Document and clean up
+
+## Open Questions
+
+1. **Multi-year backtests**: How to handle 2+ years of data efficiently?
+2. **Data updates**: How often to refresh funding rate data?
+3. **Symbol universe changes**: New listings, delistings over time?
+4. **Memory management**: Loading 3 months of tick data for 30 symbols?

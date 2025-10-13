@@ -1,0 +1,144 @@
+"""
+Tests for CLI interface.
+"""
+
+import pytest
+from unittest.mock import patch, Mock
+from pathlib import Path
+import pandas as pd
+
+
+def test_cli_help():
+    """Test CLI help message."""
+    from exness_data_preprocess.cli import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        with patch('sys.argv', ['exness-preprocess', '--help']):
+            with patch('sys.stdout'):
+                main()
+
+    assert exc_info.value.code == 0
+
+
+def test_cli_process_command(temp_dir):
+    """Test 'process' command."""
+    from exness_data_preprocess.cli import main
+
+    mock_result = {
+        'tick_count': 1000,
+        'parquet_size_mb': 0.5,
+        'duckdb_size_mb': 0.1,
+    }
+
+    with patch('sys.argv', ['exness-preprocess', 'process', '--year', '2024', '--month', '8']):
+        with patch('exness_data_preprocess.api.process_month', return_value=mock_result):
+            main()
+
+
+def test_cli_process_range_command(temp_dir):
+    """Test 'process' command with date range."""
+    from exness_data_preprocess.cli import main
+
+    mock_results = [
+        {'tick_count': 1000, 'parquet_size_mb': 0.5, 'duckdb_size_mb': 0.1},
+        {'tick_count': 1000, 'parquet_size_mb': 0.5, 'duckdb_size_mb': 0.1},
+    ]
+
+    with patch('sys.argv', ['exness-preprocess', 'process', '--range', '2024-01', '2024-02']):
+        with patch('exness_data_preprocess.api.process_date_range', return_value=mock_results):
+            main()
+
+
+def test_cli_query_command(temp_dir):
+    """Test 'query' command."""
+    from exness_data_preprocess.cli import main
+
+    mock_df = pd.DataFrame({
+        'Timestamp': pd.date_range('2024-08-01', periods=10, freq='1h'),
+        'Open': [1.085] * 10,
+        'High': [1.086] * 10,
+        'Low': [1.084] * 10,
+        'Close': [1.085] * 10,
+        'spread_avg': [0.00015] * 10,
+        'tick_count': [1000] * 10,
+    })
+
+    with patch('sys.argv', ['exness-preprocess', 'query', '--year', '2024', '--month', '8', '--timeframe', '1h']):
+        with patch('exness_data_preprocess.api.query_ohlc', return_value=mock_df):
+            main()
+
+
+def test_cli_query_with_output(temp_dir):
+    """Test 'query' command with output file."""
+    from exness_data_preprocess.cli import main
+
+    mock_df = pd.DataFrame({
+        'Timestamp': pd.date_range('2024-08-01', periods=10, freq='1h'),
+        'Open': [1.085] * 10,
+    })
+
+    output_file = temp_dir / 'output.csv'
+
+    with patch('sys.argv', [
+        'exness-preprocess', 'query',
+        '--year', '2024', '--month', '8',
+        '--output', str(output_file)
+    ]):
+        with patch('exness_data_preprocess.api.query_ohlc', return_value=mock_df):
+            main()
+
+
+def test_cli_analyze_command(temp_dir):
+    """Test 'analyze' command."""
+    from exness_data_preprocess.cli import main
+
+    mock_df = pd.DataFrame({
+        'Timestamp': pd.date_range('2024-08-01', periods=100, freq='1s'),
+        'Bid': [1.085] * 100,
+        'Ask': [1.08515] * 100,
+    })
+
+    with patch('sys.argv', ['exness-preprocess', 'analyze', '--year', '2024', '--month', '8']):
+        with patch('exness_data_preprocess.api.analyze_ticks', return_value=mock_df):
+            main()
+
+
+def test_cli_stats_command():
+    """Test 'stats' command."""
+    from exness_data_preprocess.cli import main
+
+    mock_stats = {
+        'parquet_count': 5,
+        'parquet_total_mb': 25.0,
+        'duckdb_count': 5,
+        'duckdb_total_mb': 5.0,
+        'total_mb': 30.0,
+    }
+
+    with patch('sys.argv', ['exness-preprocess', 'stats']):
+        with patch('exness_data_preprocess.api.get_storage_stats', return_value=mock_stats):
+            main()
+
+
+def test_cli_error_handling():
+    """Test CLI error handling."""
+    from exness_data_preprocess.cli import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        with patch('sys.argv', ['exness-preprocess', 'query', '--year', '2024', '--month', '8']):
+            with patch('exness_data_preprocess.api.query_ohlc', side_effect=Exception('Test error')):
+                main()
+
+    assert exc_info.value.code == 1
+
+
+def test_cli_no_command():
+    """Test CLI with no command shows help."""
+    from exness_data_preprocess.cli import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        with patch('sys.argv', ['exness-preprocess']):
+            with patch('sys.stdout'):
+                main()
+
+    assert exc_info.value.code == 1

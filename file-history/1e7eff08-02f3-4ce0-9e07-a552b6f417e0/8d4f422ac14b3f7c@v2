@@ -1,0 +1,177 @@
+"""
+Basic usage examples for exness-data-preprocess.
+
+This script demonstrates the simplest way to use the package for:
+1. Processing a single month of Exness tick data
+2. Querying OHLC data at different timeframes
+3. Analyzing raw tick data
+4. Getting storage statistics
+
+For batch processing examples, see batch_processing.py.
+"""
+
+from pathlib import Path
+import exness_data_preprocess as edp
+
+# Optional: Configure base directory (defaults to ~/exness-data/)
+BASE_DIR = Path.home() / "exness-data"
+
+# ============================================================================
+# Example 1: Process a Single Month
+# ============================================================================
+print("=" * 80)
+print("Example 1: Process a Single Month")
+print("=" * 80)
+
+# Process August 2024 EURUSD data
+# This will:
+#   1. Download Exness ZIP (if not cached)
+#   2. Convert to Parquet with Zstd-22 (lossless, 9% smaller than ZIP)
+#   3. Generate DuckDB OHLC database with 1-minute bars
+#   4. Delete ZIP to save space (optional)
+result = edp.process_month(
+    year=2024,
+    month=8,
+    pair="EURUSD",
+    base_dir=BASE_DIR,
+    delete_zip=True,
+)
+
+print(f"\n✅ Successfully processed August 2024 EURUSD:")
+print(f"   Parquet path:  {result['parquet_path']}")
+print(f"   DuckDB path:   {result['duckdb_path']}")
+print(f"   Compression:   {result['compression_ratio']:.1%} of ZIP size")
+print(f"   OHLC bars:     {result['bar_count']:,} bars")
+print(f"   Tick count:    {result['tick_count']:,} ticks")
+
+# ============================================================================
+# Example 2: Query OHLC Data (Multiple Timeframes)
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 2: Query OHLC Data at Different Timeframes")
+print("=" * 80)
+
+# Query 1-minute bars (direct from DuckDB, no resampling)
+df_1m = edp.query_ohlc(
+    year=2024,
+    month=8,
+    pair="EURUSD",
+    timeframe="1m",
+    base_dir=BASE_DIR,
+)
+print(f"\n1-minute bars:   {len(df_1m):,} rows")
+print(df_1m.head())
+
+# Query 5-minute bars (resampled from 1m)
+df_5m = edp.query_ohlc(
+    year=2024,
+    month=8,
+    pair="EURUSD",
+    timeframe="5m",
+    base_dir=BASE_DIR,
+)
+print(f"\n5-minute bars:   {len(df_5m):,} rows")
+print(df_5m.head())
+
+# Query 1-hour bars (resampled from 1m)
+df_1h = edp.query_ohlc(
+    year=2024,
+    month=8,
+    pair="EURUSD",
+    timeframe="1h",
+    base_dir=BASE_DIR,
+)
+print(f"\n1-hour bars:     {len(df_1h):,} rows")
+print(df_1h.head())
+
+# ============================================================================
+# Example 3: Analyze Raw Tick Data
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 3: Analyze Raw Tick Data")
+print("=" * 80)
+
+# Load raw tick data from Parquet (on-demand, not stored in memory)
+df_ticks = edp.analyze_ticks(
+    year=2024,
+    month=8,
+    pair="EURUSD",
+    base_dir=BASE_DIR,
+)
+
+print(f"\nTick data:       {len(df_ticks):,} ticks")
+print(f"Columns:         {list(df_ticks.columns)}")
+print(f"Date range:      {df_ticks['Timestamp'].min()} to {df_ticks['Timestamp'].max()}")
+print(f"\nFirst 5 ticks:")
+print(df_ticks.head())
+
+# Calculate spread statistics
+df_ticks['Spread'] = df_ticks['Ask'] - df_ticks['Bid']
+print(f"\nSpread statistics (pips):")
+print(f"   Mean:         {df_ticks['Spread'].mean() * 10000:.2f} pips")
+print(f"   Median:       {df_ticks['Spread'].median() * 10000:.2f} pips")
+print(f"   Min:          {df_ticks['Spread'].min() * 10000:.2f} pips")
+print(f"   Max:          {df_ticks['Spread'].max() * 10000:.2f} pips")
+
+# ============================================================================
+# Example 4: Get Storage Statistics
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 4: Get Storage Statistics")
+print("=" * 80)
+
+stats = edp.get_storage_stats(base_dir=BASE_DIR)
+
+print(f"\nStorage usage:")
+print(f"   Parquet files: {stats['parquet_count']} files ({stats['parquet_total_mb']:.1f} MB)")
+print(f"   DuckDB files:  {stats['duckdb_count']} files ({stats['duckdb_total_mb']:.1f} MB)")
+print(f"   Total:         {stats['total_mb']:.1f} MB")
+
+# ============================================================================
+# Example 5: Using the Processor Class Directly (Advanced)
+# ============================================================================
+print("\n" + "=" * 80)
+print("Example 5: Using ExnessDataProcessor Class (Advanced)")
+print("=" * 80)
+
+# For advanced use cases, you can use the processor class directly
+processor = edp.ExnessDataProcessor(base_dir=BASE_DIR)
+
+# Check if data exists before processing
+if processor._check_parquet_exists(year=2024, month=8, pair="EURUSD"):
+    print("✅ August 2024 EURUSD data already processed")
+else:
+    print("❌ August 2024 EURUSD data not found, run process_month() first")
+
+# Query with custom SQL (advanced)
+duckdb_path = BASE_DIR / "duckdb" / "eurusd_ohlc_2024_08.duckdb"
+if duckdb_path.exists():
+    import duckdb
+
+    conn = duckdb.connect(str(duckdb_path), read_only=True)
+
+    # Custom SQL query: Get trading hours with highest volatility
+    result = conn.execute("""
+        SELECT
+            HOUR(Timestamp) as hour,
+            AVG(High - Low) as avg_range,
+            AVG(spread_avg) as avg_spread,
+            SUM(tick_count) as total_ticks
+        FROM ohlc_1m
+        GROUP BY hour
+        ORDER BY avg_range DESC
+        LIMIT 5
+    """).df()
+
+    conn.close()
+
+    print("\nTop 5 most volatile hours (by average range):")
+    print(result)
+
+print("\n" + "=" * 80)
+print("✅ All examples completed successfully!")
+print("=" * 80)
+print("\nNext steps:")
+print("   - See batch_processing.py for processing multiple months")
+print("   - See docs/ for compression benchmarks and architecture details")
+print("   - See tests/ for unit tests and integration tests")

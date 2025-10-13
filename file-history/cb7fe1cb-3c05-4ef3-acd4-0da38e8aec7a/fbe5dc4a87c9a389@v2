@@ -1,0 +1,289 @@
+//! Dukascopy range bar builder with streaming state management
+//!
+//! Adapter pattern wraps RangeBarProcessor with zero core changes (Q19).
+//! Maintains SpreadStats across ticks, resets on bar close (Q13).
+
+use rangebar_core::fixed_point::FixedPoint;
+use rangebar_core::processor::RangeBarProcessor;
+use crate::dukascopy::conversion::tick_to_synthetic_trade;
+use crate::dukascopy::types::{
+    DukascopyError, DukascopyRangeBar, DukascopyTick, SpreadStats, ValidationStrictness,
+};
+
+/// Streaming range bar builder for Dukascopy tick data
+///
+/// Adapter pattern (Q3, Q19):
+/// - Wraps RangeBarProcessor (zero algorithm changes)
+/// - Converts ticks → synthetic trades → range bars
+/// - Maintains SpreadStats for current bar (reset on close)
+///
+/// Volume semantics (Q10, Q11):
+/// - bar.volume = total_bid_liquidity + total_ask_liquidity
+/// - buy_volume = 0, sell_volume = 0 (direction unknown)
+/// - SpreadStats tracks bid/ask asymmetry
+pub struct DukascopyRangeBarBuilder {
+    /// Core range bar processor (stateful, Q19)
+    processor: RangeBarProcessor,
+
+    /// Synthetic trade ID counter
+    tick_counter: i64,
+
+    /// Instrument symbol for config lookup
+    instrument: String,
+
+    /// Validation strictness level (Q12)
+    validation_strictness: ValidationStrictness,
+
+    /// Current bar spread statistics (Q13: reset on close)
+    current_spread_stats: SpreadStats,
+}
+
+impl DukascopyRangeBarBuilder {
+    /// Create new builder for instrument with threshold and validation level
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold_bps` - Threshold in **tenths of basis points** (0.1bps units)
+    ///   - Example: `250` → 25bps = 0.25%
+    ///   - Example: `10` → 1bps = 0.01%
+    ///   - Minimum: `1` → 0.1bps = 0.001%
+    /// * `instrument` - Instrument symbol (e.g., "EURUSD")
+    /// * `validation_strictness` - Validation level (Permissive/Strict/Paranoid)
+    ///
+    /// # Returns
+    ///
+    /// New builder instance with zero state
+    ///
+    /// # Breaking Change (v3.0.0)
+    ///
+    /// Prior to v3.0.0, `threshold_bps` was in 1bps units.
+    /// **Migration**: Multiply all threshold values by 10.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rangebar_providers::dukascopy::builder::DukascopyRangeBarBuilder;
+    /// use rangebar_providers::dukascopy::types::ValidationStrictness;
+    ///
+    /// let builder = DukascopyRangeBarBuilder::new(
+    ///     250,                          // 250 × 0.1bps = 25bps = 0.25% (v3.0.0)
+    ///     "EURUSD",                     // Forex major
+    ///     ValidationStrictness::Strict  // Default level
+    /// );
+    /// ```
+    pub fn new(
+        threshold_bps: u32,
+        instrument: impl Into<String>,
+        validation_strictness: ValidationStrictness,
+    ) -> Self {
+        Self {
+            processor: RangeBarProcessor::new(threshold_bps),
+            tick_counter: 0,
+            instrument: instrument.into(),
+            validation_strictness,
+            current_spread_stats: SpreadStats::new(),
+        }
+    }
+
+    /// Process single tick, returning completed bar if threshold breached
+    ///
+    /// State management (Q13, Q19):
+    /// 1. Validate tick (raise on error per requirement)
+    /// 2. Update current bar's spread stats (accumulate)
+    /// 3. Convert tick → synthetic trade
+    /// 4. Process through core processor
+    /// 5. If bar closes: wrap with spread stats, reset stats for next bar
+    ///
+    /// # Arguments
+    ///
+    /// * `tick` - Dukascopy tick (quote data)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(bar))` - Bar completed (threshold breached)
+    /// - `Ok(None)` - Tick processed, bar accumulating
+    /// - `Err(...)` - Validation or processing error (raise immediately)
+    ///
+    /// # Error Recovery (Q22)
+    ///
+    /// - Config errors: FATAL → propagate to caller → abort
+    /// - Validation errors: Propagate to caller → skip tick logic
+    /// - Processing errors: FATAL → propagate to caller → abort
+    ///
+    /// Caller should track error rate and abort if >10% errors.
+    pub fn process_tick(
+        &mut self,
+        tick: &DukascopyTick,
+    ) -> Result<Option<DukascopyRangeBar>, DukascopyError> {
+        // 1. Update spread stats (before conversion, accumulate for current bar)
+        self.current_spread_stats.update(tick);
+
+        // 2. Convert tick to synthetic trade (raises on error)
+        let synthetic_trade = tick_to_synthetic_trade(
+            tick,
+            &self.instrument,
+            self.tick_counter,
+            self.validation_strictness,
+        )?;
+        self.tick_counter += 1;
+
+        // 3. Process through core processor (raises on error)
+        let maybe_bar = self.processor.process_single_trade(synthetic_trade)?;
+
+        // 4. If bar closed, wrap with spread stats and reset
+        if let Some(mut base) = maybe_bar {
+            // Q10: Zero out buy/sell volume since direction is unknown for quote data
+            // Synthetic AggTrades use arbitrary is_buyer_maker=false, but this
+            // should not imply actual trade direction
+            base.buy_volume = FixedPoint(0);
+            base.sell_volume = FixedPoint(0);
+            base.buy_trade_count = 0;
+            base.sell_trade_count = 0;
+            base.buy_turnover = 0;
+            base.sell_turnover = 0;
+
+            let completed_bar = DukascopyRangeBar {
+                base,
+                spread_stats: self.current_spread_stats.clone(),
+            };
+
+            // Reset spread stats for next bar (Q13: per-bar semantics)
+            // Note: Breaching tick opens new bar, so update stats with current tick
+            self.current_spread_stats = SpreadStats::new();
+            self.current_spread_stats.update(tick);
+
+            Ok(Some(completed_bar))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get incomplete bar if exists (for final bar at stream end)
+    ///
+    /// Returns current bar state with accumulated spread stats.
+    /// Useful for retrieving partial bar when stream ends.
+    ///
+    /// # Returns
+    ///
+    /// `Some(DukascopyRangeBar)` if bar in progress, `None` if no active bar
+    pub fn get_incomplete_bar(&self) -> Option<DukascopyRangeBar> {
+        self.processor.get_incomplete_bar().map(|mut base| {
+            // Q10: Zero out buy/sell volume since direction is unknown for quote data
+            base.buy_volume = FixedPoint(0);
+            base.sell_volume = FixedPoint(0);
+            base.buy_trade_count = 0;
+            base.sell_trade_count = 0;
+            base.buy_turnover = 0;
+            base.sell_turnover = 0;
+
+            DukascopyRangeBar {
+                base,
+                spread_stats: self.current_spread_stats.clone(),
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builder_streaming_state() {
+        let mut builder = DukascopyRangeBarBuilder::new(
+            25, // 25 bps = 0.25%
+            "EURUSD",
+            ValidationStrictness::Strict,
+        );
+
+        // First tick - initializes bar
+        let tick1 = DukascopyTick {
+            bid: 1.0800,
+            ask: 1.0815,
+            bid_volume: 100.0,
+            ask_volume: 120.0,
+            timestamp_ms: 1_600_000_000_000,
+        };
+
+        let result = builder.process_tick(&tick1).unwrap();
+        assert!(result.is_none()); // No bar closed yet
+
+        // Check incomplete bar exists
+        let incomplete = builder.get_incomplete_bar();
+        assert!(incomplete.is_some());
+        let incomplete_bar = incomplete.unwrap();
+        assert_eq!(incomplete_bar.spread_stats.tick_count, 1);
+    }
+
+    #[test]
+    fn test_spread_stats_reset_on_bar_close() {
+        let mut builder = DukascopyRangeBarBuilder::new(
+            25,
+            "EURUSD",
+            ValidationStrictness::Strict,
+        );
+
+        // First tick at 1.0800 mid
+        let tick1 = DukascopyTick {
+            bid: 1.0792,
+            ask: 1.0808,
+            bid_volume: 100.0,
+            ask_volume: 120.0,
+            timestamp_ms: 1_600_000_000_000,
+        };
+        builder.process_tick(&tick1).unwrap();
+
+        // Second tick at 1.0800 mid (no breach)
+        let tick2 = DukascopyTick {
+            bid: 1.0793,
+            ask: 1.0807,
+            bid_volume: 110.0,
+            ask_volume: 130.0,
+            timestamp_ms: 1_600_001_000_000,
+        };
+        builder.process_tick(&tick2).unwrap();
+
+        // Third tick breaches +0.25% threshold (forces bar close)
+        // Mid-price needs to be > 1.0800 * 1.0025 = 1.0827
+        let tick3 = DukascopyTick {
+            bid: 1.0825,
+            ask: 1.0835, // mid = 1.0830 (breach!)
+            bid_volume: 105.0,
+            ask_volume: 125.0,
+            timestamp_ms: 1_600_002_000_000,
+        };
+
+        let maybe_bar = builder.process_tick(&tick3).unwrap();
+        assert!(maybe_bar.is_some());
+
+        let completed_bar = maybe_bar.unwrap();
+
+        // Verify spread stats were captured
+        assert_eq!(completed_bar.spread_stats.tick_count, 3);
+
+        // Verify new bar has fresh spread stats
+        let new_incomplete = builder.get_incomplete_bar().unwrap();
+        assert_eq!(new_incomplete.spread_stats.tick_count, 1); // Just tick3
+    }
+
+    #[test]
+    fn test_validation_error_propagation() {
+        let mut builder = DukascopyRangeBarBuilder::new(
+            25,
+            "EURUSD",
+            ValidationStrictness::Strict,
+        );
+
+        // Crossed market tick
+        let bad_tick = DukascopyTick {
+            bid: 1.0815,
+            ask: 1.0800, // bid > ask
+            bid_volume: 100.0,
+            ask_volume: 120.0,
+            timestamp_ms: 1_600_000_000_000,
+        };
+
+        let result = builder.process_tick(&bad_tick);
+        assert!(result.is_err());
+    }
+}

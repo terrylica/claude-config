@@ -1,0 +1,310 @@
+"""
+OKX CDN aggtrades downloader with raw tick data storage.
+
+This module downloads tick-level trade data from OKX CDN and stores it
+in Parquet format WITHOUT aggregation, allowing flexible resampling later.
+
+Key features:
+- Downloads from CDN (no rate limits)
+- Streams ZIP extraction (no disk storage of raw CSV)
+- Stores raw ticks in optimized Parquet
+- Dictionary encoding for symbols/sides
+- Sorted by (timestamp, symbol) for fast queries
+"""
+
+import calendar
+import logging
+from io import BytesIO
+from pathlib import Path
+from typing import List, Optional
+import zipfile
+
+import httpx
+import pandas as pd
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+# OKX CDN base URL
+OKX_CDN_BASE = "https://www.okx.com/cdn/okex/traderecords/aggtrades/monthly"
+
+
+def construct_cdn_url(msg_type: str, year: int, month: int, day: int) -> str:
+    """
+    Construct OKX CDN URL for specific day.
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        year: Year (e.g., 2023)
+        month: Month (1-12)
+        day: Day (1-31)
+
+    Returns:
+        Full CDN URL
+
+    Examples:
+        >>> url = construct_cdn_url("allspot", 2023, 10, 1)
+        >>> print(url)
+        https://www.okx.com/cdn/okex/traderecords/aggtrades/monthly/202310/allspot-aggtrades-2023-10-01.zip
+    """
+    month_str = f"{year:04d}{month:02d}"
+    filename = f"{msg_type}-aggtrades-{year:04d}-{month:02d}-{day:02d}.zip"
+    return f"{OKX_CDN_BASE}/{month_str}/{filename}"
+
+
+def parse_aggtrades_csv(
+    csv_buffer: BytesIO,
+    market_type: str = "spot",
+    symbols_filter: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """
+    Parse OKX aggtrades CSV to DataFrame with optimal schema.
+
+    CSV format:
+        instrument_name,trade_id,side,size,price,created_time
+        BTC-USDT,123456,buy,0.5,45000.0,1696118400000
+
+    Output schema:
+        - timestamp: datetime64[ns, UTC]
+        - symbol: string (normalized, e.g., "BTC-USDT")
+        - price: float64
+        - size: float64
+        - side: string ("buy" or "sell")
+        - trade_value: float64 (price × size, for VWAP)
+
+    Args:
+        csv_buffer: BytesIO containing CSV data
+        market_type: "spot" or "swap"
+        symbols_filter: Optional list of symbols to include (e.g., ["BTC-USDT"])
+
+    Returns:
+        DataFrame with processed trade data
+    """
+    # Read CSV with GBK encoding (OKX uses bilingual headers in GBK)
+    try:
+        df = pd.read_csv(csv_buffer, encoding='gbk')
+    except UnicodeDecodeError:
+        # Fallback to UTF-8 if GBK fails
+        csv_buffer.seek(0)
+        df = pd.read_csv(csv_buffer, encoding='utf-8')
+
+    # Normalize bilingual column names (e.g., "created_time/成交时间" -> "created_time")
+    df.columns = [col.split('/')[0] for col in df.columns]
+
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "timestamp", "symbol", "price", "size", "side", "trade_value"
+        ])
+
+    # Convert timestamp (milliseconds to datetime)
+    df["timestamp"] = pd.to_datetime(df["created_time"], unit="ms", utc=True)
+
+    # Normalize symbol column
+    df["symbol"] = df["instrument_name"]
+
+    # Calculate trade value (for VWAP computation)
+    df["trade_value"] = df["price"] * df["size"]
+
+    # Apply symbol filter if specified
+    if symbols_filter:
+        df = df[df["symbol"].isin(symbols_filter)]
+
+    # Select and reorder columns
+    df = df[["timestamp", "symbol", "price", "size", "side", "trade_value"]]
+
+    # Sort by timestamp and symbol (critical for query performance)
+    df = df.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+    return df
+
+
+def download_and_parse_day(
+    msg_type: str,
+    year: int,
+    month: int,
+    day: int,
+    symbols_filter: Optional[List[str]] = None,
+    timeout: int = 60,
+) -> pd.DataFrame:
+    """
+    Download and parse aggtrades for a single day.
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        year: Year
+        month: Month (1-12)
+        day: Day (1-31)
+        symbols_filter: Optional list of symbols to include
+        timeout: HTTP timeout in seconds
+
+    Returns:
+        DataFrame with tick data for the day
+
+    Raises:
+        httpx.HTTPError: If download fails
+    """
+    url = construct_cdn_url(msg_type, year, month, day)
+    logger.info(f"Downloading {year}-{month:02d}-{day:02d} from CDN...")
+
+    # Download ZIP to memory
+    with httpx.Client(timeout=timeout) as client:
+        response = client.get(url)
+        response.raise_for_status()
+
+    zip_buffer = BytesIO(response.content)
+
+    # Extract and parse CSV from ZIP
+    all_chunks = []
+    with zipfile.ZipFile(zip_buffer, "r") as zf:
+        for csv_filename in zf.namelist():
+            if not csv_filename.endswith(".csv"):
+                continue
+
+            logger.debug(f"Parsing {csv_filename} from ZIP")
+
+            with zf.open(csv_filename) as csv_file:
+                df = parse_aggtrades_csv(
+                    BytesIO(csv_file.read()),
+                    market_type="spot" if "spot" in msg_type else "swap",
+                    symbols_filter=symbols_filter,
+                )
+                if not df.empty:
+                    all_chunks.append(df)
+
+    if not all_chunks:
+        logger.warning(f"No data found for {year}-{month:02d}-{day:02d}")
+        return pd.DataFrame(columns=[
+            "timestamp", "symbol", "price", "size", "side", "trade_value"
+        ])
+
+    # Combine all chunks
+    combined = pd.concat(all_chunks, ignore_index=True)
+    combined = combined.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+    logger.info(
+        f"Downloaded {year}-{month:02d}-{day:02d}: {len(combined):,} trades, "
+        f"{combined['symbol'].nunique()} symbols"
+    )
+
+    return combined
+
+
+def download_month_ticks(
+    msg_type: str,
+    year: int,
+    month: int,
+    output_parquet: Path,
+    symbols_filter: Optional[List[str]] = None,
+    skip_errors: bool = True,
+) -> dict:
+    """
+    Download full month of tick data and save to Parquet.
+
+    This is the main entry point for downloading tick data.
+
+    Args:
+        msg_type: "allspot" or "allswap"
+        year: Year (e.g., 2023)
+        month: Month (1-12)
+        output_parquet: Path to save Parquet file
+        symbols_filter: Optional list of symbols to include
+        skip_errors: Continue if some days fail to download
+
+    Returns:
+        Dict with download statistics
+
+    Examples:
+        >>> from pathlib import Path
+        >>> stats = download_month_ticks(
+        ...     msg_type="allspot",
+        ...     year=2023,
+        ...     month=10,
+        ...     output_parquet=Path("data/okx_ticks/202310.parquet"),
+        ...     symbols_filter=["BTC-USDT", "ETH-USDT"]
+        ... )
+        >>> print(f"Downloaded {stats['total_trades']:,} trades")
+    """
+    num_days = calendar.monthrange(year, month)[1]
+
+    logger.info(
+        f"Downloading {msg_type} {year}-{month:02d} ({num_days} days) from CDN"
+    )
+
+    all_days = []
+    days_succeeded = 0
+    days_failed = 0
+    failed_days = []
+
+    for day in range(1, num_days + 1):
+        try:
+            day_df = download_and_parse_day(
+                msg_type=msg_type,
+                year=year,
+                month=month,
+                day=day,
+                symbols_filter=symbols_filter,
+            )
+
+            if not day_df.empty:
+                all_days.append(day_df)
+                days_succeeded += 1
+            else:
+                logger.warning(f"Day {day} returned no data")
+                days_failed += 1
+                failed_days.append(day)
+
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to download day {day}: {e}")
+            days_failed += 1
+            failed_days.append(day)
+
+            if not skip_errors:
+                raise
+
+        except Exception as e:
+            logger.error(f"Unexpected error on day {day}: {e}")
+            days_failed += 1
+            failed_days.append(day)
+
+            if not skip_errors:
+                raise
+
+    if not all_days:
+        raise ValueError(f"No data downloaded for {year}-{month:02d}")
+
+    # Combine all days
+    logger.info(f"Combining {len(all_days)} days of data...")
+    combined = pd.concat(all_days, ignore_index=True)
+    combined = combined.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+    # Save to Parquet with optimal settings
+    output_parquet.parent.mkdir(parents=True, exist_ok=True)
+
+    combined.to_parquet(
+        output_parquet,
+        index=False,
+        engine="pyarrow",
+        compression="zstd",
+        compression_level=9,
+        # Dictionary encode string columns for compression
+        use_dictionary=["symbol", "side"],
+        # Row group size: balance compression vs query speed
+        row_group_size=1_000_000,
+    )
+
+    file_size_mb = output_parquet.stat().st_size / 1024 / 1024
+
+    logger.info(
+        f"Saved {len(combined):,} trades to {output_parquet} "
+        f"({file_size_mb:.2f} MB, zstd-9)"
+    )
+
+    return {
+        "days_succeeded": days_succeeded,
+        "days_failed": days_failed,
+        "failed_days": failed_days,
+        "total_trades": len(combined),
+        "unique_symbols": combined["symbol"].nunique(),
+        "date_range": (combined["timestamp"].min(), combined["timestamp"].max()),
+        "file_size_mb": file_size_mb,
+    }

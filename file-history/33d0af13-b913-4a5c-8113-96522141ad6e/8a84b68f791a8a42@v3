@@ -1,0 +1,173 @@
+# Phase 7: BID-Only OHLC Construction with Dual-Spread Tracking
+
+**Version**: 1.0.0
+**Status**: Active
+**Created**: 2025-01-19
+
+## Objective
+
+Demonstrate OHLC bar construction using BID prices exclusively from Exness Raw_Spread variant, with dual-spread tracking from both Raw_Spread and Standard variants.
+
+## Input Requirements
+
+### Data Sources
+
+- **Primary**: `/tmp/Exness_EURUSD_Raw_Spread_2024_08.zip` - BID prices for OHLC construction
+- **Reference**: `/tmp/Exness_EURUSD_2024_08.zip` - Standard spread for comparison
+
+### CSV Format (Exness tick data)
+
+```
+"Exness","Symbol","Timestamp","Bid","Ask"
+```
+
+### Extraction Window
+
+- **Duration**: 2 consecutive minutes
+- **Timeframe**: 1-minute bars (2 bars total)
+- **Sample Window**: 2024-08-05 07:00:00 - 2024-08-05 07:01:59 UTC
+
+## Processing Pipeline
+
+### Step 1: Data Loading
+
+1. Extract CSV from both ZIP files using `zipfile` module
+2. Parse with `pandas.read_csv()` using standard datetime parsing
+3. Convert Timestamp column to UTC timezone-aware datetime
+4. Filter to 2-minute extraction window
+
+### Step 2: OHLC Construction from BID
+
+1. Select **BID column only** from Raw_Spread variant
+2. Set Timestamp as index
+3. Apply `df.resample('1min')` on BID column
+4. Compute OHLC using built-in aggregations:
+   - Open: `first()`
+   - High: `max()`
+   - Low: `min()`
+   - Close: `last()`
+
+### Step 3: Spread Calculation
+
+1. **Raw_Spread Variant**: Calculate `(Ask - Bid).mean()` per 1-minute interval
+2. **Standard Variant**: Calculate `(Ask - Bid).mean()` per 1-minute interval
+3. Add as columns: `raw_spread_avg`, `standard_spread_avg`
+
+### Step 4: Output Generation
+
+- **Format**: CSV with header
+- **Path**: `/tmp/demo_exness_bid_ohlc.csv`
+- **Schema**:
+  ```
+  Timestamp,Open,High,Low,Close,raw_spread_avg,standard_spread_avg
+  ```
+
+## SLOs (Service Level Objectives)
+
+### Availability
+
+- **Target**: 100% processing success when input files exist
+- **Failure Mode**: Explicit `FileNotFoundError` if ZIP files missing
+- **Propagation**: No fallbacks, no defaults, no retries
+
+### Correctness
+
+- **OHLC Integrity**: Derived from BID prices only (no Ask, no midpoint)
+- **Spread Precision**: 5 decimal places (standard forex pip precision)
+- **Temporal Alignment**: Bars aligned to minute boundaries (00 seconds)
+- **Validation**: High ≥ max(Open, Close), Low ≤ min(Open, Close)
+
+### Observability
+
+- **Logging Points**:
+  1. ZIP file loading with file sizes
+  2. CSV parsing with row counts
+  3. Time window filtering with resulting row counts
+  4. OHLC resampling with bar count
+  5. Spread calculations with min/max/mean values
+  6. Output file writing with path confirmation
+
+### Maintainability
+
+- **Built-in Solutions**: Use `pandas.resample()`, no custom aggregation logic
+- **Standard Libraries**: `zipfile`, `pandas`, `pathlib` only
+- **No External Dependencies**: No `ta-lib`, no custom indicator libraries
+- **Error Messages**: Include timestamp ranges, row counts, file paths
+
+## Error Handling Strategy
+
+### FileNotFoundError
+
+```python
+if not raw_spread_path.exists():
+    raise FileNotFoundError(f"Raw_Spread data missing: {raw_spread_path}")
+```
+
+### ValueError (CSV Format)
+
+```python
+if 'Bid' not in df.columns or 'Ask' not in df.columns:
+    raise ValueError(f"Invalid CSV format. Expected columns: Bid, Ask. Got: {df.columns.tolist()}")
+```
+
+### IndexError (Insufficient Data)
+
+```python
+if len(ohlc) < 2:
+    raise IndexError(f"Expected 2 bars, got {len(ohlc)}. Time range: {df.index.min()} to {df.index.max()}")
+```
+
+## Implementation Notes
+
+### Why BID-Only?
+
+- **Market Microstructure**: BID represents executable price for long positions
+- **Zero-Spread Context**: In Raw_Spread variant, Bid=Ask at deviation events
+- **Consistency**: Single price series eliminates bid-ask bounce in OHLC bars
+
+### Spread Tracking Rationale
+
+- **Raw_Spread**: Captures spread behavior during zero-spread deviation events
+- **Standard**: Baseline spread distribution for comparison
+- **Dual Tracking**: Enables analysis of spread compression patterns
+
+## Output Schema
+
+| Column              | Type                | Source               | Description                       |
+| ------------------- | ------------------- | -------------------- | --------------------------------- |
+| Timestamp           | datetime64[ns, UTC] | Index                | Bar start time (minute boundary)  |
+| Open                | float64             | Raw_Spread BID       | First BID price in interval       |
+| High                | float64             | Raw_Spread BID       | Maximum BID price in interval     |
+| Low                 | float64             | Raw_Spread BID       | Minimum BID price in interval     |
+| Close               | float64             | Raw_Spread BID       | Last BID price in interval        |
+| raw_spread_avg      | float64             | Raw_Spread (Ask-Bid) | Mean spread in Raw_Spread variant |
+| standard_spread_avg | float64             | Standard (Ask-Bid)   | Mean spread in Standard variant   |
+
+## Validation Criteria
+
+### OHLC Integrity
+
+```python
+assert (ohlc['High'] >= ohlc[['Open', 'Close']].max(axis=1)).all()
+assert (ohlc['Low'] <= ohlc[['Open', 'Close']].min(axis=1)).all()
+```
+
+### Spread Non-Negativity
+
+```python
+assert (ohlc['raw_spread_avg'] >= 0).all()
+assert (ohlc['standard_spread_avg'] >= 0).all()
+```
+
+### Temporal Ordering
+
+```python
+assert ohlc.index.is_monotonic_increasing
+assert (ohlc.index.second == 0).all()  # Aligned to minute boundaries
+```
+
+## References
+
+- **Data Source**: Exness via ex2archive.com
+- **Research Context**: Phase 6 interval clustering and burst analysis
+- **Visualization**: Phase 6 burst decay dashboard (`generate_lightweight_dashboard.py`)

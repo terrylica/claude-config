@@ -1,0 +1,220 @@
+# exness-data-preprocess - Project Memory
+
+**Architecture**: Professional forex tick data preprocessing with unified DuckDB storage and optimal compression
+
+**Full Documentation**: [`README.md`](README.md) - Installation, usage, API reference
+
+---
+
+## Quick Links
+
+- **[README.md](README.md)** - Full project documentation
+- **[Documentation Hub](docs/README.md)** - Organized research findings and guides
+- **[Examples](examples/)** - Usage patterns (basic_usage.py, batch_processing.py)
+- **[Data Sources Guide](docs/EXNESS_DATA_SOURCES.md)** - Complete Exness variant reference
+- **[Implementation Plan](docs/implementation-plan.yaml)** - OpenAPI 3.1.1 specification
+
+---
+
+## Essential Architecture Decisions
+
+### Unified DuckDB Storage (✅ Validated 2025-10-12)
+
+**Decision**: Store BOTH irregular tick data and regular OHLC bars in single DuckDB file per instrument
+
+**Validation**: Real Exness EURUSD data (Sep 2024)
+- ✅ **Irregular ticks**: 925K Raw_Spread + 1.08M Standard ticks (variable intervals: 1µs to 130.61s)
+- ✅ **Regular OHLC**: 30,240 minute-aligned bars (0 unaligned)
+- ✅ **Phase7 schema**: 9 columns (dual spreads + dual tick counts)
+- ✅ **Performance**: <15ms queries for all timeframes
+- ✅ **Storage**: 11.26 MB per month (extremely efficient)
+
+**Files**: [`/tmp/exness-duckdb-test/FINDINGS.md`](/tmp/exness-duckdb-test/FINDINGS.md), [`test_real_unified.py`](/tmp/exness-duckdb-test/test_real_unified.py)
+
+**Next**: Refactor `ExnessDataProcessor` to implement unified DuckDB architecture
+
+### Compression Strategy (✅ Benchmarked)
+
+**Decision**: Parquet with Zstd-22 for tick data storage
+
+**Rationale**:
+- **Lossless**: Zero precision loss (delta encoding rejected: 36 pips error)
+- **Efficient**: 9% smaller than ZIP (4.77 MB per month)
+- **Fast**: 0.78s write, 0.014s read
+- **Queryable**: Direct DuckDB access without decode step
+
+**Full Analysis**: [`docs/research/compression-benchmarks/README.md`](docs/research/compression-benchmarks/README.md)
+
+---
+
+## Exness Data Sources
+
+### Available Variants (4 per instrument)
+
+| Variant | Zero-Spreads | Use Case |
+|---------|--------------|----------|
+| **{SYMBOL}** | 0% | Standard quotes (reference) |
+| **{SYMBOL}_Raw_Spread** | 97.81% | Execution prices (primary for phase7) |
+| **{SYMBOL}_Standart_Plus** | 0% | Wider spreads |
+| **{SYMBOL}_Zero_Spread** | 97.81% | Similar to Raw_Spread |
+
+**URL Pattern**:
+```
+https://ticks.ex2archive.com/ticks/{VARIANT}/{YEAR}/{MONTH}/Exness_{VARIANT}_{YEAR}_{MONTH}.zip
+```
+
+**Discovery**:
+```bash
+# List all instruments and variants
+curl -s "https://ticks.ex2archive.com/ticks/" | jq -r '.[] | .name' | sort
+
+# Filter for EURUSD
+curl -s "https://ticks.ex2archive.com/ticks/" | jq -r '.[] | .name' | grep -i "EURUSD"
+```
+
+**Phase7 Downloads** (dual-variant methodology):
+```bash
+# Primary: Raw_Spread (98% zero-spreads, execution prices)
+curl -L "https://ticks.ex2archive.com/ticks/EURUSD_Raw_Spread/2024/09/Exness_EURUSD_Raw_Spread_2024_09.zip" \
+  -o Exness_EURUSD_Raw_Spread_2024_09.zip
+
+# Reference: Standard (0% zero-spreads, traditional quotes)
+curl -L "https://ticks.ex2archive.com/ticks/EURUSD/2024/09/Exness_EURUSD_2024_09.zip" \
+  -o Exness_EURUSD_2024_09.zip
+```
+
+**Full Guide**: [`docs/EXNESS_DATA_SOURCES.md`](docs/EXNESS_DATA_SOURCES.md) - Complete reference with examples
+
+**Test Artifacts**: [`/tmp/exness-duckdb-test/EXNESS_VARIANTS.md`](/tmp/exness-duckdb-test/EXNESS_VARIANTS.md)
+
+**Helper Script**: [`/tmp/exness-duckdb-test/download_exness_variants.sh`](/tmp/exness-duckdb-test/download_exness_variants.sh)
+
+---
+
+## Research Areas
+
+### Zero-Spread Deviation Analysis
+
+**Research Period**: Sep 2024 baseline + 16-month validation (Jan-Aug 2024+2025)
+
+**Key Findings**:
+- ✅ **Mean Reversion**: 87.3% ± 1.9% stable across 16 months
+- ⚠️ **Volatility Prediction**: Regime shift between 2024 (R²=0.371) and 2025 (R²=0.209)
+- ✅ **Phase7 Methodology**: Dual-variant BID-only OHLC construction validated
+
+**Documentation**: [`docs/research/eurusd-zero-spread-deviations/README.md`](docs/research/eurusd-zero-spread-deviations/README.md)
+
+**Methodology**: [`docs/research/eurusd-zero-spread-deviations/01-methodology.md`](docs/research/eurusd-zero-spread-deviations/01-methodology.md)
+
+**Phase7 v1.1.0**: [`docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.1.0.md`](docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.1.0.md)
+
+### Compression Benchmarks
+
+**Decision**: Parquet Zstd-22 over Brotli-11 (too slow) and Delta Encoding (lossy)
+
+**Adversarial Audit**: Delta encoding rejected due to 36.16 pips average error (max 95.10 pips)
+
+**Documentation**: [`docs/research/compression-benchmarks/README.md`](docs/research/compression-benchmarks/README.md)
+
+---
+
+## Development Setup
+
+### Prerequisites
+
+```bash
+# Clone and setup
+git clone https://github.com/Eon-Labs/exness-data-preprocess.git
+cd exness-data-preprocess
+
+# Install with uv (recommended)
+uv sync --dev
+
+# Or with pip
+pip install -e ".[dev]"
+```
+
+### Testing
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run with coverage
+uv run pytest --cov=exness_data_preprocess --cov-report=html
+```
+
+### Code Quality
+
+```bash
+# Format and lint
+uv run ruff format .
+uv run ruff check --fix .
+
+# Type checking
+uv run mypy src/
+```
+
+---
+
+## Current Implementation Status
+
+### Completed
+
+- ✅ **Compression benchmarks** - Parquet Zstd-22 selected
+- ✅ **Unified DuckDB validation** - Real data test passed
+- ✅ **Phase7 methodology** - v1.1.0 specification complete
+- ✅ **Exness variant discovery** - 4 variants mapped, download scripts ready
+- ✅ **Zero-spread deviation research** - 16-month validation complete
+
+### In Progress
+
+- 🔄 **Refactor ExnessDataProcessor** - Implement unified DuckDB architecture
+  - Current: Downloads Raw_Spread only, uses wrong URL pattern
+  - Target: Download both variants (Raw_Spread + Standard), unified DuckDB storage
+  - URL fix: From flat structure to `/ticks/{variant}/{year}/{month}/` hierarchy
+
+### Pending
+
+- ⏳ **Phase7 OHLC implementation** - Generate 9-column schema with dual spreads/tick counts
+- ⏳ **CLI enhancements** - Add variant selection, OHLC resampling commands
+- ⏳ **API expansion** - Add `query_ticks()`, `resample_ohlc()` methods
+
+---
+
+## File Locations
+
+**Project Root**: `/Users/terryli/eon/exness-data-preprocess/ `
+
+**Data Storage** (default): `~/eon/exness-data/`
+```
+~/eon/exness-data/
+├── parquet/          # Tick data (current implementation)
+├── duckdb/           # OHLC databases (current implementation)
+└── unified/          # Target: Unified DuckDB files (ticks + OHLC)
+    ├── eurusd_2024_08.duckdb
+    ├── eurusd_2024_09.duckdb
+    └── ...
+```
+
+**Test Artifacts**: `/tmp/exness-duckdb-test/`
+- `FINDINGS.md` - Unified DuckDB validation report
+- `EXNESS_VARIANTS.md` - Complete variant guide
+- `eurusd_real_2024_09.duckdb` - Real data test database (11.26 MB)
+- `download_exness_variants.sh` - Helper script
+
+---
+
+## References
+
+- **Exness Data**: https://ticks.ex2archive.com/
+- **Official Exness**: https://www.exness.com/tick-history/ (Cloudflare protected)
+- **DuckDB**: https://duckdb.org/
+- **Apache Parquet**: https://parquet.apache.org/
+- **Zstd Compression**: https://facebook.github.io/zstd/
+
+---
+
+**Version**: 0.1.0
+**Last Updated**: 2025-10-12
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure

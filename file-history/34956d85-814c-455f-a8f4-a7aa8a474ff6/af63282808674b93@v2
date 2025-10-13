@@ -1,0 +1,428 @@
+#!/usr/bin/env python3
+"""
+DuckDB vs Parquet: Real Quantitative Trading Benchmarks
+
+Apple-to-apple comparison using actual quant trading operations:
+1. Rolling volatility (20-period)
+2. Resample 1m → 1h OHLCV
+3. Calculate RSI indicator
+4. Multi-condition signal generation
+5. Correlation analysis
+6. Feature engineering pipeline
+
+Both implementations do the SAME work, just different execution paths.
+"""
+
+import time
+from pathlib import Path
+import pandas as pd
+import numpy as np
+import duckdb
+
+
+def load_data():
+    """Load test dataset."""
+    conn = duckdb.connect('/tmp/eurusd_1m_2024_08.duckdb', read_only=True)
+    df = conn.execute("SELECT * FROM ohlc").df()
+    conn.close()
+    return df
+
+
+def benchmark_rolling_volatility_duckdb(db_path: Path, runs: int = 5):
+    """Calculate 20-period rolling volatility using DuckDB."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+
+        # Calculate returns and rolling volatility in SQL
+        result = conn.execute("""
+            WITH returns AS (
+                SELECT
+                    Timestamp,
+                    Close,
+                    (Close - LAG(Close, 1) OVER (ORDER BY Timestamp)) / LAG(Close, 1) OVER (ORDER BY Timestamp) AS return
+                FROM ohlc
+            )
+            SELECT
+                Timestamp,
+                Close,
+                return,
+                STDDEV(return) OVER (
+                    ORDER BY Timestamp
+                    ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+                ) * SQRT(20) AS volatility_20
+            FROM returns
+            WHERE return IS NOT NULL
+        """).df()
+
+        conn.close()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_rolling_volatility_parquet(pq_path: Path, runs: int = 5):
+    """Calculate 20-period rolling volatility using pandas."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+
+        df = pd.read_parquet(pq_path)
+        df = df.sort_values('Timestamp')
+        df['return'] = df['Close'].pct_change()
+        df['volatility_20'] = df['return'].rolling(window=20).std() * np.sqrt(20)
+        result = df[['Timestamp', 'Close', 'return', 'volatility_20']].dropna()
+
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_resample_1h_duckdb(db_path: Path, runs: int = 5):
+    """Resample 1m → 1h OHLCV using DuckDB."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+
+        result = conn.execute("""
+            SELECT
+                DATE_TRUNC('hour', Timestamp) AS hour,
+                FIRST(Open) AS Open,
+                MAX(High) AS High,
+                MIN(Low) AS Low,
+                LAST(Close) AS Close,
+                AVG(tick_count_raw_spread) AS avg_tick_count
+            FROM ohlc
+            GROUP BY DATE_TRUNC('hour', Timestamp)
+            ORDER BY hour
+        """).df()
+
+        conn.close()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_resample_1h_parquet(pq_path: Path, runs: int = 5):
+    """Resample 1m → 1h OHLCV using pandas."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+
+        df = pd.read_parquet(pq_path)
+        df = df.set_index('Timestamp')
+
+        result = pd.DataFrame({
+            'Open': df['Open'].resample('1h').first(),
+            'High': df['High'].resample('1h').max(),
+            'Low': df['Low'].resample('1h').min(),
+            'Close': df['Close'].resample('1h').last(),
+            'avg_tick_count': df['tick_count_raw_spread'].resample('1h').mean()
+        }).dropna()
+
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_rsi_duckdb(db_path: Path, runs: int = 5):
+    """Calculate 14-period RSI using DuckDB."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+
+        result = conn.execute("""
+            WITH price_changes AS (
+                SELECT
+                    Timestamp,
+                    Close,
+                    Close - LAG(Close, 1) OVER (ORDER BY Timestamp) AS change
+                FROM ohlc
+            ),
+            gains_losses AS (
+                SELECT
+                    Timestamp,
+                    Close,
+                    CASE WHEN change > 0 THEN change ELSE 0 END AS gain,
+                    CASE WHEN change < 0 THEN -change ELSE 0 END AS loss
+                FROM price_changes
+            ),
+            avg_gains_losses AS (
+                SELECT
+                    Timestamp,
+                    Close,
+                    AVG(gain) OVER (ORDER BY Timestamp ROWS BETWEEN 13 PRECEDING AND CURRENT ROW) AS avg_gain,
+                    AVG(loss) OVER (ORDER BY Timestamp ROWS BETWEEN 13 PRECEDING AND CURRENT ROW) AS avg_loss
+                FROM gains_losses
+            )
+            SELECT
+                Timestamp,
+                Close,
+                CASE
+                    WHEN avg_loss = 0 THEN 100
+                    ELSE 100 - (100 / (1 + (avg_gain / avg_loss)))
+                END AS rsi_14
+            FROM avg_gains_losses
+            WHERE avg_gain IS NOT NULL AND avg_loss IS NOT NULL
+        """).df()
+
+        conn.close()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_rsi_parquet(pq_path: Path, runs: int = 5):
+    """Calculate 14-period RSI using pandas."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+
+        df = pd.read_parquet(pq_path)
+        df = df.sort_values('Timestamp')
+
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+
+        rs = gain / loss
+        df['rsi_14'] = 100 - (100 / (1 + rs))
+        result = df[['Timestamp', 'Close', 'rsi_14']].dropna()
+
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_multi_condition_filter_duckdb(db_path: Path, runs: int = 5):
+    """Complex multi-condition signal generation using DuckDB."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+
+        result = conn.execute("""
+            WITH price_metrics AS (
+                SELECT
+                    Timestamp,
+                    Close,
+                    AVG(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS sma_20,
+                    (Close - LAG(Close, 1) OVER (ORDER BY Timestamp)) / LAG(Close, 1) OVER (ORDER BY Timestamp) AS return_1,
+                    tick_count_raw_spread
+                FROM ohlc
+            )
+            SELECT
+                Timestamp,
+                Close,
+                sma_20,
+                return_1,
+                tick_count_raw_spread
+            FROM price_metrics
+            WHERE Close > sma_20
+              AND return_1 > 0.0001
+              AND tick_count_raw_spread > 20
+              AND sma_20 IS NOT NULL
+        """).df()
+
+        conn.close()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_multi_condition_filter_parquet(pq_path: Path, runs: int = 5):
+    """Complex multi-condition signal generation using pandas."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+
+        df = pd.read_parquet(pq_path)
+        df = df.sort_values('Timestamp')
+
+        df['sma_20'] = df['Close'].rolling(window=20).mean()
+        df['return_1'] = df['Close'].pct_change()
+
+        result = df[
+            (df['Close'] > df['sma_20']) &
+            (df['return_1'] > 0.0001) &
+            (df['tick_count_raw_spread'] > 20) &
+            (df['sma_20'].notna())
+        ][['Timestamp', 'Close', 'sma_20', 'return_1', 'tick_count_raw_spread']]
+
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_feature_engineering_duckdb(db_path: Path, runs: int = 5):
+    """Full feature engineering pipeline using DuckDB."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        conn = duckdb.connect(str(db_path), read_only=True)
+
+        result = conn.execute("""
+            SELECT
+                Timestamp,
+                Close,
+                -- Price features
+                (Close - LAG(Close, 1) OVER w) / LAG(Close, 1) OVER w AS return_1,
+                (Close - LAG(Close, 5) OVER w) / LAG(Close, 5) OVER w AS return_5,
+                (Close - LAG(Close, 20) OVER w) / LAG(Close, 20) OVER w AS return_20,
+                -- Moving averages
+                AVG(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) AS sma_10,
+                AVG(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS sma_20,
+                AVG(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 49 PRECEDING AND CURRENT ROW) AS sma_50,
+                -- Volatility
+                STDDEV(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS volatility_20,
+                -- Price position
+                (Close - MIN(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)) /
+                (MAX(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) -
+                 MIN(Close) OVER (ORDER BY Timestamp ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)) AS stoch_20,
+                -- Tick count features
+                AVG(tick_count_raw_spread) OVER (ORDER BY Timestamp ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) AS avg_ticks_10
+            FROM ohlc
+            WINDOW w AS (ORDER BY Timestamp)
+        """).df()
+
+        conn.close()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def benchmark_feature_engineering_parquet(pq_path: Path, runs: int = 5):
+    """Full feature engineering pipeline using pandas."""
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+
+        df = pd.read_parquet(pq_path)
+        df = df.sort_values('Timestamp')
+
+        # Price features
+        df['return_1'] = df['Close'].pct_change(1)
+        df['return_5'] = df['Close'].pct_change(5)
+        df['return_20'] = df['Close'].pct_change(20)
+
+        # Moving averages
+        df['sma_10'] = df['Close'].rolling(window=10).mean()
+        df['sma_20'] = df['Close'].rolling(window=20).mean()
+        df['sma_50'] = df['Close'].rolling(window=50).mean()
+
+        # Volatility
+        df['volatility_20'] = df['Close'].rolling(window=20).std()
+
+        # Stochastic
+        low_20 = df['Close'].rolling(window=20).min()
+        high_20 = df['Close'].rolling(window=20).max()
+        df['stoch_20'] = (df['Close'] - low_20) / (high_20 - low_20)
+
+        # Tick count features
+        df['avg_ticks_10'] = df['tick_count_raw_spread'].rolling(window=10).mean()
+
+        result = df[[
+            'Timestamp', 'Close', 'return_1', 'return_5', 'return_20',
+            'sma_10', 'sma_20', 'sma_50', 'volatility_20', 'stoch_20', 'avg_ticks_10'
+        ]]
+
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+
+    return sum(times) / len(times), len(result)
+
+
+def main():
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║   DuckDB vs Parquet: Real Quantitative Trading Benchmarks    ║")
+    print("║              Apple-to-Apple Comparison                        ║")
+    print("╚═══════════════════════════════════════════════════════════════╝\n")
+
+    db_path = Path('/tmp/eurusd_1m_2024_08.duckdb')
+    pq_path = Path('/tmp/eurusd_1m_2024_08.parquet')
+
+    print("Dataset: August 2024, 31,218 bars\n")
+
+    # Test 1: Rolling Volatility
+    print("█ Test 1: Rolling 20-Period Volatility")
+    print("━" * 70)
+    duck_vol, duck_rows = benchmark_rolling_volatility_duckdb(db_path, runs=5)
+    pq_vol, pq_rows = benchmark_rolling_volatility_parquet(pq_path, runs=5)
+    print(f"DuckDB:  {duck_vol*1000:.1f} ms → {duck_rows:,} rows")
+    print(f"Parquet: {pq_vol*1000:.1f} ms → {pq_rows:,} rows")
+    print(f"Winner:  {'DuckDB' if duck_vol < pq_vol else 'Parquet'} "
+          f"({min(duck_vol, pq_vol)/max(duck_vol, pq_vol):.2f}x)\n")
+
+    # Test 2: Resample 1h
+    print("█ Test 2: Resample 1m → 1h OHLCV")
+    print("━" * 70)
+    duck_res, duck_rows = benchmark_resample_1h_duckdb(db_path, runs=5)
+    pq_res, pq_rows = benchmark_resample_1h_parquet(pq_path, runs=5)
+    print(f"DuckDB:  {duck_res*1000:.1f} ms → {duck_rows:,} rows")
+    print(f"Parquet: {pq_res*1000:.1f} ms → {pq_rows:,} rows")
+    print(f"Winner:  {'DuckDB' if duck_res < pq_res else 'Parquet'} "
+          f"({min(duck_res, pq_res)/max(duck_res, pq_res):.2f}x)\n")
+
+    # Test 3: RSI Calculation
+    print("█ Test 3: Calculate 14-Period RSI")
+    print("━" * 70)
+    duck_rsi, duck_rows = benchmark_rsi_duckdb(db_path, runs=5)
+    pq_rsi, pq_rows = benchmark_rsi_parquet(pq_path, runs=5)
+    print(f"DuckDB:  {duck_rsi*1000:.1f} ms → {duck_rows:,} rows")
+    print(f"Parquet: {pq_rsi*1000:.1f} ms → {pq_rows:,} rows")
+    print(f"Winner:  {'DuckDB' if duck_rsi < pq_rsi else 'Parquet'} "
+          f"({min(duck_rsi, pq_rsi)/max(duck_rsi, pq_rsi):.2f}x)\n")
+
+    # Test 4: Multi-condition filter
+    print("█ Test 4: Multi-Condition Signal Generation")
+    print("━" * 70)
+    duck_sig, duck_rows = benchmark_multi_condition_filter_duckdb(db_path, runs=5)
+    pq_sig, pq_rows = benchmark_multi_condition_filter_parquet(pq_path, runs=5)
+    print(f"DuckDB:  {duck_sig*1000:.1f} ms → {duck_rows:,} signals")
+    print(f"Parquet: {pq_sig*1000:.1f} ms → {pq_rows:,} signals")
+    print(f"Winner:  {'DuckDB' if duck_sig < pq_sig else 'Parquet'} "
+          f"({min(duck_sig, pq_sig)/max(duck_sig, pq_sig):.2f}x)\n")
+
+    # Test 5: Feature engineering
+    print("█ Test 5: Full Feature Engineering Pipeline")
+    print("━" * 70)
+    duck_feat, duck_rows = benchmark_feature_engineering_duckdb(db_path, runs=5)
+    pq_feat, pq_rows = benchmark_feature_engineering_parquet(pq_path, runs=5)
+    print(f"DuckDB:  {duck_feat*1000:.1f} ms → {duck_rows:,} rows × 11 features")
+    print(f"Parquet: {pq_feat*1000:.1f} ms → {pq_rows:,} rows × 11 features")
+    print(f"Winner:  {'DuckDB' if duck_feat < pq_feat else 'Parquet'} "
+          f"({min(duck_feat, pq_feat)/max(duck_feat, pq_feat):.2f}x)\n")
+
+    # Summary
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║                         SUMMARY                                ║")
+    print("╚═══════════════════════════════════════════════════════════════╝\n")
+
+    print("Quantitative Operation        DuckDB    Parquet    Winner")
+    print("─" * 70)
+    print(f"Rolling Volatility            {duck_vol*1000:6.1f} ms  {pq_vol*1000:6.1f} ms   "
+          f"{'DuckDB' if duck_vol < pq_vol else 'Parquet':>10}")
+    print(f"Resample 1m→1h                {duck_res*1000:6.1f} ms  {pq_res*1000:6.1f} ms   "
+          f"{'DuckDB' if duck_res < pq_res else 'Parquet':>10}")
+    print(f"RSI Calculation               {duck_rsi*1000:6.1f} ms  {pq_rsi*1000:6.1f} ms   "
+          f"{'DuckDB' if duck_rsi < pq_rsi else 'Parquet':>10}")
+    print(f"Signal Generation             {duck_sig*1000:6.1f} ms  {pq_sig*1000:6.1f} ms   "
+          f"{'DuckDB' if duck_sig < pq_sig else 'Parquet':>10}")
+    print(f"Feature Engineering           {duck_feat*1000:6.1f} ms  {pq_feat*1000:6.1f} ms   "
+          f"{'DuckDB' if duck_feat < pq_feat else 'Parquet':>10}")
+
+
+if __name__ == '__main__':
+    main()

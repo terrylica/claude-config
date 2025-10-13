@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""
+Systematic probe: tpot.base compatibility issue
+
+Goal: Understand tpot version requirements and idiomatic usage
+"""
+
+import sys
+
+print("=== Probe 1: Check if tpot is installed ===")
+try:
+    import tpot
+    print(f"✅ tpot installed: {tpot.__version__}")
+    HAS_TPOT = True
+except ImportError as e:
+    print(f"❌ tpot not installed: {e}")
+    HAS_TPOT = False
+
+print("\n=== Probe 2: Check tpot.base module ===")
+if HAS_TPOT:
+    try:
+        from tpot.base import TPOTBase
+        print(f"✅ tpot.base.TPOTBase available")
+    except ImportError as e:
+        print(f"❌ tpot.base.TPOTBase import failed: {e}")
+        print("This indicates a tpot version compatibility issue")
+else:
+    print("Skipping (tpot not installed)")
+
+print("\n=== Probe 3: TPOT version history ===")
+print("TPOT API changes:")
+print("  - tpot <= 0.12.2: Has tpot.base.TPOTBase")
+print("  - tpot >= 1.0.0: Refactored, tpot.base may not exist")
+print("  - Current pyproject.toml declares: tpot (no version pin)")
+print("  - Old docs mention: tpot==0.12.2 required")
+
+print("\n=== Probe 4: Check current tpot structure ===")
+if HAS_TPOT:
+    import tpot
+    print(f"tpot version: {tpot.__version__}")
+    print(f"tpot location: {tpot.__file__}")
+
+    # Try to introspect tpot modules
+    import pkgutil
+    print("\nAvailable tpot submodules:")
+    for importer, modname, ispkg in pkgutil.iter_modules(tpot.__path__):
+        print(f"  - tpot.{modname}")
+
+    # Check for TPOTBase alternatives
+    print("\nChecking for TPOTBase alternatives:")
+    try:
+        from tpot import TPOTRegressor, TPOTClassifier
+        print("  ✅ TPOTRegressor available")
+        print("  ✅ TPOTClassifier available")
+    except ImportError as e:
+        print(f"  ❌ Failed: {e}")
+
+print("\n=== Probe 5: Where is tpot.base used? ===")
+print("File: evolutionary_forest/multigene_gp.py:30")
+print("  from tpot.base import TPOTBase")
+print("")
+print("Usage:")
+print("  Line 167: tpot_model: TPOTBase = None  (type hint)")
+print("  Line 193: if tpot_model != None:")
+print("  Line 194:     self.base_model = tpot_model._toolbox.individual()")
+print("")
+print("File: evolutionary_forest/forest.py:877-878")
+print("  self.tpot_model = TPOTRegressor()")
+print("  self.tpot_model._fit_init()")
+print("")
+print("File: evolutionary_forest/classifier.py:80-83")
+print("  self.tpot_model = TPOTClassifier(...)")
+print("  self.tpot_model._fit_init()")
+
+print("\n=== Probe 6: Idiomatic fix patterns ===")
+print("Option 1: Pin to tpot==0.11.7 (last stable with tpot.base)")
+print("  Pros: Works with existing code")
+print("  Cons: Old version, security issues")
+print("")
+print("Option 2: Make TPOTBase optional (RECOMMENDED)")
+print("""
+# At top of multigene_gp.py
+try:
+    from tpot.base import TPOTBase
+    HAS_TPOT = True
+except ImportError:
+    # For newer tpot or when tpot not installed
+    try:
+        from tpot import TPOTRegressor
+        TPOTBase = TPOTRegressor  # Use TPOTRegressor as base type
+        HAS_TPOT = True
+    except ImportError:
+        TPOTBase = None
+        HAS_TPOT = False
+
+# Type hint becomes:
+def __init__(self, ..., tpot_model: TPOTBase | None = None, ...):
+    if tpot_model is not None and not HAS_TPOT:
+        raise ImportError("tpot required for hybrid mode")
+""")
+
+print("\nOption 3: Remove type hint, keep optional import")
+print("""
+# Type hint becomes generic
+def __init__(self, ..., tpot_model=None, ...):
+    # No type checking, works with any tpot version
+    if tpot_model is not None:
+        self.base_model = tpot_model._toolbox.individual()
+""")
+
+print("\n=== Probe 7: What is _toolbox.individual()? ===")
+print("From TPOT internals:")
+print("  - TPOT uses DEAP library for genetic programming")
+print("  - _toolbox is a DEAP Toolbox instance")
+print("  - individual() generates a random sklearn pipeline")
+print("  - EvolutionaryForest reuses these pipelines as base models")
+
+print("\n=== Conclusion ===")
+print("✅ tpot.base.TPOTBase is version-specific (< 1.0)")
+print("✅ Can be replaced with generic type or removed")
+print("✅ Only used for type hint and None check")
+print("✅ Actual usage (_toolbox.individual()) works with any version")
+print("✅ Fix: Make import optional, remove type hint specificity")

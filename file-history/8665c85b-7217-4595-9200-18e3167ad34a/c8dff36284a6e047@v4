@@ -1,0 +1,214 @@
+# Helix + Kitty + Prettier Configuration
+
+**Auto-formatting markdown files in Kitty terminal with Helix**
+
+---
+
+## Problem Solved
+
+Helix couldn't find prettier when launched from Kitty because prettier (installed via NVM) wasn't in Kitty's PATH.
+
+## Solution Applied
+
+### 1. Fixed Kitty PATH Configuration
+
+**File**: `~/.config/kitty/kitty.conf:1659`
+
+```bash
+# Include NVM node binaries for prettier formatter in Helix
+env PATH=/Users/terryli/.nvm/versions/node/v22.17.0/bin:/Users/terryli/.local/bin:/usr/local/bin:/opt/homebrew/bin:${PATH}
+```
+
+This ensures Helix can find prettier when launched from Kitty.
+
+### 2. Helix Language Configuration
+
+**File**: `~/.config/helix/languages.toml`
+
+```toml
+[[language]]
+name = "markdown"
+formatter = { command = 'prettier', args = ["--parser", "markdown"] }
+auto-format = true
+```
+
+**Behavior**: Auto-formats markdown files **on save** (when you press `:w`)
+
+---
+
+## Usage Options
+
+### Option 1: Auto-Format on Save (Current Setup)
+
+1. Open markdown file: `hx file.md`
+2. Make edits
+3. Save file: `:w` ← **Automatically formats with prettier**
+
+### Option 2: Format on Open (Helper Script)
+
+**Script**: `~/.local/bin/hxf` (Helix Format)
+
+```bash
+# Usage
+hxf file.md    # Opens file and immediately formats it
+```
+
+**What it does**:
+- Formats file with prettier first (in-place with `--write`)
+- Then opens the formatted file in Helix
+- File is already formatted when you see it
+
+### Option 3: Manual Format
+
+Press `:fmt` anytime to manually trigger prettier formatting.
+
+---
+
+## Verification Steps
+
+### Test 1: Verify PATH
+
+```bash
+# From within Kitty terminal
+echo $PATH | grep -o "/Users/terryli/.nvm/versions/node/v22.17.0/bin"
+```
+
+Should output the NVM path.
+
+### Test 2: Verify Prettier
+
+```bash
+# From within Kitty terminal
+which prettier
+prettier --version
+```
+
+Should show prettier 3.6.2 or later.
+
+### Test 3: Test Auto-Format
+
+```bash
+# Create test file
+cat > /tmp/test_table.md << 'EOF'
+| Column 1 | Column 2 | Column 3 |
+|---|---|---|
+| A | B | C |
+| Very Long Text | Short | Medium Length |
+EOF
+
+# Open in Helix
+hx /tmp/test_table.md
+
+# Type :w to save (should auto-format)
+# Table should align with proper spacing
+```
+
+---
+
+## Troubleshooting
+
+### "Reader source not set" panic
+
+**Cause**: `hxf` script run from non-interactive context (e.g., Claude Code bash execution)
+
+**Error**:
+```
+thread 'main' panicked at crossterm-0.28.1/src/event/read.rs:39:30:
+reader source not set
+```
+
+**Fix**: Run `hxf` directly from your terminal (Kitty), not from Claude Code's bash execution
+```bash
+# Must run from actual terminal prompt
+hxf file.md
+
+# NOT from Claude Code bash tool
+```
+
+**Technical Reason**: Helix requires a proper TTY with stdin/stdout/stderr connected. The script now:
+1. Checks for interactive terminal with `[ -t 0 ]`
+2. Uses `exec hx` to replace shell process for proper TTY inheritance
+
+---
+
+### "Prettier not found" error
+
+**Cause**: Kitty PATH doesn't include NVM binaries
+
+**Fix**: Restart Kitty after PATH configuration update
+```bash
+# Kill all Kitty instances
+killall kitty
+
+# Reopen Kitty
+open -a Kitty
+```
+
+### Auto-format not working
+
+**Check Helix config**:
+```bash
+cat ~/.config/helix/languages.toml | grep -A 2 "name = \"markdown\""
+```
+
+Should show `auto-format = true`.
+
+### Prettier version conflicts
+
+**Check prettier path**:
+```bash
+# Should use NVM version
+which prettier
+# /Users/terryli/.nvm/versions/node/v22.17.0/bin/prettier
+
+# Verify it works
+prettier --version
+```
+
+---
+
+## Related Configuration
+
+**Helix Config**: `~/.config/helix/config.toml`
+- Custom keybinding: `Space + t` for manual table formatting
+
+**Kitty Config**: `~/.config/kitty/kitty.conf`
+- Line 1659: PATH configuration for prettier
+
+**Helper Scripts**:
+- `~/.local/bin/hxf` - Open and format markdown files
+
+---
+
+## Migration Notes
+
+**Updated**: 2025-10-11
+
+**Changes**:
+1. Added NVM path to Kitty environment (line 1659)
+2. Created `hxf` helper script for format-on-open workflow
+3. Verified prettier 3.6.2 is accessible
+4. Fixed `hxf` script: Changed from `helix` to `hx` command
+5. Fixed `hxf` script: Changed from `-c ':fmt'` (caused panic) to `prettier --write` before opening
+6. Fixed `hxf` script: Added TTY check (`[ -t 0 ]`) and `exec` for proper terminal inheritance
+
+**Previous Issues**:
+- Manual `:fmt` required because prettier not in PATH
+- Helix `-c` flag caused "reader source not set" panic
+- Running from non-interactive context (Claude Code) caused crossterm panic
+
+**Current Behavior**:
+- Auto-format on save works (`:w` in Helix)
+- `hxf` formats file then opens it (must run from actual terminal like Kitty, not from Claude Code)
+
+---
+
+## Quick Reference
+
+| Command | Action |
+|---------|--------|
+| `hx file.md` | Open file (auto-format on `:w`) |
+| `hxf file.md` | Open file and format immediately |
+| `:w` | Save (triggers auto-format) |
+| `:fmt` | Manual format |
+| `Space + t` | Custom table formatting |

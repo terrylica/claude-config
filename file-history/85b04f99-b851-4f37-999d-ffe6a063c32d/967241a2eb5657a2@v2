@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""
+Test even larger lookback values to find if we can get 100% validation pass rate.
+"""
+
+import sys
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Load validation data
+sample_data_dir = "/Users/terryli/eon/ml-feature-set/ml_feature_set/sample_data"
+df_full = pd.read_csv(f"{sample_data_dir}/resampled_binance_BTC-2h.csv")
+
+# Add required columns
+df_full['date'] = pd.to_datetime(df_full['date'])
+df_full['actual_ready_time'] = df_full['date'] + timedelta(hours=2)
+
+# Configure package
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    availability_column='actual_ready_time',
+    filter_redundancy=True
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"Testing larger lookback values...")
+print(f"Full dataset: {len(df_full)} rows")
+print()
+
+# Test multiple timestamps (like validation does)
+test_times = [
+    "2025-03-17 02:00:00",  # Step 1
+    "2025-03-17 14:00:00",  # Step 7 (regime change)
+    "2025-03-19 06:00:00",  # Step 27
+]
+
+# Get reference features from full data
+print("Computing reference features from full data...")
+features_full = indicator.fit_transform_features(df_full)
+all_cols = features_full.columns.tolist()
+
+print(f"Reference values computed from full data ({len(df_full)} rows)")
+print()
+
+# Test different lookbacks
+test_lookbacks = [1000, 1500, 2000, 3000, 5000, 8000]
+
+for lookback in test_lookbacks:
+    print(f"\n{'=' * 80}")
+    print(f"Testing lookback: {lookback} rows")
+    print(f"{'=' * 80}")
+
+    total_mismatches = 0
+    total_comparisons = 0
+
+    for test_time_str in test_times:
+        test_time = pd.to_datetime(test_time_str)
+        test_idx = df_full[df_full['actual_ready_time'] == test_time].index[0]
+
+        # Slice data
+        start_idx = test_idx - lookback + 1
+        if start_idx < 0:
+            print(f"\n{test_time_str}: Skipping (not enough data)")
+            continue
+
+        df_sliced = df_full.iloc[start_idx:test_idx + 1].reset_index(drop=True)
+
+        # Compute features
+        features_sliced = indicator.fit_transform_features(df_sliced)
+
+        # Compare all features at last row
+        mismatches = 0
+        for col in all_cols:
+            ref_val = features_full.iloc[test_idx][col]
+            sliced_val = features_sliced.iloc[-1][col]
+            diff = abs(ref_val - sliced_val)
+
+            if diff >= 1e-4:
+                mismatches += 1
+
+        total_mismatches += mismatches
+        total_comparisons += len(all_cols)
+
+        match_pct = 100.0 * (len(all_cols) - mismatches) / len(all_cols)
+        status = "✓" if mismatches == 0 else "✗"
+        print(f"{test_time_str}: {status} {mismatches}/{len(all_cols)} errors ({match_pct:.1f}% match)")
+
+    overall_pct = 100.0 * (total_comparisons - total_mismatches) / total_comparisons if total_comparisons > 0 else 0
+    print(f"\nOverall: {total_mismatches}/{total_comparisons} errors ({overall_pct:.1f}% match)")
+
+    if total_mismatches == 0:
+        print(f"✓ PERFECT! Lookback {lookback} produces 100% accurate features")
+        break
+
+print("\n" + "=" * 80)
+print("RECOMMENDATION")
+print("=" * 80)
+
+print(f"\nPackage reports min_lookback: {indicator.min_lookback}")
+print(f"Tested lookback values: {test_lookbacks}")
+print("\nFor production use, recommend using the smallest lookback that achieves 100% accuracy")
+print("or a conservative value that balances accuracy vs training data loss.")

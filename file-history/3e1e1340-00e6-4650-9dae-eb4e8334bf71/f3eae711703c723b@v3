@@ -1,0 +1,59 @@
+#!/bin/bash
+# Phase 1: Download SWAP data for 21 months (2023-01 to 2024-12)
+# Per V2_PRODUCTION_DEPLOYMENT.md
+# Estimated time: 2-3 hours
+# Storage: ~32 GB raw ticks
+
+set -e  # Exit on error (fail-fast)
+
+echo "=================================="
+echo "Phase 1: SWAP Data Download"
+echo "=================================="
+echo "Period: 2023-01 to 2024-12 (21 months)"
+echo "Estimated time: 2-3 hours"
+echo "Storage: ~32 GB raw ticks"
+echo ""
+
+START_TIME=$(date +%s)
+
+# Download 2023 (12 months)
+for month in {1..12}; do
+    echo ""
+    echo "=== Downloading 2023-$(printf "%02d" $month) SWAP data ==="
+    uv run --active python scripts/download_month.py 2023 $month \
+        --ticks --market-type swap --data-dir data/
+
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to download 2023-$(printf "%02d" $month)"
+        exit 1
+    fi
+done
+
+# Download 2024 (12 months)
+for month in {1..12}; do
+    echo ""
+    echo "=== Downloading 2024-$(printf "%02d" $month) SWAP data ==="
+    uv run --active python scripts/download_month.py 2024 $month \
+        --ticks --market-type swap --data-dir data/
+
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to download 2024-$(printf "%02d" $month)"
+        exit 1
+    fi
+done
+
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+ELAPSED_MIN=$((ELAPSED / 60))
+
+echo ""
+echo "=================================="
+echo "Phase 1 Complete: SWAP Download"
+echo "=================================="
+echo "Elapsed time: ${ELAPSED_MIN} minutes"
+echo ""
+echo "Verifying downloads..."
+ls -lh data/raw_ticks_swap/2023/ data/raw_ticks_swap/2024/
+echo ""
+echo "Total size:"
+du -sh data/raw_ticks_swap/

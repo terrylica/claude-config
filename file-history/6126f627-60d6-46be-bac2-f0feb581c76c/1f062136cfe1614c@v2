@@ -1,0 +1,111 @@
+"""
+Test to reproduce the boundary condition bug from user report.
+
+The bug occurs when:
+1. A mult1 resampled bar's availability time aligns with a validation timestamp
+2. The vectorized code incorrectly includes a bar that shouldn't be available yet
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+print("=" * 80)
+print("BOUNDARY CONDITION BUG TEST")
+print("=" * 80)
+
+# Create test data that will trigger the boundary condition
+# Base interval: 2h, Mult1: 4x = 8h
+start_time = datetime(2025, 3, 16, 0, 0, tzinfo=timezone.utc)
+n_bars = 400  # Need at least 360 for multi-interval mode
+
+dates = [start_time + timedelta(hours=2*i) for i in range(n_bars)]
+ready_times = [d + timedelta(hours=2) for d in dates]  # Data ready 2h after bar close
+
+data = pd.DataFrame({
+    'date': dates,
+    'actual_ready_time': ready_times,
+    'open': [100 + 5*np.sin(i/10) for i in range(n_bars)],
+    'high': [105 + 5*np.sin(i/10) for i in range(n_bars)],
+    'low': [95 + 5*np.sin(i/10) for i in range(n_bars)],
+    'close': [100 + 5*np.sin(i/10) for i in range(n_bars)],
+    'volume': [1000000] * n_bars
+})
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False,
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Full dataset features
+print(f"\nComputing features on full dataset ({len(data)} bars)...")
+features_full = indicator.fit_transform_features(data)
+
+# Test at multiple validation points that could trigger the boundary bug
+validation_times = [
+    datetime(2025, 3, 17, 2, 0, tzinfo=timezone.utc),   # Might align with mult1
+    datetime(2025, 3, 17, 4, 0, tzinfo=timezone.utc),   # User's failing case
+    datetime(2025, 3, 17, 6, 0, tzinfo=timezone.utc),
+    datetime(2025, 3, 18, 0, 0, tzinfo=timezone.utc),
+]
+
+print(f"\nTesting at {len(validation_times)} validation points...")
+print()
+
+failures = []
+
+for val_time in validation_times:
+    # Filter data by availability
+    pred_data = data[data['actual_ready_time'] <= val_time].copy()
+
+    if len(pred_data) < 50:  # Need enough data
+        continue
+
+    features_pred = indicator.fit_transform_features(pred_data)
+
+    # Find matching row in full dataset
+    matching_rows = data[data['actual_ready_time'] == val_time]
+    if len(matching_rows) == 0:
+        continue
+
+    match_idx = matching_rows.index[0]
+
+    # Compare features
+    mult1_full = features_full.iloc[match_idx]['rsi_mult1']
+    mult1_pred = features_pred.iloc[-1]['rsi_mult1']
+    mult2_full = features_full.iloc[match_idx]['rsi_mult2']
+    mult2_pred = features_pred.iloc[-1]['rsi_mult2']
+
+    diff_mult1 = abs(mult1_full - mult1_pred)
+    diff_mult2 = abs(mult2_full - mult2_pred)
+
+    status_mult1 = "PASS" if diff_mult1 < 1e-5 else "FAIL"
+    status_mult2 = "PASS" if diff_mult2 < 1e-5 else "FAIL"
+
+    print(f"Validation: {val_time}")
+    print(f"  Mult1: {mult1_full:.6f} vs {mult1_pred:.6f} (diff: {diff_mult1:.10f}) [{status_mult1}]")
+    print(f"  Mult2: {mult2_full:.6f} vs {mult2_pred:.6f} (diff: {diff_mult2:.10f}) [{status_mult2}]")
+
+    if diff_mult1 >= 1e-5 or diff_mult2 >= 1e-5:
+        failures.append((val_time, diff_mult1, diff_mult2))
+
+print()
+print("=" * 80)
+print("RESULTS")
+print("=" * 80)
+
+if len(failures) == 0:
+    print("\n✅ ALL TESTS PASSED - No data leakage detected!")
+    print("The boundary condition bug is FIXED.")
+else:
+    print(f"\n❌ {len(failures)} TEST(S) FAILED - Data leakage detected!")
+    print("\nFailing validation points:")
+    for val_time, diff1, diff2 in failures:
+        print(f"  {val_time}: mult1 diff={diff1:.6f}, mult2 diff={diff2:.6f}")
+    print("\n⚠️  The boundary condition bug is NOT fixed.")
+
+print()

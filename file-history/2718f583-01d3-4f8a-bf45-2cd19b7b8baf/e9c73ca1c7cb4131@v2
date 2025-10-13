@@ -1,0 +1,517 @@
+# 🚨 CRITICAL BUG REPORT: atr-adaptive-laguerre v1.0.6
+
+**Date:** 2025-10-07
+**Reporter:** Eon Labs ML Feature Engineering Team
+**Package Version:** v1.0.6 (reports as 0.2.1 internally)
+**Severity:** CRITICAL - Package unsuitable for production use in rolling window contexts
+
+---
+
+## Executive Summary
+
+**⚠️ UPDATE (2025-10-07):** Further testing reveals the issue is MUCH WORSE than initially reported.
+
+**Initial Bug:** `min_lookback` returns 360, but needs 366 to avoid crashes
+**Actual Bug:** `min_lookback` returns 360, but needs **1000 rows** for correct mult2 features, and **EVEN 20000 ROWS** doesn't fix mult1/regime features!
+
+**Impact:**
+- **366 rows:** No crash, but mult2 features 47% wrong
+- **1000 rows:** mult2 features correct, but mult1/regime features still wrong
+- **20000 rows:** Same 10 features still wrong (off-by-one and regime misclassifications)
+
+**Conclusion:** Package has fundamental bugs in how it calculates mult1 and mult2 features with sliced data. **UNSUITABLE FOR PRODUCTION USE** in rolling window validation or inference contexts.
+
+---
+
+## Root Cause Analysis
+
+### The Bug
+
+```python
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    availability_column='actual_ready_time',
+    filter_redundancy=True
+)
+
+indicator = ATRAdaptiveLaguerreRSI(config)
+print(indicator.min_lookback)  # Returns: 360
+
+# But providing exactly 360 rows FAILS!
+df_360_rows = df.iloc[-360:].reset_index(drop=True)
+features = indicator.fit_transform_features(df_360_rows)
+# KeyError: 'regime'
+
+# Providing 366 rows WORKS!
+df_366_rows = df.iloc[-366:].reset_index(drop=True)
+features = indicator.fit_transform_features(df_366_rows)
+# Success!
+```
+
+### Discovery Process
+
+1. **Observation:** Validation framework fails 0/30 tests for mult2 (12x interval) features
+2. **Hypothesis 1:** DataFrame index issue → REJECTED (reset_index doesn't fix it)
+3. **Hypothesis 2:** filter_redundancy issue → REJECTED (fails with both True and False)
+4. **Hypothesis 3:** Data length issue → ✅ **CONFIRMED**
+
+### Systematic Testing
+
+| Data Length | Result | Note |
+|-------------|--------|------|
+| Full data (32736 rows) | ✅ Works | Much more than min_lookback |
+| 1000 rows | ✅ Works | Sufficient buffer |
+| 500 rows | ✅ Works | Sufficient buffer |
+| 400 rows | ✅ Works | Small buffer |
+| 370 rows | ✅ Works | Minimal buffer |
+| **366 rows** | ✅ **Works** | **ACTUAL MINIMUM** |
+| 365 rows | ❌ **Fails** | Below actual minimum |
+| 360 rows | ❌ **Fails** | Reported min_lookback (WRONG!) |
+
+**Conclusion:** Package requires 366 rows minimum but reports `min_lookback = 360`
+
+---
+
+## Error Details
+
+### Error When Using min_lookback Value
+
+```
+KeyError: 'regime'
+
+Traceback:
+  File "atr_adaptive_laguerre/features/atr_adaptive_rsi.py", line 774, in fit_transform_features
+  File "atr_adaptive_laguerre/features/atr_adaptive_rsi.py", line 953, in _fit_transform_features_with_availability
+  File "atr_adaptive_laguerre/features/cross_interval.py", line 66, in extract_interactions
+  File "atr_adaptive_laguerre/features/cross_interval.py", line 109, in _regime_alignment
+    regime_mult2 = mult2["regime"]
+KeyError: 'regime'
+```
+
+### Why This Happens
+
+The cross-interval feature calculation (`cross_interval.py`) expects a `'regime'` column in the `mult2` features DataFrame, but with exactly 360 rows, this column is missing or inaccessible.
+
+**Likely cause:** Internal buffer calculation for mult2 (12x interval) requires 6 additional rows beyond the base min_lookback.
+
+---
+
+## Impact on ML Frameworks
+
+### Our Use Case
+
+We have a validation framework that:
+1. Queries `indicator.min_lookback` → Gets 360
+2. Provides exactly 360 rows of historical data
+3. Package crashes with `KeyError: 'regime'`
+4. Validation fails 0/30 tests
+
+### Expected Behavior
+
+```python
+# Framework should work like this:
+lookback = indicator.min_lookback  # Should return ACTUAL minimum
+df_pred = df.iloc[-lookback:].reset_index(drop=True)
+features = indicator.fit_transform_features(df_pred)  # Should work!
+```
+
+### Actual Behavior
+
+```python
+# What actually happens:
+lookback = indicator.min_lookback  # Returns 360 (WRONG!)
+df_pred = df.iloc[-lookback:].reset_index(drop=True)  # 360 rows
+features = indicator.fit_transform_features(df_pred)  # CRASHES!
+# KeyError: 'regime'
+```
+
+---
+
+## Configuration Details
+
+**Config that triggers the bug:**
+
+```python
+ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    smoothing_period=5,
+    smoothing_method='ema',
+    level_up=0.85,
+    level_down=0.15,
+    adaptive_offset=0.75,
+    filter_redundancy=True,  # Fails with both True and False
+    availability_column='actual_ready_time'
+)
+```
+
+**Key parameters:**
+- `multiplier_1=4`
+- `multiplier_2=12`
+- `atr_period=14`
+
+**Formula:** Package reports `min_lookback = multiplier_2 × max(30, atr_period + 10) = 12 × 30 = 360`
+
+**Actual minimum:** 366 rows (6-row discrepancy!)
+
+---
+
+## Minimal Reproduction
+
+```python
+import pandas as pd
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Create test data (370 rows to have buffer)
+df = pd.DataFrame({
+    'date': pd.date_range('2024-01-01', periods=370, freq='1h'),
+    'actual_ready_time': pd.date_range('2024-01-01', periods=370, freq='1h'),
+    'open': 100 + pd.Series(range(370)) * 0.1,
+    'high': 101 + pd.Series(range(370)) * 0.1,
+    'low': 99 + pd.Series(range(370)) * 0.1,
+    'close': 100 + pd.Series(range(370)) * 0.1,
+    'volume': 1000.0
+})
+
+# Configure package
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"Package reports min_lookback: {indicator.min_lookback}")  # 360
+
+# Test with reported min_lookback (FAILS)
+df_360 = df.iloc[-360:].reset_index(drop=True)
+try:
+    features = indicator.fit_transform_features(df_360)
+    print("360 rows: SUCCESS")
+except KeyError as e:
+    print(f"360 rows: FAILED - KeyError: {e}")
+
+# Test with actual minimum (WORKS)
+df_366 = df.iloc[-366:].reset_index(drop=True)
+try:
+    features = indicator.fit_transform_features(df_366)
+    print(f"366 rows: SUCCESS - {features.shape}")
+except KeyError as e:
+    print(f"366 rows: FAILED - KeyError: {e}")
+```
+
+**Expected output:**
+```
+Package reports min_lookback: 360
+360 rows: FAILED - KeyError: 'regime'
+366 rows: SUCCESS - (366, 79)
+```
+
+---
+
+## Proposed Fixes
+
+### Option 1: Fix min_lookback Calculation ✅ RECOMMENDED
+
+Update the `min_lookback` property to return the correct value:
+
+```python
+@property
+def min_lookback(self) -> int:
+    base_lookback = max(30, self.config.atr_period + 10)
+
+    if self.config.multiplier_2 is not None:
+        # Cross-interval features need additional buffer
+        return self.config.multiplier_2 * base_lookback + 6  # ← Add 6-row buffer
+
+    return base_lookback
+```
+
+### Option 2: Fix Cross-Interval Feature Calculation
+
+Investigate `cross_interval.py` to understand why 366 rows are needed and fix the underlying calculation to work with 360 rows.
+
+### Option 3: Add Explicit Documentation
+
+If the 6-row buffer is intentional, document it clearly:
+
+```python
+@property
+def min_lookback(self) -> int:
+    """
+    Minimum number of rows required for feature calculation.
+
+    Note: For multi-interval mode, an additional 6-row buffer
+    is required beyond the base calculation for cross-interval features.
+    """
+    base_lookback = max(30, self.config.atr_period + 10)
+
+    if self.config.multiplier_2 is not None:
+        return self.config.multiplier_2 * base_lookback + 6
+
+    return base_lookback
+```
+
+---
+
+## Workaround for Users
+
+Until the package is fixed, use this workaround:
+
+```python
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# DON'T use min_lookback directly!
+# lookback = indicator.min_lookback  # This is wrong!
+
+# Use min_lookback + 6 instead:
+lookback = indicator.min_lookback + 6  # 360 + 6 = 366
+
+# Now it works:
+df_pred = df.iloc[-lookback:].reset_index(drop=True)
+features = indicator.fit_transform_features(df_pred)  # ✓ Success!
+```
+
+---
+
+## Impact Assessment
+
+### Severity: HIGH
+
+1. **Breaks ML validation frameworks:** Any framework using `min_lookback` will fail
+2. **Silent failure risk:** Users might not discover this until production
+3. **Inconsistent behavior:** Works with full data, fails with sliced data
+4. **Misleading API:** `min_lookback` property is incorrect
+
+### Affected Use Cases
+
+- ✅ **Full dataset training:** Works (data length >> min_lookback)
+- ❌ **Rolling window validation:** Fails (uses exact min_lookback)
+- ❌ **Production inference:** May fail (if providing minimal data)
+- ❌ **Backtesting frameworks:** Fails (optimizes lookback based on property)
+
+---
+
+## Testing Checklist for Package Maintainer
+
+- [ ] Update `min_lookback` calculation to return 366 for multi-interval mode
+- [ ] Add unit test: `test_min_lookback_sufficient()`
+- [ ] Add integration test: Validate with exactly `min_lookback` rows works
+- [ ] Update documentation if 6-row buffer is intentional
+- [ ] Consider adding validation in `fit_transform_features()`:
+  ```python
+  if len(df) < self._actual_min_lookback():
+      raise ValueError(f"Insufficient data: {len(df)} rows, need {self._actual_min_lookback()}")
+  ```
+
+---
+
+## Additional Observations
+
+### Version Display Issue
+
+Package also has a version reporting bug:
+
+```python
+import atr_adaptive_laguerre
+print(atr_adaptive_laguerre.__version__)  # Prints: 0.2.1
+# But PyPI shows: 1.0.6
+```
+
+Suggest fixing version consistency.
+
+---
+
+## Contact
+
+**Reporter:** Eon Labs ML Feature Engineering Team
+**Email:** [Your contact]
+**Integration:** Production ML pipeline for cryptocurrency prediction
+**Urgency:** HIGH - Blocks production deployment
+
+**Request:** Please prioritize this fix in v1.0.7 or hotfix v1.0.6.1
+
+---
+
+## Appendix: Full Test Results
+
+```
+Testing different data lengths:
+  360 rows: ✗ FAILS (KeyError: 'regime')
+  365 rows: ✗ FAILS (KeyError: 'regime')
+  366 rows: ✓ WORKS  ← ACTUAL MINIMUM
+  370 rows: ✓ WORKS
+  380 rows: ✓ WORKS
+  400 rows: ✓ WORKS
+  500 rows: ✓ WORKS
+  1000 rows: ✓ WORKS
+  32736 rows (full): ✓ WORKS
+
+Package reports: min_lookback = 360
+Actual minimum: 366 rows
+Discrepancy: 6 rows
+```
+
+---
+
+## ⚠️ CRITICAL UPDATE: Fundamental Sliced Data Bug (2025-10-07)
+
+### Discovery Process
+
+After implementing the +6 buffer workaround, validation still failed 0/30 steps. Further investigation revealed:
+
+1. **Systematic testing of lookback lengths:**
+
+```
+Testing data length accuracy:
+  366 rows: 47.4% correct (10/19 mult2 features wrong)
+  500 rows: 73.7% correct
+  800 rows: 94.7% correct (1 feature off)
+  1000 rows: 100% correct mult2 features! ✓
+```
+
+2. **But validation still fails with 1000-row lookback:**
+   - Result: 10/30 steps passing (improvement from 0/30)
+   - mult1 (4x) and regime features still showing errors
+
+3. **Extended testing with massive lookbacks:**
+
+```
+Testing with problematic timestamp (2025-03-17 14:00:00):
+  1000 rows: 10/22 regime features wrong
+  5000 rows: 10/22 regime features wrong (SAME ERRORS!)
+  10000 rows: 10/22 regime features wrong (IDENTICAL!)
+  20000 rows: 10/22 regime features wrong (NO IMPROVEMENT!)
+```
+
+### The Fundamental Bug
+
+**The package calculates features DIFFERENTLY for sliced data vs full data**, regardless of lookback length!
+
+#### Specific Errors (Consistent across all lookback lengths):
+
+| Feature | Full Data | Sliced Data (any lookback) | Issue |
+|---------|-----------|---------------------------|-------|
+| `bars_since_oversold_mult1` | 15.0 | 14.0 | Off by 1 |
+| `bars_since_extreme_mult1` | 4.0 | 3.0 | Off by 1 |
+| `regime_mult2` | 1.0 | 0.0 | **Wrong regime!** |
+| `regime_bearish_mult2` | 0.0 | 1.0 | **Wrong regime!** |
+| `regime_neutral_mult2` | 1.0 | 0.0 | **Wrong regime!** |
+| `bars_since_overbought_mult2` | 49.0 | 48.0 | Off by 1 |
+| `bars_since_extreme_mult2` | 1.0 | 0.0 | Off by 1 |
+| `regime_agreement_count` | 3.0 | 2.0 | Off by 1 |
+| `regime_stability_score` | 0.67 | 1.0 | Wrong calculation |
+| `bars_since_alignment` | 0.0 | 75.0 | **Completely wrong!** |
+
+### Root Cause Hypothesis
+
+The package likely:
+1. **Uses DataFrame index for bar counting** - When reset_index() is called, bar counts become wrong
+2. **Starts counting from slice beginning** - Doesn't properly handle that sliced data represents a window of a larger dataset
+3. **Regime detection uses global context** - Needs ALL historical data to correctly identify regime changes
+4. **availability_column not working correctly** - May not properly handle the column for mult1/mult2 intervals
+
+### Impact Assessment
+
+**Severity: CRITICAL** - Package is fundamentally broken for production use.
+
+#### Use Cases Affected:
+
+- ❌ **Rolling window validation** - FAILS (our use case)
+- ❌ **Production inference with windowed data** - Will produce WRONG features
+- ❌ **Backtesting with lookback constraints** - Will produce WRONG features
+- ✅ **Full dataset training** - Works (but can't validate!)
+- ✅ **Package's own validation** - Passes (doesn't test with sliced data!)
+
+#### Production Risk:
+
+If deployed without discovering this bug:
+1. **Silent failures:** Features appear to compute without errors
+2. **Wrong predictions:** mult1/mult2/regime features will be incorrect
+3. **Model degradation:** Model trained on full data, predicts with wrong features
+4. **Financial impact:** Trading decisions based on incorrect technical indicators
+
+### Workarounds Attempted
+
+| Workaround | Result | Notes |
+|------------|--------|-------|
+| `min_lookback + 6 (366 rows)` | ❌ Failed | Fixes crash, 47% wrong features |
+| `1000 rows` | ⚠️ Partial | mult2 correct, mult1/regime still wrong |
+| `20000 rows (60% of dataset!)` | ❌ Failed | Same errors persist |
+| `Full dataset` | ✅ Works | Not viable for production inference |
+
+### Recommendation to Package Maintainer
+
+**This is a BLOCKER bug that must be fixed before package is production-ready.**
+
+Suggested fixes:
+
+1. **Fix "bars_since" calculations** - Should count from the availability_column timestamp, not DataFrame index
+2. **Fix regime detection** - Should work correctly with sliced data
+3. **Add sliced data testing** - Package validation should test with various slice lengths, not just full data
+4. **Document limitations** - If unfixable, clearly document that package requires full historical dataset
+
+### Recommendation to Users
+
+**DO NOT USE** multi-interval mode (mult1/mult2) in production until this bug is fixed.
+
+Alternatives:
+1. **Use single-interval mode** - Only base features (27 features)
+2. **Wait for fix** - Report this bug and wait for maintainer to fix
+3. **Use alternative packages** - Consider other technical indicator packages
+4. **Implement manually** - Calculate mult1/mult2 features yourself with proper resampling
+
+---
+
+## Final Validation Results
+
+With `lookback = 1000` in production code:
+
+```
+Validation Results: 10/30 steps passing (33.3% success rate)
+
+Error categories:
+- mult2 regime features: Wrong in 20/30 steps
+- mult1 bar counting: Off by 1 in multiple steps
+- Cross-interval features: Wrong due to regime errors
+```
+
+**Conclusion:** Package is UNSUITABLE for production use in rolling window contexts.
+
+---
+
+## Files Updated
+
+1. `/Users/terryli/eon/ml-feature-set/ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size79_v4.py`
+   - Implemented `lookback = 1000` workaround
+   - Added comprehensive documentation of bugs
+   - **Status:** Fails validation (10/30 passing)
+
+2. Bug investigation scripts:
+   - `/tmp/find_actual_min_lookback.py` - Discovered 1000-row requirement
+   - `/tmp/test_larger_lookbacks.py` - Tested up to 8000 rows
+   - `/tmp/analyze_failing_timestamp.py` - Proved fundamental bug with 20000-row test
+
+---
+
+## Contact Package Maintainer
+
+**Package:** atr-adaptive-laguerre v1.0.6  
+**PyPI:** https://pypi.org/project/atr-adaptive-laguerre/  
+
+**Recommended actions:**
+1. Open GitHub issue with this bug report
+2. Request urgent fix for sliced data handling
+3. Request proper validation testing with windowed data
+4. Consider contributing a fix if source is available
+
+**Until fixed:** Package should be marked as **experimental / not production-ready**.
+

@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+Benchmark: Iterative Feature Development Workflow
+
+Real-world scenario:
+1. Start with base OHLC data
+2. Add indicator columns iteratively as strategy develops
+3. Need metadata/comments for each indicator
+4. Query final dataset with all indicators
+
+Tests DuckDB vs Parquet for this specific workflow.
+"""
+
+import time
+from pathlib import Path
+import pandas as pd
+import duckdb
+import numpy as np
+
+
+def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Calculate RSI indicator."""
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+
+def calculate_macd(close: pd.Series) -> tuple:
+    """Calculate MACD indicator (MACD line, Signal line, Histogram)."""
+    ema_12 = close.ewm(span=12, adjust=False).mean()
+    ema_26 = close.ewm(span=26, adjust=False).mean()
+    macd_line = ema_12 - ema_26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def calculate_bollinger_bands(close: pd.Series, period: int = 20, std_dev: float = 2.0) -> tuple:
+    """Calculate Bollinger Bands (Upper, Middle, Lower)."""
+    middle = close.rolling(window=period).mean()
+    std = close.rolling(window=period).std()
+    upper = middle + (std_dev * std)
+    lower = middle - (std_dev * std)
+    return upper, middle, lower
+
+
+def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Calculate Average True Range."""
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(window=period).mean()
+
+
+def benchmark_duckdb_workflow(base_df: pd.DataFrame, runs: int = 3):
+    """Benchmark DuckDB iterative workflow."""
+    print("█ DuckDB: Iterative Feature Development")
+    print("━" * 70)
+
+    times = []
+
+    for run in range(runs):
+        db_path = Path(f'/tmp/iterative_test_{run}.duckdb')
+        if db_path.exists():
+            db_path.unlink()
+
+        conn = duckdb.connect(str(db_path))
+
+        # Step 1: Create base table
+        start = time.perf_counter()
+        conn.execute("CREATE TABLE ohlc AS SELECT * FROM base_df")
+        step1_time = time.perf_counter() - start
+
+        # Step 2: Add RSI column
+        start = time.perf_counter()
+        conn.execute("ALTER TABLE ohlc ADD COLUMN rsi DOUBLE")
+        rsi = calculate_rsi(base_df['Close'])
+        conn.execute("UPDATE ohlc SET rsi = ? FROM (SELECT * FROM rsi) WHERE ohlc.rowid = rsi.rowid", [rsi])
+        conn.execute("COMMENT ON COLUMN ohlc.rsi IS '14-period Relative Strength Index (oversold <30, overbought >70)'")
+        step2_time = time.perf_counter() - start
+
+        # Step 3: Add MACD columns
+        start = time.perf_counter()
+        conn.execute("ALTER TABLE ohlc ADD COLUMN macd_line DOUBLE")
+        conn.execute("ALTER TABLE ohlc ADD COLUMN macd_signal DOUBLE")
+        conn.execute("ALTER TABLE ohlc ADD COLUMN macd_histogram DOUBLE")
+        macd_line, signal_line, histogram = calculate_macd(base_df['Close'])
+        # Create temp dataframe for update
+        macd_df = pd.DataFrame({
+            'macd_line': macd_line,
+            'macd_signal': signal_line,
+            'macd_histogram': histogram
+        })
+        conn.execute("""
+            UPDATE ohlc
+            SET macd_line = macd_df.macd_line,
+                macd_signal = macd_df.macd_signal,
+                macd_histogram = macd_df.macd_histogram
+            FROM (SELECT * FROM macd_df) macd_df
+            WHERE ohlc.rowid = macd_df.rowid
+        """)
+        conn.execute("COMMENT ON COLUMN ohlc.macd_line IS 'MACD Line (12-EMA minus 26-EMA)'")
+        step3_time = time.perf_counter() - start
+
+        # Step 4: Add Bollinger Bands
+        start = time.perf_counter()
+        conn.execute("ALTER TABLE ohlc ADD COLUMN bb_upper DOUBLE")
+        conn.execute("ALTER TABLE ohlc ADD COLUMN bb_middle DOUBLE")
+        conn.execute("ALTER TABLE ohlc ADD COLUMN bb_lower DOUBLE")
+        upper, middle, lower = calculate_bollinger_bands(base_df['Close'])
+        bb_df = pd.DataFrame({'bb_upper': upper, 'bb_middle': middle, 'bb_lower': lower})
+        conn.execute("""
+            UPDATE ohlc
+            SET bb_upper = bb_df.bb_upper,
+                bb_middle = bb_df.bb_middle,
+                bb_lower = bb_df.bb_lower
+            FROM (SELECT * FROM bb_df) bb_df
+            WHERE ohlc.rowid = bb_df.rowid
+        """)
+        conn.execute("COMMENT ON COLUMN ohlc.bb_upper IS '20-period Bollinger Band Upper (2 std dev)'")
+        step4_time = time.perf_counter() - start
+
+        # Step 5: Add ATR column
+        start = time.perf_counter()
+        conn.execute("ALTER TABLE ohlc ADD COLUMN atr DOUBLE")
+        atr = calculate_atr(base_df['High'], base_df['Low'], base_df['Close'])
+        conn.execute("UPDATE ohlc SET atr = ? FROM (SELECT * FROM atr) WHERE ohlc.rowid = atr.rowid", [atr])
+        conn.execute("COMMENT ON COLUMN ohlc.atr IS '14-period Average True Range (volatility measure)'")
+        step5_time = time.perf_counter() - start
+
+        # Step 6: Query final dataset with all indicators
+        start = time.perf_counter()
+        result = conn.execute("SELECT * FROM ohlc").df()
+        step6_time = time.perf_counter() - start
+
+        total_time = step1_time + step2_time + step3_time + step4_time + step5_time + step6_time
+        times.append(total_time)
+
+        conn.close()
+        db_path.unlink()
+
+        if run == 0:  # Print breakdown for first run
+            print(f"  Step 1: Create base table       {step1_time*1000:.1f} ms")
+            print(f"  Step 2: Add RSI                 {step2_time*1000:.1f} ms")
+            print(f"  Step 3: Add MACD (3 cols)       {step3_time*1000:.1f} ms")
+            print(f"  Step 4: Add Bollinger (3 cols)  {step4_time*1000:.1f} ms")
+            print(f"  Step 5: Add ATR                 {step5_time*1000:.1f} ms")
+            print(f"  Step 6: Query final dataset     {step6_time*1000:.1f} ms")
+            print(f"  ───────────────────────────────────────")
+            print(f"  Total: {total_time*1000:.1f} ms → {len(result):,} rows × {len(result.columns)} columns")
+
+    avg_time = sum(times) / len(times)
+    print(f"\nAverage total time: {avg_time*1000:.1f} ms (over {runs} runs)")
+    return avg_time
+
+
+def benchmark_parquet_workflow(base_df: pd.DataFrame, runs: int = 3):
+    """Benchmark Parquet iterative workflow (requires full rewrite each time)."""
+    print("\n█ Parquet: Iterative Feature Development")
+    print("━" * 70)
+
+    times = []
+
+    for run in range(runs):
+        pq_path = Path(f'/tmp/iterative_test_{run}.parquet')
+
+        # Step 1: Write base table
+        start = time.perf_counter()
+        df = base_df.copy()
+        df.to_parquet(pq_path, index=False, compression='zstd')
+        step1_time = time.perf_counter() - start
+
+        # Step 2: Add RSI column (read → modify → rewrite)
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path)
+        df['rsi'] = calculate_rsi(df['Close'])
+        df.to_parquet(pq_path, index=False, compression='zstd')
+        step2_time = time.perf_counter() - start
+
+        # Step 3: Add MACD columns (read → modify → rewrite)
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path)
+        macd_line, signal_line, histogram = calculate_macd(df['Close'])
+        df['macd_line'] = macd_line
+        df['macd_signal'] = signal_line
+        df['macd_histogram'] = histogram
+        df.to_parquet(pq_path, index=False, compression='zstd')
+        step3_time = time.perf_counter() - start
+
+        # Step 4: Add Bollinger Bands (read → modify → rewrite)
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path)
+        upper, middle, lower = calculate_bollinger_bands(df['Close'])
+        df['bb_upper'] = upper
+        df['bb_middle'] = middle
+        df['bb_lower'] = lower
+        df.to_parquet(pq_path, index=False, compression='zstd')
+        step4_time = time.perf_counter() - start
+
+        # Step 5: Add ATR column (read → modify → rewrite)
+        start = time.perf_counter()
+        df = pd.read_parquet(pq_path)
+        df['atr'] = calculate_atr(df['High'], df['Low'], df['Close'])
+        df.to_parquet(pq_path, index=False, compression='zstd')
+        step5_time = time.perf_counter() - start
+
+        # Step 6: Query final dataset
+        start = time.perf_counter()
+        result = pd.read_parquet(pq_path)
+        step6_time = time.perf_counter() - start
+
+        total_time = step1_time + step2_time + step3_time + step4_time + step5_time + step6_time
+        times.append(total_time)
+
+        pq_path.unlink()
+
+        if run == 0:  # Print breakdown for first run
+            print(f"  Step 1: Write base table             {step1_time*1000:.1f} ms")
+            print(f"  Step 2: Read→Add RSI→Rewrite         {step2_time*1000:.1f} ms")
+            print(f"  Step 3: Read→Add MACD→Rewrite        {step3_time*1000:.1f} ms")
+            print(f"  Step 4: Read→Add Bollinger→Rewrite   {step4_time*1000:.1f} ms")
+            print(f"  Step 5: Read→Add ATR→Rewrite         {step5_time*1000:.1f} ms")
+            print(f"  Step 6: Read final dataset           {step6_time*1000:.1f} ms")
+            print(f"  ──────────────────────────────────────────")
+            print(f"  Total: {total_time*1000:.1f} ms → {len(result):,} rows × {len(result.columns)} columns")
+
+    avg_time = sum(times) / len(times)
+    print(f"\nAverage total time: {avg_time*1000:.1f} ms (over {runs} runs)")
+    return avg_time
+
+
+def main():
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║    Iterative Feature Development: DuckDB vs Parquet          ║")
+    print("║                                                                ║")
+    print("║  Scenario: Adding indicator columns one at a time             ║")
+    print("║  (Real-world strategy development workflow)                   ║")
+    print("╚═══════════════════════════════════════════════════════════════╝\n")
+
+    # Load existing data
+    print("Loading August 2024 dataset...")
+    conn = duckdb.connect('/tmp/eurusd_1m_2024_08.duckdb', read_only=True)
+    base_df = conn.execute("SELECT Timestamp, Open, High, Low, Close FROM ohlc").df()
+    conn.close()
+    print(f"Loaded {len(base_df):,} rows × {len(base_df.columns)} columns\n")
+
+    # Run benchmarks
+    duckdb_time = benchmark_duckdb_workflow(base_df, runs=3)
+    parquet_time = benchmark_parquet_workflow(base_df, runs=3)
+
+    # Summary
+    print("\n╔═══════════════════════════════════════════════════════════════╗")
+    print("║                         SUMMARY                                ║")
+    print("╚═══════════════════════════════════════════════════════════════╝\n")
+
+    print(f"DuckDB Total Time:  {duckdb_time*1000:.1f} ms")
+    print(f"Parquet Total Time: {parquet_time*1000:.1f} ms")
+
+    if duckdb_time < parquet_time:
+        speedup = parquet_time / duckdb_time
+        print(f"\nWinner: DuckDB ({speedup:.2f}x faster)")
+        print(f"DuckDB is {(speedup-1)*100:.0f}% faster for iterative development")
+    else:
+        speedup = duckdb_time / parquet_time
+        print(f"\nWinner: Parquet ({speedup:.2f}x faster)")
+
+    print("\n" + "─" * 70)
+    print("Why this matters for YOUR workflow:")
+    print("─" * 70)
+    print("✓ DuckDB: ALTER TABLE ADD COLUMN (no rewrite)")
+    print("✓ DuckDB: SQL COMMENT for metadata on each column")
+    print("✓ DuckDB: Transactional safety (rollback if error)")
+    print("✗ Parquet: Must read entire file → modify → rewrite for each indicator")
+    print("✗ Parquet: No metadata beyond basic schema")
+    print("✗ Parquet: No transactional safety")
+
+
+if __name__ == '__main__':
+    main()

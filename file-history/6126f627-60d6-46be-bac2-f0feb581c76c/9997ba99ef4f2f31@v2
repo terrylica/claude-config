@@ -1,0 +1,89 @@
+"""Debug script to check RSI values in full vs sliced data."""
+
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import pandas as pd
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Generate test data
+base_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+n_bars = 1000
+dates = [base_time + timedelta(hours=2 * i) for i in range(n_bars)]
+
+np.random.seed(42)
+price_base = 50000
+trend = np.linspace(0, 5000, n_bars)
+volatility = np.random.normal(0, 200, n_bars).cumsum()
+close_prices = price_base + trend + volatility
+
+data = pd.DataFrame(
+    {
+        "date": dates,
+        "open": close_prices * 0.999,
+        "high": close_prices * 1.002,
+        "low": close_prices * 0.998,
+        "close": close_prices,
+        "volume": np.random.uniform(1000000, 3000000, n_bars),
+        "actual_ready_time": [d + timedelta(hours=2) for d in dates],
+    }
+)
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    availability_column="actual_ready_time",
+    filter_redundancy=False,  # Disable filtering to see raw RSI values
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Full data
+features_full = indicator.fit_transform_features(data)
+
+# Sliced data
+validation_idx = 600
+lookback = indicator.min_lookback + 100
+data_sliced = data.iloc[validation_idx - lookback + 1 : validation_idx + 1].reset_index(drop=True)
+features_sliced = indicator.fit_transform_features(data_sliced)
+
+# List all columns to see what's available
+print("\n" + "=" * 80)
+print(f"Available columns ({len(features_full.columns)}):")
+print("=" * 80)
+print(", ".join(sorted(features_full.columns)))
+
+# Compare RSI values
+print("\n" + "=" * 80)
+print("RSI VALUE COMPARISON")
+print("=" * 80)
+
+# Check raw RSI values (should exist without redundancy filter)
+for col in ["rsi_base", "rsi_mult1", "rsi_mult2"]:
+    if col in features_full.columns and col in features_sliced.columns:
+        full_val = features_full.iloc[validation_idx][col]
+        sliced_val = features_sliced.iloc[-1][col]
+        diff = abs(full_val - sliced_val)
+        status = "✅" if diff < 1e-10 else "❌"
+        print(f"{status} {col:30s}: full={full_val:.8f}, sliced={sliced_val:.8f}, diff={diff:.2e}")
+    else:
+        print(f"⚠️  {col:30s}: NOT FOUND in features")
+
+print("\n" + "=" * 80)
+print("MULT2 DERIVATIVE FEATURES")
+print("=" * 80)
+
+for col in ["rsi_change_5_mult2", "rsi_velocity_mult2", "rsi_zscore_20_mult2", "rsi_volatility_20_mult2"]:
+    if col in features_full.columns and col in features_sliced.columns:
+        full_val = features_full.iloc[validation_idx][col]
+        sliced_val = features_sliced.iloc[-1][col]
+        diff = abs(full_val - sliced_val)
+        status = "✅" if diff < 1e-10 else "❌"
+        print(f"{status} {col:30s}: full={full_val:.8f}, sliced={sliced_val:.8f}, diff={diff:.2e}")
+
+# Check how many mult2 bars we have
+print("\n" + "=" * 80)
+print("DATA DIMENSIONS")
+print("=" * 80)
+print(f"Full base data: {len(data)} bars")
+print(f"Sliced base data: {len(data_sliced)} bars")
+print(f"Full mult2 data: {len(data) // 12} estimated bars")
+print(f"Sliced mult2 data: {len(data_sliced) // 12} estimated bars")

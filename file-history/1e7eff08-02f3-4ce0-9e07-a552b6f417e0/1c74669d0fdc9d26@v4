@@ -1,0 +1,314 @@
+# exness-data-preprocess - Project Memory
+
+**Architecture**: Professional forex tick data preprocessing with unified single-file DuckDB storage
+
+**Full Documentation**: [`README.md`](README.md) - Installation, usage, API reference
+
+---
+
+## Quick Links
+
+- **[README.md](README.md)** - Full project documentation
+- **[Documentation Hub](docs/README.md)** - Organized research findings and guides
+- **[Examples](examples/)** - Usage patterns (basic_usage.py, batch_processing.py)
+- **[Data Sources Guide](docs/EXNESS_DATA_SOURCES.md)** - Complete Exness variant reference
+- **[Architecture Plan](docs/UNIFIED_DUCKDB_PLAN_v2.md)** - v2.0.0 specification
+
+---
+
+## Essential Architecture Decisions
+
+### Unified Single-File DuckDB Storage v2.0.0 (✅ Implemented & Validated 2025-10-12)
+
+**Decision**: Store all years of data in single DuckDB file per instrument (eurusd.duckdb, not monthly files)
+
+**Implementation**: v2.0.0 refactoring completed
+- ✅ **Single file per instrument**: eurusd.duckdb contains all years
+- ✅ **Dual-variant storage**: Raw_Spread + Standard in same database
+- ✅ **PRIMARY KEY constraints**: Prevents duplicates during incremental updates
+- ✅ **Automatic gap detection**: Downloads only missing months
+- ✅ **Phase7 9-column OHLC**: Dual spreads + dual tick counts
+- ✅ **Date range queries**: Sub-15ms query performance
+- ✅ **On-demand resampling**: Any timeframe (5m, 1h, 1d) in <15ms
+
+**Validation Results** (13 months, Oct 2024 - Oct 2025):
+- ✅ **Raw_Spread ticks**: 18.6M ticks
+- ✅ **Standard ticks**: 19.6M ticks
+- ✅ **OHLC bars**: 413K bars (1-minute)
+- ✅ **Database size**: 2.08 GB
+- ✅ **Query performance**: <15ms for all operations
+- ✅ **Incremental updates**: Working correctly (0 months added when up to date)
+
+**Architecture Benefits**:
+- **No file fragmentation**: All years in one database
+- **No duplicates**: PRIMARY KEY constraints prevent duplicate data
+- **Fast queries**: Date range filtering without loading entire dataset
+- **Scalability**: 2.08 GB for 13 months (3 years ~4.8 GB)
+
+**Comprehensive Plan**: [`docs/UNIFIED_DUCKDB_PLAN_v2.md`](docs/UNIFIED_DUCKDB_PLAN_v2.md) - Complete v2.0.0 specification
+
+**Legacy Plan**: [`docs/archive/UNIFIED_DUCKDB_PLAN_v1.0.0_LEGACY.md`](docs/archive/UNIFIED_DUCKDB_PLAN_v1.0.0_LEGACY.md) - Monthly-file architecture (archived)
+
+**Test Artifacts**:
+- `/tmp/exness-duckdb-test/refactored/eurusd.duckdb` - 2.08 GB unified database
+- `/tmp/exness-duckdb-test/test_refactored_processor.py` - Validation test
+- `/tmp/exness-duckdb-test/test_queries_only.py` - Query validation test
+
+### Phase7 9-Column OHLC Schema (✅ Implemented)
+
+**Schema**:
+1. `Timestamp` - Bar timestamp
+2. `Open` - Opening price (from Raw_Spread)
+3. `High` - High price (from Raw_Spread)
+4. `Low` - Low price (from Raw_Spread)
+5. `Close` - Closing price (from Raw_Spread)
+6. `raw_spread_avg` - Average spread from Raw_Spread variant
+7. `standard_spread_avg` - Average spread from Standard variant
+8. `tick_count_raw_spread` - Tick count from Raw_Spread variant
+9. `tick_count_standard` - Tick count from Standard variant
+
+**Implementation**:
+```sql
+INSERT INTO ohlc_1m
+SELECT
+    DATE_TRUNC('minute', r.Timestamp) as Timestamp,
+    FIRST(r.Bid ORDER BY r.Timestamp) as Open,
+    MAX(r.Bid) as High,
+    MIN(r.Bid) as Low,
+    LAST(r.Bid ORDER BY r.Timestamp) as Close,
+    AVG(r.Ask - r.Bid) as raw_spread_avg,
+    AVG(s.Ask - s.Bid) as standard_spread_avg,
+    COUNT(r.Timestamp) as tick_count_raw_spread,
+    COUNT(s.Timestamp) as tick_count_standard
+FROM raw_spread_ticks r
+LEFT JOIN standard_ticks s
+    ON DATE_TRUNC('minute', r.Timestamp) = DATE_TRUNC('minute', s.Timestamp)
+GROUP BY DATE_TRUNC('minute', r.Timestamp)
+```
+
+**Rationale**:
+- **BID-only OHLC**: Uses Raw_Spread Bid prices (execution prices)
+- **Dual spreads**: Tracks both Raw_Spread (zero-spreads) and Standard (market spreads)
+- **Dual tick counts**: Records tick counts from both variants
+- **LEFT JOIN**: Uses Raw_Spread as primary source, Standard as reference
+
+**Phase7 v1.1.0**: [`docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.1.0.md`](docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.1.0.md)
+
+---
+
+## Exness Data Sources
+
+### Available Variants (4 per instrument)
+
+| Variant | Zero-Spreads | Use Case |
+|---------|--------------|----------|
+| **{SYMBOL}** | 0% | Standard quotes (reference) |
+| **{SYMBOL}_Raw_Spread** | 97.81% | Execution prices (primary for phase7) |
+| **{SYMBOL}_Standart_Plus** | 0% | Wider spreads |
+| **{SYMBOL}_Zero_Spread** | 97.81% | Similar to Raw_Spread |
+
+**URL Pattern** (fixed in v2.0.0):
+```
+https://ticks.ex2archive.com/ticks/{VARIANT}/{YEAR}/{MONTH}/Exness_{VARIANT}_{YEAR}_{MONTH}.zip
+```
+
+**Phase7 Downloads** (dual-variant methodology):
+```bash
+# Primary: Raw_Spread (98% zero-spreads, execution prices)
+curl -L "https://ticks.ex2archive.com/ticks/EURUSD_Raw_Spread/2024/09/Exness_EURUSD_Raw_Spread_2024_09.zip" \
+  -o Exness_EURUSD_Raw_Spread_2024_09.zip
+
+# Reference: Standard (0% zero-spreads, traditional quotes)
+curl -L "https://ticks.ex2archive.com/ticks/EURUSD/2024/09/Exness_EURUSD_2024_09.zip" \
+  -o Exness_EURUSD_2024_09.zip
+```
+
+**Full Guide**: [`docs/EXNESS_DATA_SOURCES.md`](docs/EXNESS_DATA_SOURCES.md) - Complete reference with examples
+
+**Test Artifacts**: [`/tmp/exness-duckdb-test/EXNESS_VARIANTS.md`](/tmp/exness-duckdb-test/EXNESS_VARIANTS.md)
+
+---
+
+## Research Areas
+
+### Zero-Spread Deviation Analysis
+
+**Research Period**: Sep 2024 baseline + 16-month validation (Jan-Aug 2024+2025)
+
+**Key Findings**:
+- ✅ **Mean Reversion**: 87.3% ± 1.9% stable across 16 months
+- ⚠️ **Volatility Prediction**: Regime shift between 2024 (R²=0.371) and 2025 (R²=0.209)
+- ✅ **Phase7 Methodology**: Dual-variant BID-only OHLC construction validated
+
+**Documentation**: [`docs/research/eurusd-zero-spread-deviations/README.md`](docs/research/eurusd-zero-spread-deviations/README.md)
+
+**Methodology**: [`docs/research/eurusd-zero-spread-deviations/01-methodology.md`](docs/research/eurusd-zero-spread-deviations/01-methodology.md)
+
+### Compression Benchmarks
+
+**Decision**: DuckDB native storage (no Parquet files in v2.0.0)
+
+**Legacy Benchmarks** (v1.0.0): Parquet Zstd-22 over Brotli-11 (too slow) and Delta Encoding (lossy)
+
+**Documentation**: [`docs/research/compression-benchmarks/README.md`](docs/research/compression-benchmarks/README.md)
+
+---
+
+## Development Setup
+
+### Prerequisites
+
+```bash
+# Clone and setup
+git clone https://github.com/Eon-Labs/exness-data-preprocess.git
+cd exness-data-preprocess
+
+# Install with uv (recommended)
+uv sync --dev
+
+# Or with pip
+pip install -e ".[dev]"
+```
+
+### Testing
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run with coverage
+uv run pytest --cov=exness_data_preprocess --cov-report=html
+```
+
+### Code Quality
+
+```bash
+# Format and lint
+uv run ruff format .
+uv run ruff check --fix .
+
+# Type checking
+uv run mypy src/
+```
+
+---
+
+## Current Implementation Status
+
+### v2.0.0 Architecture (✅ Completed 2025-10-12)
+
+- ✅ **Unified single-file DuckDB** - One file per instrument (eurusd.duckdb)
+- ✅ **Dual-variant storage** - Raw_Spread + Standard in same database
+- ✅ **PRIMARY KEY constraints** - Prevents duplicates during incremental updates
+- ✅ **Automatic gap detection** - Downloads only missing months
+- ✅ **Phase7 9-column OHLC** - Dual spreads + dual tick counts
+- ✅ **Date range queries** - Sub-15ms query performance
+- ✅ **On-demand resampling** - Any timeframe in <15ms
+- ✅ **SQL filter support** - Direct SQL WHERE clauses on ticks
+- ✅ **API refactoring** - Clean unified API
+- ✅ **Examples updated** - basic_usage.py, batch_processing.py
+- ✅ **Documentation updated** - README.md, CLAUDE.md, docs/README.md
+
+### API Reference
+
+**ExnessDataProcessor**:
+```python
+processor = edp.ExnessDataProcessor(base_dir="~/eon/exness-data")
+
+# Update database with incremental updates
+result = processor.update_data(
+    pair="EURUSD",
+    start_date="2022-01-01",
+    delete_zip=True,
+)
+
+# Query OHLC bars
+df_ohlc = processor.query_ohlc(
+    pair="EURUSD",
+    timeframe="1m",
+    start_date="2024-01-01",
+    end_date="2024-01-31",
+)
+
+# Query tick data
+df_ticks = processor.query_ticks(
+    pair="EURUSD",
+    variant="raw_spread",
+    start_date="2024-09-01",
+    end_date="2024-09-30",
+)
+
+# Get coverage information
+coverage = processor.get_data_coverage("EURUSD")
+```
+
+### Pending Tasks
+
+- ⏳ **CLI enhancements** - Add variant selection, OHLC resampling commands
+- ⏳ **Test suite** - Update test_processor.py, test_api.py, test_cli.py for v2.0.0
+- ⏳ **API expansion** - Add streaming query methods, batch operations
+
+---
+
+## File Locations
+
+**Project Root**: `/Users/terryli/eon/exness-data-preprocess/ `
+
+**Data Storage** (default): `~/eon/exness-data/`
+```
+~/eon/exness-data/
+├── eurusd.duckdb      # Single file for all EURUSD data
+├── gbpusd.duckdb      # Single file for all GBPUSD data
+├── xauusd.duckdb      # Single file for all XAUUSD data
+└── temp/
+    └── (temporary ZIP files)
+```
+
+**Database Schema** (per instrument):
+```
+eurusd.duckdb:
+├── raw_spread_ticks   # Timestamp (PK), Bid, Ask
+├── standard_ticks     # Timestamp (PK), Bid, Ask
+├── ohlc_1m            # Phase7 9-column schema
+└── metadata           # Coverage tracking
+```
+
+**Test Artifacts**: `/tmp/exness-duckdb-test/`
+- `refactored/eurusd.duckdb` - 2.08 GB unified database (13 months)
+- `test_refactored_processor.py` - Validation test
+- `test_queries_only.py` - Query validation test
+
+---
+
+## Migration from v1.0.0
+
+**v1.0.0 (Legacy)**:
+- Monthly DuckDB files: `eurusd_ohlc_2024_08.duckdb`
+- Parquet tick storage: `eurusd_ticks_2024_08.parquet`
+- Functions: `process_month()`, `process_date_range()`, `analyze_ticks()`
+
+**v2.0.0 (Current)**:
+- Single DuckDB file: `eurusd.duckdb`
+- No Parquet files (everything in DuckDB)
+- Unified API: `processor.update_data()`, `processor.query_ohlc()`, `processor.query_ticks()`
+
+**Migration Steps**:
+1. Run `processor.update_data(pair, start_date)` to create new unified database
+2. Delete old monthly files: `rm eurusd_ohlc_2024_*.duckdb eurusd_ticks_2024_*.parquet`
+3. Update code to use new API methods
+
+---
+
+## References
+
+- **Exness Data**: https://ticks.ex2archive.com/
+- **Official Exness**: https://www.exness.com/tick-history/ (Cloudflare protected)
+- **DuckDB**: https://duckdb.org/
+- **Apache Parquet**: https://parquet.apache.org/
+- **Zstd Compression**: https://facebook.github.io/zstd/
+
+---
+
+**Version**: 2.0.0
+**Last Updated**: 2025-10-12
+**Architecture**: Unified Single-File DuckDB Storage with Incremental Updates

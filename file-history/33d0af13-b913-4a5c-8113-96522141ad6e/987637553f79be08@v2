@@ -1,0 +1,117 @@
+#!/bin/bash
+set -e
+
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Installing Server-Based Databases for Benchmarking"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# ClickHouse
+echo "1. ClickHouse (OLAP columnar database)"
+echo "   License: Apache 2.0"
+echo "   Installing..."
+
+if command -v brew &> /dev/null; then
+    # macOS with Homebrew
+    if ! command -v clickhouse &> /dev/null; then
+        brew install clickhouse
+    fi
+    echo "   ✓ ClickHouse installed"
+
+    # Start server
+    echo "   Starting ClickHouse server..."
+    clickhouse server --daemon || echo "   ⚠ Server may already be running"
+    sleep 3
+
+    # Test connection
+    if clickhouse-client --query "SELECT 1" &> /dev/null; then
+        echo "   ✓ ClickHouse server is running on port 9000"
+    else
+        echo "   ✗ ClickHouse server failed to start"
+    fi
+else
+    echo "   ✗ Homebrew not found. Install from: https://clickhouse.com/docs/en/install"
+fi
+
+echo ""
+
+# QuestDB
+echo "2. QuestDB (Time-series database)"
+echo "   License: Apache 2.0"
+echo "   Installing..."
+
+if command -v brew &> /dev/null; then
+    if ! command -v questdb &> /dev/null; then
+        brew install questdb
+    fi
+    echo "   ✓ QuestDB installed"
+
+    # Start server
+    echo "   Starting QuestDB server..."
+    questdb start -d /tmp/questdb_data || echo "   ⚠ Server may already be running"
+    sleep 3
+
+    # Test connection
+    if curl -s http://localhost:9000/exec &> /dev/null; then
+        echo "   ✓ QuestDB server is running on port 9000"
+    else
+        echo "   ✗ QuestDB server failed to start"
+    fi
+else
+    echo "   ✗ Homebrew not found. Install from: https://questdb.io/docs/get-started/binaries/"
+fi
+
+echo ""
+
+# TimescaleDB
+echo "3. TimescaleDB (PostgreSQL extension)"
+echo "   License: Apache 2.0 + Timescale License (hybrid)"
+echo "   Installing..."
+
+if command -v brew &> /dev/null; then
+    # Install PostgreSQL if not present
+    if ! command -v psql &> /dev/null; then
+        echo "   Installing PostgreSQL..."
+        brew install postgresql@14
+    fi
+
+    # Install TimescaleDB extension
+    if ! brew list timescaledb &> /dev/null; then
+        brew install timescaledb
+    fi
+    echo "   ✓ PostgreSQL + TimescaleDB installed"
+
+    # Start PostgreSQL
+    echo "   Starting PostgreSQL server..."
+    brew services start postgresql@14 || echo "   ⚠ Server may already be running"
+    sleep 3
+
+    # Test connection
+    if psql -U "$USER" -d postgres -c "SELECT 1" &> /dev/null; then
+        echo "   ✓ PostgreSQL server is running on port 5432"
+
+        # Enable TimescaleDB extension
+        psql -U "$USER" -d postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE" &> /dev/null || true
+        echo "   ✓ TimescaleDB extension enabled"
+    else
+        echo "   ✗ PostgreSQL server failed to start"
+    fi
+else
+    echo "   ✗ Homebrew not found. Install from: https://www.timescale.com/install"
+fi
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Installation Summary"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+echo "Next steps:"
+echo "  1. Verify servers are running"
+echo "  2. Run benchmark script"
+echo "  3. Stop servers when done to free resources"
+echo ""
+echo "To stop servers:"
+echo "  • ClickHouse: killall clickhouse-server"
+echo "  • QuestDB: questdb stop"
+echo "  • TimescaleDB: brew services stop postgresql@14"
+echo ""

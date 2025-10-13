@@ -1,0 +1,147 @@
+# v1.10 Validation Plan - Sept 2025 Quick Test
+
+**Objective:** Validate real perpetual price integration with minimal dataset
+**Period:** 2025-09-01 to 2025-09-07 (7 days, 21 settlement periods)
+**Status:** SWAP data ready, SPOT data required
+
+---
+
+## Blocking Issue
+
+**Problem:** v1.10 requires both SPOT and SWAP price data
+**Current state:**
+- ✓ SWAP data: `data/raw_ticks_swap/2025/09.parquet` (523 MB, 42.2M trades)
+- ✓ SWAP bars: `data/1min_bars_swap/2025/09.parquet` (50 MB, 2.5M bars)
+- ✗ SPOT data: Missing
+- ✗ SPOT bars: Missing
+
+**Root cause:** Sept 2025 SPOT ticks not downloaded
+
+---
+
+## Unblocking Steps
+
+### Step 1: Download SPOT Ticks (Sept 2025)
+
+**Command:**
+```bash
+uv run --active python scripts/download_month.py 2025 9 \
+  --ticks --data-dir data/
+```
+
+**Expected output:** `data/raw_ticks/2025/09.parquet` (~500-700 MB)
+
+**SLOs:**
+- Correctness: Download completes with exit code 0
+- Availability: File exists at expected path
+- Observability: Trade count logged to stdout
+- Maintainability: Uses existing `download_month.py` (out-of-the-box)
+
+**Error handling:** Script raises on HTTP 404 or network errors (fail-fast)
+
+### Step 2: Aggregate SPOT Ticks to 1-Min Bars
+
+**Command:**
+```bash
+uv run --active python scripts/aggregate_month.py 2025 9 \
+  --data-dir data/
+```
+
+**Expected output:** `data/1min_bars/2025/09.parquet` (~40-60 MB, ~2M bars)
+
+**SLOs:**
+- Correctness: Output schema matches OHLCV+VWAP spec
+- Availability: File saved to correct path
+- Observability: Compression ratio logged (expected: 10-12x)
+- Maintainability: Uses existing `aggregate_month.py` (out-of-the-box)
+
+**Error handling:** Script raises if input file missing (fail-fast)
+
+### Step 3: Run v1.10 Validation Test
+
+**Command:**
+```bash
+uv run --active python v1.10-modular.py \
+  --start 2025-09-01 --end 2025-09-07 --capital 1000000 \
+  2>&1 | tee backtest_v1.10_validation.log
+```
+
+**Expected results:**
+- Trades executed: >0 periods (target: 10-20 of 21 periods)
+- Market P&L variance: >0 (validates real hedging vs synthetic)
+- Basis metrics populated: 100% of trades
+- No synthetic calculation errors
+
+**SLOs:**
+- **Correctness:** `market_pnl.std() > 0` (real perpetu
+al prices used)
+- **Availability:** ≥50% periods have both SPOT+PERP data
+- **Observability:** basis_entry_bps, basis_exit_bps populated for all trades
+- **Maintainability:** v1.10-modular.py unchanged from specification
+
+**Error handling:**
+- Raises ValueError if perp_pnl = -spot_pnl detected (synthetic leak)
+- Raises ValueError if missing PERP data (no fallback to synthetic)
+- Logs warning but continues if individual period missing data
+
+### Step 4: Validate Results
+
+**Validation script:** `scripts/validate_v1.10.py` (create)
+
+**Checks:**
+1. **Correctness SLO:**
+   ```python
+   market_pnl = df['total_spot_pnl'] + df['total_perp_pnl']
+   assert market_pnl.std() > 0, "Synthetic calculation detected"
+   ```
+
+2. **Observability SLO:**
+   ```python
+   assert df['basis_entry_bps'].notna().all(), "Missing basis metrics"
+   assert df['perp_entry_price'].notna().all(), "Missing perp prices"
+   ```
+
+3. **Real hedging verification:**
+   ```python
+   # Spot and perp P&L should not be perfect inverses
+   assert not ((df['total_spot_pnl'] + df['total_perp_pnl']).abs() < 1e-6).all()
+   ```
+
+**Output:** Pass/fail with specific SLO violations
+
+---
+
+## Success Criteria
+
+1. ✓ All 4 steps complete without errors
+2. ✓ Backtest executes ≥10 periods successfully
+3. ✓ Market P&L variance > $100 (proof of real pricing)
+4. ✓ Basis metrics populated for 100% of executed trades
+5. ✓ No synthetic calculation errors detected
+
+---
+
+## Rollback Plan
+
+**If validation fails:** Revert to v1.9-modular.py (synthetic pricing known-working)
+
+**Failure modes:**
+- Missing data: Continue development, add more months
+- Synthetic leak detected: Review v1.10 price loading logic
+- Performance issues: Not in scope (speed/perf excluded from SLOs)
+
+---
+
+## File References
+
+**Implementation:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/v1.10-modular.py`
+**Specification:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/V2_REAL_PERP_SPEC.md`
+**Deployment:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/V2_PRODUCTION_DEPLOYMENT.md`
+**Concurrency:** `/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis/CLAUDE.md` (c=13 optimal)
+
+---
+
+## Execution Log
+
+**Started:** 2025-10-08 21:15 UTC
+**Status:** Step 1 pending

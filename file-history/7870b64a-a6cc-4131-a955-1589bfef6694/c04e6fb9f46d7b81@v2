@@ -1,0 +1,106 @@
+"""Test v1.0.0 for data leakage (with filter_redundancy=False to get all features)"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone, timedelta
+
+from atr_adaptive_laguerre import (
+    ATRAdaptiveLaguerreRSI,
+    ATRAdaptiveLaguerreRSIConfig
+)
+
+# Create test data
+start_time = datetime(2025, 1, 1, tzinfo=timezone.utc)
+timestamps = [start_time + timedelta(hours=2*i) for i in range(400)]
+
+data = pd.DataFrame({
+    'date': timestamps,
+    'actual_ready_time': timestamps,
+    'open': [100 + 5*np.sin(i/10) for i in range(400)],
+    'high': [105 + 5*np.sin(i/10) for i in range(400)],
+    'low': [95 + 5*np.sin(i/10) for i in range(400)],
+    'close': [100 + 5*np.sin(i/10) for i in range(400)],
+    'volume': [1000000] * 400
+})
+
+print("=" * 80)
+print("v1.0.0 DATA LEAKAGE TEST (filter_redundancy=False)")
+print("=" * 80)
+
+# Use filter_redundancy=False to get all 121 features like v0.2.1
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    filter_redundancy=False  # Get all features like v0.2.1
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+print(f"\nConfig: filter_redundancy=False")
+print(f"Features: {indicator.n_features}")
+print(f"Min lookback: {indicator.min_lookback}")
+
+# Full data features
+features_full = indicator.fit_transform_features(data)
+
+# Validation point
+validation_idx = 380
+validation_time = timestamps[validation_idx]
+
+print(f"\n{'=' * 80}")
+print(f"VALIDATION POINT: Row {validation_idx}, Time {validation_time}")
+print(f"{'=' * 80}")
+
+# Prediction data (only past data)
+pred_data = data.iloc[:validation_idx + 1].copy()
+features_pred = indicator.fit_transform_features(pred_data)
+
+# Compare critical features
+full_rsi_base = features_full.iloc[validation_idx]['rsi_base']
+full_rsi_mult1 = features_full.iloc[validation_idx]['rsi_mult1']
+full_rsi_mult2 = features_full.iloc[validation_idx]['rsi_mult2']
+
+pred_rsi_base = features_pred.iloc[-1]['rsi_base']
+pred_rsi_mult1 = features_pred.iloc[-1]['rsi_mult1']
+pred_rsi_mult2 = features_pred.iloc[-1]['rsi_mult2']
+
+print(f"\nFull data features:")
+print(f"  rsi_base: {full_rsi_base:.6f}")
+print(f"  rsi_mult1: {full_rsi_mult1:.6f}")
+print(f"  rsi_mult2: {full_rsi_mult2:.6f}")
+
+print(f"\nPrediction features:")
+print(f"  rsi_base: {pred_rsi_base:.6f}")
+print(f"  rsi_mult1: {pred_rsi_mult1:.6f}")
+print(f"  rsi_mult2: {pred_rsi_mult2:.6f}")
+
+print(f"\n{'=' * 80}")
+print("LEAKAGE DETECTION")
+print(f"{'=' * 80}")
+
+diff_base = abs(full_rsi_base - pred_rsi_base)
+diff_mult1 = abs(full_rsi_mult1 - pred_rsi_mult1)
+diff_mult2 = abs(full_rsi_mult2 - pred_rsi_mult2)
+
+print(f"\nBase interval (1x):")
+print(f"  Difference: {diff_base:.10f}")
+print(f"  Status: {'✓ PASS' if diff_base < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+print(f"\nMultiplier 1 (4x):")
+print(f"  Difference: {diff_mult1:.10f}")
+print(f"  Status: {'✓ PASS' if diff_mult1 < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+print(f"\nMultiplier 2 (12x):")
+print(f"  Difference: {diff_mult2:.10f}")
+print(f"  Status: {'✓ PASS' if diff_mult2 < 1e-5 else '✗ FAIL - DATA LEAKAGE'}")
+
+print(f"\n{'=' * 80}")
+print("VERDICT")
+print(f"{'=' * 80}")
+
+if diff_mult1 > 0.01 or diff_mult2 > 0.01:
+    print("\n✗ v1.0.0 STILL HAS DATA LEAKAGE")
+    print("The filter_redundancy parameter does NOT fix the data leakage issue.")
+    print("It only removes features - the underlying resampling bug remains.")
+else:
+    print("\n✓ v1.0.0 FIXED DATA LEAKAGE")
+    print("The multi-interval mode now correctly respects temporal boundaries!")

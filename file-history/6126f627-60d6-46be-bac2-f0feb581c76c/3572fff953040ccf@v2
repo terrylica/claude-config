@@ -1,0 +1,66 @@
+"""Debug the mult2 mapping logic."""
+
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import pandas as pd
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Simple test data (need 360+ bars for min_lookback)
+base_time = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+n_bars = 500
+dates = [base_time + timedelta(hours=2 * i) for i in range(n_bars)]
+close_prices = np.linspace(50000, 51000, n_bars)
+
+data = pd.DataFrame(
+    {
+        "date": dates,
+        "open": close_prices * 0.999,
+        "high": close_prices * 1.001,
+        "low": close_prices * 0.998,
+        "close": close_prices,
+        "volume": np.full(n_bars, 1000000.0),
+        "actual_ready_time": [d + timedelta(hours=2) for d in dates],
+    }
+)
+
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    availability_column="actual_ready_time",
+    filter_redundancy=False,
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+
+# Full data
+features_full = indicator.fit_transform_features(data)
+
+# Slice data with sufficient lookback
+validation_idx = 400
+lookback = indicator.min_lookback + 40  # 400 bars
+data_sliced = data.iloc[validation_idx - lookback + 1 : validation_idx + 1].reset_index(drop=True)
+features_sliced = indicator.fit_transform_features(data_sliced)
+
+print("\n" + "=" * 80)
+print("DATA SLICING")
+print("=" * 80)
+print(f"Full data: {len(data)} bars, dates {data['date'].iloc[0]} to {data['date'].iloc[-1]}")
+print(f"Sliced data: {len(data_sliced)} bars, dates {data_sliced['date'].iloc[0]} to {data_sliced['date'].iloc[-1]}")
+print(f"Sliced corresponds to full indices {validation_idx - lookback + 1} to {validation_idx}")
+
+print("\n" + "=" * 80)
+print("MULT2 MAPPING CHECK")
+print("=" * 80)
+
+# Check a specific base bar
+check_idx_full = validation_idx  # Bar 400 in full data
+check_idx_sliced = lookback - 1  # Last bar in sliced data
+
+print(f"\nChecking base bar {check_idx_full} (full) = bar {check_idx_sliced} (sliced)")
+print(f"Date: {data.iloc[check_idx_full]['date']}")
+print(f"Availability: {data.iloc[check_idx_full]['actual_ready_time']}")
+
+if "rsi_mult2" in features_full.columns:
+    print(f"\nrsi_mult2 value:")
+    print(f"  Full data:   {features_full.iloc[check_idx_full]['rsi_mult2']:.8f}")
+    print(f"  Sliced data: {features_sliced.iloc[check_idx_sliced]['rsi_mult2']:.8f}")
+    print(f"  Match: {'✅' if abs(features_full.iloc[check_idx_full]['rsi_mult2'] - features_sliced.iloc[check_idx_sliced]['rsi_mult2']) < 1e-10 else '❌'}")

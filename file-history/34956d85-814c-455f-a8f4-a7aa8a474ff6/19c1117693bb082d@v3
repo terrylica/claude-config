@@ -1,0 +1,594 @@
+# Phase 6: Interval & Price Clustering Analysis
+
+**Version:** 1.0.0
+**Created:** 2025-10-05
+**Status:** Planning
+**Dependencies:** Phase 2-3 v1.0.6 (zero-spread deviation data)
+
+---
+
+## Objective
+
+Analyze temporal and spatial patterns of zero-spread deviations to identify:
+1. **Temporal regularity:** Inter-arrival time distribution, clustering in time
+2. **Price clustering:** Concentration at specific EUR/USD levels
+3. **Combined patterns:** Relationship between price zones and burst behavior
+4. **Actionable zones:** High-risk price levels to avoid or monitor
+
+---
+
+## Service Level Objectives (SLOs)
+
+### Availability
+- Analysis completion: 100% (all 16 months processed or fail explicitly)
+- Data coverage: ≥95% of zero-spread deviations included
+
+### Correctness
+- Statistical tests: scipy reference implementations (chi-square, KS test, autocorrelation)
+- Cluster significance: p < 0.05 required for classification as "hot zone"
+- Inter-arrival CV: ±0.01 precision
+
+### Observability
+- Temporal metrics: Mean, CV, autocorrelation logged per month
+- Price clusters: All zones with >2× baseline frequency reported
+- Diagnostic plots: Saved as PNG (300 DPI) for publication
+
+### Maintainability
+- Out-of-the-box: scipy, pandas, numpy only (no custom statistical methods)
+- Code reuse: ≥80% from Phase 2-3 data loading logic
+- Documentation: Statistical test rationale documented inline
+
+---
+
+## Research Questions
+
+### Phase 6A: Temporal Pattern Analysis
+
+**Q1:** Are zero-spread deviations regular or random in time?
+- **Metric:** Coefficient of variation (CV = std/mean of inter-arrival times)
+- **Threshold:** CV < 0.5 (regular), 0.5-1.5 (random), >1.5 (clustered/bursty)
+
+**Q2:** Do deviations cluster in bursts or spread evenly?
+- **Metric:** Autocorrelation of inter-arrival times (lag=1)
+- **Threshold:** |ρ| > 0.3 indicates temporal clustering
+
+**Q3:** Did temporal regularity change between 2024 and 2025?
+- **Metric:** CV_2024 vs CV_2025, two-sample KS test
+- **Threshold:** p < 0.05 for significant regime difference
+
+**Q4:** What is the best-fit distribution for inter-arrival times?
+- **Candidates:** Exponential (Poisson), Gamma (clustered), Lognormal
+- **Selection:** Minimum AIC/BIC score
+
+### Phase 6B: Price Clustering Analysis
+
+**Q5:** Do deviations cluster at specific EUR/USD price levels?
+- **Metric:** Chi-square test vs uniform distribution
+- **Threshold:** p < 0.05 for non-uniform clustering
+
+**Q6:** Is there round number bias (e.g., 1.0800, 1.0850)?
+- **Metric:** Frequency at .00/.50 levels vs expected (uniform)
+- **Threshold:** >1.5× expected frequency = significant bias
+
+**Q7:** Do deviations overlap with technical levels (daily highs/lows)?
+- **Metric:** Percentage of deviations within 10 pips of daily extremes
+- **Threshold:** >15% overlap = significant (vs ~5% random expectation)
+
+**Q8:** Are extreme deviations (>2σ) concentrated at specific prices?
+- **Metric:** Price distribution of tail events vs all events
+- **Test:** Two-sample KS test
+
+### Phase 6C: Combined Pattern Analysis
+
+**Q9:** Do inter-arrival times shorten when price is in cluster zones?
+- **Metric:** E[interval | in_cluster] vs E[interval | out_cluster]
+- **Threshold:** <70% of baseline = significant "sticky zone"
+
+**Q10:** Do bursts (short intervals) predict future bursts?
+- **Metric:** Transition probability P(burst | burst) vs P(burst | quiet)
+- **Threshold:** >2× baseline = predictive bursting
+
+---
+
+## Implementation Phases
+
+### Phase 6A: Inter-Arrival Time Analysis
+
+**Objective:** Characterize temporal regularity of zero-spread deviations
+
+**Input Data:**
+- All zero-spread deviation timestamps from Phase 2 (16 months)
+- Calculated from merged Standard + Raw_Spread data
+
+**Processing Steps:**
+
+1. **Load deviation timestamps**
+   ```python
+   # Reuse Phase 2 data loading logic
+   zero_spread = merged[merged['raw_spread'] <= 0.00001]
+   zero_spread['deviation'] = abs(zero_spread['position_ratio'] - 0.5)
+   deviations = zero_spread[zero_spread['deviation'] > DEVIATION_THRESHOLD]
+
+   timestamps = deviations['Timestamp'].sort_values()
+   ```
+
+2. **Calculate inter-arrival times**
+   ```python
+   intervals = timestamps.diff().dt.total_seconds()
+   intervals = intervals[intervals > 0]  # Remove first NaN, zero intervals
+   ```
+
+3. **Descriptive statistics**
+   ```python
+   mean_interval = intervals.mean()
+   std_interval = intervals.std()
+   cv = std_interval / mean_interval
+
+   min_interval = intervals.min()
+   max_interval = intervals.max()
+   median_interval = intervals.median()
+   ```
+
+4. **Autocorrelation test**
+   ```python
+   from scipy.stats import pearsonr
+
+   # Lag-1 autocorrelation
+   acf_1 = pearsonr(intervals[:-1], intervals[1:])[0]
+
+   # Interpretation:
+   # acf_1 > 0.3: Short intervals follow short intervals (clustering)
+   # acf_1 ≈ 0: Random (Poisson-like)
+   # acf_1 < -0.3: Regular alternation (unlikely)
+   ```
+
+5. **Distribution fitting**
+   ```python
+   from scipy.stats import expon, gamma, lognorm
+
+   # Fit exponential (Poisson process)
+   expon_params = expon.fit(intervals)
+   expon_aic = -2 * expon.logpdf(intervals, *expon_params).sum() + 2 * 1
+
+   # Fit gamma (clustered process)
+   gamma_params = gamma.fit(intervals)
+   gamma_aic = -2 * gamma.logpdf(intervals, *gamma_params).sum() + 2 * 2
+
+   # Fit lognormal
+   lognorm_params = lognorm.fit(intervals)
+   lognorm_aic = -2 * lognorm.logpdf(intervals, *lognorm_params).sum() + 2 * 2
+
+   # Select best fit (minimum AIC)
+   best_fit = min([
+       ('exponential', expon_aic),
+       ('gamma', gamma_aic),
+       ('lognormal', lognorm_aic)
+   ], key=lambda x: x[1])
+   ```
+
+6. **Regime comparison (2024 vs 2025)**
+   ```python
+   from scipy.stats import ks_2samp
+
+   intervals_2024 = intervals[timestamps.year == 2024]
+   intervals_2025 = intervals[timestamps.year == 2025]
+
+   cv_2024 = intervals_2024.std() / intervals_2024.mean()
+   cv_2025 = intervals_2025.std() / intervals_2025.mean()
+
+   ks_stat, ks_pvalue = ks_2samp(intervals_2024, intervals_2025)
+
+   if ks_pvalue < 0.05:
+       regime_different = True
+   ```
+
+**Output:**
+- `phase6a_interval_statistics.csv` (1 row per month)
+  - Columns: month, mean_interval, std_interval, cv, acf_1, min, max, median, best_fit_distribution
+- `phase6a_regime_comparison.json`
+  - CV_2024, CV_2025, ks_statistic, p_value, regime_shift (bool)
+
+**SLO Validation:**
+- CV precision ±0.01 (use np.float64)
+- All statistical tests use scipy (no custom implementations)
+- Log all metrics per month
+
+---
+
+### Phase 6B: Price Clustering Analysis
+
+**Objective:** Identify EUR/USD price levels where deviations cluster
+
+**Input Data:**
+- Zero-spread deviation timestamps + prices (from merged data)
+- Daily high/low levels from Standard data
+
+**Processing Steps:**
+
+1. **Extract prices at deviation events**
+   ```python
+   # Use midpoint of Standard quote at deviation time
+   deviations['price'] = deviations['std_mid']
+   ```
+
+2. **Price binning (5-pip buckets)**
+   ```python
+   # Create 5-pip bins across EUR/USD range
+   bin_width = 0.0005  # 5 pips
+   price_min = deviations['price'].min()
+   price_max = deviations['price'].max()
+
+   bins = np.arange(
+       np.floor(price_min / bin_width) * bin_width,
+       np.ceil(price_max / bin_width) * bin_width + bin_width,
+       bin_width
+   )
+
+   price_bins = pd.cut(deviations['price'], bins=bins)
+   event_counts = price_bins.value_counts().sort_index()
+   ```
+
+3. **Chi-square test for uniformity**
+   ```python
+   from scipy.stats import chisquare
+
+   observed = event_counts.values
+   expected = np.full_like(observed, observed.mean())
+
+   chi2, p_value = chisquare(observed, expected)
+
+   if p_value < 0.05:
+       # Reject uniformity - clustering exists
+       clustering_detected = True
+   ```
+
+4. **Identify hot zones (>2× baseline)**
+   ```python
+   baseline_density = event_counts.mean()
+   hot_zones = event_counts[event_counts > 2 * baseline_density]
+
+   # Extract price levels
+   hot_zone_levels = []
+   for interval, count in hot_zones.items():
+       mid_price = (interval.left + interval.right) / 2
+       enrichment = count / baseline_density
+       hot_zone_levels.append({
+           'price_level': mid_price,
+           'event_count': count,
+           'enrichment': enrichment,
+           'significance': 'high' if enrichment > 3 else 'moderate'
+       })
+   ```
+
+5. **Round number bias test**
+   ```python
+   # Round to nearest 50 pips (e.g., 1.0800, 1.0850, 1.0900)
+   deviations['price_rounded_50'] = (deviations['price'] * 200).round() / 200
+
+   # Count events at exact round levels
+   round_level_counts = deviations['price_rounded_50'].value_counts()
+
+   # Expected: ~2% of bins are round levels (1 in 50 pips)
+   total_events = len(deviations)
+   expected_per_round_level = total_events / (len(event_counts) / 2)  # Approx
+
+   round_bias = round_level_counts.mean() / expected_per_round_level
+
+   if round_bias > 1.5:
+       round_number_bias = True
+   ```
+
+6. **Technical level overlap**
+   ```python
+   # Get daily high/low from Standard data
+   daily_extremes = std_df.resample('D', on='Timestamp').agg({
+       'std_bid': 'min',
+       'std_ask': 'max'
+   })
+
+   # For each deviation, check if near daily high/low
+   tolerance = 0.0010  # 10 pips
+
+   deviations['near_support'] = False
+   deviations['near_resistance'] = False
+
+   for idx, row in deviations.iterrows():
+       day = row['Timestamp'].date()
+       if day in daily_extremes.index:
+           support = daily_extremes.loc[day, 'std_bid']
+           resistance = daily_extremes.loc[day, 'std_ask']
+
+           if abs(row['price'] - support) < tolerance:
+               deviations.loc[idx, 'near_support'] = True
+           if abs(row['price'] - resistance) < tolerance:
+               deviations.loc[idx, 'near_resistance'] = True
+
+   overlap_rate = (
+       deviations['near_support'] | deviations['near_resistance']
+   ).sum() / len(deviations)
+
+   if overlap_rate > 0.15:
+       technical_overlap = True
+   ```
+
+7. **Extreme deviation price distribution**
+   ```python
+   from scipy.stats import ks_2samp
+
+   # Define extreme deviations (>2σ from mean)
+   mean_dev = deviations['deviation'].mean()
+   std_dev = deviations['deviation'].std()
+
+   extreme = deviations[deviations['deviation'] > mean_dev + 2 * std_dev]
+   normal = deviations[deviations['deviation'] <= mean_dev + 2 * std_dev]
+
+   # Test if extreme deviations have different price distribution
+   ks_stat, ks_pvalue = ks_2samp(extreme['price'], normal['price'])
+
+   if ks_pvalue < 0.05:
+       extreme_price_different = True
+   ```
+
+**Output:**
+- `phase6b_price_histogram.csv` (1 row per 5-pip bin)
+  - Columns: price_bin_start, price_bin_end, event_count, density
+- `phase6b_hot_zones.csv` (1 row per significant cluster)
+  - Columns: price_level, event_count, enrichment, significance
+- `phase6b_clustering_summary.json`
+  - chi2_statistic, p_value, clustering_detected, round_bias, technical_overlap_rate
+
+**SLO Validation:**
+- Cluster significance p < 0.05
+- All hot zones >2× baseline density
+- Chi-square test uses scipy (no custom implementation)
+
+---
+
+### Phase 6C: Combined Pattern Analysis
+
+**Objective:** Analyze interaction between temporal and price patterns
+
+**Processing Steps:**
+
+1. **Conditional inter-arrival analysis**
+   ```python
+   # Classify deviations as in/out of hot zones
+   hot_zone_prices = [z['price_level'] for z in hot_zone_levels]
+   tolerance = 0.0005  # 5 pips
+
+   deviations['in_hot_zone'] = deviations['price'].apply(
+       lambda p: any(abs(p - hz) < tolerance for hz in hot_zone_prices)
+   )
+
+   # Calculate intervals separately
+   in_zone_intervals = intervals[deviations['in_hot_zone'].iloc[1:].values]
+   out_zone_intervals = intervals[~deviations['in_hot_zone'].iloc[1:].values]
+
+   mean_in_zone = in_zone_intervals.mean()
+   mean_out_zone = out_zone_intervals.mean()
+
+   ratio = mean_in_zone / mean_out_zone
+
+   if ratio < 0.7:
+       sticky_zone_effect = True  # Intervals shorten in hot zones
+   ```
+
+2. **Burst detection algorithm**
+   ```python
+   # Define burst: 3+ consecutive intervals < threshold
+   burst_threshold = intervals.quantile(0.25)  # 25th percentile
+
+   deviations['is_burst'] = False
+   for i in range(2, len(intervals)):
+       if all(intervals[i-2:i+1] < burst_threshold):
+           deviations.iloc[i]['is_burst'] = True
+
+   burst_count = deviations['is_burst'].sum()
+   burst_rate = burst_count / len(deviations)
+   ```
+
+3. **Burst prediction (transition probabilities)**
+   ```python
+   # Calculate P(burst | burst) vs P(burst | quiet)
+   deviations['next_is_burst'] = deviations['is_burst'].shift(-1)
+
+   p_burst_given_burst = (
+       deviations[deviations['is_burst']]['next_is_burst'].mean()
+   )
+
+   p_burst_given_quiet = (
+       deviations[~deviations['is_burst']]['next_is_burst'].mean()
+   )
+
+   burst_persistence = p_burst_given_burst / p_burst_given_quiet
+
+   if burst_persistence > 2.0:
+       bursts_predict_bursts = True
+   ```
+
+4. **Trading zone classification**
+   ```python
+   # Define RED/YELLOW/GREEN zones based on combined criteria
+
+   trading_zones = []
+   for hz in hot_zone_levels:
+       price = hz['price_level']
+
+       # Check if this zone has shortened intervals
+       zone_devs = deviations[
+           abs(deviations['price'] - price) < tolerance
+       ]
+       zone_intervals = intervals[zone_devs.index[1:]]
+
+       if len(zone_intervals) < 10:
+           continue  # Insufficient data
+
+       zone_cv = zone_intervals.std() / zone_intervals.mean()
+
+       # Classify zone
+       if hz['enrichment'] > 3 and zone_cv > 2.0:
+           risk_level = 'RED'  # High frequency + high burstiness
+       elif hz['enrichment'] > 2 or zone_cv > 1.5:
+           risk_level = 'YELLOW'  # Moderate risk
+       else:
+           risk_level = 'GREEN'  # Low risk
+
+       trading_zones.append({
+           'price_level': price,
+           'risk_level': risk_level,
+           'enrichment': hz['enrichment'],
+           'cv': zone_cv,
+           'recommendation': get_recommendation(risk_level)
+       })
+
+   def get_recommendation(risk):
+       if risk == 'RED':
+           return 'AVOID - High deviation frequency + burst behavior'
+       elif risk == 'YELLOW':
+           return 'CAUTION - Reduce size 50%, widen stops'
+       else:
+           return 'NORMAL - Standard risk parameters'
+   ```
+
+**Output:**
+- `phase6c_conditional_intervals.csv`
+  - Columns: in_hot_zone (bool), mean_interval, std_interval, cv, count
+- `phase6c_burst_statistics.json`
+  - burst_rate, p_burst_given_burst, p_burst_given_quiet, burst_persistence
+- `phase6c_trading_zones.json`
+  - Array of {price_level, risk_level, enrichment, cv, recommendation}
+
+**SLO Validation:**
+- Sticky zone threshold: <70% of baseline interval
+- Burst persistence: >2× baseline
+- All zones classified (RED/YELLOW/GREEN)
+
+---
+
+## Error Handling
+
+**All phases:**
+- FileNotFoundError: Raise if Exness data missing
+- InsufficientDataError: Raise if <1000 deviations per month
+- ValueError: Raise on NaN in critical calculations (intervals, prices)
+- No fallbacks, defaults, retries, or silent handling
+
+**SLO violations:**
+- Raise SLOViolationError if clustering p-value ≥ 0.05 but clusters reported
+- Raise if CV precision > ±0.01
+- Raise if hot zone enrichment < 2× but classified as significant
+
+---
+
+## Expected Outcomes
+
+### Scenario A: Random Process (Null)
+
+**Temporal:**
+- CV ≈ 1.0 (Poisson-like)
+- Autocorrelation ≈ 0
+- Best fit: Exponential distribution
+
+**Price:**
+- Chi-square p > 0.05 (uniform distribution)
+- No hot zones (all bins ≈ baseline)
+- Round number bias < 1.2×
+
+**Actionable:** None. Deviations are unpredictable random events.
+
+### Scenario B: Clustered Process (Actionable)
+
+**Temporal:**
+- CV = 2.0-3.0 (highly bursty)
+- Autocorrelation > 0.4 (strong clustering)
+- Best fit: Gamma or lognormal
+
+**Price:**
+- Chi-square p < 0.001 (significant clustering)
+- Hot zones: 3-5 levels with 3-5× enrichment
+- Round number bias > 2.0×
+- Technical overlap > 20%
+
+**Conditional:**
+- Sticky zones: Intervals 50% shorter in hot zones
+- Burst persistence: 3-4× baseline
+- RED zones: 2-3 levels
+- YELLOW zones: 3-4 levels
+
+**Actionable:**
+- Avoid RED zones (e.g., 1.0800 ± 5 pips)
+- Reduce size in YELLOW zones
+- After burst detected, expect continuation (wait for quiet period)
+
+### Scenario C: Regime-Dependent
+
+**2024:**
+- CV = 1.1 (random)
+- Price uniform
+- No actionable zones
+
+**2025:**
+- CV = 2.5 (bursty)
+- Price clustered (chi-square p < 0.001)
+- 3 RED zones, 4 YELLOW zones
+
+**Actionable:**
+- 2024 patterns obsolete
+- Use 2025-specific zone maps
+- Recalibrate quarterly for regime drift
+
+---
+
+## Deliverables
+
+**Scripts:**
+- `phase6a_interval_analysis.py`
+- `phase6b_price_clustering.py`
+- `phase6c_combined_pattern.py`
+
+**Data Files:**
+- `phase6a_interval_statistics.csv`
+- `phase6a_regime_comparison.json`
+- `phase6b_price_histogram.csv`
+- `phase6b_hot_zones.csv`
+- `phase6b_clustering_summary.json`
+- `phase6c_conditional_intervals.csv`
+- `phase6c_burst_statistics.json`
+- `phase6c_trading_zones.json`
+
+**Reports:**
+- `findings/phase6-interval-clustering-report.md`
+  - Comprehensive analysis of all findings
+  - Trading zone maps with statistical confidence
+  - Regime comparison (2024 vs 2025)
+
+**Plots:**
+- `phase6a_interval_distribution.png` (histogram + fitted distributions)
+- `phase6a_autocorrelation.png` (ACF plot)
+- `phase6b_price_heatmap.png` (event density across price levels)
+- `phase6c_trading_zones_map.png` (RED/YELLOW/GREEN zones on price chart)
+
+---
+
+## Dependencies
+
+**Data:**
+- Phase 2 zero-spread deviation extraction logic
+- 16 months Exness EUR/USD data (Standard + Raw_Spread)
+
+**Software:**
+- scipy 1.16.2 (statistical tests, distribution fitting)
+- pandas 2.0+ (data manipulation)
+- numpy 2.0+ (numerical operations)
+- matplotlib 3.0+ (diagnostic plots)
+
+**Hardware:**
+- Memory: ~2GB (16 months tick data)
+- CPU: ~30 minutes execution time (all 3 phases)
+
+---
+
+**Plan Version:** 1.0.0
+**Status:** READY FOR IMPLEMENTATION
+**Next Action:** Implement Phase 6A-C scripts
+**SLO Coverage:** All 5 dimensions defined ✅

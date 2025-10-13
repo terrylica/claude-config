@@ -1,0 +1,151 @@
+# BID-Only OHLC Construction Demo - Quick Start
+
+## Implementation Status
+
+✅ **Plan**: `/Users/terryli/eon/gapless-crypto-data/docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.0.0.md`
+✅ **Script**: `/tmp/demo_exness_bid_ohlc.py`
+✅ **Error Handling**: Raises FileNotFoundError on missing data (no fallbacks)
+✅ **SLOs Defined**: Availability, Correctness, Observability, Maintainability
+
+## Required Data Files
+
+The demo requires August 2024 Exness EURUSD tick data (both variants):
+
+1. **Raw_Spread variant** (for BID-based OHLC construction)
+2. **Standard variant** (for spread reference)
+
+## Data Download
+
+### Manual Download (curl)
+
+```bash
+# Raw_Spread variant (BID prices for OHLC)
+curl -o /tmp/Exness_EURUSD_Raw_Spread_2024_08.zip \
+  https://ticks.ex2archive.com/ticks/EURUSD_Raw_Spread/2024/08/Exness_EURUSD_Raw_Spread_2024_08.zip
+
+# Standard variant (spread reference)
+curl -o /tmp/Exness_EURUSD_2024_08.zip \
+  https://ticks.ex2archive.com/ticks/EURUSD/2024/08/Exness_EURUSD_2024_08.zip
+```
+
+### Expected File Sizes
+
+- Raw_Spread: ~35-40 MB compressed
+- Standard: ~35-40 MB compressed
+
+## Run Demo
+
+```bash
+cd /tmp && python3 demo_exness_bid_ohlc.py
+```
+
+## Expected Output
+
+### Console Output
+
+```
+=== BID-Only OHLC Construction Demo ===
+
+Step 1: Loading Raw_Spread variant...
+Loading: Exness_EURUSD_Raw_Spread_2024_08.zip (XX.X MB)
+  Loaded XXX,XXX rows
+  Filtered to X,XXX rows (2024-08-05 07:00:00 to 2024-08-05 07:01:59)
+
+Step 2: Loading Standard variant...
+Loading: Exness_EURUSD_2024_08.zip (XX.X MB)
+  Loaded XXX,XXX rows
+  Filtered to X,XXX rows (2024-08-05 07:00:00 to 2024-08-05 07:01:59)
+
+Step 3: Constructing OHLC from Raw_Spread BID...
+  Generated 2 bars
+  Time range: 2024-08-05 07:00:00+00:00 to 2024-08-05 07:01:00+00:00
+  OHLC integrity: PASS
+
+Step 4: Calculating spreads...
+  Raw_Spread variant:
+    Min: 0.00XXX, Max: 0.00XXX, Mean: 0.00XXX
+  Standard variant:
+    Min: 0.00XXX, Max: 0.00XXX, Mean: 0.00XXX
+
+Step 5: Merging results...
+
+Step 6: Writing output to /tmp/demo_exness_bid_ohlc.csv...
+  Wrote 2 bars
+
+=== Result ===
+                           Open     High      Low    Close  raw_spread_avg  standard_spread_avg
+Timestamp
+2024-08-05 07:00:00+00:00  1.XXXXX  1.XXXXX  1.XXXXX  1.XXXXX         0.00XXX              0.00XXX
+2024-08-05 07:01:00+00:00  1.XXXXX  1.XXXXX  1.XXXXX  1.XXXXX         0.00XXX              0.00XXX
+
+✓ Output saved: /tmp/demo_exness_bid_ohlc.csv
+```
+
+### Output CSV
+
+**File**: `/tmp/demo_exness_bid_ohlc.csv`
+
+**Schema**:
+
+```
+Timestamp,Open,High,Low,Close,raw_spread_avg,standard_spread_avg
+2024-08-05 07:00:00+00:00,1.XXXXX,1.XXXXX,1.XXXXX,1.XXXXX,0.00XXX,0.00XXX
+2024-08-05 07:01:00+00:00,1.XXXXX,1.XXXXX,1.XXXXX,1.XXXXX,0.00XXX,0.00XXX
+```
+
+## Data Format Reference
+
+### Exness CSV Structure
+
+```csv
+Exness,Symbol,Timestamp,Bid,Ask
+Exness,EURUSD,2024-08-05 07:00:00.123Z,1.09123,1.09123
+```
+
+### Key Points
+
+1. **BID-Only OHLC**: Open, High, Low, Close derived from BID column only (not Ask, not midpoint)
+2. **Spread Calculation**: `(Ask - Bid).mean()` per 1-minute interval
+3. **Dual Tracking**: Both Raw_Spread and Standard variant spreads included
+4. **Zero-Spread Events**: Raw_Spread variant has bid==ask at specific timestamps
+5. **Precision**: 5 decimal places (standard forex pip precision)
+
+## Error Handling
+
+The script follows strict error propagation policy:
+
+- ❌ **No fallbacks**: Missing data → FileNotFoundError
+- ❌ **No defaults**: Invalid data → ValueError with details
+- ❌ **No retries**: Download failures propagate immediately
+- ❌ **No silent handling**: All errors raised with full context
+
+## Architecture
+
+### Processing Pipeline
+
+```
+ZIP Files → pandas.read_csv() → Time Window Filter → OHLC Resample → Spread Calculation → CSV Output
+```
+
+### Built-In Solutions Used
+
+- `zipfile`: Extract CSV from ZIP archives
+- `pandas.resample('1min')`: OHLC bar construction
+- `pandas.DataFrame.agg(['first', 'max', 'min', 'last'])`: OHLC aggregations
+- `pathlib.Path`: Cross-platform file handling
+
+### SLO Compliance
+
+| SLO             | Target                           | Implementation                                      |
+| --------------- | -------------------------------- | --------------------------------------------------- |
+| Availability    | 100% when data exists            | FileNotFoundError on missing files                  |
+| Correctness     | BID-only OHLC, 5-decimal spreads | Built-in aggregations, `.round(5)`                  |
+| Observability   | Log all steps                    | Print statements for loading, filtering, resampling |
+| Maintainability | Off-the-shelf solutions          | pandas resample(), standard libraries only          |
+
+## References
+
+- **Plan**: `/Users/terryli/eon/gapless-crypto-data/docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.0.0.md`
+- **Methodology**: `/Users/terryli/eon/gapless-crypto-data/docs/research/eurusd-zero-spread-deviations/01-methodology.md`
+- **Data Source**: https://ticks.ex2archive.com/
+- **Research Context**: Phase 6 interval clustering, burst analysis, visualization

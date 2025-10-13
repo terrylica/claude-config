@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""
+Production Script: 3-Year EURUSD Historical Data Processing
+Architecture: Option A (DuckDB Only - Minimal Storage)
+
+Workflow:
+1. Download Exness ZIP for each month
+2. Generate 1-minute OHLC and store in DuckDB
+3. Delete ZIP immediately (save 3.6 GB)
+4. Add metadata for context
+5. Result: Single 28 MB DuckDB file with 1.1M rows
+
+On-demand tick analysis:
+- Re-download specific month when needed (~30 seconds)
+- Create temporary Parquet for querying
+- Delete after analysis
+
+Total storage: 28 MB (vs 8.6 GB keeping everything)
+"""
+
+import zipfile
+from pathlib import Path
+from typing import Optional, List
+from datetime import datetime, timezone
+import duckdb
+import pandas as pd
+from urllib.request import urlretrieve
+from urllib.error import URLError
+
+
+class EURUSDHistoricalProcessor:
+    """Process 3 years of EURUSD data with DuckDB-only architecture."""
+
+    def __init__(self, base_dir: Path = Path('/tmp/eurusd_data')):
+        self.base_dir = base_dir
+        self.duckdb_dir = base_dir / 'duckdb'
+        self.temp_dir = base_dir / 'temp'
+
+        # Create directories
+        for dir_path in [self.duckdb_dir, self.temp_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+
+        self.duckdb_path = self.duckdb_dir / 'eurusd_1m_2022-2024.duckdb'
+
+    def download_exness_zip(self, year: int, month: int) -> Optional[Path]:
+        """
+        Download Exness EURUSD ZIP for specific month.
+
+        URL format: https://ticks.ex2archive.com/Exness_EURUSD_Raw_Spread_YYYY_MM.zip
+        """
+        url = f"https://ticks.ex2archive.com/Exness_EURUSD_Raw_Spread_{year}_{month:02d}.zip"
+        zip_path = self.temp_dir / f"Exness_EURUSD_Raw_Spread_{year}_{month:02d}.zip"
+
+        if zip_path.exists():
+            print(f"  ZIP already exists: {zip_path.name}")
+            return zip_path
+
+        print(f"  Downloading: {url}")
+        try:
+            urlretrieve(url, zip_path)
+            size_mb = zip_path.stat().st_size / 1024 / 1024
+            print(f"  ✓ Downloaded: {size_mb:.1f} MB")
+            return zip_path
+        except URLError as e:
+            print(f"  ✗ Download failed: {e}")
+            return None
+
+    def process_zip_to_ohlc(self, zip_path: Path, year: int, month: int) -> pd.DataFrame:
+        """
+        Load ZIP, generate 1-minute OHLC, and immediately delete ZIP.
+
+        This is the core of Option A: Never store raw ticks locally.
+        """
+        print(f"\n{'─'*70}")
+        print(f"Processing: {year}-{month:02d}")
+        print(f"{'─'*70}")
+
+        # 1. Load tick data from ZIP
+        print("Step 1: Loading tick data from ZIP...")
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            csv_name = zip_path.stem + '.csv'
+            with zf.open(csv_name) as csv_file:
+                df_ticks = pd.read_csv(
+                    csv_file,
+                    usecols=['Timestamp', 'Bid', 'Ask'],
+                    parse_dates=['Timestamp']
+                )
+
+        print(f"  Loaded {len(df_ticks):,} ticks")
+
+        # 2. Convert to UTC timezone-aware
+        df_ticks['Timestamp'] = pd.to_datetime(df_ticks['Timestamp'], utc=True)
+
+        # 3. Generate 1-minute OHLC using pandas
+        print("\nStep 2: Generating 1-minute OHLC...")
+        df_ticks.set_index('Timestamp', inplace=True)
+
+        ohlc = df_ticks['Bid'].resample('1min').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last'
+        })
+
+        # Calculate average spread per minute
+        spread_avg = (df_ticks['Ask'] - df_ticks['Bid']).resample('1min').mean()
+        tick_count = df_ticks['Bid'].resample('1min').count()
+
+        ohlc['spread_avg'] = spread_avg
+        ohlc['tick_count'] = tick_count
+
+        # Remove rows with NaN (minutes with no ticks)
+        ohlc = ohlc.dropna()
+        ohlc.reset_index(inplace=True)
+
+        print(f"  Generated {len(ohlc):,} 1-minute bars")
+
+        # 4. Delete ZIP immediately to save space
+        print("\nStep 3: Deleting ZIP (we have OHLC now)...")
+        zip_size_mb = zip_path.stat().st_size / 1024 / 1024
+        zip_path.unlink()
+        print(f"  ✓ Freed {zip_size_mb:.1f} MB")
+
+        return ohlc
+
+    def store_in_duckdb(self, ohlc: pd.DataFrame, year: int, month: int):
+        """
+        Store OHLC in DuckDB with metadata.
+
+        Uses monthly tables for organization, creates unified view.
+        """
+        conn = duckdb.connect(str(self.duckdb_path))
+
+        table_name = f'ohlc_{year}_{month:02d}'
+
+        # Create table from DataFrame
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS SELECT * FROM ohlc")
+
+        # Add metadata
+        conn.execute(f"""
+            COMMENT ON TABLE {table_name} IS
+            'EURUSD 1-minute OHLC for {year}-{month:02d}. Generated from Exness raw tick data. Processed on {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.spread_avg IS
+            'Average bid-ask spread for the minute (pips)'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.tick_count IS
+            'Number of ticks in this 1-minute bar'
+        """)
+
+        conn.close()
+
+        print(f"  ✓ Stored {len(ohlc):,} bars in DuckDB table: {table_name}")
+
+    def process_all_months(self, start_year: int = 2022, end_year: int = 2024):
+        """
+        Process all months from start_year to end_year.
+
+        This is the main workflow for historical data collection.
+        """
+        print("╔═══════════════════════════════════════════════════════════════╗")
+        print("║     3-Year EURUSD Historical Data Processing (Option A)     ║")
+        print("╚═══════════════════════════════════════════════════════════════╝")
+        print()
+        print(f"Date Range: {start_year}-01 to {end_year}-12")
+        print(f"Target: {(end_year - start_year + 1) * 12} months")
+        print()
+
+        total_bars = 0
+        months_processed = 0
+
+        for year in range(start_year, end_year + 1):
+            print(f"\n{'═'*70}")
+            print(f"Year {year}")
+            print(f"{'═'*70}")
+
+            for month in range(1, 13):
+                # Skip future months
+                if year == 2024 and month > 12:
+                    continue
+
+                # 1. Download ZIP
+                zip_path = self.download_exness_zip(year, month)
+                if zip_path is None:
+                    print(f"  ⚠ Skipping {year}-{month:02d} (download failed)")
+                    continue
+
+                # 2. Process ZIP → OHLC → Delete ZIP
+                ohlc = self.process_zip_to_ohlc(zip_path, year, month)
+
+                # 3. Store in DuckDB
+                self.store_in_duckdb(ohlc, year, month)
+
+                total_bars += len(ohlc)
+                months_processed += 1
+
+        # 4. Create unified view
+        print(f"\n{'═'*70}")
+        print("Creating unified view...")
+        print(f"{'═'*70}")
+        self.create_unified_view()
+
+        # 5. Show final summary
+        self.show_summary(months_processed, total_bars)
+
+    def create_unified_view(self):
+        """
+        Create ohlc_all view that unions all monthly tables.
+
+        This provides seamless access to all 3 years of data.
+        """
+        conn = duckdb.connect(str(self.duckdb_path))
+
+        # Get all ohlc tables
+        tables = conn.execute("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = 'main' AND table_name LIKE 'ohlc_%'
+            ORDER BY table_name
+        """).fetchall()
+
+        if not tables:
+            print("  ⚠ No OHLC tables found!")
+            conn.close()
+            return
+
+        # Create UNION ALL query
+        union_query = " UNION ALL ".join([f"SELECT * FROM {t[0]}" for t in tables])
+
+        # Drop existing view
+        conn.execute("DROP VIEW IF EXISTS ohlc_all")
+
+        # Create new view
+        conn.execute(f"""
+            CREATE VIEW ohlc_all AS
+            {union_query}
+            ORDER BY Timestamp
+        """)
+
+        total_rows = conn.execute("SELECT COUNT(*) FROM ohlc_all").fetchone()[0]
+
+        conn.close()
+
+        print(f"  ✓ Created view: ohlc_all ({total_rows:,} total bars)")
+
+    def show_summary(self, months_processed: int, total_bars: int):
+        """Show final storage summary and next steps."""
+        print(f"\n{'═'*70}")
+        print("Summary")
+        print(f"{'═'*70}")
+
+        duckdb_size_mb = self.duckdb_path.stat().st_size / 1024 / 1024 if self.duckdb_path.exists() else 0
+
+        print(f"\nMonths processed: {months_processed}")
+        print(f"Total 1-minute bars: {total_bars:,}")
+        print(f"DuckDB size: {duckdb_size_mb:.1f} MB")
+        print(f"DuckDB location: {self.duckdb_path}")
+
+        print(f"\n{'─'*70}")
+        print("Storage Comparison:")
+        print(f"{'─'*70}")
+
+        zip_total = months_processed * 100  # ~100 MB per month
+        savings = zip_total - duckdb_size_mb
+
+        print(f"If we kept ZIPs:        {zip_total:>8.1f} MB")
+        print(f"DuckDB (OHLC only):     {duckdb_size_mb:>8.1f} MB")
+        print(f"                        {'─'*20}")
+        print(f"Savings:                {savings:>8.1f} MB ({100 * savings / zip_total:.1f}%)")
+
+        print(f"\n{'═'*70}")
+        print("Next Steps")
+        print(f"{'═'*70}")
+        print("\n1. Query your data:")
+        print(f"   python /tmp/query_eurusd_data.py")
+        print("\n2. Add indicators:")
+        print(f"   python /tmp/add_indicators.py")
+        print("\n3. Tick analysis (on-demand):")
+        print(f"   python /tmp/analyze_ticks_ondemand.py")
+
+    def analyze_ticks_ondemand(self, year: int, month: int, analysis_func=None):
+        """
+        Demonstrate on-demand tick analysis workflow.
+
+        1. Download ZIP for specific month
+        2. Create temporary Parquet
+        3. Run analysis with DuckDB
+        4. Delete temporary files
+
+        This shows how to access tick data without permanent storage.
+        """
+        print(f"\n{'═'*70}")
+        print(f"On-Demand Tick Analysis: {year}-{month:02d}")
+        print(f"{'═'*70}")
+
+        # 1. Download ZIP
+        print("\nStep 1: Downloading tick data...")
+        zip_path = self.download_exness_zip(year, month)
+        if zip_path is None:
+            print("  ✗ Download failed")
+            return
+
+        # 2. Create temporary Parquet
+        print("\nStep 2: Creating temporary Parquet...")
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            csv_name = zip_path.stem + '.csv'
+            with zf.open(csv_name) as csv_file:
+                df_ticks = pd.read_csv(
+                    csv_file,
+                    usecols=['Timestamp', 'Bid', 'Ask'],
+                    parse_dates=['Timestamp']
+                )
+
+        df_ticks['Timestamp'] = pd.to_datetime(df_ticks['Timestamp'], utc=True)
+
+        parquet_path = self.temp_dir / f'ticks_{year}_{month:02d}_temp.parquet'
+        df_ticks.to_parquet(parquet_path, index=False, compression='zstd')
+        parquet_size_mb = parquet_path.stat().st_size / 1024 / 1024
+        print(f"  Created: {parquet_path.name} ({parquet_size_mb:.1f} MB)")
+
+        # 3. Run analysis with DuckDB
+        print("\nStep 3: Running tick analysis...")
+        conn = duckdb.connect()
+
+        # Example analysis: Hourly spread statistics
+        analysis = conn.execute(f"""
+            SELECT
+                HOUR(Timestamp) as hour,
+                AVG(Ask - Bid) as avg_spread,
+                MIN(Ask - Bid) as min_spread,
+                MAX(Ask - Bid) as max_spread,
+                COUNT(*) as tick_count
+            FROM '{parquet_path}'
+            GROUP BY HOUR(Timestamp)
+            ORDER BY hour
+        """).df()
+
+        print("\nHourly Spread Analysis (pips):")
+        print(analysis.to_string(index=False))
+
+        conn.close()
+
+        # 4. Clean up
+        print("\nStep 4: Cleaning up temporary files...")
+        zip_path.unlink()
+        parquet_path.unlink()
+        print(f"  ✓ Deleted {parquet_size_mb:.1f} MB temporary files")
+
+        print("\n✓ On-demand analysis complete (no permanent storage used)")
+
+
+def main():
+    """Main entry point."""
+    processor = EURUSDHistoricalProcessor()
+
+    # Process all 3 years (2022-2024)
+    processor.process_all_months(start_year=2022, end_year=2024)
+
+    # Demonstrate on-demand tick analysis
+    print("\n\n")
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║          Demonstration: On-Demand Tick Analysis              ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+    processor.analyze_ticks_ondemand(year=2024, month=8)
+
+
+if __name__ == '__main__':
+    main()

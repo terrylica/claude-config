@@ -1,0 +1,38 @@
+#!/bin/bash
+# Download remaining SWAP months (c=13) - Fixed version
+set -e
+CONCURRENCY=13
+WORK_DIR="/Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis"
+
+cd "$WORK_DIR"
+
+echo "Downloading remaining 16 months (c=$CONCURRENCY)..."
+echo "- 2023-08 (redo), 2023-10 to 2023-12"
+echo "- 2024-01 to 2024-12"
+echo ""
+
+MONTHS=(
+    "2023 8"
+    "2023 10"
+    "2023 11"
+    "2023 12"
+    "2024 1" "2024 2" "2024 3" "2024 4" "2024 5" "2024 6"
+    "2024 7" "2024 8" "2024 9" "2024 10" "2024 11" "2024 12"
+)
+
+START=$(date +%s)
+
+# Download with inline bash command
+printf '%s\n' "${MONTHS[@]}" | xargs -P $CONCURRENCY -n 2 bash -c '
+    year=$1
+    month=$2
+    echo "[$(date +%H:%M:%S)] Starting $year-$(printf "%02d" $month)..."
+    cd /Users/terryli/eon/funding-rate-arbitrage/victor-cbo-analysis
+    uv run --active python scripts/download_month.py $year $month \
+        --ticks --market-type swap --data-dir data/ 2>&1 | \
+        grep -E "(✓ Saved|ERROR)" || true
+' _
+
+echo ""
+echo "Time: $(( ($(date +%s) - START) / 60 )) min"
+echo "Files: $(find data/raw_ticks_swap -name "*.parquet" | wc -l | tr -d " ")/21"
