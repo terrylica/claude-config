@@ -1,0 +1,132 @@
+#!/bin/bash
+# Setup CrossOver bottle X: drive mapping for repo tracking
+# Usage: ./scripts/setup-bottle-mapping
+
+set -e
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BOTTLE_NAME="MetaTrader 5"
+DRIVE_LETTER="X"
+
+echo "=== CrossOver Bottle Mapping Setup ==="
+echo "Repository: $REPO_ROOT"
+echo "Bottle: $BOTTLE_NAME"
+echo "Drive letter: ${DRIVE_LETTER}:"
+echo ""
+
+# Check CrossOver is installed
+if [ ! -d "/Applications/CrossOver.app" ]; then
+    echo "❌ CrossOver not found at /Applications/CrossOver.app"
+    echo "   Install CrossOver first: https://www.codeweavers.com/crossover"
+    exit 1
+fi
+
+# Check bottle exists
+BOTTLE_ROOT="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE_NAME"
+if [ ! -d "$BOTTLE_ROOT" ]; then
+    echo "❌ Bottle not found: $BOTTLE_NAME"
+    echo "   Available bottles:"
+    ls -1 "$HOME/Library/Application Support/CrossOver/Bottles/" 2>/dev/null || echo "   (none)"
+    exit 1
+fi
+
+echo "✓ Bottle found: $BOTTLE_ROOT"
+echo ""
+
+# Instructions for GUI mapping (cannot automate)
+cat << EOF
+=== Manual Steps Required ===
+
+CrossOver drive mapping must be configured via GUI:
+
+1. Open CrossOver application
+2. Select bottle: "$BOTTLE_NAME"
+3. Click "Manage Bottle" button
+4. Click "Configuration" (or "Settings")
+5. Go to "Drives" tab
+6. Add new drive mapping:
+   - Drive letter: ${DRIVE_LETTER}:
+   - Path: $REPO_ROOT
+   - Type: Normal folder
+7. Click "Apply" or "OK"
+
+=== Verification Steps ===
+
+After mapping, verify with:
+
+  # Test X: drive is visible
+  mt5-start cmd /c "dir ${DRIVE_LETTER}:\\"
+
+  # Should list: mql5, python, scripts, docs, config, exports, logs
+
+  # Test Wine Python can access X:
+  mt5-start "C:\\Program Files\\Python312\\python.exe" -c "import os; print(os.listdir('${DRIVE_LETTER}:\\\\'))"
+
+=== Next Steps ===
+
+1. Complete the GUI mapping above
+2. Run verification commands
+3. Update Wine Python scripts to use ${DRIVE_LETTER}:\\ paths
+4. See docs/guides/BOTTLE_TRACKING.md for full guide
+
+EOF
+
+# Create .gitattributes if missing
+if [ ! -f "$REPO_ROOT/.gitattributes" ]; then
+    echo ""
+    echo "Creating .gitattributes for line ending normalization..."
+    cat > "$REPO_ROOT/.gitattributes" << 'GITATTR'
+# Normalize line endings between macOS and Wine
+* text=auto
+
+# MQL5 files (Windows line endings)
+*.mq5 text eol=crlf
+*.mqh text eol=crlf
+
+# Python files (Unix line endings)
+*.py text eol=lf
+*.sh text eol=lf
+
+# Bash scripts (Unix line endings)
+mq5run text eol=lf
+mq5c text eol=lf
+setup-bottle-mapping text eol=lf
+
+# Config files (Windows line endings for Wine compatibility)
+*.ini text eol=crlf
+
+# Binary files
+*.ex5 binary
+*.dll binary
+*.exe binary
+*.pyc binary
+
+# CSV exports (Unix line endings for easier diff)
+*.csv text eol=lf
+
+# YAML (Unix line endings)
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Markdown (Unix line endings)
+*.md text eol=lf
+GITATTR
+    echo "✓ Created .gitattributes"
+    echo ""
+    echo "Run: git add .gitattributes && git commit -m 'Add .gitattributes for Wine/macOS normalization'"
+else
+    echo ""
+    echo "✓ .gitattributes already exists"
+fi
+
+# Verify bottle config file
+BOTTLE_CONF="$BOTTLE_ROOT/cxbottle.conf"
+if [ -f "$BOTTLE_CONF" ]; then
+    echo ""
+    echo "Current bottle configuration:"
+    grep -A10 "Drives" "$BOTTLE_CONF" 2>/dev/null || echo "(No drives section found yet)"
+fi
+
+echo ""
+echo "=== Setup Script Complete ==="
+echo "Follow the manual steps above to complete drive mapping."

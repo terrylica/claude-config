@@ -127,9 +127,10 @@ This document describes the refactored architecture of the Claude Code workspace
 
 **Symlinks**: Maintains compatibility through symlinks:
 - `~/.claude/ide` → `system/ide`
-- `~/.claude/projects` → `system/sessions`
 - `~/.claude/statsig` → `system/statsig`
 - `~/.claude/todos` → `system/todos`
+
+Session storage is canonical at `~/.claude/projects/`.
 
 ### 📖 Documentation
 **Location**: `docs/`
@@ -208,7 +209,7 @@ find system/ide/ -name "*.lock" -mtime +1 -delete
 find system/statsig/ -name "*.cached.*" -mtime +7 -delete
 
 # Archive old sessions (quarterly)
-find system/sessions/ -name "*.jsonl" -mtime +90 -exec mv {} history/sessions/ \;
+find ~/.claude/projects/ -name "*.jsonl" -mtime +90 -exec mv {} history/sessions/ \;
 ```
 
 ### Backup Strategy
@@ -235,7 +236,7 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ### APCF Workflow Support
 - **Evidence Generation**: APCF methodology in `CLAUDE.md`
 - **Audit Trail**: Git repository with commit history
-- **Development Context**: Session transcripts in `system/sessions/`
+- **Development Context**: Session transcripts in `~/.claude/projects/`
 - **Research Documentation**: Structured in `docs/`
 
 ### Development Tools

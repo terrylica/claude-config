@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""
+Test if atr-adaptive-laguerre v1.0.7 works WITHOUT reset_index fix.
+
+This script mimics the validation framework's behavior but does NOT reset
+DataFrame indices, allowing us to determine if the package still requires
+0-based indices or if v1.0.7 fixed the index-handling issue.
+
+Expected outcomes:
+- If test PASSES → v1.0.7 handles non-zero-based indices correctly
+- If test FAILS → v1.0.7 still needs the validation framework fix
+"""
+
+import sys
+import pandas as pd
+from datetime import timedelta
+from atr_adaptive_laguerre import ATRAdaptiveLaguerreRSI, ATRAdaptiveLaguerreRSIConfig
+
+# Configuration
+sample_data_dir = "/Users/terryli/eon/ml-feature-set/ml_feature_set/sample_data"
+lookback = 1000  # From v4 feature set
+
+print("=" * 80)
+print("Testing atr-adaptive-laguerre v1.0.7 WITHOUT reset_index fix")
+print("=" * 80)
+print()
+
+# Load validation data
+print("Loading validation data...")
+df_full = pd.read_csv(f"{sample_data_dir}/resampled_binance_BTC-2h.csv")
+df_full['date'] = pd.to_datetime(df_full['date'])
+df_full['actual_ready_time'] = df_full['date'] + timedelta(hours=2)
+print(f"Full data shape: {df_full.shape}")
+print(f"Full data index range: {df_full.index[0]} to {df_full.index[-1]}")
+print()
+
+# Configure package (same as v4)
+print("Configuring atr-adaptive-laguerre v1.0.7...")
+config = ATRAdaptiveLaguerreRSIConfig.multi_interval(
+    multiplier_1=4,
+    multiplier_2=12,
+    atr_period=14,
+    smoothing_period=5,
+    smoothing_method='ema',
+    level_up=0.85,
+    level_down=0.15,
+    adaptive_offset=0.75,
+    filter_redundancy=True,
+    availability_column='actual_ready_time'
+)
+indicator = ATRAdaptiveLaguerreRSI(config)
+print(f"Package reports min_lookback: {indicator.min_lookback}")
+print(f"Expected features: {indicator.n_features}")
+print()
+
+# Compute reference features from FULL data
+print("Computing reference features from FULL data...")
+features_full = indicator.fit_transform_features(df_full)
+print(f"Reference features shape: {features_full.shape}")
+print()
+
+# Test validation timestamps (same as validation framework)
+test_timestamps = [
+    "2025-03-17 02:00:00",  # Step 1
+    "2025-03-17 14:00:00",  # Step 7 (known to have regime changes)
+    "2025-03-18 02:00:00",  # Step 13
+    "2025-03-19 06:00:00",  # Step 27 (last in dataset)
+]
+
+all_passed = True
+total_mismatches = 0
+
+for test_time_str in test_timestamps:
+    test_time = pd.to_datetime(test_time_str)
+    test_idx = df_full[df_full['actual_ready_time'] == test_time].index[0]
+
+    print("=" * 80)
+    print(f"Testing timestamp: {test_time_str} (index {test_idx})")
+    print("=" * 80)
+
+    # Calculate slice indices
+    start_idx = test_idx - lookback + 1
+
+    if start_idx < 0:
+        print(f"  SKIP: Not enough data (start_idx={start_idx})")
+        continue
+
+    # CRITICAL: Slice WITHOUT reset_index (mimic old validation behavior)
+    # This preserves the original indices [start_idx, start_idx+1, ..., test_idx]
+    df_sliced = df_full.iloc[start_idx:test_idx + 1]
+
+    print(f"  Sliced data shape: {df_sliced.shape}")
+    print(f"  Sliced index range: {df_sliced.index[0]} to {df_sliced.index[-1]}")
+    print(f"  ⚠️  INDICES ARE NOT 0-BASED (this is the test!)")
+    print()
+
+    try:
+        # Compute features with sliced data (non-zero-based indices)
+        print(f"  Computing features with sliced data...")
+        features_sliced = indicator.fit_transform_features(df_sliced)
+        print(f"  ✓ Feature computation succeeded (no crash)")
+        print(f"  Sliced features shape: {features_sliced.shape}")
+
+    except Exception as e:
+        print(f"  ✗ CRASHED with {type(e).__name__}: {e}")
+        print(f"  → v1.0.7 still requires 0-based indices (validation framework fix needed)")
+        all_passed = False
+        total_mismatches += 1
+        continue
+
+    # Compare features at last row
+    print(f"  Comparing features...")
+    mismatches = 0
+
+    for col in features_full.columns:
+        ref_val = features_full.iloc[test_idx][col]
+        sliced_val = features_sliced.iloc[-1][col]
+        diff = abs(ref_val - sliced_val)
+
+        if diff >= 1e-4:
+            mismatches += 1
+            if mismatches <= 5:  # Show first 5 mismatches
+                print(f"    ✗ {col}: ref={ref_val:.6f}, sliced={sliced_val:.6f}, diff={diff:.6f}")
+
+    if mismatches > 0:
+        print(f"  ✗ {mismatches}/{len(features_full.columns)} features mismatch")
+        all_passed = False
+        total_mismatches += mismatches
+    else:
+        print(f"  ✓ All {len(features_full.columns)} features match perfectly!")
+
+    print()
+
+# Summary
+print("=" * 80)
+print("SUMMARY")
+print("=" * 80)
+print()
+
+if all_passed and total_mismatches == 0:
+    print("✅ RESULT: v1.0.7 works WITHOUT reset_index fix!")
+    print()
+    print("Implications:")
+    print("  - Package now handles non-zero-based indices correctly")
+    print("  - Validation framework fix NOT strictly needed for this package")
+    print("  - However, keeping the fix is still RECOMMENDED for:")
+    print("    • Other packages that may expect 0-based indices")
+    print("    • Future-proofing against package updates")
+    print("    • Consistent behavior across all feature sets")
+    print()
+    print("Recommendation: KEEP validation framework fix (general solution, no downside)")
+else:
+    print("❌ RESULT: v1.0.7 STILL REQUIRES reset_index fix!")
+    print()
+    print("Implications:")
+    print(f"  - Package crashed or produced {total_mismatches} feature mismatches")
+    print("  - Package expects 0-based DataFrame indices")
+    print("  - Validation framework fix IS REQUIRED")
+    print()
+    print("Recommendation: KEEP validation framework fix (necessary for correctness)")
+
+print()
+print("Current PR strategy (BOTH fixes included):")
+print("  1. Validation framework fix (ml_feature_set/validate_feature_set.py)")
+print("  2. v1.0.7 dependency (pyproject.toml)")
+print("  3. v4 feature set (ml_feature_set/bundled/ohlcv_atr-adaptive-laguerre_size79_v4.py)")
+print()
+print("PR #57: https://github.com/Eon-Labs/ml-feature-set/pull/57")

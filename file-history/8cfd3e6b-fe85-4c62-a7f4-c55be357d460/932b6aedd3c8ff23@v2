@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""
+Surgical fix for temporal violations in Laguerre RSI indicator.
+Removes ONLY the cache logic without breaking code structure.
+"""
+from pathlib import Path
+
+# Source file (working v3)
+source = Path("Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended).mq5")
+# Output file
+output = Path("Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5")
+
+print(f"Reading from: {source}")
+content = source.read_text(encoding='utf-16-le')
+lines = content.split('\n')
+
+print(f"Original line count: {len(lines)}")
+
+# Step 1: Find both locations first
+normal_line = None
+custom_line = None
+
+for i in range(len(lines)):
+    if 'if(atrWork[i].saveBar!=i || atrWork[i+1].saveBar>=i)' in lines[i]:
+        normal_line = i
+        print(f"\n✓ Found normal timeframe cache check at line {i+1}")
+
+    if 'if(atrWork[i].saveBar != i || (i < customBarCount - 1 && atrWork[i+1].saveBar >= i))' in lines[i]:
+        custom_line = i
+        print(f"✓ Found custom timeframe cache check at line {i+1}")
+
+if normal_line is None or custom_line is None:
+    print("\n⚠️ Could not find both locations!")
+    exit(1)
+
+# Step 2: Apply fixes in reverse order to preserve line numbers
+# Fix custom timeframe first (higher line number)
+print(f"\nApplying fix to custom timeframe (line {custom_line+1})...")
+
+# Replace the if condition
+lines[custom_line] = lines[custom_line].replace(
+    'if(atrWork[i].saveBar != i || (i < customBarCount - 1 && atrWork[i+1].saveBar >= i))',
+    '// Calculate ATR min/max for adaptive coefficient (TEMPORAL FIX: Always recalculate)\n      if(inpAtrPeriod > 1 && i > 0)'
+)
+
+# Remove cache management lines (lines custom_line+2 and custom_line+3)
+del lines[custom_line+2:custom_line+4]
+print(f"  Removed cache management (2 lines)")
+
+# Fix normal timeframe second (lower line number)
+print(f"\nApplying fix to normal timeframe (line {normal_line+1})...")
+
+# Replace the if condition
+lines[normal_line] = lines[normal_line].replace(
+    'if(atrWork[i].saveBar!=i || atrWork[i+1].saveBar>=i)',
+    '// Calculate ATR min/max for adaptive coefficient (TEMPORAL FIX: Always recalculate)\n            if(inpAtrPeriod>1 && i>0)'
+)
+
+# Remove cache management lines (lines normal_line+2, +3, +4)
+# Line +1 is {
+# Line +2 is comment about cache
+# Line +3 is atrWork[i].saveBar = i;
+# Line +4 is atrWork[i+1].saveBar = -1;
+del lines[normal_line+2:normal_line+5]
+print(f"  Removed cache management (3 lines)")
+
+print(f"\nFinal line count: {len(lines)}")
+print(f"Lines removed: {len(content.split('\\n')) - len(lines)}")
+
+# Write output
+new_content = '\n'.join(lines)
+output.write_text(new_content, encoding='utf-16-le')
+
+print(f"\n✅ Surgical temporal fix complete!")
+print(f"✅ Output: {output}")
+print(f"✅ File size: {output.stat().st_size} bytes")
+print(f"\nChanges made:")
+print("  - Removed all atrWork[i+1] (future bar) accesses")
+print("  - Removed all cache invalidation logic")
+print("  - Preserved all Laguerre RSI calculations")
+print("  - Preserved loop structure")

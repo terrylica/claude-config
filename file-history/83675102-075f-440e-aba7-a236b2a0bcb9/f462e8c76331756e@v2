@@ -1,0 +1,482 @@
+# AI Agent Workflow for MT5 Indicator Development
+
+**Status**: ✅ VALIDATED (2025-10-13)
+**Headless Execution**: WORKING (RSI correlation 0.999902)
+**Implementation Plan**: `../plans/HEADLESS_EXECUTION_PLAN.md`
+
+## Overview
+
+This workflow enables AI coding agents (Claude Code, GitHub Copilot, OpenAI Codex) to:
+
+1. Develop and compile MQL5 indicators/scripts
+2. Execute them headlessly via CrossOver/Wine on macOS
+3. Export data to CSV for Python validation
+4. Compare MT5 indicator outputs with Python implementations
+5. Iterate until Python code exactly replicates MT5 behavior
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AI Coding Agent                         │
+│                  (Claude Code / Codex)                       │
+└───────────────┬─────────────────────────────────────────────┘
+                │
+                ├─► Write/Modify MQL5 code
+                │   (indicators, scripts, EAs)
+                │
+                ├─► Compile via MetaEditor CLI
+                │   (automatic via Wine)
+                │
+                ├─► Execute headlessly via mq5run
+                │   (exports data to CSV)
+                │
+                ├─► Validate with Python
+                │   (compare MT5 vs Python outputs)
+                │
+                └─► Iterate until validation passes
+                    (Python replicates MT5 exactly)
+```
+
+## Components
+
+### 1. MQL5 Export Scripts (`mql5/Scripts/`)
+
+**ExportAligned.mq5**: Main script that exports OHLC + indicators
+
+- Uses modular architecture for easy indicator addition
+- Exports to CSV with timestamp alignment
+- Supports multiple symbols and timeframes
+- Currently includes RSI module
+
+**Structure**:
+```
+mql5/
+├── Scripts/
+│   └── ExportAligned.mq5          # Main script (entry point)
+├── Include/
+│   ├── DataExportCore.mqh         # Core CSV export functions
+│   ├── ExportAlignedCommon.mqh    # Shared functions
+│   └── modules/
+│       └── RSIModule.mqh          # RSI indicator module
+└── Samples/
+    └── RSIAnalysis.mq5            # Sample indicator analysis
+```
+
+### 2. Headless Execution (`mq5run`)
+
+**Purpose**: Execute MT5 scripts from command line without GUI interaction
+
+**Usage**:
+```bash
+# Basic execution (default: EURUSD M1, RSI)
+./scripts/mq5run
+
+# Custom symbol and timeframe
+./scripts/mq5run --symbol XAUUSD --period PERIOD_H1 --timeout 180
+
+# Different script
+./scripts/mq5run --script MyCustomExport --symbol GBPUSD --period PERIOD_M5
+```
+
+**What it does**:
+1. Generates startup.ini config with correct MT5 settings
+2. Launches MT5 via CrossOver Wine with `/portable /config:...`
+3. Waits for script completion (with timeout)
+4. Collects generated CSV files from MQL5/Files
+5. Copies to local `exports/` directory with timestamp
+6. Shows preview and validation summary
+
+**Key Features**:
+- Auto-cleanup of temporary config files
+- Timeout protection (default 120s)
+- Log extraction on failure
+- Wine debug message filtering
+- Process cleanup on timeout
+
+### 3. Python Validator (`python/validate_export.py`)
+
+**Purpose**: Validate MT5 exports and compare with Python implementations
+
+**Usage**:
+```bash
+# Validate exported CSV
+python python/validate_export.py exports/20251013_143000_Export_EURUSD_PERIOD_M1.csv
+```
+
+**What it checks**:
+1. **Data Integrity**:
+   - No missing OHLC values
+   - High >= Low, High >= Open/Close
+   - No duplicate timestamps
+   - Chronological ordering
+
+2. **Indicator Validation** (RSI example):
+   - Computes RSI using pure pandas (matches MT5 algorithm)
+   - Compares MT5 vs Python values
+   - Reports correlation, MAE, max error
+   - Shows per-bar differences
+
+**Output**:
+```
+=== MT5 Export Validator ===
+File: exports/20251013_143000_Export_EURUSD_PERIOD_M1.csv
+
+Loaded 5000 bars
+Time range: 2024-10-01 00:00:00 to 2024-10-13 14:30:00
+Columns: open, high, low, close, tick_volume, spread, real_volume, RSI
+
+=== Data Integrity Check ===
+✓ missing_ohlc: 0
+✓ invalid_high_low: 0
+✓ invalid_high_open: 0
+✓ duplicate_times: 0
+
+✓ All integrity checks passed
+
+=== RSI Validation ===
+Correlation:     0.999987
+Mean Abs Error:  0.000234
+Max Abs Error:   0.002100
+Within tolerance: 4986/5000 (99.7%)
+
+✓ RSI validation PASSED - Python implementation matches MT5
+```
+
+### 4. Startup Configuration (`startup.ini`)
+
+**Purpose**: Tell MT5 what to run on launch
+
+**Format** (based on research findings):
+```ini
+[Experts]
+Enabled=1                    # REQUIRED: Enable algo trading
+AllowLiveTrading=0           # 0 for data export only
+AllowDllImport=0             # 0 if no DLLs used
+
+[StartUp]
+Script=ExportAligned         # Script name (no .ex5)
+Symbol=EURUSD                # Symbol to attach
+Period=PERIOD_M1             # Timeframe
+ShutdownTerminal=1           # Auto-close after completion
+```
+
+**Note**: mq5run generates this automatically. Manual editing not needed.
+
+## Complete Workflow for AI Agents
+
+### Phase 1: Manual Verification
+
+**Goal**: Confirm script works in MT5 UI before automation
+
+1. **Open MetaTrader 5** (already running and logged in)
+
+2. **Test script manually**:
+   ```
+   - Press Ctrl+N (Navigator)
+   - Under "Scripts", find "ExportAligned"
+   - Drag onto any EURUSD chart
+   - Accept defaults (EURUSD, M1, 5000 bars, RSI enabled)
+   - Click OK
+   ```
+
+3. **Check for output**:
+   ```bash
+   ls -lh ~/Library/Application\ Support/CrossOver/Bottles/MetaTrader\ 5/drive_c/Program\ Files/MetaTrader\ 5/MQL5/Files/
+   ```
+
+   Expected: `Export_EURUSD_PERIOD_M1.csv`
+
+4. **Validate output**:
+   ```bash
+   cp ~/Library/Application\ Support/CrossOver/Bottles/MetaTrader\ 5/drive_c/Program\ Files/MetaTrader\ 5/MQL5/Files/Export_EURUSD_PERIOD_M1.csv exports/
+   python python/validate_export.py exports/Export_EURUSD_PERIOD_M1.csv
+   ```
+
+### Phase 2: Headless Automation
+
+**Goal**: Run scripts from command line without GUI interaction
+
+1. **Close MT5** (to avoid conflicts with headless launch)
+
+2. **Run headless**:
+   ```bash
+   ./scripts/mq5run
+   ```
+
+3. **Check results**:
+   ```bash
+   ls -lh exports/
+   ```
+
+   Expected: `20251013_143000_Export_EURUSD_PERIOD_M1.csv`
+
+4. **Validate**:
+   ```bash
+   python python/validate_export.py exports/20251013_143000_Export_EURUSD_PERIOD_M1.csv
+   ```
+
+### Phase 3: Python Implementation
+
+**Goal**: Create Python code that exactly replicates MT5 indicator
+
+1. **Load MT5 reference data**:
+   ```python
+   import pandas as pd
+
+   # Load MT5 export (this is the "source of truth")
+   mt5_df = pd.read_csv("exports/20251013_143000_Export_EURUSD_PERIOD_M1.csv")
+   mt5_df["time"] = pd.to_datetime(mt5_df["time"])
+   mt5_df.set_index("time", inplace=True)
+   ```
+
+2. **Implement indicator in Python**:
+   ```python
+   def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+       """RSI using EMA (matches MT5)"""
+       delta = close.diff()
+       gain = delta.where(delta > 0, 0.0)
+       loss = -delta.where(delta < 0, 0.0)
+
+       avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+       avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+
+       rs = avg_gain / avg_loss
+       rsi = 100 - (100 / (1 + rs))
+       return rsi
+
+   # Compute using Python
+   py_rsi = compute_rsi(mt5_df["close"], period=14)
+   ```
+
+3. **Compare**:
+   ```python
+   import numpy as np
+
+   # Compare with MT5 values
+   mt5_rsi = mt5_df["RSI"]
+   py_rsi_aligned = py_rsi.reindex(mt5_rsi.index)
+
+   # Calculate metrics
+   mae = np.mean(np.abs(mt5_rsi - py_rsi_aligned))
+   max_error = np.max(np.abs(mt5_rsi - py_rsi_aligned))
+   correlation = np.corrcoef(mt5_rsi, py_rsi_aligned)[0, 1]
+
+   print(f"MAE: {mae:.6f}")
+   print(f"Max Error: {max_error:.6f}")
+   print(f"Correlation: {correlation:.6f}")
+   ```
+
+4. **Iterate** until MAE < 0.01 and correlation > 0.999
+
+### Phase 4: Continuous Integration
+
+**Goal**: Automate validation in CI/CD pipeline
+
+```bash
+#!/bin/bash
+# ci-validate.sh
+
+set -e
+
+# 1. Export data from MT5
+./scripts/mq5run --symbol EURUSD --period PERIOD_M1 --timeout 120
+
+# 2. Find latest export
+LATEST_CSV=$(ls -t exports/*.csv | head -1)
+
+# 3. Validate with Python
+python python/validate_export.py "$LATEST_CSV"
+
+# 4. Run Python implementation tests
+uv run --active python -m pytest tests/test_indicators.py -v
+
+echo "✓ All validations passed"
+```
+
+## Research-Based Best Practices
+
+Based on community research (2022-2025):
+
+### Config File Requirements
+
+1. **Always include `[Experts] Enabled=1`** - Without this, scripts won't run
+2. **Use `[StartUp]` section**, not `[Experts]` - Correct section for auto-launching
+3. **Script path without .ex5 extension** - MT5 expects "ScriptName" not "ScriptName.ex5"
+4. **Set `ShutdownTerminal=1`** - For headless CI, terminal must close automatically
+5. **CRITICAL: Use relative config paths** - Absolute paths with spaces cause double-quote issues
+   - ✅ Correct: `/config:config\\startup_${TIMESTAMP}.ini`
+   - ❌ Wrong: `/config:"C:\\Program Files\\MetaTrader 5\\config\\startup_${TIMESTAMP}.ini"`
+   - Root cause: Shell quoting + MT5 config parser = double quotes in path → load failure
+
+### Wine/CrossOver Considerations
+
+1. **Wine version matters** - MT5 build 4865 requires Wine 8.0+ (CrossOver 21+)
+2. **Display required** - MT5 is GUI app, needs X11/display even if headless
+3. **Process cleanup** - Always use timeout and kill stale processes
+4. **Path format** - Use Windows-style paths in config: `C:\\path\\to\\file.ini`
+
+### Common Pitfalls
+
+1. **Anti-debugging in Docker** - Requires `CAP_SYS_PTRACE` capability
+2. **Account not logged in** - Must login once via GUI first
+3. **Missing history data** - Script may fail if symbol history not downloaded
+4. **Indicator initialization** - First N bars may have invalid values (skip in comparison)
+
+## Adding New Indicators
+
+### Step 1: Create MQL5 Module
+
+```mql5
+// mql5/Include/modules/MyIndicatorModule.mqh
+#ifndef __MY_INDICATOR_MODULE_MQH__
+#define __MY_INDICATOR_MODULE_MQH__
+
+struct IndicatorColumn
+{
+   string name;
+   double values[];
+};
+
+bool MyIndicator_Load(
+   const string symbol,
+   const ENUM_TIMEFRAMES timeframe,
+   const int bars,
+   const int period,
+   IndicatorColumn &column,
+   string &errorMsg
+)
+{
+   // Create indicator handle
+   int handle = iMyIndicator(symbol, timeframe, period);
+   if(handle == INVALID_HANDLE)
+   {
+      errorMsg = "Failed to create indicator handle";
+      return false;
+   }
+
+   // Copy indicator buffer
+   ArrayResize(column.values, bars);
+   if(CopyBuffer(handle, 0, 0, bars, column.values) != bars)
+   {
+      errorMsg = "Failed to copy indicator buffer";
+      IndicatorRelease(handle);
+      return false;
+   }
+
+   column.name = "MyIndicator";
+   IndicatorRelease(handle);
+   return true;
+}
+
+#endif // __MY_INDICATOR_MODULE_MQH__
+```
+
+### Step 2: Update ExportAligned.mq5
+
+```mql5
+#include "../Include/modules/MyIndicatorModule.mqh"
+
+input bool InpUseMyIndicator = true;
+input int  InpMyIndicatorPeriod = 14;
+
+// In OnStart(), add:
+if(InpUseMyIndicator)
+{
+   IndicatorColumn myColumn;
+   string myError = "";
+   if(!MyIndicator_Load(symbol, InpTimeframe, series.count, InpMyIndicatorPeriod, myColumn, myError))
+   {
+      PrintFormat("MyIndicator failed: %s", myError);
+      return;
+   }
+   ArrayResize(columns, columnCount + 1);
+   columns[columnCount] = myColumn;
+   columnCount++;
+}
+```
+
+### Step 3: Recompile and Test
+
+```bash
+# Recompile (if MetaEditor CLI available)
+# Or compile via MT5 UI
+
+# Test headless
+./scripts/mq5run --symbol EURUSD --period PERIOD_M1
+
+# Validate
+python python/validate_export.py exports/latest.csv
+```
+
+### Step 4: Implement in Python
+
+```python
+def compute_my_indicator(data: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Python implementation matching MT5"""
+    # Implement indicator logic here
+    pass
+
+# Add to validation script for automated testing
+```
+
+## Troubleshooting
+
+### Script doesn't run headlessly
+
+**Check**:
+1. Is `[Experts] Enabled=1` in config?
+2. Is script name correct (no .ex5)?
+3. Is symbol valid for account?
+4. Check MT5 logs: `~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/MQL5/Logs/`
+
+**Known Issue - Config Path Quoting** (RESOLVED 2025-10-13):
+- **Error**: `cannot load config "C:\Program Files\MetaTrader 5\config\startup_YYYYMMDD_HHMMSS.ini"" at start`
+- **Cause**: Absolute path with spaces requires shell quotes, MT5 receives double quotes
+- **Fix**: Use relative path `config\startup_${TIMESTAMP}.ini` without quotes in `/config:` parameter
+- **Validated**: Headless execution working with 100% success rate post-fix
+
+### No CSV generated
+
+**Check**:
+1. Did script execute? (check logs)
+2. Did script have errors? (check Experts log tab in MT5)
+3. Is file in correct location? (`MQL5/Files/`)
+4. Did script complete before timeout?
+
+### Python validation fails
+
+**Check**:
+1. Are you using the same algorithm? (EMA vs SMA for RSI)
+2. Are initial bars handled correctly? (skip first N)
+3. Is precision sufficient? (use more decimal places)
+4. Are timestamps aligned?
+
+### MT5 closes immediately
+
+**Check**:
+1. Wine version (need 8.0+ for recent MT5 builds)
+2. Is display available? (CrossOver should handle this)
+3. Check terminal logs for crash messages
+
+## Future Enhancements
+
+1. **Multi-symbol exports** - Export multiple symbols in single run
+2. **Tick data export** - Export tick-level data for training
+3. **Optimization runs** - Export Strategy Tester optimization results
+4. **Live monitoring** - Continuous export during live trading
+5. **Remote execution** - Trigger exports via API/webhook
+
+## References
+
+- **Implementation Plan** (with SLOs): `../plans/HEADLESS_EXECUTION_PLAN.md`
+- **Validation Report**: `../reports/SUCCESS_REPORT.md`
+- Research findings: `../archive/historical.txt` (2022-2025 community best practices)
+- MT5 documentation: `CROSSOVER_MQ5.md`
+- MQL5 code: `../../mql5/`
+- Python validator: `../../python/validate_export.py`
+- Execution wrapper: `../../scripts/mq5run`
+
+## Contact & Support
+
+For issues or questions about this workflow, see the historical conversation context or consult the research findings embedded in the codebase.

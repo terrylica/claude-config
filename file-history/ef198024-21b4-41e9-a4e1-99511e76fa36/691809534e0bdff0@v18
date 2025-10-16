@@ -1,0 +1,168 @@
+"""
+ATR-Adaptive Laguerre RSI Feature Set (v2 - Single-Interval, 27 Features)
+
+Single-interval implementation using atr-adaptive-laguerre v1.0.5+ with data leakage fix.
+
+Features (27 total):
+- Core RSI: Laguerre RSI with ATR-adaptive gamma
+- Regime Detection: Bull/Bear/Neutral classification
+- Level Distances: Distance to overbought/oversold/midline
+- Crossovers: Detection of regime changes
+- Bar Tracking: Bars since extreme levels
+- Momentum: RSI changes and velocity
+- Statistics: Percentile rank, z-score, volatility, range
+
+Architecture:
+- Uses package's single-interval mode (no multipliers)
+- Only requires base 1x data as input
+- Uses availability_column='actual_ready_time' to respect data availability (v1.0.5 fix)
+
+Package: atr-adaptive-laguerre>=1.0.5
+Reference: https://pypi.org/project/atr-adaptive-laguerre/
+
+Changelog:
+- v2.1: Updated to v1.0.5 (boundary bug fixed)
+- v2: Single-interval (27 features) optimized for v0.2.0 API
+- v1: Initial implementation
+"""
+
+import numpy as np
+import pandas as pd
+from ml_feature_set.feature_set import FeatureSet
+
+
+class CustomFeatureSet(FeatureSet):
+    """
+    ATR-Adaptive Laguerre RSI Feature Set (Single-Interval - 27 Features)
+
+    This feature set uses the atr-adaptive-laguerre package's single-interval
+    processing to generate 27 momentum and regime features.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._indicator = None
+
+    def _get_indicator(self):
+        """Lazy initialization of ATR-Adaptive Laguerre RSI indicator"""
+        if self._indicator is None:
+            try:
+                from atr_adaptive_laguerre import (
+                    ATRAdaptiveLaguerreRSI,
+                    ATRAdaptiveLaguerreRSIConfig
+                )
+
+                # Use v1.0.5 single-interval mode (27 features)
+                config = ATRAdaptiveLaguerreRSIConfig.single_interval(
+                    atr_period=14,
+                    smoothing_period=5,
+                    smoothing_method='ema',
+                    level_up=0.85,
+                    level_down=0.15,
+                    adaptive_offset=0.75,
+                    availability_column='actual_ready_time'  # v1.0.5: Fix data leakage
+                )
+                self._indicator = ATRAdaptiveLaguerreRSI(config)
+
+                # Validate configuration
+                assert self._indicator.n_features == 27, \
+                    f"Expected 27 features, config will generate {self._indicator.n_features}"
+
+            except ImportError as e:
+                raise ImportError(
+                    "atr-adaptive-laguerre>=1.0.5 required. "
+                    "Install: pip install 'atr-adaptive-laguerre>=1.0.5'"
+                ) from e
+        return self._indicator
+
+    @property
+    def data_dependencies(self):
+        """Return data source dependencies information."""
+        return [
+            {"source": "ohlcv", "resample_factors": [1], "is_primary": True},
+        ]
+
+    def get_source_lookback_length(self, source_name):
+        """
+        Get required historical data length for specific data source.
+
+        Args:
+            source_name: Data source name (e.g., ohlcv_1x)
+
+        Returns:
+            Required historical data length (30 for single-interval config)
+        """
+        # Parse source name
+        parts = source_name.split("_")
+
+        if len(parts) > 1 and parts[-1].endswith("x"):
+            try:
+                int(parts[-1].replace("x", ""))
+                base_source = "_".join(parts[:-1])
+            except ValueError:
+                base_source = source_name
+        else:
+            base_source = source_name
+
+        if base_source == "ohlcv":
+            indicator = self._get_indicator()
+            return indicator.min_lookback
+
+        raise ValueError(f"Unsupported data source: {source_name}")
+
+    def extract_feature(self):
+        """Extract ATR-Adaptive Laguerre RSI single-interval features (27 total)"""
+
+        # Get OHLCV data source
+        ohlcv_source = self.get_data_source("ohlcv_1x")
+        df = ohlcv_source["data_df"].copy()
+
+        # Validate framework requirements
+        if "actual_ready_time" not in df.columns:
+            raise ValueError(
+                "Data source missing 'actual_ready_time' column "
+                "(required by ml-feature-set framework)"
+            )
+
+        # Validate OHLCV columns
+        required_columns = ["open", "high", "low", "close", "volume"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                f"Data source missing required columns: {', '.join(missing_columns)}"
+            )
+
+        # Get indicator and compute features
+        indicator = self._get_indicator()
+
+        # Validate sufficient data
+        if len(df) < indicator.min_lookback:
+            raise ValueError(
+                f"Insufficient data: {len(df)} rows provided, "
+                f"{indicator.min_lookback} required for single-interval mode"
+            )
+
+        features_df = indicator.fit_transform_features(df)
+
+        # Validate output shape
+        if features_df.shape[0] != df.shape[0]:
+            raise ValueError(
+                f"Feature output length mismatch: "
+                f"expected {df.shape[0]}, got {features_df.shape[0]}"
+            )
+
+        # Validate feature count (should be 27)
+        if features_df.shape[1] != 27:
+            raise ValueError(
+                f"Feature count mismatch: expected 27 features, got {features_df.shape[1]}"
+            )
+
+        # Prefix feature names to avoid conflicts
+        feature_columns = {col: f"atr_laguerre_{col}" for col in features_df.columns}
+        features_df = features_df.rename(columns=feature_columns)
+
+        # Handle NaN values
+        features_df = features_df.fillna(0.0)
+
+        # Set features using batch method
+        self.set_features_batch(features_df.to_dict('list'))

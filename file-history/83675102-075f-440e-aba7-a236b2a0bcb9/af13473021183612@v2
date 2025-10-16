@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Comprehensive MetaEditor CLI testing script
+
+CX_ROOT="/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
+WINEPREFIX="/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+MT5_ROOT="$WINEPREFIX/drive_c/Program Files/MetaTrader 5"
+TEST_FILE="C:/test.mq5"
+ORIGINAL_FILE="MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5"
+
+cd "$MT5_ROOT"
+
+echo "=============================================="
+echo "MetaEditor CLI Compilation Test - Comprehensive"
+echo "=============================================="
+echo ""
+
+# Attempt 1: Basic help
+echo "--- Attempt 1: MetaEditor /? ---"
+env WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all timeout 3 "$CX_ROOT/bin/wine" MetaEditor64.exe /? 2>&1 | grep -v "^fixme:" | head -10
+echo "Exit code: $?"
+echo ""
+
+# Attempt 2: Compile with simple C: path
+echo "--- Attempt 2: /compile:C:/test.mq5 ---"
+env WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all timeout 5 "$CX_ROOT/bin/wine" MetaEditor64.exe /compile:C:/test.mq5 2>&1 | grep -v "^fixme:"
+echo "Exit code: $?"
+echo ""
+
+# Attempt 3: Compile with quoted path
+echo "--- Attempt 3: /compile:\"C:/test.mq5\" ---"
+env WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all timeout 5 "$CX_ROOT/bin/wine" MetaEditor64.exe "/compile:C:/test.mq5" 2>&1 | grep -v "^fixme:"
+echo "Exit code: $?"
+echo ""
+
+# Attempt 4: With /inc and /log
+echo "--- Attempt 4: /compile with /inc and /log ---"
+env WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all timeout 5 "$CX_ROOT/bin/wine" MetaEditor64.exe /compile:C:/test.mq5 /inc:MQL5 /log 2>&1 | grep -v "^fixme:"
+echo "Exit code: $?"
+echo ""
+
+# Attempt 5: Try with original file path
+echo "--- Attempt 5: Original file path ---"
+env WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all timeout 5 "$CX_ROOT/bin/wine" MetaEditor64.exe "/compile:$ORIGINAL_FILE" 2>&1 | grep -v "^fixme:"
+echo "Exit code: $?"
+echo ""
+
+# Attempt 6: Windows-style path
+echo "--- Attempt 6: Windows-style path with backslashes ---"
+env WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all timeout 5 "$CX_ROOT/bin/wine" MetaEditor64.exe '/compile:MQL5\Indicators\Custom\ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5' 2>&1 | grep -v "^fixme:"
+echo "Exit code: $?"
+echo ""
+
+# Check results
+echo "=============================================="
+echo "Checking for compiled files..."
+echo "=============================================="
+echo ""
+
+if [ -f "$WINEPREFIX/drive_c/test.ex5" ]; then
+    echo "✓ SUCCESS: test.ex5 was created!"
+    ls -lh "$WINEPREFIX/drive_c/test.ex5"
+else
+    echo "✗ test.ex5 not found"
+fi
+
+if [ -f "$MT5_ROOT/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.ex5" ]; then
+    echo "✓ SUCCESS: Original FIXED.ex5 was created!"
+    ls -lh "$MT5_ROOT/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.ex5"
+else
+    echo "✗ FIXED.ex5 not found"
+fi
+
+echo ""
+echo "=============================================="
+echo "Checking MetaEditor log for new entries..."
+echo "=============================================="
+python3 << 'PYEOF'
+from pathlib import Path
+from datetime import datetime, timedelta
+
+log_file = Path("/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/logs/metaeditor.log")
+content = log_file.read_text(encoding='utf-16-le')
+lines = content.strip().split('\n')
+
+# Look for recent entries (last hour)
+now = datetime.now()
+recent_cutoff = now - timedelta(hours=1)
+
+print(f"Looking for log entries after {recent_cutoff.strftime('%Y.%m.%d %H:%M')}")
+print("")
+
+found_recent = False
+for line in lines[-20:]:
+    if line.strip():
+        # Try to parse timestamp
+        try:
+            parts = line.split('\t')
+            if len(parts) >= 2:
+                timestamp_str = parts[1].strip()
+                # Parse format like "2025.10.13 14:32:06.641"
+                timestamp = datetime.strptime(timestamp_str.split('.')[0], '%Y.%m.%d %H:%M:%S')
+                if timestamp > recent_cutoff:
+                    print(f"Recent: {line}")
+                    found_recent = True
+        except:
+            pass
+
+if not found_recent:
+    print("No recent compilation entries found in log")
+    print("")
+    print("Last 3 log entries:")
+    for line in lines[-3:]:
+        if line.strip():
+            print(f"  {line}")
+PYEOF

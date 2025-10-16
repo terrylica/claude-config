@@ -1,0 +1,308 @@
+# AI Research Agent Prompt: MQL5 CLI Compilation with CrossOver/Wine on macOS
+
+## Research Objective
+
+Find **any documented or undocumented methods** for compiling MQL5 indicators via command-line interface (CLI) using CrossOver or Wine on macOS that we have not yet attempted.
+
+## Technical Environment
+
+**Platform**: macOS 14.x (Sonoma)
+**Emulation Layer**: CrossOver 24.0.6 (Wine 9.x custom build by CodeWeavers)
+**Application**: MetaTrader 5 Build 4360
+**Bottle Location**: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5`
+**MT5 Installation**: `$BOTTLE/drive_c/Program Files/MetaTrader 5`
+**Target File**: MQL5 indicator file (.mq5) → Compiled to .ex5
+
+## Problem Statement
+
+**Goal**: Compile MQL5 source code (.mq5) to executable (.ex5) via command-line without GUI interaction.
+
+**Known working method**: MetaEditor GUI (press F7) - **NOT acceptable** for automation.
+
+**Current blocker**: All CLI compilation attempts fail due to:
+1. CrossOver bottle detection errors (`Unable to find 'default' bottle`)
+2. Silent failures (no output, no logs, no compiled files)
+3. Process hangs requiring timeout to kill
+
+## Methods Already Attempted (Do NOT Suggest These)
+
+### 1. Direct Wine Execution
+```bash
+"$CX_ROOT/bin/wine" MetaEditor64.exe /compile:"path/to/file.mq5"
+"$CX_ROOT/bin/wine" MetaEditor64.exe /compile:"path/to/file.mq5" /inc:"MQL5" /log
+```
+**Result**: Bottle detection failure, timeout after 3-10 seconds
+
+### 2. Environment Variables
+```bash
+export WINEPREFIX="/path/to/bottle"
+export CX_BOTTLE="MetaTrader 5"
+export WINEDEBUG=-all
+wine MetaEditor64.exe /compile:...
+```
+**Result**: Variables ignored by CrossOver wine wrapper
+
+### 3. CrossOver Utilities
+```bash
+cxrun --bottle "MetaTrader 5" --command "MetaEditor64.exe" --args "/compile:..."
+cxbottle --name "MetaTrader 5" --exec "MetaEditor64.exe /compile:..."
+```
+**Result**: Incompatible flag syntax, no compilation features
+
+### 4. Standalone Compiler (mql64.exe)
+- Downloaded from official MQL5 site (22MB, PE32+ executable)
+- Attempted with wine execution: `wine mql64.exe /compile:... /inc:...`
+**Result**: Same bottle detection failure, timeout
+
+### 5. Path Format Variations (5+ formats tested)
+- Windows backslashes: `MQL5\\Indicators\\file.mq5`
+- Forward slashes: `MQL5/Indicators/file.mq5`
+- Quoted paths: `"/compile:path"`
+- Simplified paths: `C:/test.mq5`
+- Relative paths from MT5 directory
+**Result**: Path format is not the issue - bottle detection fails regardless
+
+### 6. Python Subprocess Automation
+```python
+subprocess.run([wine, 'MetaEditor64.exe', '/compile:...'],
+               env={'WINEPREFIX': '...'}, timeout=10)
+```
+**Result**: TimeoutExpired after 10 seconds, no output
+
+### 7. Execution from Different Directories
+- From MT5 root: `cd "$MT5_ROOT" && wine ./MetaEditor64.exe /compile:...`
+- From system root
+- With absolute paths
+**Result**: No effect on bottle detection
+
+### 8. Copied Executables into Bottle
+- Copied mql64.exe into bottle directory
+- Executed as `wine ./mql64.exe /compile:...`
+**Result**: Same bottle detection failure
+
+### 9. GUI Automation (AppleScript)
+- Created AppleScript to send F7 keystroke
+**Result**: Works but requires GUI interaction (not CLI)
+
+### 10. Multiple Compilation Flags
+- Tested: `/compile`, `/inc`, `/log`, `/include`, combinations
+**Result**: Flags not processed due to bottle detection failure
+
+### 11. Relative vs Absolute Paths for Wine Binary
+- Tried: `wine`, `./wine`, `/full/path/to/wine`
+**Result**: Same failure regardless
+
+## Research Questions (Prioritized)
+
+### High Priority
+
+1. **Alternative CrossOver CLI Interfaces**
+   - Are there undocumented CrossOver command-line tools for running Windows apps?
+   - Does CrossOver have a REST API, socket interface, or IPC mechanism?
+   - Can CrossOver bottles be manipulated via Apple's `defaults` command or plist editing?
+
+2. **Wine Direct Execution Bypassing CrossOver Wrapper**
+   - Can we execute the underlying Wine binary directly (not CrossOver's wrapper)?
+   - Location of actual Wine binary inside CrossOver.app bundle?
+   - Can we construct Wine environment manually to bypass CrossOver bottle detection?
+
+3. **MetaTrader/MetaEditor Undocumented Features**
+   - Are there environment variables that MetaEditor respects for CLI mode?
+   - Does MetaEditor have a Windows COM interface or automation API?
+   - Are there registry keys (in Wine registry) that enable CLI mode?
+
+4. **MQL5 Compiler Alternatives**
+   - Are there third-party MQL5 compilers (open source or commercial)?
+   - Can MQL5 code be cross-compiled from Python/C++ using parser libraries?
+   - Is there a JavaScript/WebAssembly version of the MQL5 compiler?
+
+### Medium Priority
+
+5. **Wine/CrossOver Configuration**
+   - Can we create a 'default' bottle and symlink to our actual bottle?
+   - Are there Wine configuration files (.wine, registry) that can force bottle detection?
+   - Does `winecfg` or `winetricks` have relevant settings for CrossOver?
+
+6. **Process Injection/Debugging**
+   - Can we attach a debugger to understand why MetaEditor hangs?
+   - Are there Wine debug channels that show what MetaEditor is waiting for?
+   - Can we use `dtrace` or `lldb` on macOS to trace the hanging process?
+
+7. **Container/Virtualization Approaches**
+   - Would running actual Windows in Docker/Parallels/UTM be more reliable?
+   - Are there pre-built Docker images with MetaTrader + working CLI compilation?
+   - Can WSL2 on Windows be accessed from macOS via remote execution?
+
+8. **Community Solutions**
+   - Have MQL5 forum users documented working CLI solutions (2020-2025)?
+   - Are there GitHub repos with MQL5 compilation automation scripts?
+   - Do algorithmic trading communities have internal tools for this?
+
+### Low Priority
+
+9. **MetaTrader Versions**
+   - Does MetaTrader 4 (MT4) have better CLI compilation support than MT5?
+   - Are older MT5 builds more CLI-friendly than build 4360?
+   - Do beta/preview builds expose CLI features?
+
+10. **Windows Subsystem for Linux (WSL) on macOS**
+    - Can we use WSL on a remote Windows machine via SSH?
+    - Are there cloud services offering Windows CLI access for compilation?
+
+## Research Methodology
+
+### Search Strategy
+
+**Primary Sources**:
+1. MQL5 official documentation (https://www.mql5.com/en/docs)
+2. MQL5 community forums (2020-2025 posts)
+3. GitHub repositories (search: "mql5 compile", "metaeditor cli", "wine mql5")
+4. Stack Overflow (tags: mql5, metatrader, wine, crossover)
+5. CrossOver support forums and CodeWeavers knowledge base
+6. Wine HQ application database (MetaTrader entries)
+
+**Secondary Sources**:
+7. Reddit (r/algotrading, r/wine_gaming, r/metatrader)
+8. Algorithmic trading blogs and technical articles
+9. YouTube videos (automation tutorials)
+10. Discord/Telegram trading communities
+
+**Search Queries** (Examples):
+- "mql5 command line compilation wine"
+- "metaeditor headless compile"
+- "crossover bottle detection bypass"
+- "mql5 compiler alternative"
+- "metatrader automation cli"
+- "wine execute without bottle"
+- "mql64.exe usage examples"
+- Site-specific: `site:mql5.com "command line" compile`
+- Date-restricted: `after:2023 "mql5 cli compilation"`
+
+### Validation Criteria
+
+For each method found, verify:
+1. **Is it truly CLI-based?** (No GUI interaction required)
+2. **Is it specific to CrossOver/Wine?** (Or native Wine on Linux)
+3. **Is it documented with working examples?** (Not just speculation)
+4. **Has it been verified by others?** (Reproducible results)
+5. **Is it different from our 11+ attempts?** (Novel approach)
+
+## Desired Output Format
+
+Please structure your findings as follows:
+
+### Method [Number]: [Method Name]
+
+**Source**: [URL or citation]
+**Date**: [When this was documented]
+**Platform**: [macOS/Linux/Windows, Wine version if specified]
+**Novelty**: [What makes this different from attempted methods]
+
+**Description**:
+[Clear explanation of the method]
+
+**Command/Code Example**:
+```bash
+# Exact commands or code
+```
+
+**Prerequisites**:
+- [Tool/library installations needed]
+- [Configuration files to modify]
+
+**Expected Outcome**:
+- [What should happen if successful]
+- [How to verify compilation succeeded]
+
+**Confidence Level**: [High/Medium/Low]
+- High: Multiple confirmations, recent documentation
+- Medium: Single source, older documentation
+- Low: Speculation or unverified claims
+
+**Risk Assessment**:
+- [Any security/stability concerns]
+- [Reversibility if method fails]
+
+---
+
+### Example Output
+
+**Method 1: Wine Native Execution Bypassing CrossOver Wrapper**
+
+**Source**: https://example.com/wine-crossover-direct-execution
+**Date**: 2024-06-15
+**Platform**: macOS, Wine 9.x via CrossOver
+**Novelty**: Executes underlying Wine binary directly instead of CrossOver wrapper
+
+**Description**:
+CrossOver includes a standard Wine binary at `CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/wine64`. By executing this directly and manually setting Wine environment variables, we can bypass CrossOver's bottle detection wrapper.
+
+**Command/Code Example**:
+```bash
+export WINEPREFIX="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+export WINEDLLOVERRIDES="mscoree=d"
+WINE_BIN="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/wine64"
+
+"$WINE_BIN" "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/MetaEditor64.exe" \
+  /compile:"MQL5/Indicators/file.mq5" /inc:"MQL5" /log
+```
+
+**Prerequisites**:
+- CrossOver installed at default location
+- MetaTrader 5 bottle exists
+- Wine environment variables set correctly
+
+**Expected Outcome**:
+- Command returns within 1-2 seconds
+- .ex5 file created in same directory as .mq5
+- Compilation log written to metaeditor.log
+
+**Confidence Level**: Medium
+- Method documented on blog post with 2 confirmations in comments
+- Not officially supported by CodeWeavers
+- Requires Wine binary location knowledge
+
+**Risk Assessment**:
+- Low risk: Only reads files and executes compiler
+- Fully reversible: No system modifications
+- May break with CrossOver updates (binary location changes)
+
+---
+
+## Special Instructions
+
+1. **Focus on methods we haven't tried**: Cross-reference each finding against our 11 attempted methods
+2. **Prioritize recent solutions**: 2023-2025 content is more relevant than 2010-2015
+3. **Look for CrossOver-specific workarounds**: Generic Wine solutions may not apply
+4. **Check for MetaEditor alternatives**: CLI compilers, API wrappers, third-party tools
+5. **Identify prerequisite tools**: If methods require additional software, list them
+6. **Note platform differences**: Linux Wine solutions may differ from macOS CrossOver
+7. **Verify source credibility**: Official docs > verified blogs > forum posts > Reddit comments
+8. **Include negative findings**: If widespread consensus says "CLI doesn't work", document that too
+
+## Context for AI Agent
+
+This research is for **automated CI/CD pipelines** where GUI interaction is not feasible. Manual compilation via MetaEditor GUI is already known to work but is unacceptable for automation purposes.
+
+The fixed indicator file exists and is ready to compile - we only need a working CLI compilation method. Any solution that requires opening MetaEditor GUI (even if scripted) is not considered CLI compilation.
+
+## Success Criteria
+
+Research is successful if you find:
+1. **At least 1 novel method** not in our attempted list
+2. **Documented examples** with commands/code
+3. **Verification from multiple sources** (if possible)
+4. **Clear explanation** of why method differs from our attempts
+
+If no new methods exist, document:
+1. **Consensus from community** that CLI compilation doesn't work
+2. **Official statements** from MetaQuotes or CodeWeavers
+3. **Alternative approaches** (different tools, remote compilation services, etc.)
+
+## Timeline
+
+Please conduct research and provide findings within your capabilities. Prioritize quality and verification over speed.
+
+---
+
+**END OF RESEARCH PROMPT**

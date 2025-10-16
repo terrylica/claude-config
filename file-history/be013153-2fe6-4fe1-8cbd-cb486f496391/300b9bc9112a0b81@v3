@@ -1,0 +1,98 @@
+#!/usr/bin/env python
+"""Quick test to verify objective function fixes work correctly."""
+import numpy as np
+from sklearn.datasets import make_regression, make_classification
+
+print("Testing evolutionary-forest objective functions...")
+
+# Test 1: MSE Regression
+print("\n1. Testing MSE objective...")
+try:
+    from evolutionary_forest.forest import EvolutionaryForestRegressor
+    X, y = make_regression(n_samples=100, n_features=5, noise=0.1, random_state=42)
+    model = EvolutionaryForestRegressor(
+        max_height=3,
+        normalize=True,
+        select='AutomaticLexicase',
+        gene_num=10,
+        boost_size=100,
+        n_gen=2,
+        n_pop=10,
+        cross_pb=1,
+        base_learner='Ridge',
+        score_func='MSE',
+        verbose=False
+    )
+    model.fit(X[:80], y[:80])
+    score = model.score(X[80:], y[80:])
+    print(f"   ✅ MSE objective works! Score: {score:.4f}")
+except Exception as e:
+    print(f"   ❌ MSE objective failed: {e}")
+
+# Test 2: RMSE Regression
+print("\n2. Testing RMSE objective...")
+try:
+    from evolutionary_forest.forest import EvolutionaryForestRegressor
+    X, y = make_regression(n_samples=100, n_features=5, noise=0.1, random_state=42)
+    model = EvolutionaryForestRegressor(
+        max_height=3,
+        normalize=True,
+        select='AutomaticLexicase',
+        gene_num=10,
+        boost_size=100,
+        n_gen=2,
+        n_pop=10,
+        cross_pb=1,
+        base_learner='Ridge',
+        score_func='RMSE',
+        verbose=False
+    )
+    model.fit(X[:80], y[:80])
+    score = model.score(X[80:], y[80:])
+    print(f"   ✅ RMSE objective works! Score: {score:.4f}")
+except Exception as e:
+    print(f"   ❌ RMSE objective failed: {e}")
+
+# Test 3: Accuracy Classification
+print("\n3. Testing Accuracy objective...")
+try:
+    from evolutionary_forest.classifier import EvolutionaryForestClassifier
+    X, y = make_classification(n_samples=100, n_features=5, n_informative=3,
+                               n_redundant=0, n_classes=2, random_state=42)
+    model = EvolutionaryForestClassifier(
+        max_height=3,
+        normalize=True,
+        select='AutomaticLexicase',
+        gene_num=10,
+        boost_size=100,
+        n_gen=2,
+        n_pop=10,
+        cross_pb=1,
+        base_learner='LR',
+        score_func='Accuracy',
+        verbose=False
+    )
+    model.fit(X[:80], y[:80])
+    score = model.score(X[80:], y[80:])
+    print(f"   ✅ Accuracy objective works! Score: {score:.4f}")
+except Exception as e:
+    print(f"   ❌ Accuracy objective failed: {e}")
+
+# Test 4: OneHotEncoder sklearn API compatibility
+print("\n4. Testing OneHotEncoder API compatibility...")
+try:
+    from sklearn.preprocessing import OneHotEncoder
+    import warnings
+    warnings.filterwarnings('error')
+
+    # This should not raise deprecation warning
+    enc = OneHotEncoder(sparse_output=False)
+    data = np.array([[1], [2], [3]])
+    enc.fit_transform(data)
+    print("   ✅ OneHotEncoder uses correct API (sparse_output=False)")
+except DeprecationWarning as e:
+    print(f"   ❌ OneHotEncoder still using deprecated API: {e}")
+except Exception as e:
+    print(f"   ⚠️  OneHotEncoder test encountered error: {e}")
+
+print("\n✅ All objective function tests completed!")

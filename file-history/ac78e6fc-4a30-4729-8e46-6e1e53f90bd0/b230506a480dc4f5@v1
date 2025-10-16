@@ -1,0 +1,598 @@
+# SSH aliases with ZeroTier failover (built into SSH config)
+
+# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# Fix broken Homebrew completions (prevent warning about missing _brew)
+if [[ -L "/usr/local/share/zsh/site-functions/_brew" && ! -e "/usr/local/share/zsh/site-functions/_brew" ]]; then
+  rm -f "/usr/local/share/zsh/site-functions/_brew" >/dev/null 2>&1
+fi
+
+# Homebrew initialization
+if [ -x "/opt/homebrew/bin/brew" ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+# Path to your Oh My Zsh installation.
+export ZSH="$HOME/.oh-my-zsh"
+
+# Terminal Integration (VSCode/Cursor/Warp)
+if [[ "$TERM_PROGRAM" == "vscode" || "$TERM_PROGRAM" == "WarpTerminal" ]]; then
+    export SHELL=/bin/zsh
+    export COLORTERM=truecolor
+fi
+
+# Disable Oh-My-Zsh auto-title to allow custom emoji titles
+DISABLE_AUTO_TITLE="true"
+
+# Set name of the theme to load
+ZSH_THEME="robbyrussell"
+
+# Disable the % symbol for partial line output
+unsetopt PROMPT_SP
+
+# Which plugins would you like to load?
+plugins=(
+    git
+    zsh-syntax-highlighting
+    zsh-autosuggestions
+    colored-man-pages
+    zsh-completions
+)
+
+source $ZSH/oh-my-zsh.sh
+
+# User configuration
+# Note: PATH and pipx configuration moved to ~/.zshenv for proper precedence
+
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+alias qpublish="quarto render && quarto publish quarto-pub --no-prompt"
+# Note: PATH entries moved to ~/.zshenv for proper precedence
+# Homebrew PATH entry removed - managed by ~/.zshenv
+export CFLAGS="-O3 -mtune=native"
+export CXXFLAGS="-O3 -mtune=native"
+
+# Python Virtual Environment Management
+# Improved function to detect and activate Python virtual environments
+
+# Function to check if a virtual environment is active
+is_venv_active() {
+  if [ -n "$VIRTUAL_ENV" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Function to safely deactivate a virtual environment
+safe_deactivate() {
+  if is_venv_active; then
+    deactivate 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
+# Dynamic project root detection
+get_project_root() {
+  if [[ -n "$VIRTUAL_ENV" ]]; then
+    # For standard venv layout, project root is typically the parent of .venv
+    dirname "$VIRTUAL_ENV"
+  fi
+}
+
+# Function to automatically set project-specific environment variables
+venv_auto_set_project_vars() {
+  local project_root=$(get_project_root)
+  
+  if [[ -n "$project_root" && -d "$project_root" ]]; then
+    # Set PYTHONPATH to include the project root if not already set
+    if [[ ":$PYTHONPATH:" != *":$project_root:"* ]]; then
+      export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$project_root"
+    fi
+    
+    # Add any project bin directory to PATH if it exists
+    if [[ -d "$project_root/bin" ]]; then
+      export PATH="$project_root/bin:$PATH"
+    fi
+    
+    # Auto-detect project type and set appropriate environment variables
+    if [[ -f "$project_root/pyproject.toml" ]]; then
+      # Extract project name from pyproject.toml if available
+      # Look for 'name = "project-name"' pattern with quotes
+      local project_name=$(grep -A1 "\[project\]" "$project_root/pyproject.toml" | grep "name" | sed -E 's/name = "([^"]+)".*/\1/' | sed -E "s/name = '([^']+)'.*/\1/")
+      
+      if [[ -z "$project_name" ]]; then
+        # Try a more general approach if the above doesn't work
+        project_name=$(grep "name" "$project_root/pyproject.toml" | head -1 | sed -E 's/.*name.*=.*"([^"]+)".*/\1/' | sed -E "s/.*name.*=.*'([^']+)'.*/\1/")
+      fi
+      
+      if [[ -n "$project_name" ]]; then
+        # Convert project name to uppercase with underscores for env var convention
+        local env_prefix=$(echo "$project_name" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
+        export "${env_prefix}_ROOT"="$project_root"
+        
+        # Set PYTHONPATH to include src dir if it exists
+        if [[ -d "$project_root/src" ]]; then
+          export PYTHONPATH="$project_root/src:$PYTHONPATH"
+        fi
+        
+        echo "Set environment for project: $project_name"
+      fi
+    fi
+  fi
+}
+
+# Function to detect and activate the appropriate Python virtual environment
+activate_python_env() {
+  # Skip if we're in a Docker container
+  if [ -f /.dockerenv ]; then
+    return
+  fi
+
+  # Skip if we're in the scripts directory (to prevent conflicts with IDE environments)
+  if [[ "$PWD" == "/Users/terryli/scripts"* ]]; then
+    return
+  fi
+
+  # Check for .venv in current directory or parent directories
+  local dir="$PWD"
+  local max_depth=6  # Limit search to 6 parent directories
+  local depth=0
+  
+  while [ "$dir" != "/" ] && [ $depth -lt $max_depth ]; do
+    if [ -d "$dir/.venv" ] && [ -f "$dir/.venv/bin/activate" ]; then
+      # Check if we're already in this virtual environment
+      if [ "$VIRTUAL_ENV" = "$dir/.venv" ]; then
+        return  # Already in the correct venv
+      fi
+      
+      # Deactivate any active virtual environment first
+      safe_deactivate
+      
+      # Activate workspace virtual environment
+      source "$dir/.venv/bin/activate"
+      
+      # Ensure PATH prioritizes the venv bin directory
+      export PATH="$dir/.venv/bin:$PATH"
+      
+      # Call the hook to set project-specific environment variables
+      venv_auto_set_project_vars
+      
+      echo "Activated Python virtual environment at $dir/.venv"
+      rehash  # Refresh command hash table
+      return
+    fi
+    dir=$(dirname "$dir")
+    ((depth++))
+  done
+  
+  # If we've reached here and not found a venv, and we're in a venv that
+  # doesn't match any parent directory's .venv, deactivate it
+  if is_venv_active; then
+    local venv_path=$(dirname $(dirname "$VIRTUAL_ENV"))
+    if [ "$venv_path" != "$PWD" ] && [[ "$PWD" != "$venv_path"/* ]]; then
+      safe_deactivate
+      echo "Deactivated virtual environment not associated with this directory"
+    fi
+  fi
+}
+
+# Set up Python executable wrapper
+python_wrapper() {
+  if is_venv_active && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+    "$VIRTUAL_ENV/bin/python" "$@"
+  else
+    \command python "$@"
+  fi
+}
+
+# Set up pip wrapper to ensure it uses the correct Python
+pip_wrapper() {
+  if is_venv_active && [ -x "$VIRTUAL_ENV/bin/pip" ]; then
+    "$VIRTUAL_ENV/bin/pip" "$@"
+  else
+    \command pip "$@"
+  fi
+}
+
+# Enhanced Python script execution with suffix aliases
+python_script_handler() {
+  # Process script path
+  local script="$1"
+  shift  # Remove script from arguments
+  
+  # Check if file exists and is executable
+  if [[ ! -f "$script" || ! -x "$script" ]]; then
+    echo "Error: Script not found or not executable: $script" >&2
+    return 1
+  fi
+  
+  # Read first line to check for shebang
+  local shebang=$(head -n 1 "$script")
+  
+  # If has python shebang and we're in a venv, run with venv python
+  if [[ "$shebang" == *"python"* ]] && is_venv_active; then
+    # Use the wrapper to ensure venv's Python is used
+    python "$script" "$@"
+    return $?
+  fi
+  
+  # Otherwise run normally
+  "$script" "$@"
+  return $?
+}
+
+# Note: Python/pip aliases use wrappers but should prefer uv per CLAUDE.md principles
+# Remove any existing aliases first
+unalias python python3 pip pip3 2>/dev/null || true
+
+# Set up aliases to use the wrapper (legacy support, prefer uv commands)
+alias python=python_wrapper
+alias python3=python_wrapper
+# Note: pip aliases maintained for compatibility, but prefer 'uv add' and 'uv run'
+alias pip=pip_wrapper
+alias pip3=pip_wrapper
+
+# Run the function each time the directory changes
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd activate_python_env
+
+# Skip shell startup activation to prevent conflicts with IDE environments
+# activate_python_env
+
+# Set up suffix alias for .py files
+alias -s py=python_script_handler
+
+# TA-Lib config
+export TA_INCLUDE_PATH=/opt/homebrew/include
+export TA_LIBRARY_PATH=/opt/homebrew/lib
+
+# Note: UV Python PATH management moved to ~/.zshenv for proper precedence
+# UV_PYTHON auto-detection for the newest version
+if [[ -z "$UV_PYTHON" ]]; then
+  # Check if UV has managed Python installations
+  if [[ -d ~/.local/share/uv/python ]]; then
+    # Use nullglob to handle case where no directories match
+    setopt local_options nullglob
+    uv_python_dirs=(~/.local/share/uv/python/cpython-*)
+    if [[ ${#uv_python_dirs[@]} -gt 0 ]]; then
+      # Sort by version (newest first) and pick the first one
+      for uv_python_dir in "${(@On)uv_python_dirs}"; do
+        if [[ -d "$uv_python_dir/bin" ]]; then
+          newest_python="$uv_python_dir/bin/python3"
+          if [[ -x "$newest_python" ]]; then
+            export UV_PYTHON="$newest_python"
+            break
+          fi
+        fi
+      done
+    fi
+  fi
+fi
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+export PATH="/Users/terryli/.bun/bin:$PATH"
+export GEMINI_API_KEY="AIzaSyDi-qHoQX6K4APVVzOWfNcW794SnWD6-5A"
+
+# Helix as default editor (modern modal editor with built-in LSP)
+export EDITOR="hx"
+export VISUAL="hx"
+
+# Glow for markdown viewing only
+alias mdview='glow'
+alias mdpager='glow -p'
+
+# Disable Python Language Servers for Cursor IDE
+export PYRIGHT_PYTHON_ENABLE=false
+export BASEDPYRIGHT_ENABLE=false
+export PYTHON_LANGUAGE_SERVER=none
+export VSCODE_PYTHON_ANALYSIS_DISABLED=true
+export CLAUDE_TTS_TO_CLIPBOARD=1
+
+# Simple tmux session manager
+source ~/.claude/tmux/config/simple-shell-integration.sh
+
+# Ensure tmux-workspace function is completely removed
+unset -f tmux-workspace 2>/dev/null
+
+# GPU Workstation Tools - All available via ~/.local/bin (in PATH)
+# Note: All SAGE and development tools are now in ~/.local/bin and accessible globally
+# Terminal display settings
+export LINES=50
+export COLUMNS=120
+alias ssh-tca-nt='ssh tca -t "cd ~/eon/nt && pwd && echo \"Now in ~/eon/nt directory\" && exec /bin/zsh -l"'
+# Smart SSH function with directory sync
+ssh-yca() {
+    local current_dir="$PWD"
+    local relative_dir=""
+    
+    # Check if we're under HOME directory
+    if [[ "$current_dir" == "$HOME"* ]]; then
+        # Get relative path from HOME
+        relative_dir="${current_dir#$HOME/}"
+        
+        if [[ -n "$relative_dir" ]]; then
+            # Try to cd to the same relative directory, fallback to HOME if it doesn't exist
+            ssh yca -t "cd ~/'$relative_dir' 2>/dev/null || cd ~; exec /bin/zsh -l"
+        else
+            # We're in HOME directory
+            ssh yca -t "cd ~; exec /bin/zsh -l"
+        fi
+    else
+        # Not under HOME, just go to remote HOME
+        ssh yca -t "cd ~; exec /bin/zsh -l"
+    fi
+}
+alias ssh-tca='ssh tca -t "exec /bin/zsh -l"'
+
+# Rust-Python integration helper
+rust-python-project() {
+    local project_name=$1
+    if [[ -z "$project_name" ]]; then
+        echo "Usage: rust-python-project <project_name>"
+        return 1
+    fi
+    
+    echo "Creating hybrid Rust-Python project: $project_name"
+    cargo new "$project_name" --bin
+    cd "$project_name"
+    
+    # Add maturin for Python bindings
+    cargo add pyo3 --features "extension-module"
+    cargo add maturin --build
+    
+    # Initialize Python environment
+    uv venv .venv
+    source .venv/bin/activate
+    uv add maturin
+    
+    echo "Hybrid Rust-Python project created successfully!"
+    echo "To build Python extension: maturin develop --release"
+}
+
+# Clean and rebuild function
+fresh-build() {
+    echo "🧹 Cleaning build artifacts..."
+    cargo clean
+    echo "🔨 Rebuilding with optimizations..."
+    cargo build --release
+    echo "✅ Fresh build complete!"
+}
+
+# Dynamic tab title based on ~/eon/ subdirectory
+eon_set_tab_title() {
+  # Only set if in Ghostty
+  if [[ -n "$GHOSTTY_RESOURCES_DIR" ]]; then
+    local title_prefix=""
+    local dir_name=$(basename "$PWD")
+
+    case "$PWD" in
+      */.claude*)                   title_prefix="🔮" ;;
+      */scripts*)                   title_prefix="🐚" ;;
+      */eon/ml-feature-*)           title_prefix="🤖" ;;
+      */eon/evolutionary-forest*)   title_prefix="🧬" ;;
+      */eon/backtesting.py*)        title_prefix="📊" ;;
+      */eon/funding-rate-arbitrage*) title_prefix="💹" ;;
+      */eon/AlphaForge*)            title_prefix="⚡" ;;
+      */eon/data-source-manager*)   title_prefix="💾" ;;
+      */eon/gapless-crypto-data*)   title_prefix="₿" ;;
+      */eon/atr-adaptive-laguerre*) title_prefix="📈" ;;
+      */eon/experiment_*)           title_prefix="🧪" ;;
+      */eon/helpers-worktree*)      title_prefix="🔧" ;;
+      */eon/custom-logger*)         title_prefix="📝" ;;
+      */eon/_Archived*)             title_prefix="📦" ;;
+      */eon/legal-docs-source*)     title_prefix="📜" ;;
+      */eon/eon-ming-settlement-system*) title_prefix="🤝" ;;
+      */eon/mql5*)                  title_prefix="📰" ;;
+      */eon/*)                      title_prefix="⚙️" ;;
+      */dental-career-opportunities*) title_prefix="🦷" ;;
+      */app/mpv*)                   title_prefix="🎬" ;;
+      *)                            title_prefix="" ;;
+    esac
+
+    # Set window title using OSC sequence
+    if [[ -n "$title_prefix" ]]; then
+      printf '\033]0;%s %s\007' "$title_prefix" "$dir_name"
+    else
+      printf '\033]0;%s\007' "$dir_name"
+    fi
+  fi
+}
+
+# Hook to update tab title on directory change
+add-zsh-hook precmd eon_set_tab_title
+
+# Claude wrapper removed - title preservation handled by CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 in settings.json
+
+# Atuin shell history sync with encrypted cloud backup
+eval "$(atuin init zsh)"
+
+# MetaTrader 5 CrossOver helpers
+CROSSOVER_HOME="$HOME/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
+CROSSOVER_BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+if [ -d "$CROSSOVER_HOME/bin" ]; then
+  export PATH="$CROSSOVER_HOME/bin:$PATH"
+  export MVK_CONFIG_LOG_LEVEL="${MVK_CONFIG_LOG_LEVEL:-0}"
+fi
+
+mt5-start() {
+  local cxstart="$CROSSOVER_HOME/bin/cxstart"
+  if [ ! -x "$cxstart" ]; then
+    printf 'MetaTrader helper: cxstart missing at %s\n' "$cxstart" >&2
+    return 1
+  fi
+  "$cxstart" --bottle "MetaTrader 5" "$@"
+}
+
+mq5c() {
+  if [ -z "$1" ]; then
+    echo "Usage: mq5c path/to/script.mq5" >&2
+    return 1
+  fi
+  local src_abs="${1:A}"
+  local src_dir="${src_abs:h}"
+  local src_name="${src_abs:t}"
+  local stem="${src_name%.*}"
+  local stage_root="$CROSSOVER_BOTTLE/drive_c/mt5work/staging"
+  local stage_target="$stage_root/$(basename "$src_dir")"
+  mkdir -p "$stage_target"
+  rsync -a --delete "$src_dir/" "$stage_target/" || {
+    printf 'mq5c: unable to stage directory %s\n' "$src_dir" >&2
+    return 1
+  }
+  local stage_src="$stage_target/$src_name"
+  local stage_log="$stage_target/${stem}.log"
+  local stage_ex="$stage_target/${stem}.ex5"
+  rm -f "$stage_log" "$stage_log.utf8" "$stage_ex"
+  local stage_src_rel=${stage_src#${CROSSOVER_BOTTLE}/drive_c/}
+  local stage_log_rel=${stage_log#${CROSSOVER_BOTTLE}/drive_c/}
+  local stage_src_win="C:\\${stage_src_rel//\//\\\\}"
+  local stage_log_win="C:\\${stage_log_rel//\//\\\\}"
+  mt5-start "C:\\Program Files\\MetaTrader 5\\metaeditor64.exe" \
+    /compile:"$stage_src_win" \
+    /log:"$stage_log_win" \
+    /errors
+  local exit_code=$?
+  if [ -f "$stage_log" ]; then
+    local log_utf8="$stage_log.utf8"
+    if iconv -f UTF-16 -t UTF-8 "$stage_log" > "$log_utf8" 2>/dev/null; then
+      local tail_line
+      tail_line=$(tail -n 1 "$log_utf8" 2>/dev/null)
+      printf 'mq5c: log written to %s\n' "$stage_log"
+      printf 'mq5c: UTF-8 copy at %s\n' "$log_utf8"
+      if [ -n "$tail_line" ]; then
+        printf 'mq5c: %s\n' "$tail_line"
+      fi
+    else
+      printf 'mq5c: compilation log at %s (UTF-16)\n' "$stage_log"
+    fi
+  else
+    printf 'mq5c: no explicit log generated at %s\n' "$stage_log" >&2
+  fi
+  if [ -f "$stage_ex" ]; then
+    cp "$stage_ex" "$src_dir/${stem}.ex5"
+    printf 'mq5c: copied %s to %s\n' "$stage_ex" "$src_dir/${stem}.ex5"
+  fi
+  local meta_log="$CROSSOVER_BOTTLE/drive_c/Program Files/MetaTrader 5/logs/metaeditor.log"
+  if [ -f "$meta_log" ]; then
+    local tmp_meta
+    tmp_meta=$(mktemp)
+    if iconv -f UTF-16 -t UTF-8 "$meta_log" > "$tmp_meta" 2>/dev/null; then
+      local summary
+      summary=$(grep -aF "$stage_src_win" "$tmp_meta" | tail -n 1)
+      if [ -n "$summary" ]; then
+        printf 'mq5c: %s\n' "$summary"
+      fi
+    fi
+    rm -f "$tmp_meta"
+  fi
+  if [ "$exit_code" -gt 0 ]; then
+    return 0
+  fi
+  return $exit_code
+}
+
+mq5export() {
+  if [ $# -lt 4 ]; then
+    echo "Usage: mq5export script.mq5 SYMBOL TIMEFRAME BARS [OUTPUT_NAME]" >&2
+    return 1
+  fi
+  local script_path="$1"
+  local script_dir_resolved
+  script_dir_resolved=$(cd "$(dirname "$script_path")" && pwd)
+  local script_abs="$script_dir_resolved/$(basename "$script_path")"
+  shift
+  local symbol="$1"; shift
+  local timeframe="$1"; shift
+  local bars="$1"; shift
+  local output_name="$1"
+
+  mq5c "$script_abs" || return $?
+
+  local script_dir
+  script_dir=$(dirname "$script_abs")
+  local stem
+  stem=$(basename "$script_abs")
+  stem=${stem%.*}
+  local base_name
+  base_name=$(basename "$script_dir")
+  local stage_target="$CROSSOVER_BOTTLE/drive_c/mt5work/staging/$base_name"
+  local staged_ex5="$stage_target/${stem}.ex5"
+  if [ ! -f "$staged_ex5" ]; then
+    printf 'mq5export: compiled artifact %s not found\n' "$staged_ex5" >&2
+    return 1
+  fi
+
+  local scripts_dir="$CROSSOVER_BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Scripts"
+  mkdir -p "$scripts_dir"
+  cp "$staged_ex5" "$scripts_dir/${stem}.ex5"
+
+  local config_file="$stage_target/export_config.ini"
+  local config_rel=${config_file#${CROSSOVER_BOTTLE}/drive_c/}
+  local config_win="C:\\${config_rel//\//\\\\}"
+
+  local tf_value
+  case "$timeframe" in
+    PERIOD_M1|M1) tf_value=1 ;;
+    PERIOD_M5|M5) tf_value=5 ;;
+    PERIOD_M15|M15) tf_value=15 ;;
+    PERIOD_M30|M30) tf_value=30 ;;
+    PERIOD_H1|H1) tf_value=60 ;;
+    PERIOD_H4|H4) tf_value=240 ;;
+    PERIOD_D1|D1) tf_value=1440 ;;
+    PERIOD_W1|W1) tf_value=10080 ;;
+    PERIOD_MN1|MN1) tf_value=43200 ;;
+    *) tf_value="$timeframe" ;;
+  esac
+
+  local csv_name="$output_name"
+  if [ -z "$csv_name" ]; then
+    csv_name="Export_${symbol}_${timeframe}.csv"
+  fi
+
+  cat > "$config_file" <<EOF
+[Common]
+Login=0
+EnableNews=0
+
+[Experts]
+AllowDllImport=0
+Enabled=1
+
+[StartUp]
+EnableExperts=1
+Script=${stem}
+Symbol=${symbol}
+Period=${tf_value}
+ScriptParameters=InpSymbol=${symbol};InpTimeframe=${tf_value};InpBars=${bars};InpUseRSI=true;InpRSIPeriod=14;InpOutputName=${csv_name}
+ShutdownTerminal=1
+EOF
+
+  mt5-start "C:\\Program Files\\MetaTrader 5\\terminal64.exe" /portable /skipupdate /config:"$config_win"
+
+  local data_dir="$CROSSOVER_BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Files"
+  local csv_path="$data_dir/$csv_name"
+  if [ ! -f "$csv_path" ]; then
+    printf 'mq5export: expected CSV %s not found\n' "$csv_path" >&2
+    return 1
+  fi
+
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local exports_dir="$repo_root/exports"
+  mkdir -p "$exports_dir"
+  local dest="$exports_dir/$csv_name"
+  cp "$csv_path" "$dest"
+
+  local history="$exports_dir/history.jsonl"
+  printf '{"timestamp":"%s","symbol":"%s","timeframe":"%s","bars":%s,"file":"%s"}\n' \
+    "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$symbol" "$timeframe" "$bars" "$csv_name" >> "$history"
+
+  printf 'mq5export: CSV stored at %s\n' "$dest"
+}

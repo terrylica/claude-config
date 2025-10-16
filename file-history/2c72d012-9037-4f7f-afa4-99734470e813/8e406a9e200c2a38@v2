@@ -1,0 +1,364 @@
+"""Integration tests for processor methods returning Pydantic models (v2.1.0).
+
+SLO Coverage:
+- SLO-CR-2: UpdateResult/CoverageInfo match processor return data: 100% field accuracy
+- SLO-MA-3: Tests independent (no execution order dependency): 100% isolation
+- SLO-MA-4: Mock fixtures prevent network calls: 0 external dependencies
+- SLO-MA-5: Test failures don't leave orphaned temp files: 100% cleanup success
+"""
+
+import pytest
+from pathlib import Path
+
+from exness_data_preprocess.models import CoverageInfo, UpdateResult
+from exness_data_preprocess.processor import ExnessDataProcessor
+
+
+class TestUpdateDataReturnsUpdateResult:
+    """Test update_data() returns UpdateResult Pydantic instance."""
+
+    def test_update_data_return_type_non_existent_database(self, processor_with_temp_dir, monkeypatch):
+        """Test update_data() returns UpdateResult instance (database doesn't exist yet).
+
+        SLO-CR-2: Model field accuracy: 100%.
+        SLO-MA-4: Mock fixtures prevent network calls: 0 external dependencies.
+        """
+        # Mock download_exness_zip to avoid network calls
+        def mock_download(self, year, month, pair, variant):
+            # Create mock ZIP file
+            import zipfile
+            import pandas as pd
+
+            zip_path = self.temp_dir / f"Exness_{pair}_{variant}_{year}_{month:02d}.zip"
+            csv_path = self.temp_dir / f"Exness_{pair}_{variant}_{year}_{month:02d}.csv"
+
+            # Create empty CSV
+            df = pd.DataFrame({"Timestamp": [], "Bid": [], "Ask": []})
+            df.to_csv(csv_path, index=False)
+
+            # Create ZIP
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(csv_path, csv_path.name)
+
+            csv_path.unlink()
+            return zip_path
+
+        # Mock _load_ticks_from_zip to return empty DataFrame
+        def mock_load_ticks(self, zip_path):
+            import pandas as pd
+            return pd.DataFrame({
+                "Timestamp": pd.to_datetime([], utc=True),
+                "Bid": [],
+                "Ask": []
+            })
+
+        monkeypatch.setattr(ExnessDataProcessor, "download_exness_zip", mock_download)
+        monkeypatch.setattr(ExnessDataProcessor, "_load_ticks_from_zip", mock_load_ticks)
+
+        # Call update_data
+        result = processor_with_temp_dir.update_data(
+            pair="EURUSD",
+            start_date="2024-09-01"
+        )
+
+        # SLO-CR-2: Verify UpdateResult instance
+        assert isinstance(result, UpdateResult)
+
+        # SLO-CR-2: Verify all fields accessible via attributes
+        assert isinstance(result.duckdb_path, Path)
+        assert isinstance(result.months_added, int)
+        assert isinstance(result.raw_ticks_added, int)
+        assert isinstance(result.standard_ticks_added, int)
+        assert isinstance(result.ohlc_bars, int)
+        assert isinstance(result.duckdb_size_mb, float)
+
+        # SLO-CR-3: Verify constraints (ge=0)
+        assert result.months_added >= 0
+        assert result.raw_ticks_added >= 0
+        assert result.standard_ticks_added >= 0
+        assert result.ohlc_bars >= 0
+        assert result.duckdb_size_mb >= 0
+
+    def test_update_data_attribute_access(self, processor_with_temp_dir, monkeypatch):
+        """Test UpdateResult supports attribute access.
+
+        SLO-CR-2: Model field accuracy: 100%.
+        """
+        # Mock to avoid network calls
+        def mock_download(self, year, month, pair, variant):
+            # Create mock ZIP file
+            import zipfile
+            import pandas as pd
+
+            zip_path = self.temp_dir / f"Exness_{pair}_{variant}_{year}_{month:02d}.zip"
+            csv_path = self.temp_dir / f"Exness_{pair}_{variant}_{year}_{month:02d}.csv"
+
+            # Create empty CSV
+            df = pd.DataFrame({"Timestamp": [], "Bid": [], "Ask": []})
+            df.to_csv(csv_path, index=False)
+
+            # Create ZIP
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(csv_path, csv_path.name)
+
+            csv_path.unlink()
+            return zip_path
+
+        def mock_load_ticks(self, zip_path):
+            import pandas as pd
+            return pd.DataFrame({
+                "Timestamp": pd.to_datetime([], utc=True),
+                "Bid": [],
+                "Ask": []
+            })
+
+        monkeypatch.setattr(ExnessDataProcessor, "download_exness_zip", mock_download)
+        monkeypatch.setattr(ExnessDataProcessor, "_load_ticks_from_zip", mock_load_ticks)
+
+        result = processor_with_temp_dir.update_data(
+            pair="EURUSD",
+            start_date="2024-09-01"
+        )
+
+        # SLO-CR-2: Verify attribute access works
+        months = result.months_added
+        assert isinstance(months, int)
+
+        path = result.duckdb_path
+        assert isinstance(path, Path)
+
+        size = result.duckdb_size_mb
+        assert isinstance(size, float)
+
+        raw_ticks = result.raw_ticks_added
+        assert isinstance(raw_ticks, int)
+
+        std_ticks = result.standard_ticks_added
+        assert isinstance(std_ticks, int)
+
+        bars = result.ohlc_bars
+        assert isinstance(bars, int)
+
+
+class TestGetDataCoverageReturnsCoverageInfo:
+    """Test get_data_coverage() returns CoverageInfo Pydantic instance."""
+
+    def test_get_data_coverage_return_type_no_database(self, processor_with_temp_dir):
+        """Test get_data_coverage() returns CoverageInfo (database doesn't exist).
+
+        SLO-CR-2: Model field accuracy: 100%.
+        """
+        # Call get_data_coverage on non-existent database
+        coverage = processor_with_temp_dir.get_data_coverage("EURUSD")
+
+        # SLO-CR-2: Verify CoverageInfo instance
+        assert isinstance(coverage, CoverageInfo)
+
+        # SLO-CR-2: Verify all fields accessible via attributes
+        assert isinstance(coverage.database_exists, bool)
+        assert isinstance(coverage.duckdb_path, str)
+        assert isinstance(coverage.duckdb_size_mb, float)
+        assert isinstance(coverage.raw_spread_ticks, int)
+        assert isinstance(coverage.standard_ticks, int)
+        assert isinstance(coverage.ohlc_bars, int)
+        assert coverage.earliest_date is None or isinstance(coverage.earliest_date, str)
+        assert coverage.latest_date is None or isinstance(coverage.latest_date, str)
+        assert isinstance(coverage.date_range_days, int)
+
+        # SLO-CR-2: Verify expected values for non-existent database
+        assert coverage.database_exists is False
+        assert coverage.duckdb_size_mb == 0
+        assert coverage.raw_spread_ticks == 0
+        assert coverage.standard_ticks == 0
+        assert coverage.ohlc_bars == 0
+        assert coverage.earliest_date is None
+        assert coverage.latest_date is None
+        assert coverage.date_range_days == 0
+
+    def test_get_data_coverage_attribute_access(self, processor_with_temp_dir):
+        """Test CoverageInfo supports attribute access.
+
+        SLO-CR-2: Model field accuracy: 100%.
+        """
+        coverage = processor_with_temp_dir.get_data_coverage("EURUSD")
+
+        # SLO-CR-2: Verify attribute access works
+        exists = coverage.database_exists
+        assert isinstance(exists, bool)
+
+        path = coverage.duckdb_path
+        assert isinstance(path, str)
+
+        size = coverage.duckdb_size_mb
+        assert isinstance(size, float)
+
+        raw_ticks = coverage.raw_spread_ticks
+        assert isinstance(raw_ticks, int)
+
+        std_ticks = coverage.standard_ticks
+        assert isinstance(std_ticks, int)
+
+        bars = coverage.ohlc_bars
+        assert isinstance(bars, int)
+
+        earliest = coverage.earliest_date
+        assert earliest is None or isinstance(earliest, str)
+
+        latest = coverage.latest_date
+        assert latest is None or isinstance(latest, str)
+
+        days = coverage.date_range_days
+        assert isinstance(days, int)
+
+    def test_get_data_coverage_serialization(self, processor_with_temp_dir):
+        """Test CoverageInfo can be serialized to dict and JSON.
+
+        SLO-CR-2: Model field accuracy: 100%.
+        """
+        coverage = processor_with_temp_dir.get_data_coverage("EURUSD")
+
+        # Test dict serialization
+        dict_result = coverage.model_dump()
+        assert isinstance(dict_result, dict)
+        assert "database_exists" in dict_result
+        assert "duckdb_path" in dict_result
+        assert "raw_spread_ticks" in dict_result
+
+        # Test JSON serialization
+        json_str = coverage.model_dump_json()
+        assert isinstance(json_str, str)
+        assert "database_exists" in json_str
+        assert "duckdb_path" in json_str
+
+
+class TestProcessorMethodSignatures:
+    """Test processor method signatures use Literal types."""
+
+    def test_update_data_accepts_literal_types(self, processor_with_temp_dir, monkeypatch):
+        """Test update_data() accepts PairType literals.
+
+        SLO-CR-3: Type constraint enforcement: 100%.
+        """
+        # Mock to avoid network calls
+        def mock_download(self, year, month, pair, variant):
+            # Create mock ZIP file
+            import zipfile
+            import pandas as pd
+
+            zip_path = self.temp_dir / f"Exness_{pair}_{variant}_{year}_{month:02d}.zip"
+            csv_path = self.temp_dir / f"Exness_{pair}_{variant}_{year}_{month:02d}.csv"
+
+            # Create empty CSV
+            df = pd.DataFrame({"Timestamp": [], "Bid": [], "Ask": []})
+            df.to_csv(csv_path, index=False)
+
+            # Create ZIP
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(csv_path, csv_path.name)
+
+            csv_path.unlink()
+            return zip_path
+
+        def mock_load_ticks(self, zip_path):
+            import pandas as pd
+            return pd.DataFrame({
+                "Timestamp": pd.to_datetime([], utc=True),
+                "Bid": [],
+                "Ask": []
+            })
+
+        monkeypatch.setattr(ExnessDataProcessor, "download_exness_zip", mock_download)
+        monkeypatch.setattr(ExnessDataProcessor, "_load_ticks_from_zip", mock_load_ticks)
+
+        # Test various valid pairs
+        result = processor_with_temp_dir.update_data(pair="EURUSD", start_date="2024-09-01")
+        assert isinstance(result, UpdateResult)
+
+        result = processor_with_temp_dir.update_data(pair="GBPUSD", start_date="2024-09-01")
+        assert isinstance(result, UpdateResult)
+
+        result = processor_with_temp_dir.update_data(pair="XAUUSD", start_date="2024-09-01")
+        assert isinstance(result, UpdateResult)
+
+    def test_get_data_coverage_accepts_literal_types(self, processor_with_temp_dir):
+        """Test get_data_coverage() accepts PairType literals.
+
+        SLO-CR-3: Type constraint enforcement: 100%.
+        """
+        # Test various valid pairs
+        coverage = processor_with_temp_dir.get_data_coverage("EURUSD")
+        assert isinstance(coverage, CoverageInfo)
+
+        coverage = processor_with_temp_dir.get_data_coverage("GBPUSD")
+        assert isinstance(coverage, CoverageInfo)
+
+        coverage = processor_with_temp_dir.get_data_coverage("XAUUSD")
+        assert isinstance(coverage, CoverageInfo)
+
+
+class TestModelFieldConstraints:
+    """Test Pydantic models enforce field constraints at runtime."""
+
+    def test_update_result_constraints_enforced(self):
+        """Test UpdateResult enforces ge=0 constraints.
+
+        SLO-CR-3: Type constraint enforcement: 100%.
+        """
+        from pydantic import ValidationError
+
+        # Valid construction
+        result = UpdateResult(
+            duckdb_path=Path("/tmp/test.duckdb"),
+            months_added=0,
+            raw_ticks_added=0,
+            standard_ticks_added=0,
+            ohlc_bars=0,
+            duckdb_size_mb=0.0,
+        )
+        assert result.months_added == 0
+
+        # Invalid construction (negative values)
+        with pytest.raises(ValidationError):
+            UpdateResult(
+                duckdb_path=Path("/tmp/test.duckdb"),
+                months_added=-1,
+                raw_ticks_added=0,
+                standard_ticks_added=0,
+                ohlc_bars=0,
+                duckdb_size_mb=0.0,
+            )
+
+    def test_coverage_info_constraints_enforced(self):
+        """Test CoverageInfo enforces ge=0 constraints.
+
+        SLO-CR-3: Type constraint enforcement: 100%.
+        """
+        from pydantic import ValidationError
+
+        # Valid construction
+        coverage = CoverageInfo(
+            database_exists=False,
+            duckdb_path="/tmp/test.duckdb",
+            duckdb_size_mb=0.0,
+            raw_spread_ticks=0,
+            standard_ticks=0,
+            ohlc_bars=0,
+            earliest_date=None,
+            latest_date=None,
+            date_range_days=0,
+        )
+        assert coverage.raw_spread_ticks == 0
+
+        # Invalid construction (negative values)
+        with pytest.raises(ValidationError):
+            CoverageInfo(
+                database_exists=False,
+                duckdb_path="/tmp/test.duckdb",
+                duckdb_size_mb=-1.0,
+                raw_spread_ticks=0,
+                standard_ticks=0,
+                ohlc_bars=0,
+                earliest_date=None,
+                latest_date=None,
+                date_range_days=0,
+            )

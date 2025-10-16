@@ -1,0 +1,125 @@
+#!/bin/bash
+# Setup git tracking for CrossOver bottle files
+
+set -e
+
+BOTTLE_USER="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/users/crossover"
+BOTTLE_PYTHON="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/Python312"
+BOTTLE_MT5="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5"
+
+echo "=== Bottle File Tracking Setup ==="
+
+# Option 1: Git repo in bottle user directory
+echo "1. Initialize git in bottle user directory..."
+cd "$BOTTLE_USER"
+git init
+git config user.name "$(git config --global user.name)"
+git config user.email "$(git config --global user.email)"
+
+# Create .gitignore
+cat > .gitignore << 'EOF'
+# Wine/Windows system files
+*.ini
+*.dll
+*.exe
+*.tmp
+~*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Exports (track separately in main repo)
+exports/*.csv
+
+# Logs
+*.log
+EOF
+
+# Initial commit
+git add .
+git commit -m "Initial bottle snapshot: Python scripts and config"
+
+echo "✓ Git repo initialized in bottle"
+echo "  Location: $BOTTLE_USER/.git"
+
+# Option 2: Track Python packages
+echo ""
+echo "2. Document Wine Python environment..."
+cd "$BOTTLE_PYTHON"
+python.exe -m pip list > "$BOTTLE_USER/requirements-wine.txt"
+echo "✓ Python packages documented: requirements-wine.txt"
+
+# Option 3: Create tracking manifest
+echo ""
+echo "3. Create tracking manifest..."
+cat > "$BOTTLE_USER/BOTTLE_MANIFEST.md" << EOF
+# CrossOver Bottle Tracking
+
+**Bottle**: MetaTrader 5
+**Location**: ~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/
+**Wine Version**: $(wine --version 2>/dev/null || echo "unknown")
+
+## Tracked Locations
+
+### User Scripts
+- \`C:\\users\\crossover\\export_aligned.py\` - Main export script
+- \`C:\\users\\crossover\\test_*.py\` - Test scripts
+- \`C:\\users\\crossover\\exports\` - CSV outputs (gitignored)
+
+### Python Environment
+- \`C:\\Program Files\\Python312\` - Wine Python installation
+- \`requirements-wine.txt\` - Installed packages snapshot
+
+### MT5 Configuration
+- \`C:\\Program Files\\MetaTrader 5\\config\` - MT5 configs
+- \`C:\\Program Files\\MetaTrader 5\\MQL5\\Scripts\` - Compiled MQL5
+
+## Sync Strategy
+
+**From main repo → bottle**:
+- Copy Python scripts when updated
+- Compile MQL5 with mq5c (auto-stages)
+
+**From bottle → main repo**:
+- Copy CSV exports to project exports/
+- Track Python environment changes here
+
+## Git Operations
+
+\`\`\`bash
+# Commit bottle changes
+cd "$BOTTLE_USER"
+git add export_aligned.py
+git commit -m "Update export script"
+
+# View bottle history
+git log --oneline
+
+# Diff bottle changes
+git diff export_aligned.py
+\`\`\`
+
+## Backup
+
+\`\`\`bash
+# Snapshot entire bottle
+cd ~/Library/Application Support/CrossOver/Bottles/
+tar czf "MetaTrader5-\$(date +%Y%m%d).tar.gz" "MetaTrader 5"
+\`\`\`
+EOF
+
+git add BOTTLE_MANIFEST.md requirements-wine.txt
+git commit -m "Add tracking manifest and Python package list"
+
+echo "✓ Tracking manifest created"
+echo ""
+echo "=== Setup Complete ==="
+echo "Bottle git repo: $BOTTLE_USER/.git"
+echo "Manifest: $BOTTLE_USER/BOTTLE_MANIFEST.md"
+echo ""
+echo "Next steps:"
+echo "1. cd \"$BOTTLE_USER\""
+echo "2. git status  # Check tracked files"
+echo "3. git log     # View bottle history"

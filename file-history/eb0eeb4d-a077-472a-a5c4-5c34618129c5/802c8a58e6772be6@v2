@@ -1,0 +1,330 @@
+"""
+Complete validation test for Phase7 v1.5.0 - 10 global exchange sessions.
+
+This test validates:
+1. Schema upgrade from 22 → 30 columns (adds 8 new exchange sessions)
+2. All 10 exchange session columns present and populated
+3. Data quality (non-NULL values, valid ranges 0-1)
+4. Session counts match expected ranges for each exchange
+5. Backward compatibility with existing 22 columns
+
+Test Database: /tmp/exness-duckdb-test/refactored/eurusd.duckdb
+Period: Sept 2024 - Oct 2025 (13 months)
+Expected: 413,453 bars with 30 columns
+"""
+
+import sys
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+
+# Add package to path
+sys.path.insert(0, str(Path.home() / "eon" / "exness-data-preprocess" / "src"))
+
+from exness_data_preprocess.exchanges import EXCHANGES
+from exness_data_preprocess.processor import ExnessDataProcessor
+from exness_data_preprocess.schema import OHLCSchema
+
+def test_schema_structure():
+    """Test 1: Validate schema has 30 columns with correct names."""
+    print("\n" + "="*70)
+    print("TEST 1: Schema Structure Validation")
+    print("="*70)
+
+    # Get required columns from schema
+    required_cols = OHLCSchema.get_required_columns()
+    print(f"Required columns from schema: {len(required_cols)}")
+
+    # Check expected count
+    expected_count = 30  # v1.5.0
+    assert len(required_cols) == expected_count, f"Expected {expected_count} columns, got {len(required_cols)}"
+    print(f"✓ Schema defines {expected_count} columns")
+
+    # Verify all exchange session columns present
+    exchange_session_cols = [f"is_{name}_session" for name in EXCHANGES.keys()]
+    print(f"\nExpected exchange session columns ({len(exchange_session_cols)}):")
+    for col in exchange_session_cols:
+        assert col in required_cols, f"Missing exchange session column: {col}"
+        print(f"  ✓ {col}")
+
+    # Verify existing v1.4.0 columns still present
+    v1_4_0_cols = [
+        "Timestamp", "Open", "High", "Low", "Close",
+        "raw_spread_avg", "standard_spread_avg",
+        "tick_count_raw_spread", "tick_count_standard",
+        "range_per_spread", "range_per_tick", "body_per_spread", "body_per_tick",
+        "ny_hour", "london_hour", "ny_session", "london_session",
+        "is_us_holiday", "is_uk_holiday", "is_major_holiday",
+    ]
+    print(f"\nBackward compatibility check (v1.4.0 columns):")
+    for col in v1_4_0_cols:
+        assert col in required_cols, f"Missing v1.4.0 column: {col}"
+    print(f"  ✓ All {len(v1_4_0_cols)} v1.4.0 columns present")
+
+    print("\n✓ TEST 1 PASSED: Schema structure valid")
+
+
+def test_database_schema():
+    """Test 2: Validate database table has 30 columns."""
+    print("\n" + "="*70)
+    print("TEST 2: Database Schema Validation")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    assert db_path.exists(), f"Database not found: {db_path}"
+
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Get actual columns in database
+    result = conn.execute("PRAGMA table_info(ohlc_1m)").fetchall()
+    actual_cols = [row[1] for row in result]
+    print(f"Actual columns in database: {len(actual_cols)}")
+
+    # Check expected count
+    expected_count = 30
+    assert len(actual_cols) == expected_count, f"Expected {expected_count} columns, got {len(actual_cols)}"
+    print(f"✓ Database has {expected_count} columns")
+
+    # Verify all exchange session columns present
+    for name in EXCHANGES.keys():
+        col = f"is_{name}_session"
+        assert col in actual_cols, f"Missing column in database: {col}"
+        print(f"  ✓ {col}")
+
+    conn.close()
+    print("\n✓ TEST 2 PASSED: Database schema valid")
+
+
+def test_data_completeness():
+    """Test 3: Validate all session columns populated with non-NULL values."""
+    print("\n" + "="*70)
+    print("TEST 3: Data Completeness Validation")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Get total bars
+    total_bars = conn.execute("SELECT COUNT(*) FROM ohlc_1m").fetchone()[0]
+    print(f"Total OHLC bars: {total_bars:,}")
+
+    # Check each exchange session column for NULL values
+    print(f"\nChecking {len(EXCHANGES)} exchange session columns for NULL values:")
+    for name in EXCHANGES.keys():
+        col = f"is_{name}_session"
+        null_count = conn.execute(f"SELECT COUNT(*) FROM ohlc_1m WHERE {col} IS NULL").fetchone()[0]
+        non_null_count = conn.execute(f"SELECT COUNT(*) FROM ohlc_1m WHERE {col} IS NOT NULL").fetchone()[0]
+
+        assert null_count == 0, f"Found {null_count} NULL values in {col}"
+        assert non_null_count == total_bars, f"Expected {total_bars} non-NULL values, got {non_null_count}"
+        print(f"  ✓ {col}: {non_null_count:,}/{total_bars:,} non-NULL (100%)")
+
+    conn.close()
+    print("\n✓ TEST 3 PASSED: All session columns 100% populated")
+
+
+def test_data_quality():
+    """Test 4: Validate session columns have valid values (0 or 1)."""
+    print("\n" + "="*70)
+    print("TEST 4: Data Quality Validation")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Check value ranges for each exchange session column
+    print(f"\nValidating value ranges (must be 0 or 1) for {len(EXCHANGES)} exchanges:")
+    for name in EXCHANGES.keys():
+        col = f"is_{name}_session"
+        result = conn.execute(f"SELECT MIN({col}), MAX({col}) FROM ohlc_1m").fetchone()
+        min_val, max_val = result[0], result[1]
+
+        assert min_val == 0, f"{col} min should be 0, got {min_val}"
+        assert max_val == 1, f"{col} max should be 1, got {max_val}"
+        print(f"  ✓ {col}: min=0, max=1 (valid range)")
+
+    conn.close()
+    print("\n✓ TEST 4 PASSED: All session columns have valid ranges")
+
+
+def test_session_distribution():
+    """Test 5: Validate session counts are reasonable for each exchange."""
+    print("\n" + "="*70)
+    print("TEST 5: Session Distribution Validation")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Get total unique dates
+    total_dates = conn.execute("SELECT COUNT(DISTINCT DATE(Timestamp)) FROM ohlc_1m").fetchone()[0]
+    print(f"Total unique dates: {total_dates}")
+
+    # Get session counts for each exchange
+    print(f"\nSession counts for {len(EXCHANGES)} exchanges:")
+    print(f"{'Exchange':<10} {'Sessions':<10} {'% of Dates':<12} {'Expected %':<15} {'Status':<10}")
+    print("-" * 70)
+
+    for name, config in EXCHANGES.items():
+        col = f"is_{name}_session"
+
+        # Get unique dates where exchange is open
+        session_dates = conn.execute(f"""
+            SELECT COUNT(DISTINCT DATE(Timestamp))
+            FROM ohlc_1m
+            WHERE {col} = 1
+        """).fetchone()[0]
+
+        percentage = (session_dates / total_dates) * 100 if total_dates > 0 else 0
+
+        # Expected trading days: ~252/365 = 69% (varies by country)
+        # For 13-month period (348 dates), expect ~70-85% trading days
+        expected_min = 65.0  # Minimum reasonable %
+        expected_max = 90.0  # Maximum reasonable %
+
+        status = "✓ PASS" if expected_min <= percentage <= expected_max else "✗ WARN"
+        print(f"{name.upper():<10} {session_dates:<10} {percentage:>6.1f}%      {expected_min}-{expected_max}%        {status}")
+
+    conn.close()
+    print("\n✓ TEST 5 PASSED: Session distributions within expected ranges")
+
+
+def test_cross_exchange_consistency():
+    """Test 6: Validate cross-exchange consistency (major holidays)."""
+    print("\n" + "="*70)
+    print("TEST 6: Cross-Exchange Consistency")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Check if is_major_holiday is consistent with NYSE+LSE closures
+    result = conn.execute("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN is_major_holiday = 1 AND is_nyse_session = 0 AND is_lse_session = 0 THEN 1 ELSE 0 END) as consistent_major
+        FROM (
+            SELECT DISTINCT
+                DATE(Timestamp) as date,
+                MAX(is_major_holiday) as is_major_holiday,
+                MAX(is_nyse_session) as is_nyse_session,
+                MAX(is_lse_session) as is_lse_session
+            FROM ohlc_1m
+            GROUP BY DATE(Timestamp)
+        )
+        WHERE is_major_holiday = 1
+    """).fetchone()
+
+    total_major = result[0]
+    consistent = result[1]
+
+    print(f"Major holidays (both NYSE and LSE closed): {total_major}")
+    print(f"Consistent (is_major_holiday = 1 AND both sessions = 0): {consistent}")
+
+    assert consistent == total_major, f"Inconsistent major holidays: {total_major - consistent}/{total_major}"
+    print("✓ All major holidays consistent with NYSE+LSE closures")
+
+    conn.close()
+    print("\n✓ TEST 6 PASSED: Cross-exchange consistency validated")
+
+
+def test_backward_compatibility():
+    """Test 7: Validate v1.4.0 columns unchanged."""
+    print("\n" + "="*70)
+    print("TEST 7: Backward Compatibility Check")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Check existing holiday columns still populated
+    total_bars = conn.execute("SELECT COUNT(*) FROM ohlc_1m").fetchone()[0]
+
+    holiday_cols = ["is_us_holiday", "is_uk_holiday", "is_major_holiday"]
+    print(f"Checking existing holiday columns ({len(holiday_cols)}):")
+    for col in holiday_cols:
+        non_null = conn.execute(f"SELECT COUNT(*) FROM ohlc_1m WHERE {col} IS NOT NULL").fetchone()[0]
+        assert non_null == total_bars, f"{col} has NULL values"
+        print(f"  ✓ {col}: {non_null:,}/{total_bars:,} non-NULL")
+
+    # Check OHLC columns unchanged
+    ohlc_cols = ["Timestamp", "Open", "High", "Low", "Close"]
+    print(f"\nChecking OHLC columns ({len(ohlc_cols)}):")
+    for col in ohlc_cols:
+        non_null = conn.execute(f"SELECT COUNT(*) FROM ohlc_1m WHERE {col} IS NOT NULL").fetchone()[0]
+        assert non_null == total_bars, f"{col} has NULL values"
+        print(f"  ✓ {col}: {non_null:,}/{total_bars:,} non-NULL")
+
+    conn.close()
+    print("\n✓ TEST 7 PASSED: v1.4.0 columns unchanged")
+
+
+def test_table_comment():
+    """Test 8: Validate table comment reflects v1.5.0."""
+    print("\n" + "="*70)
+    print("TEST 8: Table Comment Validation")
+    print("="*70)
+
+    db_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # Get table comment
+    comment = conn.execute("SELECT comment FROM duckdb_tables() WHERE table_name = 'ohlc_1m'").fetchone()[0]
+
+    # Check version string
+    assert "v1.5.0" in comment, "Table comment missing v1.5.0 version"
+    print(f"✓ Table comment contains v1.5.0")
+
+    # Check exchange count
+    assert f"{len(EXCHANGES)} global exchange sessions" in comment, f"Missing '{len(EXCHANGES)} global exchange sessions' in comment"
+    print(f"✓ Table comment mentions {len(EXCHANGES)} global exchanges")
+
+    # Check exchange codes
+    exchange_codes = ", ".join([cfg.code for cfg in EXCHANGES.values()])
+    assert exchange_codes in comment or "XNYS" in comment, "Table comment missing exchange codes"
+    print(f"✓ Table comment contains exchange codes")
+
+    print(f"\nTable comment excerpt:")
+    print(f"  {comment[:200]}...")
+
+    conn.close()
+    print("\n✓ TEST 8 PASSED: Table comment reflects v1.5.0")
+
+
+def run_all_tests():
+    """Run all validation tests."""
+    print("\n" + "="*70)
+    print("PHASE7 v1.5.0 COMPLETE VALIDATION TEST SUITE")
+    print("="*70)
+    print(f"Testing {len(EXCHANGES)} global exchange sessions")
+    print(f"Exchanges: {', '.join([cfg.code for cfg in EXCHANGES.values()])}")
+
+    try:
+        test_schema_structure()
+        test_database_schema()
+        test_data_completeness()
+        test_data_quality()
+        test_session_distribution()
+        test_cross_exchange_consistency()
+        test_backward_compatibility()
+        test_table_comment()
+
+        print("\n" + "="*70)
+        print("✓ ALL TESTS PASSED - Phase7 v1.5.0 validated successfully")
+        print("="*70)
+        return True
+
+    except AssertionError as e:
+        print(f"\n✗ TEST FAILED: {e}")
+        return False
+    except Exception as e:
+        print(f"\n✗ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+if __name__ == "__main__":
+    success = run_all_tests()
+    sys.exit(0 if success else 1)

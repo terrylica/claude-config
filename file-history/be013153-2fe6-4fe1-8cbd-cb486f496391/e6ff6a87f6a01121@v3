@@ -1,0 +1,206 @@
+# Dependency Architecture & Optional Imports
+
+**Problem**: EvolutionaryForest has deep import chains requiring optional dependencies even for basic use.
+
+---
+
+## Root Cause Analysis (Data-First Debugging)
+
+### Import Chain That Requires torch
+
+```
+User wants basic MSE/RMSE/MAE regression
+  ↓
+forest.py (entry point)
+  ↓ imports
+archive.py
+  ↓ imports
+evaluation.py
+  ↓ imports (line 75)
+generalization/cache/sharpness_memory.py
+  ↓ imports (line 7)
+primitive_functions.py
+  ↓ imports (line 7)
+torch ← BLOCKS IMPORT EVEN FOR BASIC USE
+```
+
+### Issue
+- **Source**: Basic regression (MSE/RMSE/MAE) on numeric OHLCV data
+- **Sink**: Requires torch, shap, category-encoders, etc. even though these are only for advanced features
+- **Root Cause**: Module-level imports create deep dependency chains
+
+---
+
+## Partial Fixes Applied
+
+### ✅ Made Optional (with runtime checks)
+
+1. **torch & shap** in `evaluation.py`:
+   ```python
+   try:
+       import torch
+       HAS_TORCH = True
+   except ImportError:
+       torch = None
+       HAS_TORCH = False
+
+   # Runtime check when gradient optimization requested
+   if gradient_operators and not HAS_TORCH:
+       raise ImportError("torch required for gradient optimization")
+   ```
+
+2. **category_encoders** in `forest.py`:
+   ```python
+   try:
+       import category_encoders
+       HAS_CATEGORY_ENCODERS = True
+   except ImportError:
+       HAS_CATEGORY_ENCODERS = False
+
+   # Runtime check when categorical encoding requested
+   if self.categorical_encoding and not HAS_CATEGORY_ENCODERS:
+       raise ImportError("category-encoders required")
+   ```
+
+3. **sklearn2pmml, tpot, xgboost** in `forest.py`:
+   - Made optional with try/except
+   - Only fail when actually used
+
+4. **onedal** in `evaluation.py`:
+   - Made optional with runtime check in `weighted_sampling()`
+
+5. **EQLSymbolicRegression** in `configuration.py`:
+   - Lazy import with `_get_eql_symbolic_regression()`
+   - Only loads when EQL hybrid configuration used
+
+### ❌ Still Required (Deep Import Chain)
+
+**torch** - Required by:
+- `primitive_functions.py` (imported by sharpness_memory.py)
+- `evaluation.py` has multiple torch imports in deep chain
+- Cannot be made fully optional without refactoring import structure
+
+**shap** - Required by:
+- `evaluation.py` (can be optional but deep chain still exists)
+
+---
+
+## Solutions
+
+### Option 1: Install Full Dependencies (RECOMMENDED)
+
+```bash
+cd ~/eon/evolutionary-forest
+
+# Install all optional dependencies
+uv sync --extra full
+
+# Run examples
+uv run python examples/binance_crypto_features.py
+```
+
+### Option 2: Add torch/shap to Core Dependencies
+
+Edit `pyproject.toml`:
+```toml
+dependencies = [
+    # ... existing ...
+    "torch>=2.0.0",
+    "shap>=0.48.0",
+]
+```
+
+This makes the package easier to use but increases install size.
+
+### Option 3: Minimal Install (Lightweight Examples Only)
+
+```bash
+# Works for lightweight validation
+uv run python examples/validate_fixes_lightweight.py  # ✅ Works
+
+# Fails for full EvolutionaryForest (needs torch)
+uv run python examples/binance_crypto_features.py     # ❌ Requires torch
+```
+
+---
+
+## Architectural Issue
+
+The fundamental problem is **eager imports at module level**:
+
+```python
+# ❌ CURRENT: Imports everything at module load
+import torch  # Top of file
+
+# ✅ BETTER: Lazy import when needed
+def use_torch_feature():
+    try:
+        import torch
+    except ImportError:
+        raise ImportError("torch required for this feature")
+```
+
+**Impact**:
+- Basic regression (MSE/RMSE/MAE) on numeric data shouldn't need torch
+- But current architecture requires it due to import chains
+- Full refactoring would require changing ~50+ files
+
+---
+
+## Workaround for Basic Use
+
+**For crypto OHLCV feature engineering (no torch needed in theory)**:
+
+Currently blocked by import chain. Options:
+
+1. **Install torch anyway** (simplest):
+   ```bash
+   uv pip install torch
+   ```
+
+2. **Use full install**:
+   ```bash
+   uv sync --extra full
+   ```
+
+3. **Wait for upstream refactor** (long-term):
+   - Lazy imports throughout codebase
+   - Separate minimal entry points
+   - Feature flags for optional components
+
+---
+
+## Recommendations
+
+### For Users (Current)
+1. Use `uv sync --extra full` for complete functionality
+2. Or install torch manually: `uv pip install torch`
+3. Lightweight validation works without torch: `validate_fixes_lightweight.py`
+
+### For Maintainers (Future)
+1. Refactor import structure to use lazy loading
+2. Create minimal entry points for basic use cases
+3. Document which features require which optional dependencies
+4. Consider extracting advanced features to separate modules
+
+---
+
+## Dependency Status
+
+| Dependency | Status | Required For | Can Be Optional? |
+|------------|--------|--------------|------------------|
+| torch | ❌ Required | Gradient descent, EQL, deep features, primitive_functions | No (deep import) |
+| shap | ⚠️ Partial | SHAP values, interpretability | Partial (some imports) |
+| category-encoders | ✅ Optional | Categorical encoding | Yes ✅ |
+| sklearn2pmml | ✅ Optional | PMML export | Yes ✅ |
+| tpot | ✅ Optional | Auto-ML integration | Yes ✅ |
+| xgboost | ✅ Optional | XGBoost backend | Yes ✅ |
+| onedal | ✅ Optional | Weighted sampling | Yes ✅ |
+| cachetools | ✅ Required | LRU caching | Added to deps ✅ |
+
+---
+
+**Conclusion**: For now, use `uv sync --extra full` to install all dependencies. Future refactoring could make torch truly optional for basic regression use cases.
+
+**Last Updated**: 2025-10-06
+**Session**: Data-First Debugging Protocol applied

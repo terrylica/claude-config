@@ -1,0 +1,191 @@
+# Refactoring Checklist - Quick Reference
+
+**Current Status**: Phase 2 Complete ✅
+
+**Resume Point**: Phase 3 - Extract session_detector.py
+
+---
+
+## Phase Completion Status
+
+- ✅ **Phase 1**: Utility Modules (downloader, tick_loader)
+- ✅ **Phase 2**: Database Layer (database_manager)
+- ⏳ **Phase 3**: Session Detection (session_detector) - NEXT
+- ⏳ **Phase 4**: Complex Logic (gap_detector, ohlc_generator, query_engine)
+- ⏳ **Phase 5**: Finalize Facade + Tests
+
+---
+
+## Files Created So Far
+
+- ✅ `/Users/terryli/eon/exness-data-preprocess/src/exness_data_preprocess/downloader.py` (89 lines)
+- ✅ `/Users/terryli/eon/exness-data-preprocess/src/exness_data_preprocess/tick_loader.py` (67 lines)
+- ✅ `/Users/terryli/eon/exness-data-preprocess/src/exness_data_preprocess/database_manager.py` (213 lines)
+
+---
+
+## Phase 2 Todo (Database Manager) ✅ COMPLETE
+
+### Step 2.1: Create database_manager.py ✅
+- [x] Copy `_get_or_create_db()` logic (lines 122-210 from processor.py)
+- [x] Copy `_append_ticks_to_db()` logic (lines 217-245 from processor.py)
+- [x] ~~Copy `add_schema_comments()` logic~~ - Does not exist (inline in get_or_create_db)
+- [x] ~~Copy `add_schema_comments_all()` logic~~ - Does not exist (not needed)
+- [x] Create class with `__init__(base_dir: Path)`
+- [x] Add docstrings and type hints
+
+### Step 2.2: Update processor.py ✅
+- [x] Add import: `from exness_data_preprocess.database_manager import DatabaseManager`
+- [x] Add to `__init__()`: `self.db_manager = DatabaseManager(self.base_dir)`
+- [x] Replace `_get_or_create_db()` → delegate to `self.db_manager.get_or_create_db()`
+- [x] Replace `_append_ticks_to_db()` → delegate to `self.db_manager.append_ticks()`
+
+### Step 2.3: Test ✅
+- [x] Run: `uv run pytest -v --tb=short`
+- [x] Verify: 48 tests pass (Result: 48 passed in 101.98s)
+- [ ] Commit: `git commit -m "Phase 2: Extract database_manager module"`
+
+---
+
+## Phase 3 Todo (Session Detector)
+
+### Step 3.1: Create session_detector.py
+- [ ] Copy calendar initialization logic from `__init__()` (lines 92-97)
+- [ ] Copy session detection logic from `_regenerate_ohlc()` (lines 504-564)
+- [ ] Create class with `__init__()` and `detect_sessions_and_holidays()`
+
+### Step 3.2: Update processor.py
+- [ ] Add import: `from exness_data_preprocess.session_detector import SessionDetector`
+- [ ] Add to `__init__()`: `self.session_detector = SessionDetector()`
+- [ ] Remove: `self.calendars` initialization
+- [ ] Replace session detection in `_regenerate_ohlc()` → delegate to `self.session_detector`
+
+### Step 3.3: Test
+- [ ] Run: `uv run pytest -v --tb=short`
+- [ ] Verify: 48 tests pass
+- [ ] Commit: `git commit -m "Phase 3: Extract session_detector module"`
+
+---
+
+## Phase 4 Todo (Complex Logic)
+
+### Step 4.1: Create gap_detector.py
+- [ ] Copy `_discover_missing_months()` logic (lines 247-347)
+- [ ] Create class with `__init__(database_manager)` and `discover_missing_months()`
+
+### Step 4.2: Create ohlc_generator.py
+- [ ] Copy `_regenerate_ohlc()` logic (lines 415-566)
+- [ ] Create class with `__init__(session_detector)` and `regenerate_ohlc()`
+- [ ] Use `self.session_detector.detect_sessions_and_holidays()`
+
+### Step 4.3: Create query_engine.py
+- [ ] Copy `query_ticks()` logic (lines 568-621)
+- [ ] Copy `query_ohlc()` logic (lines 622-711)
+- [ ] Copy `get_data_coverage()` logic (lines 713-789)
+- [ ] Create class with three methods
+
+### Step 4.4: Update processor.py
+- [ ] Add imports for all three modules
+- [ ] Add to `__init__()`: Initialize gap_detector, ohlc_generator, query_engine
+- [ ] Replace all methods with delegation calls
+
+### Step 4.5: Test
+- [ ] Run: `uv run pytest -v --tb=short` after EACH module
+- [ ] Verify: 48 tests pass after EACH module
+- [ ] Commit: After each module extraction
+
+---
+
+## Phase 5 Todo (Finalize)
+
+### Step 5.1: Verify processor.py structure
+- [ ] Check line count: Should be ~150-200 lines (was 885)
+- [ ] Check methods: All should be thin delegation methods
+- [ ] Check imports: All 7 modules imported
+
+### Step 5.2: Run all tests
+- [ ] Run: `uv run pytest -v --tb=short`
+- [ ] Verify: 48 tests pass
+
+### Step 5.3: Create module tests (optional)
+- [ ] Create `tests/test_downloader.py`
+- [ ] Create `tests/test_tick_loader.py`
+- [ ] Create `tests/test_database_manager.py`
+- [ ] Create `tests/test_gap_detector.py`
+- [ ] Create `tests/test_session_detector.py`
+- [ ] Create `tests/test_ohlc_generator.py`
+- [ ] Create `tests/test_query_engine.py`
+
+### Step 5.4: Update documentation
+- [ ] Update `/Users/terryli/eon/exness-data-preprocess/CLAUDE.md` with new module structure
+- [ ] Update `/Users/terryli/eon/exness-data-preprocess/docs/README.md` with architecture changes
+- [ ] Verify examples still work: Run `uv run python examples/basic_usage.py`
+
+### Step 5.5: Final validation
+- [ ] Run: `uv run pytest -v --tb=short`
+- [ ] Run: `uv run ruff format .`
+- [ ] Run: `uv run ruff check .`
+- [ ] Run: `uv run mypy src/`
+- [ ] Commit: `git commit -m "Phase 5: Finalize refactoring to v1.6.0"`
+
+---
+
+## Quick Test Command
+
+```bash
+uv run pytest -v --tb=short
+```
+
+**Expected**: 48 passed (all tests must pass after each phase)
+
+---
+
+## Emergency Rollback
+
+```bash
+# If tests fail after extraction
+git reset --hard HEAD  # Rollback to last commit
+```
+
+---
+
+## Current Processor.py State
+
+**Line Count**: 771 lines (was 885)
+**Reduced By**: 114 lines (Phases 1-2 combined, 12.9% reduction)
+**Target**: ~150 lines (83% total reduction needed)
+
+**Remaining to Extract**:
+- ~~`_get_or_create_db()` - 88 lines~~ ✅ Extracted (Phase 2)
+- ~~`_append_ticks_to_db()` - 28 lines~~ ✅ Extracted (Phase 2)
+- `_discover_missing_months()` - 100 lines
+- `_regenerate_ohlc()` - 154 lines (largest method)
+- `query_ticks()` - 53 lines
+- `query_ohlc()` - 89 lines
+- `get_data_coverage()` - 76 lines
+
+**Total Remaining to Extract**: ~472 lines → Target remaining: ~150 lines ✓
+
+---
+
+## Key Principles
+
+1. **Copy 100% unchanged** - No "improvements" during extraction
+2. **Test after EACH extraction** - Never batch multiple modules
+3. **Commit after EACH phase** - Enable rollback points
+4. **Preserve public API** - All ExnessDataProcessor methods unchanged
+5. **Zero regressions** - All 48 tests must pass always
+
+---
+
+## Reference Documents
+
+- **Detailed Plan**: `/Users/terryli/eon/exness-data-preprocess/docs/plans/PHASE7_v1.6.0_REFACTORING_PROGRESS.md`
+- **Original Plan**: `/Users/terryli/eon/exness-data-preprocess/docs/plans/PHASE7_v1.5.0_REFACTORING_PLAN.md`
+- **Processor Source**: `/Users/terryli/eon/exness-data-preprocess/src/exness_data_preprocess/processor.py`
+
+---
+
+**Next Action**: Create `session_detector.py` following Phase 3 in detailed plan
+
+**Last Updated**: 2025-10-15 (Phase 2 complete)

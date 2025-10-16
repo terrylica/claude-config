@@ -11,7 +11,7 @@ This document catalogues critical files and directories that are integral to Cla
 
 ### System Directories
 - `system/` - ✅ **CLAUDE CODE OFFICIAL** - Session management and runtime data
-  - `system/sessions/` - Auto-generated session files
+  - `~/.claude/projects/` - Auto-generated session files (canonical)
   - `system/todos/` - Todo tracking system files
   - **WARNING**: Do not move or delete the `system/` directory
 

@@ -1,0 +1,166 @@
+# MetaTrader 5 CrossOver Essentials
+
+**Status**: ⚠️ Conditionally validated (2025-10-13)
+**Limitation**: Headless execution requires GUI initialization for each symbol/timeframe
+**Correlation**: 0.999902 (RSI Python vs MT5)
+
+## Core Locations
+- Wine toolchain (CrossOver build): `/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin`
+- Bottle prefix: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5`
+- MetaEditor: `C:\Program Files\MetaTrader 5\metaeditor64.exe`
+- Terminal: `C:\Program Files\MetaTrader 5\terminal64.exe`
+- CLI staging workspace: `C:\mt5work` (mapped to `~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/mt5work`)
+- **MT5 Logs** (portable mode): `~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/logs/` - Critical for diagnosing startup/config issues
+- **MQL5 Script Logs**: `~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/MQL5/Logs/` - Script execution output
+
+## Wine Builds
+- Preferred (CrossOver-managed): `/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin` (symlink into `CrossOver-Hosted Application/`)
+- Legacy MetaTrader bundle (avoid mixing): `/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin`
+- Confirm the active toolchain after updating:  
+  `wine --version` → CrossOver’s build prints a multi-line block headed by `Product Name: CrossOver`; the legacy Wine prints a single-line `wine-*` banner.
+- Audit bundle metadata when required:  
+  `PlistBuddy -c 'Print :CFBundleShortVersionString' "/Users/terryli/Applications/CrossOver.app/Contents/Info.plist"`  
+  `PlistBuddy -c 'Print :CFBundleShortVersionString' "/Applications/MetaTrader 5.app/Contents/Info.plist"`
+
+## Shell Prep (zsh / Ghostty)
+```zsh
+export PATH="/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin:$PATH"
+export MVK_CONFIG_LOG_LEVEL=0    # silence MoltenVK spam (optional)
+which wine     # → /Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
+wine --version # verify output identifies the CrossOver toolchain
+```
+
+## Compile mq5 from Terminal
+```zsh
+mq5c path/to/script.mq5          # stages file, compiles under C:\mt5work, copies .ex5 back
+```
+- MetaEditor build 4865 under CrossOver refuses to compile files outside a simple, space-free path. All scripts are staged to `C:\mt5work` before compilation; the helper keeps this in sync automatically.
+- Resulting `.ex5` and UTF-16 `.log` live in `…/drive_c/mt5work/`; the helper also converts the log to UTF-8 and drops it alongside the staged file.
+- Wine quirk: `metaeditor64.exe /log:CON ...` can mirror logs to stdout, but file logs are the reliable artefact. Always inspect the UTF-8 copy or the raw UTF-16 version.
+- Stage any required `#include`/`Libraries` dependencies under `C:\mt5work` (or ensure they already live inside the bottle’s standard `MQL5` tree) so MetaEditor can resolve them.
+
+## Handy Helpers
+- `mq5c <script.mq5>` stages the script directory under `C:\mt5work\staging\`, invokes MetaEditor headlessly, converts the UTF-16 log to UTF-8, copies the `.ex5` next to the source, and prints the compile summary. Non-zero exit highlights a compilation error.
+- `mq5run [--symbol SYMBOL] [--period PERIOD] [--timeout SECONDS]` executes MT5 scripts headlessly via CrossOver. Generates startup.ini config, launches terminal64.exe with `/portable /skipupdate /config:`, collects CSV exports, shows preview. **Validated working 2025-10-13** with config path fix applied.
+
+## Aligned Exporter Workflow
+- `mql5/Scripts/ExportAligned.mq5` (with `../Include/DataExportCore.mqh` and `../Include/modules/RSIModule.mqh`) exports bar data plus RSI values in a single CSV row set.
+- Compile via `mq5c mql5/Scripts/ExportAligned.mq5`, then manually run the script from MT5 or call `scripts/mq5run` headlessly.
+- Default output files follow `Export_<symbol>_<timeframe>.csv` and reside in `…/MQL5/Files/`. The helper copies them into the repository `exports/` directory for downstream Python validation.
+
+## Headless Execution (mq5run)
+
+**Status**: ⚠️ Conditionally working (2025-10-13)
+**Limitation**: Requires GUI initialization for each symbol/timeframe before headless execution
+
+### Critical Limitation
+
+**Headless execution works ONLY for symbols/timeframes previously opened in GUI**
+
+**Empirical Evidence** (2025-10-13 16:09):
+- EURUSD M1 (previously executed manually): ✅ SUCCESS
+- XAUUSD H1 (never opened in GUI): ❌ FAILED (script never executed)
+
+**Root Cause**: MT5 startup.ini `[StartUp]` section requires existing chart context. Cannot create new charts programmatically.
+
+**Workaround**: Manually open each symbol/timeframe in GUI once:
+1. Open MT5 terminal
+2. Create chart: Ctrl+N → Select symbol → OK
+3. Run ExportAligned script once (drag from Navigator → Scripts)
+4. Close MT5
+5. Headless execution will work for that symbol/timeframe
+
+### Usage
+```bash
+# After GUI initialization (see limitation above)
+./mq5run --symbol EURUSD --period PERIOD_M1       # Works if EURUSD M1 previously opened
+./mq5run --symbol XAUUSD --period PERIOD_H1       # Works if XAUUSD H1 previously opened
+./mq5run --timeout 300                             # Extended timeout
+```
+
+### Critical Config Path Fix (Empirically Validated)
+
+**Problem**: MT5 logs showed `cannot load config "C:\Program Files\MetaTrader 5\config\startup_YYYYMMDD_HHMMSS.ini"" at start` (note double quotes)
+
+**Root Cause**: Absolute path with spaces + shell quoting → MT5 receives double-quoted path → load failure
+
+**Solution** (mq5run:114):
+```bash
+# ❌ FAILS - Absolute path requires quotes, MT5 receives double quotes
+CONFIG_WIN_PATH="C:\\Program Files\\MetaTrader 5\\config\\startup_${TIMESTAMP}.ini"
+# Usage: /config:"${CONFIG_WIN_PATH}"
+
+# ✅ WORKS - Relative path from MT5 directory, no spaces, no quotes needed
+CONFIG_WIN_PATH="config\\startup_${TIMESTAMP}.ini"
+# Usage: /config:${CONFIG_WIN_PATH}
+```
+
+**Key Insight**: Use relative paths from MT5 directory to avoid quoting issues with Wine/CrossOver command parsing.
+
+### startup.ini Requirements (Community Research 2022-2025 + Empirical Validation)
+
+```ini
+[Experts]
+Enabled=1                    # REQUIRED - Scripts won't run without this
+AllowLiveTrading=0           # 0 for data export (no trading)
+AllowDllImport=0             # 0 if no DLLs required
+
+[StartUp]
+Script=ExportAligned         # Script name WITHOUT .ex5 extension
+Symbol=EURUSD                # Must be valid for account
+Period=PERIOD_M1             # MT5 timeframe constant
+ShutdownTerminal=1           # Auto-close after completion (headless CI)
+```
+
+**Generated automatically by mq5run** - no manual editing required.
+
+### Diagnostic Log Locations
+
+**MT5 Terminal Logs** (portable mode):
+```bash
+# Primary location (contains startup errors)
+~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/logs/YYYYMMDD.log
+
+# MQL5 script logs (Expert Advisor/Script output)
+~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/MQL5/Logs/YYYYMMDD.log
+```
+
+**Search keywords**: "config", "startup", "error", "script", "fail"
+
+### Validation Pipeline
+
+```bash
+# 1. Execute headlessly
+./scripts/mq5run --symbol EURUSD --period PERIOD_M1
+
+# 2. Validate integrity + indicator correlation
+python python/validate_export.py exports/$(ls -t exports/*.csv | head -1)
+
+# Expected output:
+# ✓ All integrity checks passed
+# ✓ RSI validation PASSED - Python implementation matches MT5
+# Correlation: 0.999902
+```
+
+### Validated Configuration (Production)
+- CrossOver 24.0.5 + MT5 Build 5.0.4865
+- macOS Sequoia 15.1 (24B83)
+- EURUSD M1, 5000 bars, RSI(14) - ✅ Works after GUI initialization
+- XAUUSD H1 - ❌ Failed cold start (never opened in GUI)
+- Timeout: 120s (sufficient for 5000 bars)
+- Success rate: 100% for initialized symbols, 0% for cold start
+
+## GUI / Runtime
+- Launch MetaEditor GUI for debugging: `mt5-start "C:\Program Files\MetaTrader 5\metaeditor64.exe"`
+- Launch MetaTrader terminal: `mt5-start "C:\Program Files\MetaTrader 5\terminal64.exe"`
+- Restart wineserver if needed: `mt5-start wineserver -k`
+
+## References
+
+**Essential Reading**:
+- **This file** - Core MT5/CrossOver operations and empirical fixes
+- `../reports/VALIDATION_STATUS.md` - Current validation status and SLO metrics
+- `../plans/HEADLESS_EXECUTION_PLAN.md` - Implementation plan with diagnostic process (v3.0.0 COMPLETE)
+- `../reports/SUCCESS_REPORT.md` - Manual and headless validation results
+- `AI_AGENT_WORKFLOW.md` - Complete workflow guide for AI agents
+- `../archive/historical.txt` - Community research findings (2022-2025)

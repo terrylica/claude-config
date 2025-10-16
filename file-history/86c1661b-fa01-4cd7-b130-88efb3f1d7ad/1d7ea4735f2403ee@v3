@@ -1,0 +1,187 @@
+# Notion Integration for Touchstone Documentation
+
+**Last Updated**: 2025-10-15
+**Status**: Active
+**Integration Type**: Internal (Workspace-only)
+
+## Overview
+
+Retrieves Touchstone service documentation from internal Notion pages within the EonLabs workspace.
+
+## Credentials
+
+All credentials stored in Doppler (`claude-config` project, `dev` config).
+
+### NOTION_API_TOKEN
+
+- **Type**: Internal Integration Secret
+- **Value**: `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`
+- **Integration Name**: Touchstone Docs Reader
+- **Workspace**: EonLabs
+- **Created**: 2025-10-15
+- **Capabilities**:
+  - ✅ Read content (request to read content)
+  - ✅ Read comments (read comments on blocks and pages)
+  - ✅ Insert comments (create comments on blocks and pages)
+  - ❌ Update content (not enabled)
+  - ❌ Insert content (not enabled)
+- **User Capabilities**: Read user information including email addresses
+- **Scope**: Workspace-only (not public)
+- **Purpose**: Read-only access to Touchstone documentation pages
+- **Used By**: `/Users/terryli/eon/ml-feature-set/util/touchstone/fetch_notion_docs.py`
+
+**Doppler Storage**:
+```bash
+doppler secrets get NOTION_API_TOKEN --project claude-config --config dev
+```
+
+### NOTION_TOUCHSTONE_PAGE_ID
+
+- **Type**: Notion Page Identifier
+- **Value**: `1832d2dc-3efa-80de-ae67-c5d40921f65d`
+- **Format**: UUID with hyphens (32 hex chars formatted as 8-4-4-4-12)
+- **Page URL**: `https://www.notion.so/eonlabs/Touchstone-Service-Operator-Manual-1832d2dc3efa80deae67c5d40921f65d`
+- **Page Title**: Touchstone Service Operator Manual
+- **Purpose**: Target page ID for Touchstone documentation
+- **Access**: Must grant "Touchstone Docs Reader" connection to this page
+- **Created**: 2025-10-15
+
+**Doppler Storage**:
+```bash
+doppler secrets get NOTION_TOUCHSTONE_PAGE_ID --project claude-config --config dev
+```
+
+## Integration Setup Steps
+
+### 1. Create Integration ✅ COMPLETED
+
+- Dashboard: https://www.notion.com/my-integrations
+- Integration created: "Touchstone Docs Reader"
+- Token obtained and stored in Doppler
+
+### 2. Connect Integration to Page ⏳ IN PROGRESS
+
+**Required Actions**:
+1. Navigate to Touchstone documentation page in Notion
+2. Click "..." menu (top-right)
+3. Select "+ Add connections"
+4. Choose "Touchstone Docs Reader"
+5. Confirm access
+6. Copy 32-character Page ID from URL
+7. Store in Doppler (see command above)
+
+**Warning**: Integration shows "doesn't have access to any pages yet" until Step 2 is completed.
+
+### 3. Verify Access ⏳ PENDING
+
+```bash
+doppler run --project claude-config --config dev -- \
+  python3 util/touchstone/fetch_notion_docs.py
+```
+
+## Usage
+
+### Fetch Documentation (Display)
+
+```bash
+doppler run --project claude-config --config dev -- \
+  python3 util/touchstone/fetch_notion_docs.py
+```
+
+### Save to File
+
+```bash
+doppler run --project claude-config --config dev -- \
+  python3 util/touchstone/fetch_notion_docs.py \
+  --output touchstone_docs.md
+```
+
+### Get Raw JSON
+
+```bash
+doppler run --project claude-config --config dev -- \
+  python3 util/touchstone/fetch_notion_docs.py \
+  --format json
+```
+
+### Fetch Different Page
+
+```bash
+doppler run --project claude-config --config dev -- \
+  python3 util/touchstone/fetch_notion_docs.py \
+  --page-id "alternative-page-id"
+```
+
+## API Version
+
+- **Current**: `2025-09-03` (latest as of 2025-10-15)
+- **Features**: Multi-source database support
+- **Breaking Changes**: Requires `data_source_id` for database operations (not applicable for page reading)
+
+## Dependencies
+
+See `/Users/terryli/eon/ml-feature-set/util/touchstone/requirements.txt`:
+- `notion-client>=2.2.1` (official Notion Python SDK)
+- `PyYAML` (existing)
+- `boto3` (existing)
+
+**Installation**:
+```bash
+cd /Users/terryli/eon/ml-feature-set
+uv pip install -r util/touchstone/requirements.txt
+```
+
+## Script Details
+
+**Location**: `/Users/terryli/eon/ml-feature-set/util/touchstone/fetch_notion_docs.py`
+
+**Features**:
+- Notion API 2025-09-03 support
+- Markdown conversion from Notion blocks
+- Rich text formatting (bold, italic, code, links)
+- Block types: headings, paragraphs, lists, code blocks, quotes, callouts, dividers
+- Doppler credential injection
+- Flexible output formats (stdout, file, JSON)
+
+**Supported Block Types**:
+- Headings (H1, H2, H3)
+- Paragraphs
+- Bulleted lists
+- Numbered lists
+- Code blocks (with language syntax)
+- Quotes
+- Callouts (with emoji icons)
+- Dividers
+
+## Security
+
+- **Credential Storage**: Doppler (never commit to git)
+- **Access Level**: Read-only content
+- **Workspace Restriction**: EonLabs only
+- **Token Type**: Internal Integration (not OAuth)
+
+## Troubleshooting
+
+### "Your integration doesn't have access to any pages yet"
+
+**Solution**: Complete Step 2 (Connect Integration to Page) above.
+
+### "NOTION_API_TOKEN environment variable not set"
+
+**Solution**: Use Doppler credential injection:
+```bash
+doppler run --project claude-config --config dev -- python3 ...
+```
+
+### "NOTION_TOUCHSTONE_PAGE_ID environment variable not set"
+
+**Solution**:
+1. Get Page ID from Notion URL
+2. Store in Doppler: `doppler secrets set NOTION_TOUCHSTONE_PAGE_ID="..." --project claude-config --config dev`
+
+## References
+
+- Notion API Docs: https://developers.notion.com/
+- API Version 2025-09-03: https://developers.notion.com/docs/upgrade-guide-2025-09-03
+- Integration Settings: https://www.notion.com/my-integrations
+- Doppler Integration Spec: `/Users/terryli/.claude/specifications/doppler-integration.yaml`

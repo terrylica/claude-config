@@ -1,0 +1,685 @@
+# Repository Reorganization Plan
+# Version: 1.0.0
+# Date: 2025-10-13
+# Status: IN_PROGRESS
+#
+# Purpose: Migrate from flat/scattered structure to organized hierarchy
+# Constraints:
+#   - Language-agnostic methodology
+#   - Separate moves from code changes
+#   - Chronological and revertible
+#   - Test-driven validation
+#   - Error propagation: raise immediately, no retries
+#   - Off-the-shelf solutions only
+
+metadata:
+  project_name: mql5-crossover
+  primary_languages:
+    - MQL5  # MetaTrader 5 scripting (.mq5, .mqh)
+    - Python  # Validation and data processing (.py)
+  secondary_languages:
+    - Bash  # Automation scripts
+    - Markdown  # Documentation
+  created: 2025-10-13
+  updated: 2025-10-13
+  status: IN_PROGRESS
+
+# ============================================================================
+# SERVICE LEVEL OBJECTIVES
+# ============================================================================
+
+slos:
+  availability:
+    target: 100%
+    description: "All files accessible after reorganization"
+    measurement: "File count before == file count after moves"
+    failure_condition: "Any file missing or inaccessible"
+    validation:
+      - command: "find . -type f | wc -l"
+        frequency: "after each batch"
+        threshold: "must match pre-move count"
+
+  correctness:
+    target: 100%
+    description: "All references resolve correctly after updates"
+    measurement: "MQL5 compilation success + script execution success"
+    failure_condition: "Any compilation error OR execution error OR broken link"
+    validation:
+      - command: "mq5c mql5/Scripts/ExportAligned.mq5"
+        frequency: "after reference updates"
+        threshold: "exit code 0"
+      - command: "./scripts/mq5run --symbol EURUSD --period PERIOD_M1"
+        frequency: "after reference updates"
+        threshold: "CSV exported successfully"
+      - command: "python python/validate_export.py exports/<latest>.csv"
+        frequency: "after reference updates"
+        threshold: "correlation >= 0.999"
+
+  observability:
+    target: 100%
+    description: "All operations logged with errors propagated"
+    measurement: "Git commit per batch + error visibility"
+    failure_condition: "Silent failure OR missing commit OR unclear error"
+    validation:
+      - command: "git log --oneline | grep 'reorg:'"
+        frequency: "continuous"
+        threshold: "12+ reorg commits visible"
+      - policy: "All errors raised immediately with context"
+        enforcement: "No try-except without re-raise"
+
+  maintainability:
+    target: 100%
+    description: "Repository structure follows language conventions"
+    measurement: "Directory structure matches proposed hierarchy"
+    failure_condition: "Files in wrong locations OR orphaned files in root"
+    validation:
+      - command: "ls -la | grep -E '\\.mq5$|\\.py$' | grep -v README | grep -v CLAUDE"
+        frequency: "after phase 9"
+        threshold: "0 matches (only README.md and CLAUDE.md in root)"
+      - command: "test -d mql5/Scripts && test -d mql5/Include && test -d python"
+        frequency: "after phase 2"
+        threshold: "exit code 0"
+
+# ============================================================================
+# SURVEY REPORT
+# ============================================================================
+
+survey:
+  summary: |
+    Repository contains MQL5 trading scripts, Python validation tools, and
+    extensive documentation for headless MT5 data export via CrossOver/Wine.
+
+    Current structure mixes concerns in root directory with some organization
+    in mql5_export/ and docs/ subdirectories.
+
+  detected_languages:
+    MQL5:
+      description: "MetaTrader 5 Expert Advisors, Scripts, and Indicators"
+      file_count: 7
+      extensions: [".mq5", ".mqh"]
+      conventions:
+        - "Organize by type: Experts/, Scripts/, Indicators/, Include/"
+        - "Use #include with relative paths"
+        - "Compiled files (.ex5) in same directory as source"
+
+    Python:
+      description: "Data validation and processing"
+      file_count: 1
+      extensions: [".py"]
+      conventions:
+        - "Use src/ or package-name/ for modules"
+        - "Scripts in scripts/ or bin/"
+        - "Tests in tests/"
+
+    Bash:
+      description: "Automation and CLI tools"
+      file_count: 1
+      extensions: [".sh", no-extension-executable]
+      conventions:
+        - "Executables in scripts/ or bin/"
+        - "Use #!/usr/bin/env bash shebang"
+
+    Markdown:
+      description: "Documentation and guides"
+      file_count: 6
+      extensions: [".md"]
+      conventions:
+        - "Root: README.md, CHANGELOG.md, LICENSE"
+        - "Detailed docs in docs/"
+        - "Archives in docs/archive/ or .archive/"
+
+  file_inventory:
+    total_files: 21
+    by_location:
+      root:
+        count: 14
+        concerns: ["Scripts", "Documentation", "Archives", "Configs", "Validation"]
+        risk: HIGH  # Mixed concerns, hard to navigate
+
+      mql5_export:
+        count: 4
+        concerns: ["MQL5 production scripts", "Core libraries", "Modules"]
+        risk: LOW  # Well organized
+
+      docs:
+        count: 2
+        concerns: ["Documentation"]
+        risk: LOW  # Appropriate
+
+      exports:
+        count: 0
+        concerns: ["Output data"]
+        risk: NONE  # Output directory
+
+  dependency_analysis:
+    internal_imports:
+      - source: "mql5_export/ExportAligned.mq5"
+        imports: ["DataExportCore.mqh", "modules/RSIModule.mqh"]
+        risk: LOW  # Relative imports, will be preserved
+
+      - source: "validate_export.py"
+        imports: ["pandas", "numpy"]
+        risk: NONE  # External dependencies only
+
+    external_references:
+      - file: "CROSSOVER_MQ5.md"
+        references: ["mql5_export/ExportAligned.mq5", "validate_export.py"]
+        risk: MEDIUM  # Documentation links need updating
+
+      - file: "QUICKSTART.md"
+        references: ["mq5run", "validate_export", "docs/AI_AGENT_WORKFLOW.md"]
+        risk: MEDIUM  # Script paths need updating
+
+      - file: "HEADLESS_EXECUTION_PLAN.md"
+        references: ["validate_export.py", "VALIDATION_STATUS.md"]
+        risk: MEDIUM  # Cross-doc links need updating
+
+  risks_identified:
+    HIGH:
+      - description: "Root directory cluttered with mixed concerns"
+        impact: "Reduces discoverability, violates separation of concerns"
+        mitigation: "Move to organized hierarchy"
+
+    MEDIUM:
+      - description: "Documentation has hard-coded paths"
+        impact: "Links break after moves"
+        mitigation: "Batch update after moves with sed/awk"
+
+      - description: "Shell scripts may have hard-coded paths"
+        impact: "Scripts fail after moves"
+        mitigation: "Test after each batch, update references"
+
+    LOW:
+      - description: "MQL5 includes use relative paths"
+        impact: "May need adjustment if directory depth changes"
+        mitigation: "Preserve relative structure within mql5/"
+
+# ============================================================================
+# PROPOSED HIERARCHY
+# ============================================================================
+
+proposed_hierarchy:
+  rationale: |
+    Organize by language and purpose, following idiomatic conventions:
+    - MQL5: Mirror MT5 structure (Scripts/, Include/, Experts/)
+    - Python: Separate tools/scripts from source code
+    - Docs: Organize by type (guides, plans, archive)
+    - Config: Centralize configs and templates
+
+  structure:
+    README.md: "Project overview (to be created/updated)"
+    CLAUDE.md: "Project memory hub (to be created)"
+
+    mql5/:
+      description: "All MQL5 source code"
+      Scripts/:
+        ExportAligned.mq5: "Production data export script"
+        ExportEURUSD.mq5: "Legacy EURUSD-specific export"
+
+      Include/:
+        DataExportCore.mqh: "Core export functionality"
+        ExportAlignedCommon.mqh: "Common export utilities"
+        modules/:
+          RSIModule.mqh: "RSI calculation module"
+
+      Samples/:
+        PositionInfoSample.mq5: "Sample position info script"
+        TestSimple.mq5: "Simple test script"
+
+    python/:
+      description: "Python validation and processing tools"
+      validate_export.py: "CSV validation and indicator comparison"
+
+    scripts/:
+      description: "Automation and CLI tools"
+      mq5run: "Headless MT5 execution wrapper"
+
+    docs/:
+      description: "All documentation"
+      guides/:
+        QUICKSTART.md: "Quick start guide"
+        CROSSOVER_MQ5.md: "CrossOver/MT5 essentials"
+        AI_AGENT_WORKFLOW.md: "AI agent workflow"
+
+      plans/:
+        HEADLESS_EXECUTION_PLAN.md: "Current execution plan (v3.0.0)"
+        exporter_plan.md: "Exporter implementation plan"
+
+      reports/:
+        SUCCESS_REPORT.md: "Validation success report"
+        VALIDATION_STATUS.md: "Current validation status"
+
+      archive/:
+        HEADLESS_EXECUTION_PLAN.v2.0.0.archived.md: "Archived plan v2.0.0"
+        historical.txt: "Historical research findings"
+
+    config/:
+      description: "Configuration files and templates"
+      startup.ini: "MT5 startup configuration"
+
+    logs/:
+      description: "Runtime logs and output"
+      .gitkeep: "Keep directory in git"
+
+    exports/:
+      description: "Exported CSV data (git-ignored)"
+      .gitkeep: "Keep directory in git"
+
+# ============================================================================
+# MOVE MAP
+# ============================================================================
+
+move_map:
+  description: |
+    Maps old paths to new paths. Execute in order.
+    Format: source -> destination
+
+  batch_1_create_directories:
+    description: "Create new directory structure"
+    commands:
+      - mkdir -p mql5/Scripts
+      - mkdir -p mql5/Include/modules
+      - mkdir -p mql5/Samples
+      - mkdir -p python
+      - mkdir -p scripts
+      - mkdir -p docs/guides
+      - mkdir -p docs/plans
+      - mkdir -p docs/reports
+      - mkdir -p docs/archive
+      - mkdir -p config
+      - mkdir -p logs
+
+  batch_2_move_mql5_scripts:
+    description: "Move MQL5 scripts to mql5/Scripts/"
+    risk: LOW
+    validation: "mq5c should find scripts in new location"
+    moves:
+      - source: "./mql5_export/ExportAligned.mq5"
+        destination: "./mql5/Scripts/ExportAligned.mq5"
+        reason: "Production export script"
+
+      - source: "./ExportEURUSD.mq5"
+        destination: "./mql5/Scripts/ExportEURUSD.mq5"
+        reason: "Legacy EURUSD-specific script"
+
+  batch_3_move_mql5_includes:
+    description: "Move MQL5 include files to mql5/Include/"
+    risk: MEDIUM
+    validation: "Check #include paths in scripts"
+    moves:
+      - source: "./mql5_export/DataExportCore.mqh"
+        destination: "./mql5/Include/DataExportCore.mqh"
+        reason: "Core export library"
+
+      - source: "./mql5_export/ExportAlignedCommon.mqh"
+        destination: "./mql5/Include/ExportAlignedCommon.mqh"
+        reason: "Common export utilities"
+
+      - source: "./mql5_export/modules/RSIModule.mqh"
+        destination: "./mql5/Include/modules/RSIModule.mqh"
+        reason: "RSI module"
+
+  batch_4_move_mql5_samples:
+    description: "Move sample MQL5 scripts to mql5/Samples/"
+    risk: LOW
+    validation: "Samples are non-critical"
+    moves:
+      - source: "./PositionInfoSample.mq5"
+        destination: "./mql5/Samples/PositionInfoSample.mq5"
+        reason: "Sample script"
+
+      - source: "./TestSimple.mq5"
+        destination: "./mql5/Samples/TestSimple.mq5"
+        reason: "Test script"
+
+  batch_5_move_python:
+    description: "Move Python tools to python/"
+    risk: MEDIUM
+    validation: "Test validate_export.py with relative imports"
+    moves:
+      - source: "./validate_export.py"
+        destination: "./python/validate_export.py"
+        reason: "Validation tool"
+
+  batch_6_move_scripts:
+    description: "Move automation scripts to scripts/"
+    risk: HIGH
+    validation: "Test mq5run execution, may need PATH updates"
+    moves:
+      - source: "./mq5run"
+        destination: "./scripts/mq5run"
+        reason: "Headless execution wrapper"
+
+  batch_7_move_docs_guides:
+    description: "Move guide documentation to docs/guides/"
+    risk: LOW
+    validation: "Check links between docs"
+    moves:
+      - source: "./QUICKSTART.md"
+        destination: "./docs/guides/QUICKSTART.md"
+        reason: "User guide"
+
+      - source: "./CROSSOVER_MQ5.md"
+        destination: "./docs/guides/CROSSOVER_MQ5.md"
+        reason: "Technical reference"
+
+      - source: "./docs/AI_AGENT_WORKFLOW.md"
+        destination: "./docs/guides/AI_AGENT_WORKFLOW.md"
+        reason: "Workflow guide"
+
+  batch_8_move_docs_plans:
+    description: "Move planning documents to docs/plans/"
+    risk: LOW
+    validation: "Update cross-references"
+    moves:
+      - source: "./HEADLESS_EXECUTION_PLAN.md"
+        destination: "./docs/plans/HEADLESS_EXECUTION_PLAN.md"
+        reason: "Current implementation plan"
+
+      - source: "./docs/exporter_plan.md"
+        destination: "./docs/plans/exporter_plan.md"
+        reason: "Exporter design plan"
+
+  batch_9_move_docs_reports:
+    description: "Move status/report documents to docs/reports/"
+    risk: LOW
+    validation: "Update cross-references"
+    moves:
+      - source: "./SUCCESS_REPORT.md"
+        destination: "./docs/reports/SUCCESS_REPORT.md"
+        reason: "Validation report"
+
+      - source: "./VALIDATION_STATUS.md"
+        destination: "./docs/reports/VALIDATION_STATUS.md"
+        reason: "Current status"
+
+  batch_10_move_docs_archive:
+    description: "Move archived documents to docs/archive/"
+    risk: LOW
+    validation: "Archives are historical, low risk"
+    moves:
+      - source: "./HEADLESS_EXECUTION_PLAN.v2.0.0.archived.md"
+        destination: "./docs/archive/HEADLESS_EXECUTION_PLAN.v2.0.0.archived.md"
+        reason: "Archived plan"
+
+      - source: "./historical.txt"
+        destination: "./docs/archive/historical.txt"
+        reason: "Historical research"
+
+  batch_11_move_config:
+    description: "Move configuration files to config/"
+    risk: LOW
+    validation: "Update references in scripts"
+    moves:
+      - source: "./startup.ini"
+        destination: "./config/startup.ini"
+        reason: "MT5 startup config"
+
+  batch_12_cleanup_old_directories:
+    description: "Remove empty old directories"
+    risk: LOW
+    validation: "Ensure all files moved"
+    commands:
+      - rmdir mql5_export/modules
+      - rmdir mql5_export
+
+# ============================================================================
+# REFERENCE UPDATE PLAN
+# ============================================================================
+
+reference_updates:
+  description: |
+    After moves complete, update references in code and docs.
+    Use sed/awk for batch updates, manual review for complex cases.
+
+  batch_1_mql5_includes:
+    description: "Update #include paths in MQL5 scripts"
+    risk: HIGH
+    validation: "Compile all MQL5 scripts"
+    files:
+      - file: "./mql5/Scripts/ExportAligned.mq5"
+        changes:
+          - pattern: '#include "DataExportCore.mqh"'
+            replacement: '#include "../Include/DataExportCore.mqh"'
+          - pattern: '#include "modules/RSIModule.mqh"'
+            replacement: '#include "../Include/modules/RSIModule.mqh"'
+
+  batch_2_script_paths:
+    description: "Update paths in shell scripts"
+    risk: HIGH
+    validation: "Test script execution"
+    files:
+      - file: "./scripts/mq5run"
+        changes:
+          - pattern: "look for mql5_export/"
+            replacement: "look for mql5/Scripts/"
+          - pattern: "reference to validate_export.py"
+            replacement: "python/validate_export.py"
+
+  batch_3_documentation_links:
+    description: "Update file paths in documentation"
+    risk: MEDIUM
+    validation: "Visual inspection of docs"
+    files:
+      - file: "./docs/guides/QUICKSTART.md"
+        update_method: "batch_sed"
+        patterns:
+          - old: "./mq5run"
+            new: "../scripts/mq5run"
+          - old: "validate_export"
+            new: "../python/validate_export.py"
+          - old: "docs/AI_AGENT_WORKFLOW.md"
+            new: "AI_AGENT_WORKFLOW.md"
+
+      - file: "./docs/guides/CROSSOVER_MQ5.md"
+        update_method: "batch_sed"
+        patterns:
+          - old: "mql5_export/ExportAligned.mq5"
+            new: "mql5/Scripts/ExportAligned.mq5"
+          - old: "validate_export.py"
+            new: "python/validate_export.py"
+          - old: "VALIDATION_STATUS.md"
+            new: "reports/VALIDATION_STATUS.md"
+          - old: "HEADLESS_EXECUTION_PLAN.md"
+            new: "plans/HEADLESS_EXECUTION_PLAN.md"
+
+      - file: "./docs/plans/HEADLESS_EXECUTION_PLAN.md"
+        update_method: "batch_sed"
+        patterns:
+          - old: "validate_export.py"
+            new: "../../python/validate_export.py"
+          - old: "VALIDATION_STATUS.md"
+            new: "../reports/VALIDATION_STATUS.md"
+
+# ============================================================================
+# EXECUTION CHECKLIST
+# ============================================================================
+
+execution_checklist:
+  description: "Step-by-step execution plan with validation"
+
+  phase_1_preparation:
+    - [ ] Create backup: `cp -r . ../mql5-crossover-backup-$(date +%Y%m%d)`
+    - [ ] Commit current state: `git add . && git commit -m "Pre-reorg snapshot"`
+    - [ ] Create reorg branch: `git checkout -b reorg/organized-hierarchy`
+    - [ ] Verify working directory clean: `git status`
+
+  phase_2_directory_creation:
+    - [ ] Execute batch_1_create_directories
+    - [ ] Verify directories created: `ls -la mql5/ python/ scripts/ docs/ config/ logs/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Create new directory structure"`
+
+  phase_3_mql5_migration:
+    - [ ] Execute batch_2_move_mql5_scripts
+    - [ ] Verify scripts moved: `ls -la mql5/Scripts/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move MQL5 scripts to mql5/Scripts/"`
+
+    - [ ] Execute batch_3_move_mql5_includes
+    - [ ] Verify includes moved: `ls -la mql5/Include/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move MQL5 includes to mql5/Include/"`
+
+    - [ ] Execute batch_4_move_mql5_samples
+    - [ ] Verify samples moved: `ls -la mql5/Samples/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move MQL5 samples to mql5/Samples/"`
+
+  phase_4_python_and_scripts:
+    - [ ] Execute batch_5_move_python
+    - [ ] Verify Python files moved: `ls -la python/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move Python tools to python/"`
+
+    - [ ] Execute batch_6_move_scripts
+    - [ ] Verify scripts moved: `ls -la scripts/`
+    - [ ] Test: `./scripts/mq5run --help` (expect path errors, will fix in phase 6)
+    - [ ] Commit: `git add . && git commit -m "reorg: Move automation scripts to scripts/"`
+
+  phase_5_documentation:
+    - [ ] Execute batch_7_move_docs_guides
+    - [ ] Verify guides moved: `ls -la docs/guides/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move guides to docs/guides/"`
+
+    - [ ] Execute batch_8_move_docs_plans
+    - [ ] Verify plans moved: `ls -la docs/plans/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move plans to docs/plans/"`
+
+    - [ ] Execute batch_9_move_docs_reports
+    - [ ] Verify reports moved: `ls -la docs/reports/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move reports to docs/reports/"`
+
+    - [ ] Execute batch_10_move_docs_archive
+    - [ ] Verify archives moved: `ls -la docs/archive/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move archives to docs/archive/"`
+
+  phase_6_config_and_cleanup:
+    - [ ] Execute batch_11_move_config
+    - [ ] Verify config moved: `ls -la config/`
+    - [ ] Commit: `git add . && git commit -m "reorg: Move config to config/"`
+
+    - [ ] Execute batch_12_cleanup_old_directories
+    - [ ] Verify old directories removed: `ls -la` (no mql5_export/)
+    - [ ] Commit: `git add . && git commit -m "reorg: Clean up old directories"`
+
+  phase_7_reference_updates:
+    - [ ] Update MQL5 #include paths (batch_1_mql5_includes)
+    - [ ] Test compile: `mq5c mql5/Scripts/ExportAligned.mq5`
+    - [ ] Commit: `git add . && git commit -m "fix: Update MQL5 include paths"`
+
+    - [ ] Update script paths (batch_2_script_paths)
+    - [ ] Test: `./scripts/mq5run --help`
+    - [ ] Commit: `git add . && git commit -m "fix: Update script paths"`
+
+    - [ ] Update documentation links (batch_3_documentation_links)
+    - [ ] Visual review: `cat docs/guides/QUICKSTART.md`
+    - [ ] Commit: `git add . && git commit -m "fix: Update documentation links"`
+
+  phase_8_testing:
+    - [ ] Test MQL5 compilation: `mq5c mql5/Scripts/ExportAligned.mq5`
+    - [ ] Test script execution: `./scripts/mq5run --symbol EURUSD --period PERIOD_M1`
+    - [ ] Test Python validation: `python python/validate_export.py exports/<latest>.csv`
+    - [ ] Test documentation links: Open docs in browser, click links
+    - [ ] Test all scripts: `./scripts/mq5run --help`
+
+  phase_9_finalization:
+    - [ ] Create README.md in root
+    - [ ] Create CLAUDE.md in root (project memory hub)
+    - [ ] Update .gitignore if needed
+    - [ ] Final commit: `git add . && git commit -m "reorg: Complete organized hierarchy migration"`
+    - [ ] Tag version: `git tag reorg-v1.0.0`
+    - [ ] Merge to main: `git checkout main && git merge reorg/organized-hierarchy`
+    - [ ] Verify main works: Run tests again
+    - [ ] Push: `git push origin main --tags`
+
+# ============================================================================
+# ROLLBACK PLAN
+# ============================================================================
+
+rollback_plan:
+  description: "How to revert if reorganization fails"
+
+  method_1_git_revert:
+    description: "Use git to revert to pre-reorg state"
+    steps:
+      - "Checkout pre-reorg commit: git checkout <pre-reorg-sha>"
+      - "Create rollback branch: git checkout -b rollback/reorg-failed"
+      - "Verify old structure: ls -la"
+      - "If satisfied: git checkout main && git reset --hard <pre-reorg-sha>"
+
+  method_2_backup_restore:
+    description: "Restore from backup directory"
+    steps:
+      - "Remove current directory: rm -rf /Users/terryli/eon/mql5-crossover"
+      - "Restore backup: cp -r ../mql5-crossover-backup-<date> /Users/terryli/eon/mql5-crossover"
+      - "Verify: cd /Users/terryli/eon/mql5-crossover && ls -la"
+
+  partial_rollback:
+    description: "Revert specific batches if only some fail"
+    note: "Each batch has a git commit, can cherry-pick or revert individual commits"
+
+# ============================================================================
+# POST-REORG VALIDATION
+# ============================================================================
+
+validation_tests:
+  description: "Tests to run after reorganization completes"
+
+  compilation_tests:
+    - test: "Compile ExportAligned.mq5"
+      command: "mq5c mql5/Scripts/ExportAligned.mq5"
+      expected: "Compilation successful, .ex5 created"
+
+    - test: "Compile ExportEURUSD.mq5"
+      command: "mq5c mql5/Scripts/ExportEURUSD.mq5"
+      expected: "Compilation successful, .ex5 created"
+
+  execution_tests:
+    - test: "Run mq5run script"
+      command: "./scripts/mq5run --symbol EURUSD --period PERIOD_M1"
+      expected: "Export completes, CSV in exports/"
+
+    - test: "Run validation"
+      command: "python python/validate_export.py exports/<latest>.csv"
+      expected: "All checks pass, correlation > 0.999"
+
+  documentation_tests:
+    - test: "Check documentation links"
+      method: "Manual review"
+      files: ["docs/guides/QUICKSTART.md", "docs/guides/CROSSOVER_MQ5.md"]
+      expected: "All relative links resolve correctly"
+
+  structure_tests:
+    - test: "Verify directory structure"
+      command: "tree -L 2"
+      expected: "Matches proposed_hierarchy"
+
+    - test: "No orphaned files in root"
+      command: "ls -la | grep -E '\\.mq5$|\\.py$|\\.md$'"
+      expected: "Only README.md and CLAUDE.md in root"
+
+# ============================================================================
+# BENEFITS
+# ============================================================================
+
+benefits:
+  discoverability:
+    before: "Mixed files in root, hard to find scripts vs docs vs samples"
+    after: "Clear separation: mql5/, python/, scripts/, docs/"
+    improvement: "New users can navigate easily"
+
+  maintainability:
+    before: "Updates scattered across root directory"
+    after: "Organized by concern, easier to update related files"
+    improvement: "Changes localized to relevant directories"
+
+  scalability:
+    before: "Adding new scripts clutters root further"
+    after: "Clear location for new files (mql5/Scripts/, python/, etc.)"
+    improvement: "Can add 100+ files without chaos"
+
+  professionalism:
+    before: "Looks like prototype/experiment"
+    after: "Follows industry conventions, looks production-ready"
+    improvement: "Easier to onboard collaborators"
+
+  ide_support:
+    before: "IDEs struggle with mixed file types in root"
+    after: "IDEs can apply language-specific settings per directory"
+    improvement: "Better autocomplete, linting, navigation"

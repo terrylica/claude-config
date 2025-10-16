@@ -1,0 +1,422 @@
+# Headless Execution Implementation Plan - Python API Bridge
+
+**Version**: 3.0.0
+**Created**: 2025-10-13
+**Status**: IN_PROGRESS
+**Supersedes**: v2.0.0 (startup.ini approach - conditionally working only)
+
+## Problem Statement
+
+**v2.0.0 Limitation Discovered** (2025-10-13 16:09):
+- startup.ini approach requires prior GUI initialization for each symbol/timeframe
+- EURUSD M1: ✅ Works (manually initialized at 15:03)
+- XAUUSD H1: ❌ Fails (never opened in GUI)
+- Root cause: `[StartUp]` section attaches scripts to existing chart contexts, does not create charts
+
+**Requirement**: True headless execution without manual GUI steps for any symbol/timeframe
+
+## Solution Architecture
+
+**MetaTrader5 Python API (Wine Python only)**:
+
+```
+Wine Python + MetaTrader5 package
+    ↓ Direct IPC connection
+MT5 Terminal (CrossOver/Wine)
+    ↓ CSV output
+macOS filesystem (shared)
+```
+
+**Key Capabilities**:
+- `mt5.symbol_select()` - programmatically add symbols to Market Watch
+- `mt5.copy_rates_range()` - fetch OHLC data without charts
+- No GUI interaction required - eliminates chart context dependency
+- CSV files written to shared macOS filesystem
+- pandas-ta for RSI calculation (installable in Wine Python)
+
+**Architecture Rationale**:
+- mt5linux/pymt5adapter both require MetaTrader5 package (Windows-only) on macOS side - fundamentally incompatible
+- Direct Wine Python execution simplifies architecture, eliminates bridge complexity
+- macOS can read CSV files directly from shared bottle filesystem
+
+## Service Level Objectives
+
+### Availability
+- **Target**: 95% success rate for any symbol/timeframe without prior GUI setup
+- **Measurement**: Successful CSV generation for never-before-initialized symbols
+- **Failure condition**: Cold start test (XAUUSD H1) fails
+
+### Correctness
+- **Target**: 100% data integrity, correlation ≥ 0.999 with MT5 native indicators
+- **Measurement**: validate_export.py all checks pass
+- **Failure condition**: Any integrity check fails OR RSI correlation < 0.999
+
+### Observability
+- **Target**: All API calls logged with errors propagated (no silent failures)
+- **Measurement**: Log entries for mt5.initialize(), symbol_select(), copy_rates_range() with error codes
+- **Failure condition**: API call fails without logged error via mt5.last_error()
+
+### Maintainability
+- **Target**: Single command data export, no manual Wine/MT5 management
+- **Measurement**: User runs one script, bridge auto-starts, MT5 auto-connects
+- **Failure condition**: User must manually start Wine processes or MT5 terminal between runs
+
+## Implementation Phases
+
+### Phase 1: Wine Python Environment Setup
+**Status**: COMPLETE ✅
+**Resolution**: NumPy 1.26.4 downgrade successful
+**Validation**: MetaTrader5 5.0.5328 imports successfully in Wine Python
+**Completion Time**: 2025-10-13 17:20
+
+**Objective**: Install Python and MetaTrader5 package inside CrossOver bottle
+
+**Resolution Details**:
+
+1. ✅ **NumPy Version Pinning** - SUCCESSFUL
+   - Downgraded from NumPy 2.3.3 to NumPy 1.26.4
+   - MetaTrader5 5.0.5328 imports successfully
+   - Test script: `test_numpy_workaround.bat`
+   - Validation output: `SUCCESS: MetaTrader5 version: 5.0.5328`
+
+**Tasks Completed**:
+1. ✅ Python 3.12.8 installed in CrossOver bottle via GUI (MetaTrader 5 bottle)
+2. ✅ NumPy 2.3.3 uninstalled
+3. ✅ NumPy 1.26.4 installed (MetaTrader5-compatible version)
+4. ✅ MetaTrader5 5.0.5328 package reinstalled
+5. ✅ MetaTrader5 import test successful
+
+**Success Criteria Met**:
+- ✅ Wine Python 3.12.8 installed and functional
+- ✅ `import MetaTrader5` succeeds in Wine Python
+- ✅ Package version: MetaTrader5 5.0.5328
+
+**Validation Result**:
+```bash
+# Executed in Wine Python via test_numpy_workaround.bat
+SUCCESS: MetaTrader5 version: 5.0.5328
+```
+
+### Phase 2: Wine Python Dependencies (REVISED)
+**Status**: IN_PROGRESS
+**Previous Approach**: mt5linux bridge - ABANDONED (requires MetaTrader5 package on macOS, which is Windows-only)
+**New Approach**: Run entire Python script in Wine, output CSV to shared filesystem
+**Estimated Duration**: 10-15 min
+
+**Objective**: Install pandas-ta in Wine Python for RSI calculation
+
+**Tasks**:
+1. ⏳ Install pandas-ta in Wine Python: `"C:\Program Files\Python312\python.exe" -m pip install pandas-ta`
+2. Verify pandas-ta import: Test in Wine Python
+3. Create shared output directory: Map macOS folder to Wine drive for CSV export
+
+**Success Criteria**:
+- pandas-ta imports successfully in Wine Python
+- Output directory accessible from both Wine and macOS
+
+**Error Handling**:
+- pandas-ta install fails → raise PackageInstallError with pip stderr
+- Import fails → raise ImportError with Wine Python traceback
+- Directory mapping fails → raise FilesystemError with details
+
+**Validation**:
+```bash
+# Test pandas-ta in Wine Python via CrossOver GUI Run Command
+"C:\Program Files\Python312\python.exe" -c "import pandas_ta; print('pandas-ta version:', pandas_ta.__version__)"
+```
+
+### Phase 3: MT5 Connection Test
+**Status**: PENDING
+**Estimated Duration**: 15-30 min
+
+**Objective**: Verify end-to-end connectivity: macOS Python → Wine bridge → MT5
+
+**Tasks**:
+1. Ensure MT5 terminal running in CrossOver (logged in)
+2. Initialize connection: `mt5.initialize()`
+3. Check terminal info: `mt5.terminal_info()`
+4. Retrieve basic data: `mt5.copy_rates_range("EURUSD", mt5.TIMEFRAME_M1, start, end)`
+5. Verify data structure matches expected format
+
+**Success Criteria**:
+- `mt5.initialize()` returns True
+- `mt5.terminal_info()` returns non-None dict with build info
+- `copy_rates_range()` returns numpy array with OHLCV fields
+
+**Error Handling**:
+- initialize() fails → raise ConnectionError with mt5.last_error()
+- terminal_info() is None → raise TerminalNotFoundError
+- copy_rates_range() returns None → raise DataFetchError with symbol/timeframe
+
+**Validation**:
+```python
+from mt5linux import MetaTrader5
+mt5 = MetaTrader5()
+
+if not mt5.initialize():
+    error = mt5.last_error()
+    raise ConnectionError(f"MT5 initialize failed: {error}")
+
+info = mt5.terminal_info()
+if info is None:
+    raise TerminalNotFoundError("terminal_info() returned None")
+
+print(f"Connected to MT5 build {info.build}")
+```
+
+### Phase 4: Data Export Script Development
+**Status**: PENDING
+**Estimated Duration**: 30-60 min
+
+**Objective**: Rewrite ExportAligned.mq5 logic in Python with RSI calculation
+
+**Tasks**:
+1. Create `export_aligned_py.py` script
+2. Implement symbol selection: `mt5.symbol_select(symbol, True)`
+3. Fetch OHLC data: `mt5.copy_rates_range(symbol, timeframe, start, end)`
+4. Calculate RSI using pandas-ta: `df.ta.rsi(length=14)`
+5. Align RSI with OHLC bars (handle NaN for initial lookback period)
+6. Export to CSV matching current format
+
+**Success Criteria**:
+- Script runs without errors for any symbol/timeframe
+- CSV format matches ExportAligned.mq5 output (columns, timestamp format)
+- RSI values present for all bars except initial 14-period lookback
+
+**Error Handling**:
+- symbol_select() fails → raise SymbolNotFoundError with mt5.last_error()
+- copy_rates_range() returns None → raise DataFetchError
+- RSI calculation fails → raise IndicatorCalculationError with pandas-ta traceback
+- CSV write fails → raise IOError with filesystem error
+
+**Validation**:
+```bash
+# Export EURUSD M1 data
+uv run --active python -m export_aligned_py --symbol EURUSD --period M1 --bars 5000
+
+# Check output
+ls -lh exports/*.csv
+head -5 exports/Export_EURUSD_PERIOD_M1.csv
+```
+
+### Phase 5: Cold Start Validation
+**Status**: PENDING
+**Estimated Duration**: 15 min
+
+**Objective**: Verify headless execution for symbol never opened in GUI (XAUUSD H1)
+
+**Tasks**:
+1. Ensure XAUUSD H1 never manually opened in MT5
+2. Run export script: `export_aligned_py.py --symbol XAUUSD --period H1 --bars 5000`
+3. Verify CSV generated with expected bars
+4. Run validation: `validate_export.py exports/Export_XAUUSD_PERIOD_H1.csv`
+5. Check RSI correlation ≥ 0.999
+
+**Success Criteria**:
+- Script completes without GUI interaction
+- CSV file exists with 5000 bars
+- validate_export.py all checks pass
+- RSI correlation ≥ 0.999
+
+**Error Handling**:
+- Script fails → raise and display full traceback (no fallback to startup.ini)
+- CSV not generated → raise FileNotFoundError
+- Validation fails → raise ValidationError with specific check failures
+
+**Validation**:
+```bash
+# Cold start test
+uv run --active python -m export_aligned_py --symbol XAUUSD --period H1 --bars 5000
+
+# Validate output
+uv run --active python -m validate_export exports/Export_XAUUSD_PERIOD_H1.csv
+# Expected: ✓ All integrity checks passed, Correlation: 0.9999+
+```
+
+## Off-the-Shelf Components
+
+### Required Packages
+- **Python 3.12+** (x64 Windows): python.org/downloads/windows/
+- **MetaTrader5 Python package**: pypi.org/project/MetaTrader5/
+- **mt5linux bridge**: pypi.org/project/mt5linux/ (Lucas Campagna, Linux/Mac bridge)
+- **pandas-ta**: pypi.org/project/pandas-ta/ (RSI and technical indicators)
+
+### Alternatives Considered
+- **TA-Lib**: Requires C compilation, more complex setup (rejected)
+- **Custom RPyC server**: Re-inventing mt5linux (rejected - use existing solution)
+- **REST API wrapper**: Over-engineered for single-user local setup (rejected)
+
+## Error Propagation Protocol
+
+**No silent failures** - all errors must raise exceptions with context:
+
+```python
+# Example error handling pattern
+if not mt5.initialize():
+    error_code, error_msg = mt5.last_error()
+    raise ConnectionError(
+        f"MT5 initialization failed\n"
+        f"Error code: {error_code}\n"
+        f"Message: {error_msg}\n"
+        f"Ensure MT5 terminal is running and logged in"
+    )
+```
+
+**Error Categories**:
+1. **Environment errors**: Python/package installation issues
+2. **Connection errors**: mt5linux bridge or MT5 terminal communication failures
+3. **Data errors**: Symbol not found, data fetch failures, empty results
+4. **Validation errors**: RSI correlation below threshold, integrity check failures
+
+**Logging Requirements**:
+- All mt5.* API calls logged with timestamps
+- Error codes from `mt5.last_error()` always included in exceptions
+- Full tracebacks preserved (no exception swallowing)
+
+## Migration from v2.0.0
+
+**Deprecated**:
+- `mq5run` script (startup.ini approach)
+- Manual GUI initialization requirement
+- startup.ini config file generation
+
+**Preserved**:
+- CSV output format (backward compatible)
+- `validate_export.py` validation logic
+- MT5 terminal in CrossOver (still required, but no GUI interaction)
+
+**New Entry Point**:
+```bash
+# Old (conditional - requires GUI setup)
+./mq5run --symbol XAUUSD --period PERIOD_H1
+
+# New (true headless)
+uv run --active python -m export_aligned_py --symbol XAUUSD --period H1 --bars 5000
+```
+
+## Progress Tracking
+
+### Phase 1: Wine Python Setup ✅ COMPLETE
+- [x] Python 3.12 Windows installer downloaded (via CrossOver GUI)
+- [x] Python 3.12.8 installed in CrossOver bottle (MetaTrader 5 bottle)
+- [x] NumPy 1.26.4 workaround tested and successful
+- [x] MetaTrader5 5.0.5328 package installed with compatible NumPy
+- [x] Import test successful - MetaTrader5 imports in Wine Python
+
+### Phase 2: mt5linux Bridge
+- [ ] mt5linux installed in Wine Python
+- [ ] mt5linux installed on macOS
+- [ ] Bridge server running
+- [ ] Connection test from macOS successful
+
+### Phase 3: MT5 Connection
+- [ ] mt5.initialize() successful
+- [ ] mt5.terminal_info() returns data
+- [ ] Basic data fetch works (EURUSD M1)
+
+### Phase 4: Export Script
+- [ ] export_aligned_py.py created
+- [ ] Symbol selection logic implemented
+- [ ] OHLC data fetch implemented
+- [ ] RSI calculation implemented
+- [ ] CSV export implemented
+
+### Phase 5: Cold Start Validation
+- [ ] XAUUSD H1 export successful (never initialized in GUI)
+- [ ] validate_export.py passes
+- [ ] RSI correlation ≥ 0.999
+
+## Wine Scientific Python Incompatibility - Resolution In Progress
+
+**Discovery Date**: 2025-10-13 16:56
+**Research Completed**: 2025-10-13 17:15
+**Current Status**: Testing NumPy 1.26.4 workaround
+
+**Error**: `Unhandled exception: unimplemented function ucrtbase.dll.crealf called in 64-bit code`
+**Root Cause**: NumPy 2.x (MetaTrader5 dependency) uses compiled C extensions that call Windows math functions not fully implemented in Wine 10.0
+**Impact**: Cannot run MetaTrader5 Python package under Wine with NumPy 2.x
+
+**Resolution Strategy** (Testing in progress):
+1. ⏳ **NumPy 1.26.4 downgrade** - MetaTrader5 compiled against NumPy 1.x API
+   - Community-verified working (MQL5 forum, Sep 2024)
+   - Test script: `test_numpy_workaround.bat` (ready to run)
+   - Expected outcome: MetaTrader5 package imports successfully
+
+2. ⏸️ **Wine 10.1+ upgrade** - Fallback if NumPy downgrade insufficient
+   - Wine 10.1+ (Feb 2025) has improved UCRT math functions
+   - WineHQ maintainer confirmation
+
+3. ⏸️ **Native UCRT override** - Last resort
+   - WINEDLLOVERRIDES with native ucrtbase.dll from Windows
+
+**Fallback Approaches** (if all workarounds fail):
+
+**Option A: Accept startup.ini Limitation** (Pragmatic)
+- Use existing v2.0.0 approach with manual GUI initialization
+- Document symbol/timeframe initialization requirement
+- Effort: 0 hours (already working)
+- Trade-off: Manual step per symbol, but reliable
+
+**Option B: Windows VM/Machine** (High effort)
+- Run MT5 + Python in actual Windows (VM or separate machine)
+- Use REST API or file sharing for macOS integration
+- Effort: 8-16 hours (VM setup, API development, testing)
+- Trade-off: True headless, but complex infrastructure
+
+**Option C: Pure MQL5 Service** (Medium effort)
+- Rewrite export logic as MQL5 Service (no Python)
+- Service auto-starts with MT5, writes to shared folder
+- macOS reads CSV files directly
+- Effort: 4-8 hours (MQL5 development, testing)
+- Trade-off: No Python flexibility, but no Wine issues
+
+**Current Recommendation**: Test NumPy 1.26.4 workaround first. Revert to Option A only if all workarounds fail.
+
+## Decision Log
+
+### Decision 1: Testing NumPy 1.26.4 workaround for Wine compatibility
+**Date**: 2025-10-13 17:15 (Updated)
+**Initial Status**: Python API approach blocked by Wine UCRT incompatibility
+**Research Findings**: Community-verified workarounds exist (NumPy 1.x pinning, Wine upgrade, native DLL)
+**Rationale**: MetaTrader5 package compiled against NumPy 1.x API, not 2.x. NumPy 2.x uses additional UCRT functions not in Wine 10.0.
+**Evidence**:
+- `ucrtbase.dll.crealf` unimplemented function error during NumPy 2.x import
+- MQL5 community confirmation (Sep 2024): MetaTrader5 incompatible with NumPy 2.x
+- WineHQ forum (Mar 2025): Wine 10.1+ has improved UCRT support
+**Current Action**: Testing NumPy 1.26.4 downgrade via `test_numpy_workaround.bat`
+**Alternative**: Revert to v2.0.0 startup.ini approach only if all workarounds fail
+
+### Decision 2: Abandon mt5linux bridge, use Wine Python only
+**Date**: 2025-10-13 17:30
+**Initial Plan**: Use mt5linux/pymt5adapter bridge for macOS Python → Wine MT5
+**Blocking Issue**: Both bridge packages require MetaTrader5 package (Windows-only) importable on macOS side
+**Evidence**:
+- mt5linux 0.1.9 requires ancient numpy==1.21.4 (incompatible with Python 3.13, distutils removed)
+- pymt5adapter all versions require exact metatrader5==5.0.31 or 5.0.33 (not available for macOS)
+- MetaTrader5 package is Windows-only, cannot run on macOS even with Wine bridge
+**Revised Architecture**: Run entire Python script in Wine, write CSV to shared macOS filesystem
+**Rationale**: Simplifies architecture, eliminates bridge complexity, leverages CrossOver's filesystem integration
+**Trade-off**: Script execution happens in Wine (slightly more friction), but eliminates dependency hell
+
+### Decision 3: pandas-ta for RSI vs TA-Lib
+**Rationale**: pandas-ta is pure Python (no C compilation), simpler installation, sufficient accuracy
+**Alternative**: TA-Lib (rejected - requires compilation, overkill for RSI only)
+
+### Decision 4: Raise errors immediately vs retry logic
+**Rationale**: User requirement - "no fallbacks, defaults, retries". Fail fast for transparency.
+**Alternative**: Automatic retry with exponential backoff (rejected per requirements)
+
+## References
+
+**Research Report**: AI researcher findings (2025-10-13) - 18 sources, 66 searches
+**Archived Plan**: HEADLESS_EXECUTION_PLAN.v2.0.0.archived.md (startup.ini approach)
+**Validation Status**: VALIDATION_STATUS.md (conditionally validated)
+**Knowledge Base**: CROSSOVER_MQ5.md (MT5/CrossOver operations)
+
+## Update Protocol
+
+- Increment version (major.minor.patch) on significant changes
+- Update phase status: PENDING → IN_PROGRESS → COMPLETE/FAILED
+- Log all decisions with date and rationale
+- Move superseded approaches to archived files
+- Update references in VALIDATION_STATUS.md and CROSSOVER_MQ5.md to point to latest plan

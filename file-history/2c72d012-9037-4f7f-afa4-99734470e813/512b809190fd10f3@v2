@@ -1,0 +1,229 @@
+# Statistical Analysis of Normalized OHLC Metrics (v1.2.0)
+
+**Date**: 2025-10-14
+**Database**: `/tmp/exness-duckdb-test/refactored/eurusd.duckdb` (2.08 GB)
+**Period**: Sept 2024 - Oct 2025 (13 months)
+**Total Bars**: 413,453 (1-minute OHLC)
+
+---
+
+## Executive Summary
+
+Successfully upgraded test database from Phase7 v1.1.0 (9 columns) to v1.2.0 (13 columns) and performed comprehensive statistical analysis of the 4 new normalized spread metrics:
+
+1. **`range_per_spread`**: (High-Low) / standard_spread_avg
+2. **`range_per_tick`**: (High-Low) / tick_count_standard
+3. **`body_per_spread`**: abs(Close-Open) / standard_spread_avg
+4. **`body_per_tick`**: abs(Close-Open) / tick_count_standard
+
+---
+
+## Phase 1: Schema Upgrade
+
+**Action**: Regenerated OHLC table with v1.2.0 schema (13 columns)
+
+**Before**:
+- 9 columns: Timestamp, Open, High, Low, Close, raw_spread_avg, standard_spread_avg, tick_count_raw_spread, tick_count_standard
+
+**After**:
+- 13 columns: Original 9 + range_per_spread, range_per_tick, body_per_spread, body_per_tick
+
+**Coverage**:
+- Total bars: 413,453
+- Non-NULL metrics: 382,941 (92.6%)
+- NULL metrics: 30,512 (7.4%) - periods without Standard variant data
+
+---
+
+## Phase 2: Statistical Analysis
+
+### 1. Descriptive Statistics
+
+#### range_per_spread (Range normalized by standard spread)
+```
+Min:     0.000000
+Mean:    2.817551  ⚠️ Range is 2.8x the standard spread on average
+Median:  2.243902  ← Right-skewed (median < mean)
+Max:     139.547786 ⚠️ Extreme outlier
+Std Dev: 2.545715
+```
+
+#### body_per_spread (Body normalized by standard spread)
+```
+Min:     0.000000
+Mean:    1.515947  ⚠️ Body is 1.5x the standard spread on average
+Median:  0.953488  ← Highly right-skewed
+Max:     128.911038 ⚠️ Extreme outlier
+Std Dev: 1.901580
+```
+
+#### range_per_tick (Range per standard tick)
+```
+Min:     0.000000000
+Mean:    0.000000180  (0.18 µ-pips per tick)
+Median:  0.000000101
+Max:     0.000055000
+Std Dev: 0.000000404
+```
+
+#### body_per_tick (Body per standard tick)
+```
+Min:     0.000000000
+Mean:    0.000000108  (0.11 µ-pips per tick)
+Median:  0.000000045
+Max:     0.000055000
+Std Dev: 0.000000368
+```
+
+### 2. Percentile Distribution
+
+#### range_per_spread
+```
+ 1st percentile:  0.0658
+ 5th percentile:  0.3077
+25th percentile:  1.3333  ← Most bars between 1.3x - 3.6x spread
+75th percentile:  3.6164  ←
+95th percentile:  6.9342  ⚠️ Volatility threshold
+99th percentile: 11.7584  ⚠️ Extreme volatility
+```
+
+#### body_per_spread
+```
+ 1st percentile:  0.0000  ← Many doji/small-body bars
+ 5th percentile:  0.0000
+25th percentile:  0.3333
+75th percentile:  2.0392
+95th percentile:  4.6667
+99th percentile:  8.2965
+```
+
+**Interpretation**:
+- **Range**: 50% of bars have range between 1.3x - 3.6x standard spread
+- **Body**: 50% of bars have body between 0.33x - 2.0x standard spread
+- **Outliers**: 1% of bars exceed 11.8x spread (range) or 8.3x spread (body)
+
+### 3. Top 20 Most Volatile Bars (Highest range_per_spread)
+
+| Timestamp               | Range/Spd | Body/Spd | Spread   | Ticks   |
+|-------------------------|-----------|----------|----------|---------|
+| 2025-04-10 17:32:00 UTC-7 | 139.55    | 128.91   | 0.000063 | 5,627,886 |
+| 2025-04-10 17:33:00 UTC-7 | 113.78    | 73.16    | 0.000063 | 7,229,200 |
+| 2025-08-22 07:00:00 UTC-7 | 101.86    | 83.14    | 0.000063 | 226,058 |
+| 2025-01-10 05:30:00 UTC-8 | 97.42     | 89.02    | 0.000065 | 141,746 |
+| 2025-04-02 13:26:00 UTC-7 | 96.49     | 60.15    | 0.000063 | 1,411,244 |
+
+**Observations**:
+- **Extreme event**: April 10, 2025 17:32 UTC-7 - range **139.5x spread** with 5.6M ticks
+- **Common pattern**: Very tight spreads (0.000063) but large pip ranges
+- **High tick counts**: Top bars often have millions of ticks (liquidity events)
+- **Time clustering**: Several events in April 2025 (high volatility period)
+
+### 4. Correlation Analysis
+
+```
+range_per_spread vs body_per_spread:    0.8468  ⚠️ STRONG positive correlation
+range_per_spread vs standard_spread:   -0.1972  ← Weak negative (smaller spreads = higher ratios)
+range_per_spread vs tick_count:         0.4846  ← Moderate positive (more ticks = more range)
+body_per_spread vs standard_spread:    -0.1414
+body_per_spread vs tick_count:          0.3852
+```
+
+**Key Insight**: **Strong 0.85 correlation** between range_per_spread and body_per_spread means:
+- Volatile bars (high range) tend to be directional (high body)
+- Directional moves are NOT typically whipsaw/ranging
+
+### 5. NULL Value Analysis
+
+```
+NULL bars:                 30,512 (7.4%)
+First NULL:                2024-09-01 14:05:00 UTC-7
+Last NULL:                 2025-10-09 15:48:00 UTC-7
+Avg Raw_Spread ticks:      30.5 (sparse data)
+```
+
+**Cause**: Periods without Standard variant tick data for spread normalization
+**Impact**: Most NULL bars (30,240) concentrated in September 2024
+
+### 6. Monthly Trends
+
+| Month    | Bars   | Range/Spd | Body/Spd | NULLs |
+|----------|--------|-----------|----------|-------|
+| 2024-09  | 30,660 | **1.44** ⬇️ | 0.77     | 30,240 |
+| 2024-10  | 33,003 | 1.76     | 0.94     | 13    |
+| 2024-11  | 29,563 | 2.85     | 1.57     | 6     |
+| 2024-12  | 30,164 | 2.47     | 1.32     | 182   |
+| 2025-01  | 31,528 | 2.79     | 1.49     | 1     |
+| 2025-02  | 28,745 | 2.47     | 1.30     | 4     |
+| 2025-03  | 30,755 | 2.89     | 1.57     | 5     |
+| **2025-04** | 31,540 | **4.84** ⬆️ | **2.56** | 3     |
+| 2025-05  | 31,032 | 3.34     | 1.79     | 2     |
+| 2025-06  | 30,789 | 2.98     | 1.61     | 4     |
+| 2025-07  | 33,047 | 2.56     | 1.39     | 5     |
+| 2025-08  | 30,152 | 2.52     | 1.40     | 8     |
+| 2025-09  | 31,578 | 2.46     | 1.32     | 28    |
+| 2025-10  | 10,897 | 2.58     | 1.39     | 11    |
+
+**Key Findings**:
+- **Lowest volatility**: September 2024 (1.44x) - 98.5% NULL bars
+- **Highest volatility**: April 2025 (4.84x) - 70% above baseline
+- **Baseline**: Most months stable at 2.4-2.9x spread
+- **Seasonal**: April 2025 anomaly suggests event-driven volatility
+
+---
+
+## Phase 3: Export Results
+
+**Output Directory**: `/tmp/exness-duckdb-test/analysis_results/`
+
+### Files Created
+
+| File | Size | Description |
+|------|------|-------------|
+| `eurusd_ohlc_1m_v1.2.0_full.parquet` | 12.81 MB | Full 413K bars with all 13 columns |
+| `eurusd_top_1000_volatile_bars.parquet` | 0.09 MB | Top 1000 highest range_per_spread |
+| `eurusd_top_1000_volatile_bars.csv` | 0.17 MB | CSV version |
+| `eurusd_top_1000_directional_bars.parquet` | 0.09 MB | Top 1000 highest body_per_spread |
+| `eurusd_top_1000_directional_bars.csv` | 0.17 MB | CSV version |
+| `eurusd_monthly_aggregates.parquet` | 0.01 MB | Monthly statistics |
+| `eurusd_monthly_aggregates.csv` | 0.00 MB | CSV version |
+| `eurusd_statistical_summary.csv` | 0.00 MB | Descriptive stats + percentiles |
+| `eurusd_correlation_matrix.csv` | 0.00 MB | Correlation coefficients |
+
+**Total Size**: 13.34 MB
+
+---
+
+## Key Takeaways
+
+1. **Normalization Works**: Metrics successfully capture volatility relative to spread and tick activity
+2. **Strong Signal**: 0.85 correlation between range and body indicates directional volatility
+3. **Outlier Events**: Top 1% of bars exceed 11.8x spread (range) - potential filter threshold
+4. **Monthly Variation**: April 2025 anomaly (4.84x) vs stable baseline (2.4-2.9x)
+5. **Data Quality**: 92.6% coverage with valid normalized metrics
+
+## Recommended Next Steps
+
+1. **Feature Engineering**:
+   - Use `range_per_spread > 6.93` (95th percentile) as volatility regime filter
+   - Use `body_per_spread > 4.67` (95th percentile) for strong directional signals
+   - NULL handling: impute with monthly averages or drop sparse periods
+
+2. **Research Questions**:
+   - What drives April 2025 anomaly? (news events, policy changes)
+   - Are extreme bars (>99th percentile) predictable or random?
+   - Do high range_per_spread bars predict continuation or mean reversion?
+
+3. **Model Integration**:
+   - Add normalized metrics to seq-2-seq model features
+   - Test regime-based models (high volatility vs baseline)
+   - Backtest filters: exclude top 1% outliers vs include all data
+
+---
+
+**Scripts**:
+- `regenerate_v1.2.0_schema.py` - Phase 1 schema upgrade
+- `analyze_normalized_metrics.py` - Phase 2 statistical analysis
+- `export_normalized_stats.py` - Phase 3 data export
+
+**Database Location**: `/tmp/exness-duckdb-test/refactored/eurusd.duckdb`
+**Analysis Date**: 2025-10-14

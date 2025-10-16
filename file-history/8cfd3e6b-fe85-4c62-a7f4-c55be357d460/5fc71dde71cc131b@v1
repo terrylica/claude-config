@@ -1,0 +1,49 @@
+# MetaTrader 5 CrossOver Essentials
+
+## Core Locations
+- Wine toolchain (CrossOver build): `/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin`
+- Bottle prefix: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5`
+- MetaEditor: `C:\Program Files\MetaTrader 5\metaeditor64.exe`
+- Terminal: `C:\Program Files\MetaTrader 5\terminal64.exe`
+- CLI staging workspace: `C:\mt5work` (mapped to `~/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/mt5work`)
+
+## Wine Builds
+- Preferred (CrossOver-managed): `/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin` (symlink into `CrossOver-Hosted Application/`)
+- Legacy MetaTrader bundle (avoid mixing): `/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin`
+- Confirm the active toolchain after updating:  
+  `wine --version` → CrossOver’s build prints a multi-line block headed by `Product Name: CrossOver`; the legacy Wine prints a single-line `wine-*` banner.
+- Audit bundle metadata when required:  
+  `PlistBuddy -c 'Print :CFBundleShortVersionString' "/Users/terryli/Applications/CrossOver.app/Contents/Info.plist"`  
+  `PlistBuddy -c 'Print :CFBundleShortVersionString' "/Applications/MetaTrader 5.app/Contents/Info.plist"`
+
+## Shell Prep (zsh / Ghostty)
+```zsh
+export PATH="/Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin:$PATH"
+export MVK_CONFIG_LOG_LEVEL=0    # silence MoltenVK spam (optional)
+which wine     # → /Users/terryli/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
+wine --version # verify output identifies the CrossOver toolchain
+```
+
+## Compile mq5 from Terminal
+```zsh
+mq5c path/to/script.mq5          # stages file, compiles under C:\mt5work, copies .ex5 back
+```
+- MetaEditor build 4865 under CrossOver refuses to compile files outside a simple, space-free path. All scripts are staged to `C:\mt5work` before compilation; the helper keeps this in sync automatically.
+- Resulting `.ex5` and UTF-16 `.log` live in `…/drive_c/mt5work/`; the helper also converts the log to UTF-8 and drops it alongside the staged file.
+- Wine quirk: `metaeditor64.exe /log:CON ...` can mirror logs to stdout, but file logs are the reliable artefact. Always inspect the UTF-8 copy or the raw UTF-16 version.
+- Stage any required `#include`/`Libraries` dependencies under `C:\mt5work` (or ensure they already live inside the bottle’s standard `MQL5` tree) so MetaEditor can resolve them.
+
+## Handy Helpers
+- `mq5c <script.mq5>` stages the script directory under `C:\mt5work\staging\`, invokes MetaEditor headlessly, converts the UTF-16 log to UTF-8, copies the `.ex5` next to the source, and prints the compile summary. Non-zero exit highlights a compilation error.
+- `mq5export <script.mq5> SYMBOL TIMEFRAME BARS [OUTPUT_NAME]` wraps `mq5c`, installs the `.ex5` into `MQL5\Scripts`, creates a temporary MT5 configuration, runs `terminal64.exe /config`, mirrors the exported CSV into `exports/`, and appends run metadata to `exports/history.jsonl`. If the CSV is missing after MT5 exits, the helper returns non-zero for immediate visibility.
+
+## Aligned Exporter Workflow
+- `mql5_export/ExportAligned.mq5` (with `DataExportCore.mqh` and `modules/RSIModule.mqh`) exports bar data plus RSI values in a single CSV row set.
+- Compile via `mq5c mql5_export/ExportAligned.mq5`, then manually run the script from MT5 or call `mq5export` with the desired symbol/timeframe/bar count.
+- Default output files follow `Export_<symbol>_<timeframe>.csv` and reside in `…/MQL5/Files/`. The helper copies them into the repository `exports/` directory for downstream Python validation.
+- Run history is appended to `exports/history.jsonl` (UTC timestamp, symbol, timeframe, bar count, filename) to satisfy observability requirements.
+
+## GUI / Runtime
+- Launch MetaEditor GUI for debugging: `mt5-start "C:\Program Files\MetaTrader 5\metaeditor64.exe"`
+- Launch MetaTrader terminal: `mt5-start "C:\Program Files\MetaTrader 5\terminal64.exe"`
+- Restart wineserver if needed: `mt5-start wineserver -k`

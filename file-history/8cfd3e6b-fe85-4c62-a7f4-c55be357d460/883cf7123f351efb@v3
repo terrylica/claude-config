@@ -1,0 +1,200 @@
+#!/usr/bin/env zsh
+# mq5run - Execute MT5 scripts headlessly via CrossOver/Wine
+# Usage: mq5run [--timeout SECONDS] [--symbol SYMBOL] [--period PERIOD] [--script SCRIPT]
+
+set -euo pipefail
+
+# === Configuration ===
+BOTTLE_NAME="MetaTrader 5"
+BOTTLE_PATH="${HOME}/Library/Application Support/CrossOver/Bottles/${BOTTLE_NAME}"
+MT5_PATH="${BOTTLE_PATH}/drive_c/Program Files/MetaTrader 5"
+MT5_FILES="${MT5_PATH}/MQL5/Files"
+TERMINAL_EXE="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
+CROSSOVER_BIN="${HOME}/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/cxstart"
+
+# Defaults
+SCRIPT_NAME="ExportAligned"
+SYMBOL="EURUSD"
+PERIOD="PERIOD_M1"
+TIMEOUT=120
+OUTPUT_DIR="./exports"
+
+# === Parse arguments ===
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --timeout)
+      TIMEOUT="$2"
+      shift 2
+      ;;
+    --symbol)
+      SYMBOL="$2"
+      shift 2
+      ;;
+    --period)
+      PERIOD="$2"
+      shift 2
+      ;;
+    --script)
+      SCRIPT_NAME="$2"
+      shift 2
+      ;;
+    --help)
+      cat <<EOF
+Usage: mq5run [OPTIONS]
+
+Options:
+  --timeout SECONDS   Timeout for script execution (default: 120)
+  --symbol SYMBOL     Symbol to export (default: EURUSD)
+  --period PERIOD     Timeframe (default: PERIOD_M1)
+  --script SCRIPT     Script name without .ex5 (default: ExportAligned)
+  --help              Show this help
+
+Examples:
+  mq5run
+  mq5run --symbol XAUUSD --period PERIOD_H1 --timeout 180
+  mq5run --script ExportAligned --symbol EURUSD --period PERIOD_M5
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# === Validation ===
+if [[ ! -d "${BOTTLE_PATH}" ]]; then
+  echo "Error: CrossOver bottle not found: ${BOTTLE_PATH}" >&2
+  exit 1
+fi
+
+# Check for terminal64.exe using Unix path
+TERMINAL_EXE_UNIX="${MT5_PATH}/terminal64.exe"
+if [[ ! -f "${TERMINAL_EXE_UNIX}" ]]; then
+  echo "Error: terminal64.exe not found: ${TERMINAL_EXE_UNIX}" >&2
+  exit 1
+fi
+
+if [[ ! -x "${CROSSOVER_BIN}" ]]; then
+  echo "Error: CrossOver cxstart not found: ${CROSSOVER_BIN}" >&2
+  exit 1
+fi
+
+# === Create startup config ===
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+CONFIG_FILE="${MT5_PATH}/config/startup_${TIMESTAMP}.ini"
+mkdir -p "$(dirname "${CONFIG_FILE}")"
+
+cat > "${CONFIG_FILE}" <<EOF
+[Experts]
+Enabled=1
+AllowLiveTrading=0
+AllowDllImport=0
+
+[StartUp]
+Script=${SCRIPT_NAME}
+Symbol=${SYMBOL}
+Period=${PERIOD}
+ShutdownTerminal=1
+EOF
+
+echo "=== MT5 Headless Script Execution ==="
+echo "Script:   ${SCRIPT_NAME}"
+echo "Symbol:   ${SYMBOL}"
+echo "Period:   ${PERIOD}"
+echo "Timeout:  ${TIMEOUT}s"
+echo "Config:   ${CONFIG_FILE}"
+echo ""
+
+# === Launch MT5 ===
+echo "Launching MT5..."
+
+# Convert Unix path to Windows path for config
+CONFIG_WIN_PATH="C:\\Program Files\\MetaTrader 5\\config\\startup_${TIMESTAMP}.ini"
+
+# Launch with timeout
+if timeout "${TIMEOUT}" "${CROSSOVER_BIN}" \
+  --bottle "${BOTTLE_NAME}" \
+  --wait-children \
+  -- \
+  "${TERMINAL_EXE}" \
+  /portable \
+  /skipupdate \
+  /config:"${CONFIG_WIN_PATH}" 2>&1 | \
+  while IFS= read -r line; do
+    # Filter out wine debug messages
+    if [[ ! "${line}" =~ ^(trace:|fixme:|warn:) ]]; then
+      echo "${line}"
+    fi
+  done
+then
+  EXIT_CODE=$?
+else
+  EXIT_CODE=$?
+  if [[ ${EXIT_CODE} -eq 124 ]]; then
+    echo "Warning: MT5 execution timed out after ${TIMEOUT}s" >&2
+    # Kill any remaining processes
+    pkill -f "terminal64.exe" 2>/dev/null || true
+  fi
+fi
+
+# Wait a moment for file system to settle
+sleep 2
+
+# === Collect output files ===
+echo ""
+echo "=== Collecting output files ==="
+
+# Expected CSV pattern
+CSV_PATTERN="Export_${SYMBOL}_${PERIOD}.csv"
+
+# Search for generated files
+mkdir -p "${OUTPUT_DIR}"
+FOUND_FILES=0
+
+if [[ -d "${MT5_FILES}" ]]; then
+  while IFS= read -r -d '' csvfile; do
+    BASENAME=$(basename "${csvfile}")
+    DEST="${OUTPUT_DIR}/${TIMESTAMP}_${BASENAME}"
+
+    echo "Found: ${BASENAME}"
+    cp "${csvfile}" "${DEST}"
+    echo "Saved: ${DEST}"
+
+    # Show first few lines
+    echo "Preview (first 5 lines):"
+    head -5 "${DEST}" | sed 's/^/  /'
+    echo ""
+
+    FOUND_FILES=$((FOUND_FILES + 1))
+  done < <(find "${MT5_FILES}" -name "Export_*.csv" -print0)
+fi
+
+if [[ ${FOUND_FILES} -eq 0 ]]; then
+  echo "Warning: No CSV files found in ${MT5_FILES}" >&2
+  echo "Check MT5 logs at: ${MT5_PATH}/MQL5/Logs/" >&2
+
+  # Show recent log entries
+  LATEST_LOG=$(find "${MT5_PATH}/MQL5/Logs" -name "*.log" -type f -print0 2>/dev/null | \
+    xargs -0 ls -t 2>/dev/null | head -1)
+
+  if [[ -n "${LATEST_LOG}" ]]; then
+    echo ""
+    echo "Latest log entries (${LATEST_LOG}):"
+    tail -20 "${LATEST_LOG}" | sed 's/^/  /'
+  fi
+
+  exit 1
+fi
+
+# === Cleanup ===
+rm -f "${CONFIG_FILE}"
+
+echo ""
+echo "=== Summary ==="
+echo "Files exported: ${FOUND_FILES}"
+echo "Output directory: ${OUTPUT_DIR}"
+echo "Status: SUCCESS"
+
+exit 0

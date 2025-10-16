@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""
+Example: Dynamic Holiday Generation using exchange_calendars
+
+This demonstrates how to dynamically check holidays for ANY instrument
+without hardcoding. The pattern is reusable for all forex pairs.
+"""
+
+import pandas as pd
+import exchange_calendars as xcals
+
+# Initialize calendars (do this ONCE per processor instance)
+nyse = xcals.get_calendar('XNYS')
+lse = xcals.get_calendar('XLON')
+
+print("=" * 70)
+print("Dynamic Holiday Generation Pattern")
+print("=" * 70)
+
+# Method 1: Check single timestamp
+print("\n1. Single Timestamp Check")
+print("-" * 70)
+
+test_date = pd.Timestamp('2025-07-04')
+is_us_holiday = not nyse.is_session(test_date)
+is_uk_holiday = not lse.is_session(test_date)
+is_major_holiday = is_us_holiday and is_uk_holiday
+
+print(f"Date: {test_date.date()}")
+print(f"  NYSE closed: {is_us_holiday}")
+print(f"  LSE closed: {is_uk_holiday}")
+print(f"  Major (both): {is_major_holiday}")
+
+# Method 2: Batch checking with pandas Series (FAST!)
+print("\n2. Batch Checking (Pandas Series) - RECOMMENDED FOR OHLC")
+print("-" * 70)
+
+# Simulate OHLC timestamps
+timestamps = pd.date_range('2025-06-30', '2025-07-06', freq='D')
+df = pd.DataFrame({'Timestamp': timestamps})
+
+# Dynamic holiday flags (vectorized - FAST!)
+df['is_us_holiday'] = df['Timestamp'].apply(lambda d: not nyse.is_session(d)).astype(int)
+df['is_uk_holiday'] = df['Timestamp'].apply(lambda d: not lse.is_session(d)).astype(int)
+df['is_major_holiday'] = ((df['is_us_holiday'] == 1) & (df['is_uk_holiday'] == 1)).astype(int)
+
+print(df.to_string(index=False))
+
+# Method 3: Pre-generate holiday list for date range (FASTEST!)
+print("\n3. Pre-generate Holiday Set (FASTEST FOR BULK)")
+print("-" * 70)
+
+# Get holiday dates as a set for O(1) lookup
+start_date = pd.Timestamp('2025-01-01')
+end_date = pd.Timestamp('2025-12-31')
+
+nyse_holidays = set(
+    nyse.regular_holidays.holidays(start=start_date, end=end_date, return_name=False)
+)
+lse_holidays = set(
+    lse.regular_holidays.holidays(start=start_date, end=end_date, return_name=False)
+)
+
+print(f"2025 NYSE holidays: {len(nyse_holidays)} days")
+print(f"2025 LSE holidays: {len(lse_holidays)} days")
+print(f"Major holidays (both): {len(nyse_holidays & lse_holidays)} days")
+
+# Ultra-fast set-based checking
+test_dates = pd.date_range('2025-07-01', '2025-07-07', freq='D')
+for date in test_dates:
+    date_only = date.date()
+    us = 1 if date_only in nyse_holidays else 0
+    uk = 1 if date_only in lse_holidays else 0
+    major = 1 if (us == 1 and uk == 1) else 0
+    print(f"{date.date()}: US={us} UK={uk} Major={major}")
+
+# Method 4: Handle weekends properly
+print("\n4. Weekends vs Holidays")
+print("-" * 70)
+
+# March 15, 2025 is Saturday - should be excluded
+weekend = pd.Timestamp('2025-03-15')
+print(f"\n{weekend.date()} ({weekend.day_name()}):")
+print(f"  NYSE is_session: {nyse.is_session(weekend)}")  # False (weekend)
+print(f"  Is in holiday list: {weekend.date() in nyse_holidays}")  # False (not holiday, just weekend)
+
+# July 4, 2025 is Friday - actual holiday
+holiday = pd.Timestamp('2025-07-04')
+print(f"\n{holiday.date()} ({holiday.day_name()}):")
+print(f"  NYSE is_session: {nyse.is_session(holiday)}")  # False (holiday)
+print(f"  Is in holiday list: {holiday.date() in nyse_holidays}")  # True (is holiday)
+
+print("\n" + "=" * 70)
+print("Key Insight: is_session() handles BOTH weekends AND holidays!")
+print("For OHLC: Use is_session() to detect trading days correctly")
+print("=" * 70)

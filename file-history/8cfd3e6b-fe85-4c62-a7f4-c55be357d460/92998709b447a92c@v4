@@ -1,0 +1,352 @@
+# Headless Execution Implementation Plan - Python API Bridge
+
+**Version**: 3.0.0
+**Created**: 2025-10-13
+**Status**: IN_PROGRESS
+**Supersedes**: v2.0.0 (startup.ini approach - conditionally working only)
+
+## Problem Statement
+
+**v2.0.0 Limitation Discovered** (2025-10-13 16:09):
+- startup.ini approach requires prior GUI initialization for each symbol/timeframe
+- EURUSD M1: ✅ Works (manually initialized at 15:03)
+- XAUUSD H1: ❌ Fails (never opened in GUI)
+- Root cause: `[StartUp]` section attaches scripts to existing chart contexts, does not create charts
+
+**Requirement**: True headless execution without manual GUI steps for any symbol/timeframe
+
+## Solution Architecture
+
+**MetaTrader5 Python API with mt5linux bridge**:
+
+```
+macOS Python (native, uv)
+    ↓ mt5linux package (RPyC bridge)
+Wine Python + MetaTrader5 package
+    ↓ IPC connection
+MT5 Terminal (CrossOver/Wine)
+```
+
+**Key Capabilities**:
+- `mt5.symbol_select()` - programmatically add symbols to Market Watch
+- `mt5.copy_rates_range()` - fetch OHLC data without charts
+- No GUI interaction required - eliminates chart context dependency
+
+## Service Level Objectives
+
+### Availability
+- **Target**: 95% success rate for any symbol/timeframe without prior GUI setup
+- **Measurement**: Successful CSV generation for never-before-initialized symbols
+- **Failure condition**: Cold start test (XAUUSD H1) fails
+
+### Correctness
+- **Target**: 100% data integrity, correlation ≥ 0.999 with MT5 native indicators
+- **Measurement**: validate_export.py all checks pass
+- **Failure condition**: Any integrity check fails OR RSI correlation < 0.999
+
+### Observability
+- **Target**: All API calls logged with errors propagated (no silent failures)
+- **Measurement**: Log entries for mt5.initialize(), symbol_select(), copy_rates_range() with error codes
+- **Failure condition**: API call fails without logged error via mt5.last_error()
+
+### Maintainability
+- **Target**: Single command data export, no manual Wine/MT5 management
+- **Measurement**: User runs one script, bridge auto-starts, MT5 auto-connects
+- **Failure condition**: User must manually start Wine processes or MT5 terminal between runs
+
+## Implementation Phases
+
+### Phase 1: Wine Python Environment Setup
+**Status**: IN_PROGRESS
+**Estimated Duration**: 30-60 min
+
+**Objective**: Install Python and MetaTrader5 package inside CrossOver bottle
+
+**Tasks**:
+1. ~~Download Python 3.12 Windows installer (x64)~~ - Using CrossOver GUI installer
+2. Install Python in CrossOver bottle via GUI (MetaTrader 5 bottle)
+   - Open CrossOver → Install Software
+   - Search for "Python" or use "Install Unlisted Application"
+   - Select Python 3.12.x (latest with binary installer)
+   - Target bottle: "MetaTrader 5"
+3. Verify Wine Python: `cxstart --bottle "MetaTrader 5" -- cmd /c python --version`
+4. Install MetaTrader5 package: `cxstart --bottle "MetaTrader 5" -- cmd /c "python -m pip install MetaTrader5"`
+5. Test basic import: `cxstart --bottle "MetaTrader 5" -- cmd /c "python -c \"import MetaTrader5; print(MetaTrader5.__version__)\""`
+
+**Success Criteria**:
+- Wine Python 3.12+ installed and functional
+- `import MetaTrader5` succeeds in Wine Python
+- Package version matches MT5 build 5.0.4865 compatibility
+
+**Error Handling**:
+- Python installer fails → raise InstallationError with exit code
+- pip install fails → raise PackageInstallError with pip stderr
+- Import fails → raise ImportError with Wine Python traceback
+
+**Validation**:
+```bash
+# Must succeed without errors
+wine python -c "import MetaTrader5 as mt5; print(f'Version: {mt5.__version__}')"
+```
+
+### Phase 2: mt5linux Bridge Setup
+**Status**: PENDING
+**Estimated Duration**: 15-30 min
+
+**Objective**: Configure RPyC bridge for macOS Python → Wine MT5 communication
+
+**Tasks**:
+1. Install mt5linux in Wine Python: `wine python -m pip install mt5linux`
+2. Install mt5linux on macOS: `uv pip install mt5linux`
+3. Configure mt5linux server in Wine (port 18812)
+4. Start bridge server: `wine python -m mt5linux serve`
+5. Test connection from macOS: `python -c "from mt5linux import MetaTrader5; mt5 = MetaTrader5()"`
+
+**Success Criteria**:
+- mt5linux server starts without errors
+- Port 18812 listening (verify with `lsof -i :18812`)
+- macOS Python can import bridged MetaTrader5 class
+
+**Error Handling**:
+- Server start fails → raise ServerStartError with Wine stderr
+- Port binding fails → raise PortBindingError (check if port already in use)
+- Import fails → raise BridgeConnectionError with RPyC traceback
+
+**Validation**:
+```bash
+# Server running
+lsof -i :18812 | grep LISTEN
+
+# Connection test from macOS
+uv run --active python -c "from mt5linux import MetaTrader5; print('Bridge OK')"
+```
+
+### Phase 3: MT5 Connection Test
+**Status**: PENDING
+**Estimated Duration**: 15-30 min
+
+**Objective**: Verify end-to-end connectivity: macOS Python → Wine bridge → MT5
+
+**Tasks**:
+1. Ensure MT5 terminal running in CrossOver (logged in)
+2. Initialize connection: `mt5.initialize()`
+3. Check terminal info: `mt5.terminal_info()`
+4. Retrieve basic data: `mt5.copy_rates_range("EURUSD", mt5.TIMEFRAME_M1, start, end)`
+5. Verify data structure matches expected format
+
+**Success Criteria**:
+- `mt5.initialize()` returns True
+- `mt5.terminal_info()` returns non-None dict with build info
+- `copy_rates_range()` returns numpy array with OHLCV fields
+
+**Error Handling**:
+- initialize() fails → raise ConnectionError with mt5.last_error()
+- terminal_info() is None → raise TerminalNotFoundError
+- copy_rates_range() returns None → raise DataFetchError with symbol/timeframe
+
+**Validation**:
+```python
+from mt5linux import MetaTrader5
+mt5 = MetaTrader5()
+
+if not mt5.initialize():
+    error = mt5.last_error()
+    raise ConnectionError(f"MT5 initialize failed: {error}")
+
+info = mt5.terminal_info()
+if info is None:
+    raise TerminalNotFoundError("terminal_info() returned None")
+
+print(f"Connected to MT5 build {info.build}")
+```
+
+### Phase 4: Data Export Script Development
+**Status**: PENDING
+**Estimated Duration**: 30-60 min
+
+**Objective**: Rewrite ExportAligned.mq5 logic in Python with RSI calculation
+
+**Tasks**:
+1. Create `export_aligned_py.py` script
+2. Implement symbol selection: `mt5.symbol_select(symbol, True)`
+3. Fetch OHLC data: `mt5.copy_rates_range(symbol, timeframe, start, end)`
+4. Calculate RSI using pandas-ta: `df.ta.rsi(length=14)`
+5. Align RSI with OHLC bars (handle NaN for initial lookback period)
+6. Export to CSV matching current format
+
+**Success Criteria**:
+- Script runs without errors for any symbol/timeframe
+- CSV format matches ExportAligned.mq5 output (columns, timestamp format)
+- RSI values present for all bars except initial 14-period lookback
+
+**Error Handling**:
+- symbol_select() fails → raise SymbolNotFoundError with mt5.last_error()
+- copy_rates_range() returns None → raise DataFetchError
+- RSI calculation fails → raise IndicatorCalculationError with pandas-ta traceback
+- CSV write fails → raise IOError with filesystem error
+
+**Validation**:
+```bash
+# Export EURUSD M1 data
+uv run --active python -m export_aligned_py --symbol EURUSD --period M1 --bars 5000
+
+# Check output
+ls -lh exports/*.csv
+head -5 exports/Export_EURUSD_PERIOD_M1.csv
+```
+
+### Phase 5: Cold Start Validation
+**Status**: PENDING
+**Estimated Duration**: 15 min
+
+**Objective**: Verify headless execution for symbol never opened in GUI (XAUUSD H1)
+
+**Tasks**:
+1. Ensure XAUUSD H1 never manually opened in MT5
+2. Run export script: `export_aligned_py.py --symbol XAUUSD --period H1 --bars 5000`
+3. Verify CSV generated with expected bars
+4. Run validation: `validate_export.py exports/Export_XAUUSD_PERIOD_H1.csv`
+5. Check RSI correlation ≥ 0.999
+
+**Success Criteria**:
+- Script completes without GUI interaction
+- CSV file exists with 5000 bars
+- validate_export.py all checks pass
+- RSI correlation ≥ 0.999
+
+**Error Handling**:
+- Script fails → raise and display full traceback (no fallback to startup.ini)
+- CSV not generated → raise FileNotFoundError
+- Validation fails → raise ValidationError with specific check failures
+
+**Validation**:
+```bash
+# Cold start test
+uv run --active python -m export_aligned_py --symbol XAUUSD --period H1 --bars 5000
+
+# Validate output
+uv run --active python -m validate_export exports/Export_XAUUSD_PERIOD_H1.csv
+# Expected: ✓ All integrity checks passed, Correlation: 0.9999+
+```
+
+## Off-the-Shelf Components
+
+### Required Packages
+- **Python 3.12+** (x64 Windows): python.org/downloads/windows/
+- **MetaTrader5 Python package**: pypi.org/project/MetaTrader5/
+- **mt5linux bridge**: pypi.org/project/mt5linux/ (Lucas Campagna, Linux/Mac bridge)
+- **pandas-ta**: pypi.org/project/pandas-ta/ (RSI and technical indicators)
+
+### Alternatives Considered
+- **TA-Lib**: Requires C compilation, more complex setup (rejected)
+- **Custom RPyC server**: Re-inventing mt5linux (rejected - use existing solution)
+- **REST API wrapper**: Over-engineered for single-user local setup (rejected)
+
+## Error Propagation Protocol
+
+**No silent failures** - all errors must raise exceptions with context:
+
+```python
+# Example error handling pattern
+if not mt5.initialize():
+    error_code, error_msg = mt5.last_error()
+    raise ConnectionError(
+        f"MT5 initialization failed\n"
+        f"Error code: {error_code}\n"
+        f"Message: {error_msg}\n"
+        f"Ensure MT5 terminal is running and logged in"
+    )
+```
+
+**Error Categories**:
+1. **Environment errors**: Python/package installation issues
+2. **Connection errors**: mt5linux bridge or MT5 terminal communication failures
+3. **Data errors**: Symbol not found, data fetch failures, empty results
+4. **Validation errors**: RSI correlation below threshold, integrity check failures
+
+**Logging Requirements**:
+- All mt5.* API calls logged with timestamps
+- Error codes from `mt5.last_error()` always included in exceptions
+- Full tracebacks preserved (no exception swallowing)
+
+## Migration from v2.0.0
+
+**Deprecated**:
+- `mq5run` script (startup.ini approach)
+- Manual GUI initialization requirement
+- startup.ini config file generation
+
+**Preserved**:
+- CSV output format (backward compatible)
+- `validate_export.py` validation logic
+- MT5 terminal in CrossOver (still required, but no GUI interaction)
+
+**New Entry Point**:
+```bash
+# Old (conditional - requires GUI setup)
+./mq5run --symbol XAUUSD --period PERIOD_H1
+
+# New (true headless)
+uv run --active python -m export_aligned_py --symbol XAUUSD --period H1 --bars 5000
+```
+
+## Progress Tracking
+
+### Phase 1: Wine Python Setup
+- [ ] Python 3.12 Windows installer downloaded
+- [ ] Python installed in CrossOver bottle
+- [ ] MetaTrader5 package installed
+- [ ] Import test successful
+
+### Phase 2: mt5linux Bridge
+- [ ] mt5linux installed in Wine Python
+- [ ] mt5linux installed on macOS
+- [ ] Bridge server running
+- [ ] Connection test from macOS successful
+
+### Phase 3: MT5 Connection
+- [ ] mt5.initialize() successful
+- [ ] mt5.terminal_info() returns data
+- [ ] Basic data fetch works (EURUSD M1)
+
+### Phase 4: Export Script
+- [ ] export_aligned_py.py created
+- [ ] Symbol selection logic implemented
+- [ ] OHLC data fetch implemented
+- [ ] RSI calculation implemented
+- [ ] CSV export implemented
+
+### Phase 5: Cold Start Validation
+- [ ] XAUUSD H1 export successful (never initialized in GUI)
+- [ ] validate_export.py passes
+- [ ] RSI correlation ≥ 0.999
+
+## Decision Log
+
+### Decision 1: Use mt5linux bridge vs Wine Python only
+**Date**: 2025-10-13
+**Rationale**: Preserve macOS-native Python workflow (uv, existing tools). Bridge adds complexity but enables cleaner development.
+**Alternative**: Run entire script in Wine (rejected - friction with macOS tooling)
+
+### Decision 2: pandas-ta for RSI vs TA-Lib
+**Rationale**: pandas-ta is pure Python (no C compilation), simpler installation, sufficient accuracy
+**Alternative**: TA-Lib (rejected - requires compilation, overkill for RSI only)
+
+### Decision 3: Raise errors immediately vs retry logic
+**Rationale**: User requirement - "no fallbacks, defaults, retries". Fail fast for transparency.
+**Alternative**: Automatic retry with exponential backoff (rejected per requirements)
+
+## References
+
+**Research Report**: AI researcher findings (2025-10-13) - 18 sources, 66 searches
+**Archived Plan**: HEADLESS_EXECUTION_PLAN.v2.0.0.archived.md (startup.ini approach)
+**Validation Status**: VALIDATION_STATUS.md (conditionally validated)
+**Knowledge Base**: CROSSOVER_MQ5.md (MT5/CrossOver operations)
+
+## Update Protocol
+
+- Increment version (major.minor.patch) on significant changes
+- Update phase status: PENDING → IN_PROGRESS → COMPLETE/FAILED
+- Log all decisions with date and rationale
+- Move superseded approaches to archived files
+- Update references in VALIDATION_STATUS.md and CROSSOVER_MQ5.md to point to latest plan

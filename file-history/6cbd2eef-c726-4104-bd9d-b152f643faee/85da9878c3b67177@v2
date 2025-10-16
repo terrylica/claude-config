@@ -1,0 +1,282 @@
+"""
+Binance VIP6 vs VIP7+LP Tier 1 Fee Savings Analysis
+
+Calculate monthly fee savings from upgrading from VIP6 to VIP7 + LP Tier 1
+for perpetual swap futures trading on Binance.
+
+Key Assumptions:
+- Trading volume: 2.5B - 5B USD (30-day range for VIP6)
+- Split: 50% maker / 50% taker
+- Only count savings within the base volume range (2.5B - 5B USD)
+- Service cost: $50,000 USD/month
+"""
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass
+class FeeStructure:
+    """Fee structure for a VIP tier and pair type."""
+
+    maker_bps: float  # Basis points (1 bp = 0.01%)
+    taker_bps: float  # Basis points
+
+
+@dataclass
+class AnalysisResult:
+    """Results of fee savings analysis."""
+
+    vip_tier: str
+    pair_type: Literal["USDT-M", "USDC-M"]
+    volume_usd: float
+    maker_volume_usd: float
+    taker_volume_usd: float
+
+    # Current VIP costs
+    current_maker_fee: float
+    current_taker_fee: float
+    current_total_fee: float
+
+    # VIP7 + LP Tier 1 costs
+    vip7_lp_maker_fee: float
+    vip7_lp_taker_fee: float
+    vip7_lp_total_fee: float
+
+    # Savings
+    total_savings: float
+    savings_percentage: float
+
+    def print_summary(self) -> None:
+        """Print formatted analysis summary."""
+        print(f"\n{'='*80}")
+        print(f"ANALYSIS: {self.vip_tier} → VIP7+LP1 | {self.pair_type} | ${self.volume_usd:,.0f} Volume")
+        print(f"{'='*80}")
+        print(f"\nVolume Split (50/50):")
+        print(f"  Maker Volume: ${self.maker_volume_usd:,.0f}")
+        print(f"  Taker Volume: ${self.taker_volume_usd:,.0f}")
+
+        print(f"\n--- {self.vip_tier} Fees (Current) ---")
+        print(f"  Maker Fee:  ${self.current_maker_fee:,.2f}")
+        print(f"  Taker Fee:  ${self.current_taker_fee:,.2f}")
+        print(f"  Total:      ${self.current_total_fee:,.2f}")
+
+        print(f"\n--- VIP7 + LP Tier 1 Fees (Target) ---")
+        print(f"  Maker Fee:  ${self.vip7_lp_maker_fee:,.2f} (LP rebate)")
+        print(f"  Taker Fee:  ${self.vip7_lp_taker_fee:,.2f}")
+        print(f"  Total:      ${self.vip7_lp_total_fee:,.2f}")
+
+        print(f"\n--- SAVINGS ---")
+        print(f"  Monthly Savings:     ${self.total_savings:,.2f}")
+        print(f"  Savings Percentage:  {self.savings_percentage:.2f}%")
+        print(f"  Service Cost:        $50,000.00")
+        print(f"  Net Benefit:         ${self.total_savings - 50000:,.2f}")
+
+        if self.total_savings > 50000:
+            roi = (self.total_savings / 50000 - 1) * 100
+            print(f"  ROI:                 {roi:.2f}%")
+            print(f"  ✅ PROFITABLE")
+        else:
+            loss_pct = (1 - self.total_savings / 50000) * 100
+            print(f"  Loss Rate:           -{loss_pct:.2f}%")
+            print(f"  ❌ NOT PROFITABLE")
+
+
+# Fee Structures for VIP5
+VIP5_USDT_M = FeeStructure(maker_bps=0.72, taker_bps=2.43)  # 0.0072% / 0.0243%
+VIP5_USDC_M = FeeStructure(maker_bps=0.00, taker_bps=1.34)  # 0.0000% / 0.0134%
+
+# Fee Structures for VIP6
+VIP6_USDT_M = FeeStructure(maker_bps=0.54, taker_bps=2.25)  # 0.0054% / 0.0225%
+VIP6_USDC_M = FeeStructure(maker_bps=0.00, taker_bps=1.24)  # 0.0000% / 0.0124%
+
+# Fee Structures for VIP7
+VIP7_USDT_M = FeeStructure(maker_bps=0.36, taker_bps=1.98)  # 0.0036% / 0.0198%
+VIP7_USDC_M = FeeStructure(maker_bps=0.00, taker_bps=1.09)  # 0.0000% / 0.0109%
+
+# LP Tier 1: Maker fee is -0.001% (rebate), Taker uses VIP7 rate
+LP_TIER1_MAKER_BPS = -0.10  # -0.001% = -0.10 bps
+
+
+def calculate_fee_savings(
+    volume_usd: float,
+    pair_type: Literal["USDT-M", "USDC-M"],
+    current_vip_tier: Literal["VIP5", "VIP6"],
+    maker_split: float = 0.5,
+) -> AnalysisResult:
+    """
+    Calculate fee savings from current VIP tier to VIP7 + LP Tier 1.
+
+    Args:
+        volume_usd: Total trading volume in USD (30-day period)
+        pair_type: Type of trading pair (USDT-M or USDC-M)
+        current_vip_tier: Current VIP tier (VIP5 or VIP6)
+        maker_split: Percentage of volume from maker orders (default 0.5 = 50%)
+
+    Returns:
+        AnalysisResult with detailed fee breakdown and savings
+    """
+    # Split volume
+    maker_volume = volume_usd * maker_split
+    taker_volume = volume_usd * (1 - maker_split)
+
+    # Get fee structures
+    if current_vip_tier == "VIP5":
+        current_fees = VIP5_USDT_M if pair_type == "USDT-M" else VIP5_USDC_M
+    else:  # VIP6
+        current_fees = VIP6_USDT_M if pair_type == "USDT-M" else VIP6_USDC_M
+
+    vip7_fees = VIP7_USDT_M if pair_type == "USDT-M" else VIP7_USDC_M
+
+    # Calculate current VIP fees
+    current_maker_fee = maker_volume * (current_fees.maker_bps / 10000)
+    current_taker_fee = taker_volume * (current_fees.taker_bps / 10000)
+    current_total = current_maker_fee + current_taker_fee
+
+    # Calculate VIP7 + LP Tier 1 fees
+    # Maker uses LP Tier 1 rebate, Taker uses VIP7 rate
+    vip7_lp_maker_fee = maker_volume * (LP_TIER1_MAKER_BPS / 10000)
+    vip7_lp_taker_fee = taker_volume * (vip7_fees.taker_bps / 10000)
+    vip7_lp_total = vip7_lp_maker_fee + vip7_lp_taker_fee
+
+    # Calculate savings
+    total_savings = current_total - vip7_lp_total
+    savings_pct = (total_savings / current_total * 100) if current_total > 0 else 0
+
+    return AnalysisResult(
+        vip_tier=current_vip_tier,
+        pair_type=pair_type,
+        volume_usd=volume_usd,
+        maker_volume_usd=maker_volume,
+        taker_volume_usd=taker_volume,
+        current_maker_fee=current_maker_fee,
+        current_taker_fee=current_taker_fee,
+        current_total_fee=current_total,
+        vip7_lp_maker_fee=vip7_lp_maker_fee,
+        vip7_lp_taker_fee=vip7_lp_taker_fee,
+        vip7_lp_total_fee=vip7_lp_total,
+        total_savings=total_savings,
+        savings_percentage=savings_pct,
+    )
+
+
+def main() -> None:
+    """Run fee analysis for VIP6 scenarios."""
+    print("\n" + "="*80)
+    print("BINANCE VIP6 vs VIP7+LP TIER 1 FEE SAVINGS ANALYSIS")
+    print("="*80)
+    print("\nService Cost: $50,000/month")
+    print("Volume Range: $2,500,000,000 - $5,000,000,000 (30-day)")
+    print("Maker/Taker Split: 50%/50%")
+
+    # VIP6 volume scenarios
+    volumes = [
+        2_500_000_000,  # Minimum VIP6 volume
+        3_000_000_000,  # Lower-mid range
+        3_500_000_000,  # Mid range
+        4_000_000_000,  # Upper-mid range
+        4_500_000_000,  # High range
+        5_000_000_000,  # Maximum VIP6 volume
+    ]
+
+    pair_types: list[Literal["USDT-M", "USDC-M"]] = ["USDT-M", "USDC-M"]
+
+    print("\n" + "="*80)
+    print("SCENARIO ANALYSIS - VIP6 BASELINE")
+    print("="*80)
+
+    results = {}
+    for volume in volumes:
+        for pair_type in pair_types:
+            result = calculate_fee_savings(volume, pair_type, "VIP6")
+            result.print_summary()
+            results[(volume, pair_type)] = result
+
+    # Summary table
+    print("\n" + "="*80)
+    print("SUMMARY TABLE: Net Benefit (Savings - $50K Service Fee)")
+    print("="*80)
+    print(f"\n{'Volume':>15} | {'USDT-M Net':>15} | {'USDC-M Net':>15} | {'Better Option':>15}")
+    print("-" * 80)
+
+    for volume in volumes:
+        usdt_result = results[(volume, "USDT-M")]
+        usdc_result = results[(volume, "USDC-M")]
+
+        usdt_net = usdt_result.total_savings - 50000
+        usdc_net = usdc_result.total_savings - 50000
+
+        better = "USDT-M" if usdt_net > usdc_net else "USDC-M"
+
+        print(f"${volume/1e9:>13.1f}B | ${usdt_net:>13,.0f} | ${usdc_net:>13,.0f} | {better:>15}")
+
+    # Comparison with VIP5
+    print("\n" + "="*80)
+    print("VIP5 vs VIP6 COMPARISON (at overlap volume: $2.5B)")
+    print("="*80)
+
+    vip5_usdt = calculate_fee_savings(2_500_000_000, "USDT-M", "VIP5")
+    vip6_usdt = calculate_fee_savings(2_500_000_000, "USDT-M", "VIP6")
+    vip5_usdc = calculate_fee_savings(2_500_000_000, "USDC-M", "VIP5")
+    vip6_usdc = calculate_fee_savings(2_500_000_000, "USDC-M", "VIP6")
+
+    print(f"\nUSDT-M at $2.5B volume:")
+    print(f"  VIP5 → VIP7+LP1: ${vip5_usdt.total_savings:,.0f} savings (Net: ${vip5_usdt.total_savings - 50000:,.0f})")
+    print(f"  VIP6 → VIP7+LP1: ${vip6_usdt.total_savings:,.0f} savings (Net: ${vip6_usdt.total_savings - 50000:,.0f})")
+    print(f"  VIP6 advantage: ${vip6_usdt.total_savings - vip5_usdt.total_savings:,.0f}")
+
+    print(f"\nUSDC-M at $2.5B volume:")
+    print(f"  VIP5 → VIP7+LP1: ${vip5_usdc.total_savings:,.0f} savings (Net: ${vip5_usdc.total_savings - 50000:,.0f})")
+    print(f"  VIP6 → VIP7+LP1: ${vip6_usdc.total_savings:,.0f} savings (Net: ${vip6_usdc.total_savings - 50000:,.0f})")
+    print(f"  VIP6 advantage: ${vip6_usdc.total_savings - vip5_usdc.total_savings:,.0f}")
+
+    # Break-even analysis
+    print("\n" + "="*80)
+    print("CONCLUSION")
+    print("="*80)
+
+    print("\nBreak-even Analysis (Where Net Benefit = $0):")
+    for pair_type in pair_types:
+        min_result = results[(volumes[0], pair_type)]
+        max_result = results[(volumes[-1], pair_type)]
+
+        min_net = min_result.total_savings - 50000
+        max_net = max_result.total_savings - 50000
+
+        print(f"\n{pair_type}:")
+        print(f"  @ ${volumes[0]/1e9:.1f}B volume: Net = ${min_net:,.0f}")
+        print(f"  @ ${volumes[-1]/1e9:.1f}B volume: Net = ${max_net:,.0f}")
+
+        if min_net < 0 and max_net > 0:
+            # Linear interpolation for break-even point
+            breakeven_volume = volumes[0] + (50000 - min_result.total_savings) * \
+                              (volumes[-1] - volumes[0]) / (max_result.total_savings - min_result.total_savings)
+            print(f"  Break-even volume: ~${breakeven_volume/1e9:.2f}B")
+            print(f"  ⚠️  Profitable only above break-even")
+        elif max_net < 0:
+            print(f"  ❌ NEVER profitable (max savings: ${max_result.total_savings:,.0f})")
+        else:
+            print(f"  ✅ ALWAYS profitable (min savings: ${min_result.total_savings:,.0f})")
+
+    print("\n" + "="*80)
+    print("KEY INSIGHTS")
+    print("="*80)
+
+    # Calculate improvement percentage for VIP6 vs VIP5
+    vip5_min_net = calculate_fee_savings(1_000_000_000, "USDT-M", "VIP5").total_savings - 50000
+    vip6_min_net = results[(volumes[0], "USDT-M")].total_savings - 50000
+
+    print(f"\n1. VIP6 starting point ($2.5B) vs VIP5 starting point ($1B):")
+    print(f"   - VIP5 @ $1B: Net benefit ${vip5_min_net:,.0f}")
+    print(f"   - VIP6 @ $2.5B: Net benefit ${vip6_min_net:,.0f}")
+    print(f"   - Improvement: ${vip6_min_net - vip5_min_net:,.0f} ({((vip6_min_net / vip5_min_net) - 1) * 100:.1f}% better)")
+
+    print(f"\n2. Scaling advantage:")
+    vip6_max_net = results[(volumes[-1], "USDT-M")].total_savings - 50000
+    print(f"   - At $5B volume: Net benefit ${vip6_max_net:,.0f}")
+    print(f"   - At $2.5B volume: Net benefit ${vip6_min_net:,.0f}")
+    print(f"   - Doubling volume adds: ${vip6_max_net - vip6_min_net:,.0f}")
+
+
+if __name__ == "__main__":
+    main()

@@ -31,8 +31,8 @@ Therefore, official Claude Code stores sessions under `~/.claude/projects/` usin
 
 ## Our Previous Deviation (Explained)
 
-- We had symlinks in `~/.claude`:
-  - `projects -> system/sessions`
+- Historical symlinks existed in `~/.claude`:
+  - `projects -> system/sessions` (removed)
   - `ide -> system/ide`, `statsig -> system/statsig`, `todos -> system/todos`
 - Active sessions lived in `~/.claude/system/sessions/…` (non-standard), and tooling referenced that path.
 - This customization caused path confusion and tooling failures (e.g., SAGE), masking the official behavior.
@@ -60,6 +60,8 @@ head -n 1 ~/.claude/projects/*/*.jsonl | python -m json.tool
 ## Decision
 
 Adopt `~/.claude/projects/` as the authoritative session root. Update internal docs, tools, and scripts to treat it as the single source of truth.
+
+Implementation plan: `specifications/session-storage-adoption.yaml`
 
 ## Session Recovery & Troubleshooting (2025-08-12)
 
@@ -180,5 +182,4 @@ Created `/home/tca/.claude/tools/session-recovery.sh` for systematic session mig
 3. **IDE terminals can override environment** - Check Cursor/VS Code settings
 4. **Sessions are resumable only if incomplete** - Completed sessions won't show in `claude -r`
 5. **Original wrapper is sufficient** - No custom wrapper needed, just fix environment
-
 

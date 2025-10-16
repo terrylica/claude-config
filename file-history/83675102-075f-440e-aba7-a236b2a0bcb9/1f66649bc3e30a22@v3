@@ -1,0 +1,393 @@
+# Laguerre RSI Bug Report - Price Smoothing Inconsistency
+
+**Status**: ✅ FIXED (2025-10-13)
+**Impact**: Indicator produces different values for `inpCustomMinutes=0` vs `inpCustomMinutes=1` on M1 chart
+**Severity**: High - Affects all calculations
+**Fixed File**: `ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5`
+**Fix Summary**: `LAGUERRE_RSI_BUG_FIX_SUMMARY.md`
+
+---
+
+## Bug Description
+
+The indicator has **two calculation paths**:
+1. **Normal Timeframe** (`inpCustomMinutes = 0`) - Uses chart's native timeframe
+2. **Custom Timeframe** (`inpCustomMinutes > 0`) - Builds custom bars from M1 data
+
+These paths implement **price smoothing differently**, causing inconsistent results even when both are operating on M1 data.
+
+---
+
+## Root Cause
+
+### Path 1: Normal Timeframe (Line 226)
+
+```mql5
+// Uses iMA indicator handle with user-specified MA method
+CopyBuffer(global.maHandle, 0, 0, copyCount, prices)
+
+// Handle created in OnInit (line 175):
+global.maHandle = iMA(_Symbol, _Period, global.maPeriod, 0, inpRsiMaType, inpRsiPrice);
+//                                                         ^^^^^^^^^^^
+// Respects inpRsiMaType parameter (MODE_EMA by default)
+```
+
+**Behavior**: Uses the MA method specified by `inpRsiMaType` input parameter:
+- `MODE_EMA` (default)
+- `MODE_SMA`
+- `MODE_SMMA`
+- `MODE_LWMA`
+
+### Path 2: Custom Timeframe (Lines 365-382)
+
+```mql5
+// Manual price smoothing - ALWAYS uses SMA
+else
+{
+    double sum = 0;
+    for(int j = 0; j < global.maPeriod; j++)
+    {
+        double tempPrice = 0;
+        switch(inpRsiPrice)
+        {
+            case PRICE_OPEN:   tempPrice = customOpen[i + j]; break;
+            case PRICE_HIGH:   tempPrice = customHigh[i + j]; break;
+            case PRICE_LOW:    tempPrice = customLow[i + j]; break;
+            case PRICE_CLOSE:  tempPrice = customClose[i + j]; break;
+            case PRICE_MEDIAN: tempPrice = (customHigh[i + j] + customLow[i + j]) / 2.0; break;
+            case PRICE_TYPICAL: tempPrice = (customHigh[i + j] + customLow[i + j] + customClose[i + j]) / 3.0; break;
+            case PRICE_WEIGHTED: tempPrice = (customHigh[i + j] + customLow[i + j] + 2 * customClose[i + j]) / 4.0; break;
+            default: tempPrice = customClose[i + j]; break;
+        }
+        sum += tempPrice;
+    }
+    customPrices[i] = sum / global.maPeriod;  // <-- HARDCODED SMA
+}
+```
+
+**Behavior**: **ALWAYS uses Simple Moving Average**, completely ignoring `inpRsiMaType`.
+
+---
+
+## Test Case Demonstrating Bug
+
+**Setup**:
+- Symbol: EURUSD
+- Chart Timeframe: M1
+- `inpRsiMaType = MODE_EMA` (default)
+- `inpRsiMaPeriod = 5` (default)
+
+**Test 1**: `inpCustomMinutes = 0`
+- Uses chart timeframe (M1)
+- Applies **EMA(5)** to prices
+- Result: Smooth indicator line
+
+**Test 2**: `inpCustomMinutes = 1`
+- Builds custom 1-minute bars from M1 data (identical bars)
+- Applies **SMA(5)** to prices (BUG!)
+- Result: **Different indicator values** even though data is identical
+
+**Expected**: Both should produce identical results on M1 chart.
+
+**Actual**: Values differ due to EMA vs SMA smoothing.
+
+---
+
+## Impact Analysis
+
+### Affected Users
+
+**All users who**:
+1. Use custom timeframe mode (`inpCustomMinutes > 0`)
+2. Rely on `inpRsiMaType` parameter (EMA, SMMA, LWMA)
+
+**Not Affected**:
+- Users with `inpRsiMaType = MODE_SMA` (SMA is used in both paths)
+- Users with `inpRsiMaPeriod = 1` (no smoothing applied)
+
+### Severity Assessment
+
+**High Severity** because:
+1. **Silent Failure**: No error message, indicator appears to work correctly
+2. **Data Integrity**: Indicator values are incorrect but look plausible
+3. **Trading Impact**: Wrong signals could lead to incorrect trading decisions
+4. **Default Settings**: Default uses MODE_EMA, so most users are affected
+
+---
+
+## Proposed Fix
+
+### Option 1: Implement All MA Methods in Custom Path (Recommended)
+
+Add MA calculation functions and respect `inpRsiMaType` in custom timeframe path:
+
+```mql5
+// Replace lines 358-384 with:
+void CalculateCustomPriceSmoothing(double &customPrices[], int customBarCount)
+{
+    for(int i = 0; i < customBarCount; i++)
+    {
+        double price = GetAppliedPrice(i);  // Extract applied price logic
+
+        if(i < global.maPeriod - 1)
+        {
+            customPrices[i] = price;
+        }
+        else
+        {
+            // Calculate MA based on inpRsiMaType
+            switch(inpRsiMaType)
+            {
+                case MODE_SMA:
+                    customPrices[i] = CalculateSMA(i, global.maPeriod);
+                    break;
+                case MODE_EMA:
+                    customPrices[i] = CalculateEMA(i, global.maPeriod, customPrices[i-1]);
+                    break;
+                case MODE_SMMA:
+                    customPrices[i] = CalculateSMMA(i, global.maPeriod, customPrices[i-1]);
+                    break;
+                case MODE_LWMA:
+                    customPrices[i] = CalculateLWMA(i, global.maPeriod);
+                    break;
+                default:
+                    customPrices[i] = CalculateSMA(i, global.maPeriod);
+            }
+        }
+    }
+}
+
+// Helper functions for each MA type:
+double CalculateSMA(int i, int period)
+{
+    double sum = 0;
+    for(int j = 0; j < period; j++)
+    {
+        sum += GetAppliedPrice(i + j);
+    }
+    return sum / period;
+}
+
+double CalculateEMA(int i, int period, double prevEMA)
+{
+    double alpha = 2.0 / (period + 1.0);
+    double price = GetAppliedPrice(i);
+
+    if(i < period)
+    {
+        // Use SMA for initialization
+        return CalculateSMA(i, i + 1);
+    }
+
+    return alpha * price + (1.0 - alpha) * prevEMA;
+}
+
+double CalculateSMMA(int i, int period, double prevSMMA)
+{
+    double price = GetAppliedPrice(i);
+
+    if(i < period)
+    {
+        return CalculateSMA(i, i + 1);
+    }
+
+    return (prevSMMA * (period - 1) + price) / period;
+}
+
+double CalculateLWMA(int i, int period)
+{
+    double sum = 0;
+    double weightSum = 0;
+
+    for(int j = 0; j < period; j++)
+    {
+        int weight = period - j;
+        sum += GetAppliedPrice(i + j) * weight;
+        weightSum += weight;
+    }
+
+    return sum / weightSum;
+}
+
+double GetAppliedPrice(int i)
+{
+    switch(inpRsiPrice)
+    {
+        case PRICE_OPEN:     return customOpen[i];
+        case PRICE_HIGH:     return customHigh[i];
+        case PRICE_LOW:      return customLow[i];
+        case PRICE_CLOSE:    return customClose[i];
+        case PRICE_MEDIAN:   return (customHigh[i] + customLow[i]) / 2.0;
+        case PRICE_TYPICAL:  return (customHigh[i] + customLow[i] + customClose[i]) / 3.0;
+        case PRICE_WEIGHTED: return (customHigh[i] + customLow[i] + 2 * customClose[i]) / 4.0;
+        default:             return customClose[i];
+    }
+}
+```
+
+### Option 2: Force SMA in Both Paths (Quick Fix)
+
+Change default `inpRsiMaType = MODE_SMA` and document limitation:
+
+```mql5
+input ENUM_MA_METHOD  inpRsiMaType = MODE_SMA;  // Price smoothing method (SMA only for custom intervals)
+```
+
+Add validation in OnInit:
+```mql5
+if(inpCustomMinutes > 0 && inpRsiMaType != MODE_SMA)
+{
+    Print("Warning: Custom interval mode only supports SMA. Forcing MODE_SMA.");
+    // Cannot modify input, but document in chart comment
+}
+```
+
+### Option 3: Use iMA Handle for Custom Bars (Hybrid)
+
+Create temporary series and use iMA:
+```mql5
+// In CalculateCustomTimeframe after building custom bars:
+// Copy custom bars to a series
+// Create iMA handle on that series
+// Use CopyBuffer to get smoothed values
+```
+
+**Complexity**: Medium - requires understanding of custom symbol creation.
+
+---
+
+## Recommendation
+
+**Implement Option 1** (Full MA implementation) because:
+1. ✅ Fixes the bug completely
+2. ✅ Respects user's `inpRsiMaType` choice
+3. ✅ Maintains consistency between both paths
+4. ✅ No breaking changes to existing code structure
+
+**Timeline**: ~2-3 hours of implementation + testing
+
+---
+
+## Python Translation Impact
+
+### Current Analysis Document
+
+The `LAGUERRE_RSI_ANALYSIS.md` currently documents:
+- EMA smoothing (based on default `inpRsiMaType = MODE_EMA`)
+- But the custom timeframe path uses SMA!
+
+### Updated Python Implementation
+
+**MUST include all MA methods** to accurately translate both paths:
+
+```python
+def apply_price_smoothing(
+    prices: pd.Series,
+    period: int = 5,
+    method: str = 'ema'
+) -> pd.Series:
+    """
+    Apply price smoothing with specified MA method.
+
+    Args:
+        prices: Price series
+        period: Smoothing period
+        method: 'sma', 'ema', 'smma', 'lwma'
+
+    Returns:
+        Smoothed price series
+    """
+    if period <= 1:
+        return prices
+
+    if method == 'sma':
+        return prices.rolling(window=period).mean()
+    elif method == 'ema':
+        return prices.ewm(span=period, adjust=False).mean()
+    elif method == 'smma':
+        # Smoothed MA (SMMA) - also known as RMA
+        alpha = 1.0 / period
+        return prices.ewm(alpha=alpha, adjust=False).mean()
+    elif method == 'lwma':
+        # Linear Weighted MA
+        weights = np.arange(1, period + 1)
+        return prices.rolling(window=period).apply(
+            lambda x: np.dot(x, weights) / weights.sum(), raw=True
+        )
+    else:
+        return prices.ewm(span=period, adjust=False).mean()
+```
+
+### Validation Strategy
+
+**Test both MQL5 paths**:
+1. Export with `inpCustomMinutes = 0` → Compare with Python EMA path
+2. Export with `inpCustomMinutes = 1` → Compare with Python SMA path (current bug)
+3. After bug fix, both should match Python with correct MA method
+
+---
+
+## Workaround for Users
+
+Until the bug is fixed, users should:
+
+1. **If using chart timeframe** (`inpCustomMinutes = 0`):
+   - Works correctly with any `inpRsiMaType`
+
+2. **If using custom timeframe** (`inpCustomMinutes > 0`):
+   - Set `inpRsiMaType = MODE_SMA` to match actual behavior
+   - Or avoid custom timeframe mode if EMA smoothing is required
+
+---
+
+## Testing Checklist
+
+After implementing fix:
+
+- [ ] Verify `inpCustomMinutes = 0` on M1 chart with MODE_EMA
+- [ ] Verify `inpCustomMinutes = 1` on M1 chart with MODE_EMA
+- [ ] Confirm both produce identical results
+- [ ] Test all MA methods: SMA, EMA, SMMA, LWMA
+- [ ] Test on multiple timeframes: M1, M5, M15, H1
+- [ ] Test custom intervals: 2, 3, 5, 10, 15 minutes
+- [ ] Compare with Python implementation
+- [ ] Validate correlation ≥ 0.999
+
+---
+
+## References
+
+- **Source File**: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended).mq5`
+- **Analysis Document**: `LAGUERRE_RSI_ANALYSIS.md ` (needs update)
+- **Affected Lines**:
+  - Normal path: 226 (CopyBuffer with iMA handle)
+  - Custom path: 358-384 (manual SMA calculation)
+  - OnInit MA handle creation: 175
+
+---
+
+**Reported**: 2025-10-13
+**Fixed**: 2025-10-13
+**Status**: ✅ Bug fixed, implementation complete, awaiting testing
+
+## Fix Implementation
+
+**Fixed File**: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5 `
+
+**Changes**:
+1. Added 5 helper function declarations (after line 109)
+2. Replaced buggy price smoothing loop (lines 349-381) with switch statement respecting `inpRsiMaType`
+3. Implemented 5 helper functions at end of file:
+   - `GetCustomAppliedPrice(int i)` - Extract price based on `inpRsiPrice`
+   - `CalculateCustomSMA(int i, int period)` - Simple Moving Average
+   - `CalculateCustomEMA(int i, int period, double prevEMA)` - Exponential Moving Average
+   - `CalculateCustomSMMA(int i, int period, double prevSMMA)` - Smoothed Moving Average
+   - `CalculateCustomLWMA(int i, int period)` - Linear Weighted Moving Average
+
+**Next Steps**:
+1. Compile fixed indicator in MetaEditor
+2. Run functional tests on M1 chart with `inpCustomMinutes=0` and `inpCustomMinutes=1`
+3. Validate all MA methods produce consistent results
+4. Replace original indicator in production once validated
+
+**Detailed Documentation**: See `LAGUERRE_RSI_BUG_FIX_SUMMARY.md ` for complete implementation details

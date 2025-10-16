@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""
+Phase 3: Export normalized metrics to Parquet and CSV
+
+Exports comprehensive datasets for further research:
+1. Full OHLC dataset with all 13 columns
+2. Top volatile bars (99th percentile range_per_spread)
+3. Top directional bars (99th percentile body_per_spread)
+4. Monthly aggregates
+5. Statistical summary
+"""
+
+import sys
+from pathlib import Path
+
+# Add project source to path
+project_src = Path("/Users/terryli/eon/exness-data-preprocess/src")
+sys.path.insert(0, str(project_src))
+
+import duckdb
+import pandas as pd
+
+
+def main():
+    duckdb_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+    output_dir = Path("/tmp/exness-duckdb-test/analysis_results")
+    output_dir.mkdir(exist_ok=True)
+
+    print("=== Phase 3: Export Results ===\n")
+
+    conn = duckdb.connect(str(duckdb_path), read_only=True)
+
+    # 1. Export full OHLC dataset (Parquet only - 413K rows)
+    print("1. Exporting full OHLC dataset (Parquet)...")
+    df_full = conn.execute("SELECT * FROM ohlc_1m ORDER BY Timestamp").df()
+    parquet_path = output_dir / "eurusd_ohlc_1m_v1.2.0_full.parquet"
+    df_full.to_parquet(parquet_path, compression="zstd", compression_level=9)
+    size_mb = parquet_path.stat().st_size / 1024 / 1024
+    print(f"✅ Exported {len(df_full):,} bars to {parquet_path.name} ({size_mb:.2f} MB)")
+    print()
+
+    # 2. Export top 1000 most volatile bars (CSV + Parquet)
+    print("2. Exporting top 1000 most volatile bars...")
+    df_volatile = conn.execute("""
+        SELECT
+            Timestamp,
+            Open, High, Low, Close,
+            range_per_spread,
+            body_per_spread,
+            range_per_tick,
+            body_per_tick,
+            raw_spread_avg,
+            standard_spread_avg,
+            tick_count_raw_spread,
+            tick_count_standard
+        FROM ohlc_1m
+        WHERE range_per_spread IS NOT NULL
+        ORDER BY range_per_spread DESC
+        LIMIT 1000
+    """).df()
+
+    # Parquet
+    parquet_path = output_dir / "eurusd_top_1000_volatile_bars.parquet"
+    df_volatile.to_parquet(parquet_path, compression="zstd", compression_level=9, index=False)
+    print(f"✅ Exported to {parquet_path.name}")
+
+    # CSV
+    csv_path = output_dir / "eurusd_top_1000_volatile_bars.csv"
+    df_volatile.to_csv(csv_path, index=False)
+    print(f"✅ Exported to {csv_path.name}")
+    print()
+
+    # 3. Export top 1000 most directional bars (CSV + Parquet)
+    print("3. Exporting top 1000 most directional bars...")
+    df_directional = conn.execute("""
+        SELECT
+            Timestamp,
+            Open, High, Low, Close,
+            body_per_spread,
+            range_per_spread,
+            body_per_tick,
+            range_per_tick,
+            raw_spread_avg,
+            standard_spread_avg,
+            tick_count_raw_spread,
+            tick_count_standard
+        FROM ohlc_1m
+        WHERE body_per_spread IS NOT NULL
+        ORDER BY body_per_spread DESC
+        LIMIT 1000
+    """).df()
+
+    # Parquet
+    parquet_path = output_dir / "eurusd_top_1000_directional_bars.parquet"
+    df_directional.to_parquet(parquet_path, compression="zstd", compression_level=9, index=False)
+    print(f"✅ Exported to {parquet_path.name}")
+
+    # CSV
+    csv_path = output_dir / "eurusd_top_1000_directional_bars.csv"
+    df_directional.to_csv(csv_path, index=False)
+    print(f"✅ Exported to {csv_path.name}")
+    print()
+
+    # 4. Export monthly aggregates (CSV + Parquet)
+    print("4. Exporting monthly aggregates...")
+    df_monthly = conn.execute("""
+        SELECT
+            DATE_TRUNC('month', Timestamp) as month,
+            COUNT(*) as total_bars,
+            COUNT(range_per_spread) as non_null_bars,
+            -- Range metrics
+            AVG(range_per_spread) as avg_range_per_spread,
+            MEDIAN(range_per_spread) as median_range_per_spread,
+            STDDEV(range_per_spread) as std_range_per_spread,
+            MIN(range_per_spread) as min_range_per_spread,
+            MAX(range_per_spread) as max_range_per_spread,
+            -- Body metrics
+            AVG(body_per_spread) as avg_body_per_spread,
+            MEDIAN(body_per_spread) as median_body_per_spread,
+            STDDEV(body_per_spread) as std_body_per_spread,
+            MIN(body_per_spread) as min_body_per_spread,
+            MAX(body_per_spread) as max_body_per_spread,
+            -- Tick-normalized metrics
+            AVG(range_per_tick) as avg_range_per_tick,
+            AVG(body_per_tick) as avg_body_per_tick,
+            -- Raw data
+            AVG(raw_spread_avg) as avg_raw_spread,
+            AVG(standard_spread_avg) as avg_standard_spread,
+            AVG(tick_count_raw_spread) as avg_raw_ticks,
+            AVG(tick_count_standard) as avg_standard_ticks
+        FROM ohlc_1m
+        GROUP BY DATE_TRUNC('month', Timestamp)
+        ORDER BY month
+    """).df()
+
+    # Parquet
+    parquet_path = output_dir / "eurusd_monthly_aggregates.parquet"
+    df_monthly.to_parquet(parquet_path, compression="zstd", compression_level=9, index=False)
+    print(f"✅ Exported to {parquet_path.name}")
+
+    # CSV
+    csv_path = output_dir / "eurusd_monthly_aggregates.csv"
+    df_monthly.to_csv(csv_path, index=False)
+    print(f"✅ Exported to {csv_path.name}")
+    print()
+
+    # 5. Export statistical summary (CSV only)
+    print("5. Exporting statistical summary...")
+
+    # Descriptive stats
+    desc_stats = conn.execute("""
+        SELECT
+            'range_per_spread' as metric,
+            COUNT(range_per_spread) as count,
+            AVG(range_per_spread) as mean,
+            MEDIAN(range_per_spread) as median,
+            STDDEV(range_per_spread) as std_dev,
+            MIN(range_per_spread) as min,
+            MAX(range_per_spread) as max,
+            QUANTILE_CONT(range_per_spread, 0.01) as p01,
+            QUANTILE_CONT(range_per_spread, 0.05) as p05,
+            QUANTILE_CONT(range_per_spread, 0.25) as p25,
+            QUANTILE_CONT(range_per_spread, 0.75) as p75,
+            QUANTILE_CONT(range_per_spread, 0.95) as p95,
+            QUANTILE_CONT(range_per_spread, 0.99) as p99
+        FROM ohlc_1m
+        UNION ALL
+        SELECT
+            'body_per_spread' as metric,
+            COUNT(body_per_spread) as count,
+            AVG(body_per_spread) as mean,
+            MEDIAN(body_per_spread) as median,
+            STDDEV(body_per_spread) as std_dev,
+            MIN(body_per_spread) as min,
+            MAX(body_per_spread) as max,
+            QUANTILE_CONT(body_per_spread, 0.01) as p01,
+            QUANTILE_CONT(body_per_spread, 0.05) as p05,
+            QUANTILE_CONT(body_per_spread, 0.25) as p25,
+            QUANTILE_CONT(body_per_spread, 0.75) as p75,
+            QUANTILE_CONT(body_per_spread, 0.95) as p95,
+            QUANTILE_CONT(body_per_spread, 0.99) as p99
+        FROM ohlc_1m
+        UNION ALL
+        SELECT
+            'range_per_tick' as metric,
+            COUNT(range_per_tick) as count,
+            AVG(range_per_tick) as mean,
+            MEDIAN(range_per_tick) as median,
+            STDDEV(range_per_tick) as std_dev,
+            MIN(range_per_tick) as min,
+            MAX(range_per_tick) as max,
+            QUANTILE_CONT(range_per_tick, 0.01) as p01,
+            QUANTILE_CONT(range_per_tick, 0.05) as p05,
+            QUANTILE_CONT(range_per_tick, 0.25) as p25,
+            QUANTILE_CONT(range_per_tick, 0.75) as p75,
+            QUANTILE_CONT(range_per_tick, 0.95) as p95,
+            QUANTILE_CONT(range_per_tick, 0.99) as p99
+        FROM ohlc_1m
+        UNION ALL
+        SELECT
+            'body_per_tick' as metric,
+            COUNT(body_per_tick) as count,
+            AVG(body_per_tick) as mean,
+            MEDIAN(body_per_tick) as median,
+            STDDEV(body_per_tick) as std_dev,
+            MIN(body_per_tick) as min,
+            MAX(body_per_tick) as max,
+            QUANTILE_CONT(body_per_tick, 0.01) as p01,
+            QUANTILE_CONT(body_per_tick, 0.05) as p05,
+            QUANTILE_CONT(body_per_tick, 0.25) as p25,
+            QUANTILE_CONT(body_per_tick, 0.75) as p75,
+            QUANTILE_CONT(body_per_tick, 0.95) as p95,
+            QUANTILE_CONT(body_per_tick, 0.99) as p99
+        FROM ohlc_1m
+    """).df()
+
+    csv_path = output_dir / "eurusd_statistical_summary.csv"
+    desc_stats.to_csv(csv_path, index=False)
+    print(f"✅ Exported to {csv_path.name}")
+    print()
+
+    # 6. Export correlation matrix (CSV)
+    print("6. Exporting correlation matrix...")
+    corr_matrix = conn.execute("""
+        SELECT
+            'range_per_spread' as metric1,
+            'body_per_spread' as metric2,
+            CORR(range_per_spread, body_per_spread) as correlation
+        FROM ohlc_1m
+        UNION ALL
+        SELECT 'range_per_spread', 'standard_spread_avg',
+            CORR(range_per_spread, standard_spread_avg)
+        FROM ohlc_1m
+        UNION ALL
+        SELECT 'range_per_spread', 'tick_count_standard',
+            CORR(range_per_spread, tick_count_standard)
+        FROM ohlc_1m
+        UNION ALL
+        SELECT 'body_per_spread', 'standard_spread_avg',
+            CORR(body_per_spread, standard_spread_avg)
+        FROM ohlc_1m
+        UNION ALL
+        SELECT 'body_per_spread', 'tick_count_standard',
+            CORR(body_per_spread, tick_count_standard)
+        FROM ohlc_1m
+        UNION ALL
+        SELECT 'range_per_tick', 'body_per_tick',
+            CORR(range_per_tick, body_per_tick)
+        FROM ohlc_1m
+    """).df()
+
+    csv_path = output_dir / "eurusd_correlation_matrix.csv"
+    corr_matrix.to_csv(csv_path, index=False)
+    print(f"✅ Exported to {csv_path.name}")
+    print()
+
+    conn.close()
+
+    # Summary
+    print("=" * 80)
+    print("Export Summary")
+    print("=" * 80)
+    print(f"Output directory: {output_dir}")
+    print()
+    print("Files created:")
+    for file in sorted(output_dir.iterdir()):
+        size_mb = file.stat().st_size / 1024 / 1024
+        print(f"  - {file.name:<50} {size_mb:>8.2f} MB")
+    print()
+    print("✅ Phase 3 Complete")
+
+
+if __name__ == "__main__":
+    main()

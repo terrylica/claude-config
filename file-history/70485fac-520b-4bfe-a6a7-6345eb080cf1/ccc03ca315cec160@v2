@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""
+Clean temporal fix for Laguerre RSI - properly handles comments and structure.
+"""
+from pathlib import Path
+
+source = Path("Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended).mq5")
+output = Path("Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5")
+
+print(f"Reading from: {source}")
+content = source.read_text(encoding='utf-16-le')
+lines = content.split('\n')
+print(f"Original line count: {len(lines)}")
+
+# Find locations
+normal_if = None
+normal_comment = None
+custom_if = None
+custom_comment = None
+
+for i in range(len(lines)):
+    # Normal timeframe
+    if 'if(atrWork[i].saveBar!=i || atrWork[i+1].saveBar>=i)' in lines[i]:
+        normal_if = i
+        normal_comment = i-1 if i > 0 else None
+        print(f"\n✓ Found normal timeframe at line {normal_if+1}")
+
+    # Custom timeframe
+    if 'if(atrWork[i].saveBar != i || (i < customBarCount - 1 && atrWork[i+1].saveBar >= i))' in lines[i]:
+        custom_if = i
+        custom_comment = i-1 if i > 0 else None
+        print(f"✓ Found custom timeframe at line {custom_if+1}")
+
+if normal_if is None or custom_if is None:
+    print("\n⚠️ Could not find both locations!")
+    print(f"Normal: {normal_if}, Custom: {custom_if}")
+    exit(1)
+
+# Apply fixes in reverse order to preserve line numbers
+# Fix custom timeframe first (higher line number)
+print(f"\nApplying fix to custom timeframe...")
+
+# Replace comment + if statement (2 lines) with new comment + if
+lines[custom_comment] = '            / /   C a l c u l a t e   A T R   m i n / m a x   f o r   a d a p t i v e   c o e f f i c i e n t   ( T E M P O R A L   F I X :   A l w a y s   r e c a l c u l a t e )'
+lines[custom_if] = '            i f ( i n p A t r P e r i o d   >   1   & &   i   >   0 )'
+
+# Remove cache management lines (lines custom_if+2 and custom_if+3)
+# Line +1 is {
+# Line +2 is atrWork[i].saveBar = i;
+# Line +3 is if(i<customBarCount-1) atrWork[i+1].saveBar = -1;
+del lines[custom_if+2:custom_if+4]
+print(f"  Replaced lines {custom_comment+1}-{custom_if+1}")
+print(f"  Removed cache management (2 lines)")
+
+# Fix normal timeframe second (lower line number)
+print(f"\nApplying fix to normal timeframe...")
+
+# Replace comment + if statement
+lines[normal_comment] = '            / /   C a l c u l a t e   A T R   m i n / m a x   f o r   a d a p t i v e   c o e f f i c i e n t   ( T E M P O R A L   F I X :   A l w a y s   r e c a l c u l a t e )'
+lines[normal_if] = '            i f ( i n p A t r P e r i o d > 1   & &   i > 0 )'
+
+# Remove cache management lines
+# Line +1 is {
+# Line +2 is comment "//   Update cache management..."
+# Line +3 is atrWork[i     ].saveBar = i;
+# Line +4 is atrWork[i + 1].saveBar = -1;
+del lines[normal_if+2:normal_if+5]
+print(f"  Replaced lines {normal_comment+1}-{normal_if+1}")
+print(f"  Removed cache management (3 lines)")
+
+print(f"\nFinal line count: {len(lines)}")
+print(f"Lines removed: {len(content.split('\\n')) - len(lines)}")
+
+# Write output
+new_content = '\n'.join(lines)
+output.write_text(new_content, encoding='utf-16-le')
+
+print(f"\n✅ Temporal fix complete!")
+print(f"✅ Output: {output}")
+print(f"✅ File size: {output.stat().st_size} bytes")
+print(f"\nChanges made:")
+print("  - Updated comment to indicate temporal fix")
+print("  - Removed all atrWork[i+1] (future bar) accesses")
+print("  - Removed all cache invalidation logic")
+print("  - Preserved all Laguerre RSI calculations")
+print("  - Preserved loop structure")

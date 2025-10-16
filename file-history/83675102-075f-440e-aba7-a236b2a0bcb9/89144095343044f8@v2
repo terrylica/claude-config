@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""
+Final temporal fix - removes ONLY the cache lines, keeps everything else intact.
+"""
+from pathlib import Path
+
+source = Path("Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended).mq5")
+output = Path("Program Files/MetaTrader 5/MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended) - FIXED.mq5")
+
+print(f"Reading from: {source}")
+content = source.read_text(encoding='utf-16-le')
+lines = content.split('\n')
+print(f"Original line count: {len(lines)}")
+
+# Find and mark lines for deletion
+to_delete = []
+
+for i in range(len(lines)):
+    line = lines[i]
+
+    # Find cache check lines with temporal violations
+    if 'atrWork[i].saveBar' in line and 'atrWork[i+1].saveBar' in line:
+        print(f"\n✓ Found temporal violation at line {i+1}")
+        print(f"   Content: {line[:100]}")
+
+        # Mark this if statement line for modification
+        # Find the opening brace and cache management lines
+        if i+1 < len(lines) and '{' in lines[i+1]:
+            # Next few lines should be cache management
+            j = i + 2
+            removed_count = 0
+
+            # Remove lines until we hit the actual ATR calculation if statement
+            while j < len(lines) and removed_count < 5:
+                if 'saveBar' in lines[j]:
+                    print(f"   Removing cache line {j+1}: {lines[j][:80]}")
+                    to_delete.append(j)
+                    removed_count += 1
+                elif 'inpAtrPeriod' in lines[j] and 'i > 0' in lines[j] and 'if' in lines[j]:
+                    # Found the actual calculation if statement, stop
+                    print(f"   Found calculation start at line {j+1}")
+                    break
+                elif lines[j].strip() == '':
+                    # Skip blank lines
+                    pass
+                elif '//' in lines[j] and 'Update cache' in lines[j]:
+                    # Remove cache comment
+                    print(f"   Removing cache comment {j+1}")
+                    to_delete.append(j)
+                    removed_count += 1
+                j += 1
+
+        # Now modify the if statement to remove the temporal violation
+        # Replace the condition: remove "|| atrWork[i+1].saveBar..." part
+        if '||' in line:
+            # Split at || and take only the first part, but keep the rest of the line structure
+            parts = line.split('||')
+            # Reconstruct with just the first condition closed with )
+            indent = line[:line.index('if')]
+            lines[i] = indent + 'if(inpAtrPeriod > 1 && i > 0)  ' + '/ /   T E M P O R A L   F I X :   R e m o v e d   c a c h e   c h e c k'
+            print(f"   Modified if condition at line {i+1}")
+
+# Remove marked lines in reverse order
+for idx in sorted(to_delete, reverse=True):
+    del lines[idx]
+
+print(f"\nFinal line count: {len(lines)}")
+print(f"Lines removed: {len(to_delete)}")
+
+# Write output
+new_content = '\n'.join(lines)
+output.write_text(new_content, encoding='utf-16-le')
+
+print(f"\n✅ Temporal fix complete!")
+print(f"✅ Output: {output}")
+print(f"✅ File size: {output.stat().st_size} bytes")

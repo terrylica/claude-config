@@ -1,0 +1,155 @@
+# Validation Status
+
+**Status**: ⚠️ CONDITIONALLY VALIDATED (2025-10-13)
+**Limitation**: Headless execution requires prior GUI setup for each symbol/timeframe
+**Correlation**: 0.999902 (RSI validation passed)
+
+## ✅ Completed
+
+1. **mq5run wrapper script** - Created, tested, and validated working
+2. **Python validator** - Validated CSV exports with 0.999902 correlation
+3. **Documentation** - Complete AI agent workflow documented
+4. **Config file generation** - Fixed to use relative paths (critical fix)
+5. **Manual execution** - Validated working (SUCCESS_REPORT.md)
+6. **Headless execution** - RESOLVED (config path fix applied)
+7. **Data integrity** - 100% validation passed (no missing/corrupted bars)
+
+## ⚠️ CONDITIONALLY RESOLVED: Headless Execution
+
+### Critical Limitation Discovered (2025-10-13 16:09)
+
+**Headless execution works ONLY for symbols/timeframes previously opened in GUI**
+
+**Test Results**:
+- EURUSD M1 (previously executed manually at 15:03): ✅ SUCCESS
+- XAUUSD H1 (never opened in GUI): ❌ FAILED (script never executed)
+
+**Root Cause**: MT5 startup.ini `[StartUp]` section requires existing chart context. It attaches scripts to existing charts rather than creating new ones. This validates 2022-2025 community research findings about GUI requirements.
+
+**Implication**: Manual intervention IS required - must open each symbol/timeframe in GUI once before headless execution works.
+
+### Previous Status: MT5 launched but script didn't execute
+
+**Initial Resolution Date**: 2025-10-13
+
+**Root Cause Identified**:
+- **Error in MT5 logs**: `cannot load config "C:\Program Files\MetaTrader 5\config\startup_20251013_145717.ini"" at start`
+- **Double quotes** in path due to shell quoting + absolute path with spaces
+- MT5 config parser received: `"C:\Program Files\..."` with extra quotes
+
+**Fix Applied** (mq5run:114):
+```bash
+# BEFORE (FAILED):
+CONFIG_WIN_PATH="C:\\Program Files\\MetaTrader 5\\config\\startup_${TIMESTAMP}.ini"
+# Used with: /config:"${CONFIG_WIN_PATH}"
+
+# AFTER (SUCCESS):
+CONFIG_WIN_PATH="config\\startup_${TIMESTAMP}.ini"
+# Used with: /config:${CONFIG_WIN_PATH}
+```
+
+**Key Insight**: Use relative path from MT5 directory - no spaces = no quoting issues
+
+**Validation Results**:
+- ✅ MT5 launched successfully
+- ✅ Script executed automatically
+- ✅ 2 CSV files generated (Export_EURUSD_PERIOD_CURRENT.csv, Export_EURUSD_PERIOD_M1.csv)
+- ✅ Terminal shut down automatically (ShutdownTerminal=1 working)
+- ✅ Python validation: 0.999902 correlation
+- ✅ Data integrity: All checks passed
+
+### Diagnostic Process Used
+
+**Phase 1: Log Analysis** (5 min - SUCCESSFUL):
+1. Located MT5 logs at: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/logs/20251013.log`
+2. Searched for keywords: "config", "startup", "error"
+3. Found exact error message with double quotes
+4. Identified root cause: Path quoting issue
+5. Applied single-line fix to mq5run
+6. Validated fix with test execution
+
+**Phases 2-3 Not Required**:
+- Web research for additional patterns: SKIPPED (Phase 1 sufficient)
+- Python API alternative approach: SKIPPED (startup.ini working as designed)
+
+## Current Status: Conditionally Production Ready
+
+**Requirement**: Each symbol/timeframe must be manually opened in MT5 GUI once before headless execution works.
+
+### Usage
+
+```bash
+# STEP 1: Initialize new symbol in MT5 GUI (REQUIRED FOR NEW SYMBOLS)
+# - Open MT5 terminal
+# - Create chart for symbol (Ctrl+N or File → New Chart → Symbol)
+# - Manually run ExportAligned script once (drag from Navigator → Scripts)
+# - Close MT5
+
+# STEP 2: Headless execution (works for initialized symbols)
+./mq5run --symbol EURUSD --period PERIOD_M1
+
+# Custom symbol/timeframe (requires STEP 1 first)
+./mq5run --symbol XAUUSD --period PERIOD_H1 --timeout 180
+
+# Validate output
+uv run --active python -m validate_export exports/$(ls -t exports/*.csv | head -1)
+```
+
+### Known Working Configurations
+
+1. ✅ EURUSD M1, 5000 bars, RSI(14) - 0.999902 correlation (after manual initialization)
+2. ❌ XAUUSD H1 - Failed cold start (never opened in GUI)
+3. ✅ Default timeout (120s) sufficient for 5000 bars
+4. ✅ CrossOver 24.0.5 + MT5 Build 5.0.4865
+5. ✅ macOS Sequoia 15.1 (24B83)
+
+## Service Level Objectives: Conditionally Met
+
+### Availability
+- **Target**: 95% success rate
+- **Actual**: 100% for initialized symbols, 0% for cold start
+- **Measurement**: Test executions generated CSV only for pre-configured symbols
+- **Limitation**: Requires manual GUI initialization for each symbol/timeframe
+
+### Correctness
+- **Target**: 100% data integrity, correlation > 0.999
+- **Actual**: 100% integrity, 0.999902 correlation
+- **Measurement**: validate_export.py all checks passed
+
+### Observability
+- **Target**: All attempts logged
+- **Actual**: Full logs with exit codes, errors captured
+- **Measurement**: MT5 logs + mq5run stderr/stdout
+
+### Maintainability
+- **Target**: Single entry point, no manual config editing
+- **Actual**: `./mq5run` single command, auto-generates config
+- **Measurement**: User only needs to call mq5run with CLI args
+
+## 📝 Production Files
+
+```
+mql5-crossover/
+├── mq5run                          ✅ VALIDATED (config path fix applied)
+├── validate_export.py              ✅ VALIDATED (0.999902 correlation)
+├── QUICKSTART.md                   ✅ Ready
+├── docs/AI_AGENT_WORKFLOW.md       ✅ Updated with fix details
+├── HEADLESS_EXECUTION_PLAN.md      ✅ v2.0.0 RESOLVED
+├── SUCCESS_REPORT.md               ✅ Manual + headless validation
+├── mql5_export/
+│   ├── ExportAligned.ex5           ✅ Working (manual + headless)
+│   ├── ExportAligned.mq5           ✅ Source code
+│   ├── DataExportCore.mqh          ✅ Core export functions
+│   └── modules/RSIModule.mqh       ✅ RSI indicator module
+└── exports/                        ✅ 3 CSV files generated
+    ├── 20251013_151258_Export_EURUSD_PERIOD_CURRENT.csv
+    ├── 20251013_151258_Export_EURUSD_PERIOD_M1.csv
+    └── manual_test_Export_EURUSD_PERIOD_M1.csv
+```
+
+## References
+
+- **Implementation Plan**: `/Users/terryli/eon/mql5-crossover/HEADLESS_EXECUTION_PLAN.md` (v2.0.0 RESOLVED)
+- **Success Report**: `/Users/terryli/eon/mql5-crossover/SUCCESS_REPORT.md` (manual validation)
+- **Workflow Guide**: `/Users/terryli/eon/mql5-crossover/docs/AI_AGENT_WORKFLOW.md` (updated with fix)
+- **Research Findings**: `/Users/terryli/eon/mql5-crossover/historical.txt` (2022-2025 best practices)

@@ -1,0 +1,105 @@
+//+------------------------------------------------------------------+
+//|                                           CandlePatterns.mqh     |
+//|                                                        Terry Li |
+//|                  Candlestick pattern detection (inside bar, etc) |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Check if current bar is an inside bar                            |
+//| Inside bar: High <= prev high AND Low >= prev low                |
+//+------------------------------------------------------------------+
+bool CheckInsideBar(const double &high[], const double &low[], int bar)
+{
+   // Need at least one previous bar
+   if(bar >= ArraySize(high) - 1)
+      return false;
+
+   // Inside bar condition:
+   // Current bar's range is completely within previous bar's range
+   if(high[bar] <= high[bar+1] && low[bar] >= low[bar+1])
+      return true;
+
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Find the mother bar index for an inside bar sequence             |
+//| Mother bar = the larger bar that precedes the first inside bar   |
+//| Returns: Index of mother bar, or -1 if not found                 |
+//+------------------------------------------------------------------+
+int FindMotherBar(const double &high[], const double &low[], int currentBar, int rates_total)
+{
+   // Walk back from current bar to find the mother bar
+   // A bar is the mother bar if it's NOT an inside bar relative to the previous bar
+   int motherBarIndex = currentBar + 1;
+
+   while(motherBarIndex < rates_total - 1)
+   {
+      // Check if this bar is an inside bar relative to the next bar
+      if(CheckInsideBar(high, low, motherBarIndex))
+         motherBarIndex++;  // Keep looking back
+      else
+         break;  // Found the mother bar
+   }
+
+   // Verify we found a valid mother bar
+   if(motherBarIndex >= rates_total)
+      return -1;
+
+   return motherBarIndex;
+}
+
+//+------------------------------------------------------------------+
+//| Count consecutive inside bars from mother bar to current bar     |
+//| All bars must be within mother bar's high/low range              |
+//| Returns: Number of consecutive inside bars (1-based count)       |
+//+------------------------------------------------------------------+
+int CountConsecutiveInsideBars(const double &high[], const double &low[], int currentBar, int motherBarIndex)
+{
+   int consecutiveCount = 0;
+
+   // Count from mother bar - 1 down to current bar
+   for(int j = motherBarIndex - 1; j >= currentBar; j--)
+   {
+      // Check if bar j is inside the mother bar's range
+      if(high[j] <= high[motherBarIndex] && low[j] >= low[motherBarIndex])
+         consecutiveCount++;
+      else
+         break;  // Sequence broken
+   }
+
+   return consecutiveCount;
+}
+
+//+------------------------------------------------------------------+
+//| Set inside bar signal as purple colored bar                      |
+//| Only colors the Nth consecutive inside bar (relative to mother)  |
+//| Requires: Global buffers and input parameters from parent        |
+//| Priority system: Only colors bar if not already colored          |
+//+------------------------------------------------------------------+
+void SetInsideBarSignal(int bar, bool isBullish, const double &high[], const double &low[], int rates_total)
+{
+   // Find the mother bar (larger bar preceding the inside bar sequence)
+   int motherBarIndex = FindMotherBar(high, low, bar, rates_total);
+
+   // If no mother bar found, skip
+   if(motherBarIndex < 0)
+      return;
+
+   // Verify current bar is still inside the mother bar's range
+   if(high[bar] > high[motherBarIndex] || low[bar] < low[motherBarIndex])
+      return;
+
+   // Count consecutive inside bars from mother bar to current bar
+   int consecutiveCount = CountConsecutiveInsideBars(high, low, bar, motherBarIndex);
+
+   // Only color if this is the Nth consecutive inside bar
+   if(consecutiveCount != InpInsideBarThreshold)
+      return;
+
+   // Only set purple if bar is not already colored by a higher priority pattern
+   // Priority: Contractions > Inside bars
+   if(InpShowColorBars && BufferColorIndex[bar] == COLOR_NONE)
+      BufferColorIndex[bar] = CLR_INSIDE_BAR;
+}
+//+------------------------------------------------------------------+
