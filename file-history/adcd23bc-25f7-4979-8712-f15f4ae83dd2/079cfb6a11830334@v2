@@ -1,0 +1,195 @@
+#!/bin/bash
+# Option 1b Implementation Script
+# Version: 1.0.0
+# Date: 2025-10-16
+
+set -euo pipefail
+
+# Color output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
+echo -e "${BLUE}=== Option 1b Implementation: SSH + Doppler Shared Keys ===${NC}"
+echo ""
+
+# Step 1: Verify SSH keys exist
+echo -e "${YELLOW}Step 1: Verifying SSH keys exist...${NC}"
+for key in tainora eonlabs 459ecs; do
+  keyfile="$HOME/.ssh/id_ed25519_$key"
+  if [[ ! -f "$keyfile" ]]; then
+    echo -e "${RED}Error: $keyfile not found${NC}"
+    exit 1
+  fi
+  echo -e "  ${GREEN}✓${NC} $keyfile"
+done
+echo ""
+
+# Step 2: Upload keys to Doppler
+echo -e "${YELLOW}Step 2: Uploading SSH keys to Doppler...${NC}"
+echo "  Project: claude-config, Config: dev"
+echo ""
+
+# Upload SSH_KEY_TAINORA
+echo -n "  Uploading SSH_KEY_TAINORA... "
+if doppler secrets set SSH_KEY_TAINORA \
+  --project claude-config \
+  --config dev \
+  --silent < "$HOME/.ssh/id_ed25519_tainora" 2>&1; then
+  echo -e "${GREEN}✓${NC}"
+else
+  echo -e "${RED}✗${NC}"
+  exit 1
+fi
+
+# Upload SSH_KEY_EONLABS
+echo -n "  Uploading SSH_KEY_EONLABS... "
+if doppler secrets set SSH_KEY_EONLABS \
+  --project claude-config \
+  --config dev \
+  --silent < "$HOME/.ssh/id_ed25519_eonlabs" 2>&1; then
+  echo -e "${GREEN}✓${NC}"
+else
+  echo -e "${RED}✗${NC}"
+  exit 1
+fi
+
+# Upload SSH_KEY_459ECS
+echo -n "  Uploading SSH_KEY_459ECS... "
+if doppler secrets set SSH_KEY_459ECS \
+  --project claude-config \
+  --config dev \
+  --silent < "$HOME/.ssh/id_ed25519_459ecs" 2>&1; then
+  echo -e "${GREEN}✓${NC}"
+else
+  echo -e "${RED}✗${NC}"
+  exit 1
+fi
+echo ""
+
+# Step 3: Attach AOD/IOI compliant notes
+echo -e "${YELLOW}Step 3: Attaching AOD/IOI compliant documentation...${NC}"
+
+echo -n "  Attaching note to SSH_KEY_TAINORA... "
+if cat /tmp/ssh-key-notes/SSH_KEY_TAINORA.yaml | \
+  doppler secrets notes set SSH_KEY_TAINORA --project claude-config 2>&1 >/dev/null; then
+  echo -e "${GREEN}✓${NC}"
+else
+  echo -e "${RED}✗${NC}"
+  exit 1
+fi
+
+echo -n "  Attaching note to SSH_KEY_EONLABS... "
+if cat /tmp/ssh-key-notes/SSH_KEY_EONLABS.yaml | \
+  doppler secrets notes set SSH_KEY_EONLABS --project claude-config 2>&1 >/dev/null; then
+  echo -e "${GREEN}✓${NC}"
+else
+  echo -e "${RED}✗${NC}"
+  exit 1
+fi
+
+echo -n "  Attaching note to SSH_KEY_459ECS... "
+if cat /tmp/ssh-key-notes/SSH_KEY_459ECS.yaml | \
+  doppler secrets notes set SSH_KEY_459ECS --project claude-config 2>&1 >/dev/null; then
+  echo -e "${GREEN}✓${NC}"
+else
+  echo -e "${RED}✗${NC}"
+  exit 1
+fi
+echo ""
+
+# Step 4: Create sync-ssh-keys script
+echo -e "${YELLOW}Step 4: Creating sync-ssh-keys script...${NC}"
+
+cat > "$HOME/.local/bin/sync-ssh-keys" << 'EOF'
+#!/bin/bash
+# SSH Key Sync from Doppler
+# Architecture: Option 1b (SSH + Doppler Shared Keys)
+# Version: 1.0.0
+
+set -euo pipefail
+
+# Configuration
+readonly KEY_DIR="$HOME/.ssh"
+readonly PROJECT="claude-config"
+readonly CONFIG="dev"
+
+# Color output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly NC='\033[0m' # No Color
+
+# Ensure .ssh directory exists
+mkdir -p "$KEY_DIR"
+
+echo -e "${YELLOW}Syncing SSH keys from Doppler ${PROJECT}/${CONFIG}...${NC}"
+
+# Fetch and write keys with correct permissions
+doppler secrets get SSH_KEY_TAINORA \
+  --project "$PROJECT" \
+  --config "$CONFIG" \
+  --plain > "$KEY_DIR/id_ed25519_tainora"
+
+doppler secrets get SSH_KEY_EONLABS \
+  --project "$PROJECT" \
+  --config "$CONFIG" \
+  --plain > "$KEY_DIR/id_ed25519_eonlabs"
+
+doppler secrets get SSH_KEY_459ECS \
+  --project "$PROJECT" \
+  --config "$CONFIG" \
+  --plain > "$KEY_DIR/id_ed25519_459ecs"
+
+# Fix permissions (SSH requires 600)
+chmod 600 "$KEY_DIR"/id_ed25519_tainora
+chmod 600 "$KEY_DIR"/id_ed25519_eonlabs
+chmod 600 "$KEY_DIR"/id_ed25519_459ecs
+
+# Verify file sizes (basic sanity check)
+for key in tainora eonlabs 459ecs; do
+  keyfile="$KEY_DIR/id_ed25519_$key"
+  if [[ -f "$keyfile" ]]; then
+    size=$(stat -f%z "$keyfile" 2>/dev/null || stat -c%s "$keyfile" 2>/dev/null)
+    if [[ $size -lt 100 ]]; then
+      echo -e "${RED}Warning: $keyfile seems too small ($size bytes)${NC}"
+      exit 1
+    fi
+  else
+    echo -e "${RED}Error: $keyfile not created${NC}"
+    exit 1
+  fi
+done
+
+echo -e "${GREEN}✅ SSH keys synced successfully${NC}"
+echo ""
+echo "Keys synced:"
+ls -lh "$KEY_DIR"/id_ed25519_{tainora,eonlabs,459ecs} | awk '{print "  " $9 " (" $5 ")"}'
+EOF
+
+chmod +x "$HOME/.local/bin/sync-ssh-keys"
+echo -e "  ${GREEN}✓${NC} Created $HOME/.local/bin/sync-ssh-keys"
+echo ""
+
+# Step 5: Test sync script
+echo -e "${YELLOW}Step 5: Testing sync-ssh-keys script...${NC}"
+"$HOME/.local/bin/sync-ssh-keys"
+echo ""
+
+echo -e "${GREEN}=== Implementation Complete ===${NC}"
+echo ""
+echo "Next steps:"
+echo "  1. Verify git operations:"
+echo "     cd ~/scripts && ssh -T git@github.com  # Should show tainora"
+echo "     cd ~/eon && ssh -T git@github.com      # Should show terrylica"
+echo "     cd ~/459ecs && ssh -T git@github.com   # Should show 459ecs"
+echo ""
+echo "  2. On new machines, just run:"
+echo "     sync-ssh-keys"
+echo ""
+echo "Documentation:"
+echo "  - Implementation guide: /tmp/option-1b-implementation.md"
+echo "  - Complexity analysis: /tmp/option-1b-vs-1c-complexity-analysis.md"
+echo "  - Note schema: /tmp/doppler-ssh-key-note-schema.yaml"

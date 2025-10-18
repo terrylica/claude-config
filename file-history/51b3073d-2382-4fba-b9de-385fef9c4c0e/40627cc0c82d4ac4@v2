@@ -1,0 +1,179 @@
+# Credential Synchronization Workflow
+
+**Source**: 1Password Employee Vault
+**Destination**: Doppler `insurance` project (`prd` config)
+
+---
+
+## Overview
+
+Workflow for migrating insurance account credentials from 1Password to Doppler with comprehensive metadata tracking.
+
+---
+
+## Prerequisites
+
+**Tools**:
+- `op` CLI v2.32.0+ (authenticated via desktop app)
+- `doppler` CLI (authenticated)
+
+**Verification**:
+```bash
+op account list
+doppler projects
+```
+
+---
+
+## Migration Steps
+
+### 1. Discover Items
+
+Search across vaults for relevant credentials:
+
+```bash
+# Keyword search
+op item list --format json | jq -r '.[] | select(.title | contains("Manulife"))'
+
+# List specific vault
+op item list --vault Employee
+```
+
+### 2. Inspect Structure
+
+Examine item fields before extraction:
+
+```bash
+op item get <item-id-or-name> --format json | \
+  jq '{title, category, fields: [.fields[] | {label, type}]}'
+```
+
+### 3. Extract and Migrate
+
+**Single field**:
+```bash
+op item get "Manulife Par Account" --fields label="username" --reveal | \
+  doppler secrets set MANULIFE_PAR_USERNAME --project insurance --config prd
+```
+
+**Multiple fields** (batch):
+```bash
+# Extract username
+op item get "Manulife Par Account" --fields label="username" --reveal | \
+  doppler secrets set MANULIFE_PAR_USERNAME --project insurance --config prd
+
+# Extract password
+op item get "Manulife Par Account" --fields label="password" --reveal | \
+  doppler secrets set MANULIFE_PAR_PASSWORD --project insurance --config prd
+
+# Extract advisor ID (if present)
+op item get "Manulife Par Account" --fields label="advisor id" --reveal | \
+  doppler secrets set MANULIFE_PAR_ADVISOR_ID --project insurance --config prd
+```
+
+### 4. Add Metadata
+
+Document the secret's provenance:
+
+```bash
+cat << 'EOF' | doppler secrets notes set MANULIFE_PAR_USERNAME --project insurance --config prd
+Source: 1Password Employee Vault
+Item: Manulife Par Account
+Category: Login
+Item ID: <item-id>
+Created: <timestamp>
+Updated: <timestamp>
+Migrated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+Purpose: Passkey-authenticated advisor portal access
+EOF
+```
+
+### 5. Verify
+
+Confirm secrets are accessible:
+
+```bash
+# List all insurance secrets
+doppler secrets --project insurance --config prd
+
+# Verify specific secret
+doppler secrets get MANULIFE_PAR_USERNAME --project insurance --config prd --plain
+
+# Test injection
+doppler run --project insurance --config prd -- env | grep MANULIFE
+```
+
+---
+
+## Secret Naming Convention
+
+**Pattern**: `<PROVIDER>_<ACCOUNT_TYPE>_<FIELD>`
+
+**Examples**:
+- `MANULIFE_PAR_USERNAME`
+- `MANULIFE_PAR_PASSWORD`
+- `MANULIFE_PAR_ADVISOR_ID`
+- `MANULIFE_TERM_USERNAME`
+
+**Rationale**: Prefix grouping allows `grep MANULIFE` for all provider secrets.
+
+---
+
+## Security Best Practices
+
+1. **Never log secret values** - Use `--plain` only when piping to Doppler
+2. **Review notes before setting** - Ensure no PII in metadata
+3. **Rotate regularly** - Update both 1Password and Doppler on credential change
+4. **Limit scope** - Use project-specific Doppler configs (`prd`, `dev`)
+5. **Audit trail** - Doppler automatically logs all secret access
+
+---
+
+## Troubleshooting
+
+### op: not authenticated
+
+```bash
+# Re-authenticate via desktop app
+op signin
+
+# Or use service account token
+export OP_SERVICE_ACCOUNT_TOKEN=<token>
+```
+
+### doppler: project not found
+
+```bash
+# Create project
+doppler projects create insurance
+
+# Create config
+doppler configs create prd --project insurance
+```
+
+### Field not found in 1Password item
+
+```bash
+# List all fields to find correct label
+op item get <item-name> --format json | jq '.fields[] | {label, type}'
+```
+
+---
+
+## Automation Notes
+
+**Not recommended**: Avoid automated 1Password → Doppler sync scripts.
+
+**Rationale**:
+- Credentials change infrequently
+- Manual review ensures no PII leakage in notes
+- Doppler is the single source of truth after migration
+- 1Password remains archival reference
+
+---
+
+## References
+
+**1Password CLI**: [op command reference](https://developer.1password.com/docs/cli/reference/)
+**Doppler CLI**: [`~/.claude/specifications/doppler-integration.yaml`](/Users/terryli/.claude/specifications/doppler-integration.yaml)
+**Parent Config**: [`~/.claude/docs/setup/credential-management.md`](/Users/terryli/.claude/docs/setup/credential-management.md)

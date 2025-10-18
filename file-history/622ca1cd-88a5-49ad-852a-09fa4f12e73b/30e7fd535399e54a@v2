@@ -1,0 +1,241 @@
+# Iteration 2: SMA Test - Interim Report (BLOCKED)
+
+**Version**: 1.0.0
+**Date**: 2025-10-17
+**Status**: 🔴 BLOCKED at compilation phase
+
+---
+
+## Service Level Objectives - Current Status
+
+| Metric | Target | Actual | Status |
+|--------|--------|--------|--------|
+| **Availability** | 100% | 0% | 🔴 FAIL |
+| **Correctness** | 100% | N/A | ⏸️ Cannot test |
+| **Observability** | 100% | 50% | 🟡 Partial |
+| **Maintainability** | ≥ 90% | Unknown | ⏸️ Cannot assess |
+
+**Root Cause**: CLI compilation method from minimal workflow is not working.
+
+---
+
+## What We Attempted
+
+### Phase 0: Create Indicator ✅ COMPLETE
+- Created `SimpleSMA_Test.mq5` in PythonInterop folder
+- Simple algorithm: 5-line SMA calculation
+- **Time**: 5 minutes
+
+### Phase 1: Compilation ❌ BLOCKED
+- Attempted CLI compilation using method from minimal workflow
+- **Result**: Silent failure, no .ex5 created, no log entry
+
+---
+
+## Errors Encountered
+
+### Error 1: CLI Compilation with Spaces in Path
+
+**Attempted Command**:
+```bash
+CX="$HOME/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
+"$CX" --bottle "MetaTrader 5" \
+  --cx-app "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
+  /log /compile:"C:/Program Files/MetaTrader 5/MQL5/Indicators/Custom/PythonInterop/SimpleSMA_Test.mq5"
+```
+
+**Result**:
+- Command executed, returned empty
+- No .ex5 file created
+- No new log entry in metaeditor.log
+- Last log entry from 2025-10-16 (yesterday)
+
+**Observation**: Silent failure matches Reality Check Matrix Gap #5 (Simple Path Copy)
+
+---
+
+### Error 2: CLI Compilation from Simple Path
+
+**Attempted Command**:
+```bash
+# Copied to C:/SimpleSMA_Test.mq5 (no spaces)
+"$CX" --bottle "MetaTrader 5" \
+  --cx-app "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
+  /log /compile:"C:/SimpleSMA_Test.mq5"
+```
+
+**Result**:
+- `Error` returned from bash
+- No .ex5 file created
+- Cannot verify log (not checked after this error)
+
+**Observation**: CLI compilation method fundamentally broken
+
+---
+
+## Root Cause Analysis
+
+### Hypothesis 1: CrossOver wine wrapper issue
+- `--cx-app` flag may not work as documented
+- May require different invocation method
+
+### Hypothesis 2: MetaEditor CLI arguments changed
+- `/log` and `/compile` flags may not be correct
+- MT5 version mismatch with documented method
+
+### Hypothesis 3: Environment variables missing
+- May need additional environment variables beyond CX_BOTTLE
+- WINEPREFIX might be required even with --bottle flag
+
+### Hypothesis 4: Terminal not running
+- MetaEditor CLI may require terminal64.exe to be running
+- Compilation may need active MT5 instance
+
+---
+
+## Impact on Workflow Validation
+
+**Iteration 2 cannot proceed** until compilation works.
+
+**Cascading Failures**:
+- ❌ Cannot test Phase 2 (Fetch Data) - already have data from Laguerre RSI
+- ❌ Cannot test Phase 3 (Export MQL5) - no compiled indicator
+- ❌ Cannot test Phase 4 (Python Implementation) - could do this anyway
+- ❌ Cannot test Phase 5 (Validation) - no MQL5 baseline values
+
+**Workflow Status**: 🔴 **NOT VALIDATED** - Blocked at Phase 1 of 5
+
+---
+
+## Learnings So Far
+
+### Learning 1: CLI Compilation is Unreliable
+
+**Evidence**:
+- Silent failures with paths containing spaces
+- Error with simple paths
+- No log entries generated
+
+**Implication**: Minimal workflow Phase 4 (Compilation) is not trustworthy
+
+**Recommendation**: Document GUI compilation method as primary, CLI as optional
+
+---
+
+### Learning 2: Reality Check Matrix Was Correct
+
+**Gap #5 Validated**: "Simple Path Copy - Did NOT copy - compiled directly"
+
+**Finding**: We claimed we didn't need the simple path copy for Laguerre RSI, but:
+- SMA test with spaces in path: Failed
+- SMA test without spaces: Also failed
+
+**Question**: How did Laguerre RSI compilation actually work?
+
+**Action Required**: Re-investigate Laguerre RSI compilation history
+
+---
+
+### Learning 3: Workflow Has Untested Steps
+
+**Assumption**: We assumed CLI compilation worked because "Laguerre RSI compiled"
+
+**Reality**: May have used GUI compilation for Laguerre RSI, forgot to document it
+
+**Impact**: Documentation does not match reality
+
+---
+
+## Recommendations
+
+### Immediate Actions
+
+1. **Stop Iteration 2** ✋
+   - Cannot proceed until compilation works
+   - Fix compilation first, then resume test
+
+2. **Investigate Laguerre RSI Compilation History**
+   - Check git history for .ex5 files
+   - Review logs from Oct 13-17
+   - Determine ACTUAL method used
+
+3. **Test GUI Compilation Method**
+   - Open MetaEditor GUI
+   - Compile SimpleSMA_Test.mq5 manually (F7)
+   - Verify .ex5 created
+   - Document this as working method
+
+4. **Update Minimal Workflow**
+   - Add GUI compilation as primary method
+   - Mark CLI compilation as "Experimental - May not work"
+   - Add troubleshooting section
+
+### Alternative Approaches
+
+#### Option A: Fix CLI Compilation
+- Research correct CrossOver wine invocation
+- Test with minimal example
+- Update minimal workflow when working
+- **Time**: 1-2 hours
+- **Risk**: May not be fixable
+
+#### Option B: Use GUI Compilation
+- Document GUI method (F7 in MetaEditor)
+- Accept manual step in workflow
+- Move forward with testing
+- **Time**: 30 minutes
+- **Risk**: Less automated, but reliable
+
+#### Option C: Investigate Build Systems
+- Check if MT5 has batch compilation tools
+- Look for official CLI documentation
+- **Time**: 2-3 hours
+- **Risk**: May not exist
+
+---
+
+## Updated SLO Assessment
+
+| Phase | Workflow Says | Actual Status |
+|-------|--------------|---------------|
+| Prerequisites | "5 min" | ✅ Working (verified) |
+| Find Indicator | "2 min" | N/A (created new) |
+| Analyze | "15-60 min" | ✅ Trivial (SMA simple) |
+| Expose Buffers | "10 min" | N/A (new indicator) |
+| **Compile** | **"5 min"** | **🔴 BLOCKED (non-functional)** |
+| Fetch Data | "5 min" | ⏸️ Skipped (have data) |
+| Export MQL5 | "10 min" | ⏸️ Cannot test |
+| Implement Python | "30-120 min" | ⏸️ Could do independently |
+| Validate | "10 min" | ⏸️ Cannot test |
+
+**Availability SLO**: 🔴 0% (Compilation step non-functional)
+
+---
+
+## Next Steps
+
+1. ✅ Create this interim report
+2. ⏳ Choose Option A, B, or C (recommend Option B: GUI method)
+3. ⏳ Update minimal workflow with working method
+4. ⏳ Resume Iteration 2 test
+5. ⏳ Complete Iteration 2 → Iteration 3
+
+---
+
+## Decision Point
+
+**Question**: How should we proceed?
+
+**Option B (Recommended)**: Accept GUI compilation, update workflow, continue testing
+- Pro: Unblocks testing, reliable method
+- Con: Less automation, requires GUI access
+
+**Option A**: Debug CLI compilation first
+- Pro: More automated if it works
+- Con: Time sink, may not be fixable
+
+**User Decision Required**: Which option to pursue?
+
+---
+
+**Status**: Iteration 2 paused, awaiting decision on compilation approach

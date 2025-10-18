@@ -1,0 +1,69 @@
+"""
+Test to verify current exchange session logic.
+"""
+import pandas as pd
+from datetime import datetime, timedelta
+import exchange_calendars as xcals
+
+# Test Case: Monday, January 8, 2024 (a normal trading day)
+# NYSE trading hours: 9:30 AM - 4:00 PM ET (14:30 UTC - 21:00 UTC in January/EST)
+
+test_timestamps = [
+    "2024-01-08 08:00:00",  # 3:00 AM ET - Before NYSE opens (should be 0)
+    "2024-01-08 14:00:00",  # 9:00 AM ET - Still before NYSE opens (should be 0)
+    "2024-01-08 15:00:00",  # 10:00 AM ET - NYSE is open (should be 1)
+    "2024-01-08 19:00:00",  # 2:00 PM ET - NYSE is open (should be 1)
+    "2024-01-08 21:00:00",  # 4:00 PM ET - NYSE just closed (should be 0)
+    "2024-01-08 23:00:00",  # 6:00 PM ET - After NYSE closes (should be 0)
+]
+
+# Test current implementation
+nyse_cal = xcals.get_calendar("XNYS")
+
+print("=" * 80)
+print("CURRENT IMPLEMENTATION TEST")
+print("=" * 80)
+print()
+print("Date: Monday, January 8, 2024 (normal trading day)")
+print("NYSE Hours: 9:30 AM - 4:00 PM ET (14:30 UTC - 21:00 UTC)")
+print()
+print(f"{'UTC Time':<20} {'ET Time':<15} {'is_session()':<15} {'Expected':<15} {'Status'}")
+print("-" * 80)
+
+for ts_str in test_timestamps:
+    ts = pd.Timestamp(ts_str, tz='UTC')
+    et_time = ts.tz_convert('America/New_York')
+
+    # Current implementation: checks if date is a trading day
+    # Note: is_session() expects date objects (not datetime)
+    current_value = int(nyse_cal.is_session(ts.date()))
+
+    # Expected value: should check if it's during trading hours
+    et_hour = et_time.hour
+    et_minute = et_time.minute
+    expected_value = 1 if (
+        nyse_cal.is_session(ts.date()) and  # Is a trading day
+        (et_hour > 9 or (et_hour == 9 and et_minute >= 30)) and  # After 9:30 AM
+        et_hour < 16  # Before 4:00 PM
+    ) else 0
+
+    status = "✓" if current_value == expected_value else "✗ MISMATCH"
+
+    print(f"{ts_str:<20} {et_time.strftime('%I:%M %p ET'):<15} {current_value:<15} {expected_value:<15} {status}")
+
+print()
+print("=" * 80)
+print("ISSUE IDENTIFIED:")
+print("=" * 80)
+print()
+print("Current implementation:")
+print("  - is_session() returns 1 for ALL minutes on a trading day")
+print("  - Does NOT check if time is during actual trading hours")
+print()
+print("Expected behavior:")
+print("  - Should return 1 ONLY during trading hours (9:30 AM - 4:00 PM ET)")
+print("  - Should return 0 before/after trading hours, weekends, and holidays")
+print()
+print("This is the misrepresentation - column is named 'is_*_session' but")
+print("only checks trading DAYS, not trading HOURS.")
+print()

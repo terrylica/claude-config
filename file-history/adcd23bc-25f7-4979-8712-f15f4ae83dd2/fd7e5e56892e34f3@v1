@@ -1,0 +1,313 @@
+# SSH Infrastructure Module
+
+Complete SSH infrastructure for TCA system with ZeroTier failover capabilities, optimized for IDE integration.
+
+## Module Structure
+
+```
+ssh-infrastructure/
+├── README.md                    # This index file
+├── docs/                        # Documentation
+│   ├── SSH_INFRASTRUCTURE_OVERVIEW.md
+│   ├── IDE_INTEGRATION_GUIDE.md # NEW: IDE-specific setup guide
+│   ├── FILE_LOCATIONS.md
+│   └── TROUBLESHOOTING_GUIDE.md
+├── legacy/                      # Deprecated components
+│   ├── ssh-tca-failover.deprecated
+│   └── MIGRATION_HISTORY.md
+├── tools/                       # SSH management tools
+│   └── switch-github-key.sh     # GitHub SSH key switcher
+└── zerotier/                    # ZeroTier network management
+    ├── README.md                # ZeroTier usage guide
+    ├── zerotier-manager.sh      # Network management script
+    └── setup-cursor-remote.sh   # IDE integration
+```
+
+## Quick Start
+
+### Current SSH Commands (Working)
+```bash
+ssh tca                    # Auto-failover connection (local → ZeroTier via SSH config)
+ssh tca-zt                 # Direct ZeroTier connection (IDE-optimized) 
+ssh-tca-nt                 # Auto-failover + cd ~/eon/nt
+```
+
+### System Architecture (Current)
+- **Primary**: SSH config Match directive failover (192.168.0.87 → 172.25.253.142)
+- **Critical**: Match directives MUST come BEFORE Host directives in SSH config
+- **Dual Strategy**: Automatic failover (`tca`) + Direct ZeroTier (`tca-zt`)
+- **IDE Optimized**: Connection multiplexing and 1-second timeout for Match directive
+
+## Core Components
+
+### Documentation (`docs/`)
+| Document | Purpose |
+|----------|---------|
+| [SSH_INFRASTRUCTURE_OVERVIEW.md](docs/SSH_INFRASTRUCTURE_OVERVIEW.md) | Complete system overview, architecture, current working configuration |
+| [IDE_INTEGRATION_GUIDE.md](docs/IDE_INTEGRATION_GUIDE.md) | Cursor, VS Code, JetBrains IDE setup and troubleshooting |
+| [FILE_LOCATIONS.md](docs/FILE_LOCATIONS.md) | Exact paths for all SSH components |
+| [TROUBLESHOOTING_GUIDE.md](docs/TROUBLESHOOTING_GUIDE.md) | Current diagnostics, solutions, Match directive debugging |
+
+### Tools (`tools/`)
+| Tool | Purpose | Usage |
+|------|---------|-------|
+| `switch-github-key.sh` | GitHub SSH key switcher | `./tools/switch-github-key.sh` |
+
+### ZeroTier Management (`zerotier/`)
+| Component | Purpose | Usage |
+|-----------|---------|-------|
+| `zerotier-manager.sh` | Network management | `./zerotier/zerotier-manager.sh [command]` |
+| `setup-cursor-remote.sh` | IDE integration | `./zerotier/setup-cursor-remote.sh` |
+| `README.md` | ZeroTier documentation | Reference guide |
+
+## Critical Files Outside Module
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| SSH Config | `~/.ssh/config` | **CRITICAL**: Match directives before Host directives |
+| ZSH Aliases | `~/.zshrc` | Shell command shortcuts (updated for SSH config) |
+| SSH Keys | `~/.ssh/id_ed25519_*` | Authentication credentials for different hosts |
+
+## Current Working Configuration
+
+### SSH Config Architecture (CRITICAL)
+The SSH config uses Match directives BEFORE Host directives for failover:
+```ssh
+# CRITICAL ORDER: Match BEFORE Host
+Match host tca exec "! timeout 1 nc -z 192.168.0.87 22 2>/dev/null"
+    HostName 172.25.253.142
+    IdentityFile ~/.ssh/id_ed25519_zerotier_np
+    # ... ZeroTier settings
+
+Host tca
+    HostName 192.168.0.87  
+    IdentityFile ~/.ssh/id_ed25519_eonlabs
+    # ... Local settings
+```
+
+### Connection Strategies
+| Command | Target | Behavior | Use Case |
+|---------|--------|----------|----------|
+| `ssh tca` | Local first, ZeroTier fallback | Auto-failover (1s detection) | General development |
+| `ssh tca-zt` | ZeroTier direct | No failover overhead | IDE connections, remote work |
+| `ssh-tca-nt` | Same as `ssh tca` | Auto-failover + cd ~/eon/nt | Development workflow |
+
+### Network Details
+
+#### Local Connection (Primary)
+- **Host**: tca
+- **IP**: 192.168.0.87
+- **User**: tca  
+- **Key**: ~/.ssh/id_ed25519_eonlabs
+- **Detection**: `timeout 1 nc -z 192.168.0.87 22`
+
+#### ZeroTier Connection (Failover)
+- **Host**: tca (automatic) / tca-zt (direct)
+- **IP**: 172.25.253.142
+- **User**: tca
+- **Key**: ~/.ssh/id_ed25519_zerotier_np
+- **Network**: db64858fedbf2ce1
+- **Device ID**: 8F53F201B7
+
+## Usage Examples
+
+### Standard Operations (Current)
+```bash
+# Auto-failover connection (recommended)
+ssh tca
+
+# Direct ZeroTier (IDE-optimized)
+ssh tca-zt
+
+# Development workflow  
+ssh-tca-nt                 # Connect + cd ~/eon/nt
+
+# Test connection methods
+ssh tca hostname           # Shows which connection was used
+ssh -v tca                 # Verbose output shows failover process
+```
+
+### SSH Config Testing
+```bash
+# Test SSH config parsing
+ssh -F ~/.ssh/config -G tca
+# Shows resolved config (hostname shows which IP will be used)
+
+# Test Match directive manually
+! timeout 1 nc -z 192.168.0.87 22 2>/dev/null && echo "Will use ZeroTier" || echo "Will use Local"
+
+# Debug SSH connection
+ssh -vvv tca hostname
+```
+
+### ZeroTier Management
+```bash
+cd ~/scripts/ssh-infrastructure/zerotier/
+./zerotier-manager.sh info         # Status check
+./zerotier-manager.sh restart      # Service restart
+./zerotier-manager.sh list         # Show network devices
+```
+
+### GitHub Key Management
+```bash
+cd ~/scripts/ssh-infrastructure/
+./tools/switch-github-key.sh       # Interactive key switcher
+
+# Test GitHub authentication
+ssh -T git@github.com
+```
+
+### Advanced Usage
+```bash
+# Force specific connections (bypass SSH config)
+ssh tca@192.168.0.87       # Force local IP
+ssh tca@172.25.253.142     # Force ZeroTier IP
+
+# Connection multiplexing management
+ssh -O check tca           # Check master connection status
+ssh -O exit tca            # Close master connection
+ls ~/.ssh/control-*        # List active connections
+```
+
+## IDE Integration
+
+### Quick IDE Setup
+| IDE | Recommended Host | Configuration |
+|-----|------------------|---------------|
+| **Cursor** | `tca` (fallback: `tca-zt`) | Use SSH config automatically |
+| **VS Code Remote** | `tca` (fallback: `tca-zt`) | Remote-SSH extension |
+| **JetBrains IDEs** | `tca-zt` (preferred) | SSH interpreter settings |
+
+### IDE-Specific Solutions
+```bash
+# Cursor hanging fix
+# Change Host from 'tca' to 'tca-zt' in connection settings
+
+# VS Code slow sync fix
+ssh -O check tca    # Verify connection multiplexing
+
+# Clean IDE connection issues
+ssh -O exit tca && ssh -O exit tca-zt
+rm ~/.ssh/control-*
+```
+
+**For complete IDE setup**: See [IDE_INTEGRATION_GUIDE.md](docs/IDE_INTEGRATION_GUIDE.md)
+
+## Performance Characteristics
+
+### Connection Timing (Optimized)
+| Scenario | Detection | Connection | Total | Best for |
+|----------|-----------|------------|-------|----------|
+| Local IP available | ~0.02s | 2-3s | 2-3s | On-site development |
+| Local IP unreachable | ~1.0s | 2-3s | 3-4s | Mixed environments |
+| Direct ZeroTier (`tca-zt`) | 0s | 2-3s | 2-3s | Remote work, IDEs |
+
+### Optimization Features
+- **Connection Multiplexing**: Reuses connections for faster IDE reconnections
+- **Timeout Optimization**: 1-second Match directive test (was 2+ seconds)
+- **Error Suppression**: `2>/dev/null` prevents IDE confusion
+- **Dual Strategy**: Choose automatic vs direct based on use case
+
+## Troubleshooting Quick Reference
+
+### Test Current Configuration
+```bash
+# Basic connection test
+ssh tca hostname
+
+# SSH config verification
+ssh -F ~/.ssh/config -G tca | grep hostname
+# Should show 172.25.253.142 when local IP unreachable
+
+# Match directive test
+! timeout 1 nc -z 192.168.0.87 22 2>/dev/null
+echo $?  # 0 = will use ZeroTier, 1 = will use local
+```
+
+### Common Issues (Current Architecture)
+
+#### SSH Config Failover Not Working
+**Problem**: Always connects to local IP, never fails over
+**Root Cause**: Match directive after Host directive in SSH config
+**Solution**: Verify Match comes BEFORE Host in `~/.ssh/config`
+
+#### IDE Connection Hanging  
+**Problem**: Cursor/VS Code hangs during connection
+**Root Cause**: Match directive execution time
+**Quick Fix**: Use `tca-zt` instead of `tca` for IDE host
+
+#### Connection Multiplexing Issues
+**Problem**: Multiple connections, no sharing
+**Solution**: 
+```bash
+ssh -O exit tca  # Reset master connection
+ssh tca hostname # Establish new master
+```
+
+**For complete troubleshooting**: See [TROUBLESHOOTING_GUIDE.md](docs/TROUBLESHOOTING_GUIDE.md)
+
+## Integration Points
+
+### Current System Integration
+- **Shell Integration**: Updated aliases use SSH config failover (no scripts)
+- **GitHub SSH**: Context-based key routing maintained via Match directives  
+- **IDE Integration**: Optimized for Cursor, VS Code, JetBrains IDEs
+- **Development Workflow**: Directory navigation shortcuts preserved
+
+### File System Integration
+- **SSH Configuration**: Standard `~/.ssh/config` location with Match directive optimization
+- **Key Management**: Standard SSH key locations with context-based routing
+- **Consolidated Module**: All SSH tools and documentation in single location
+- **Global Access**: No global scripts - uses native SSH config features
+
+## Architecture Discoveries (Critical)
+
+### SSH Configuration Architecture
+- **Critical Rule**: Match directives MUST appear BEFORE Host directives they modify
+- **Processing Order**: SSH reads config top-to-bottom, stops at first Host match
+- **Match Override**: Match directives can override Host settings if properly ordered
+- **Discovery Impact**: Enabled working ZeroTier failover, resolved IDE issues
+
+### Performance Optimization Discoveries
+- **Network Test Optimization**: `timeout 1 nc -z` vs `nc -zw2` (faster, IDE-compatible)
+- **Connection Multiplexing**: Critical for IDE performance and reconnection speed
+- **Error Suppression**: `2>/dev/null` prevents IDE SSH client confusion
+- **Dual Strategy**: Automatic vs direct connections serve different use cases
+
+## Security Features
+
+- **Ed25519 Keys**: Modern elliptic curve cryptography for all connections
+- **Key Isolation**: Different keys for different network paths and contexts
+- **Connection Timeouts**: Optimized timeouts prevent hanging sessions
+- **Private Networks**: ZeroTier provides encrypted overlay network  
+- **Host Key Verification**: SSH host key checking enabled for security
+- **Context Routing**: GitHub keys automatically selected by directory context
+
+## For Claude Code Assistant
+
+This consolidated SSH infrastructure module provides:
+
+1. **Working Architecture**: SSH config Match directive failover (not script-based)
+2. **Critical Discovery**: Match directive ordering fix that enabled all functionality
+3. **IDE Optimization**: Specific configurations and troubleshooting for development tools
+4. **Performance Focus**: Connection multiplexing and timeout optimization
+5. **Complete Documentation**: Architecture, troubleshooting, IDE integration guides
+6. **Dual Strategy**: Both automatic failover and direct connections available
+
+**Start with**: [SSH_INFRASTRUCTURE_OVERVIEW.md](docs/SSH_INFRASTRUCTURE_OVERVIEW.md) for architecture understanding
+**IDE Setup**: [IDE_INTEGRATION_GUIDE.md](docs/IDE_INTEGRATION_GUIDE.md) for Cursor/VS Code configuration  
+**Problems**: [TROUBLESHOOTING_GUIDE.md](docs/TROUBLESHOOTING_GUIDE.md) for current issue resolution
+
+**Key Commands for Testing:**
+```bash
+ssh tca hostname                                  # Test auto-failover
+ssh -F ~/.ssh/config -G tca | grep hostname      # Show config resolution
+! timeout 1 nc -z 192.168.0.87 22 2>/dev/null    # Test Match condition
+```
+
+---
+
+*SSH Infrastructure Module*  
+*Updated: 2025-08-07 (Post Match Directive Architecture Fix)*  
+*Location: `/Users/terryli/scripts/ssh-infrastructure/`*  
+*Architecture: SSH Config Match Directive with Connection Multiplexing*

@@ -1,0 +1,227 @@
+# Playwright API Audit
+
+**Version**: 1.1.0
+**Initial**: 2025-10-16T06:40:00Z
+**Updated**: 2025-10-16T07:15:00Z
+**Method**: API introspection + functional testing
+**Playwright**: 1.55.0
+**Python**: 3.13.6
+**Platform**: darwin_arm64
+
+---
+
+## Changelog
+
+### v1.1.0 (2025-10-16T07:15:00Z)
+- Added functional testing for ARIA APIs
+- Verified `Locator.aria_snapshot()` availability
+- Verified `Page.accessibility.snapshot()` availability
+- Updated SLO measurements for ARIA snapshots
+
+### v1.0.0 (2025-10-16T06:40:00Z)
+- Initial API surface probe via introspection
+- Verified 9/11 features via `hasattr()`
+- Missing: ARIA snapshot functional tests
+
+---
+
+## API Availability Matrix
+
+| Feature | API | Status | Verification | Output |
+|---------|-----|--------|--------------|--------|
+| Screenshot masking | `Page.screenshot(mask=[...])` | Available | introspection | PNG |
+| Tracing | `BrowserContext.tracing.start/stop()` | Available | introspection | trace.zip |
+| HAR recording | `Browser.new_context(record_har=...)` | Available | introspection | session.har |
+| HAR replay | `Page.route_from_har(not_found=...)` | Available | introspection | N/A |
+| ARIA selectors | `Page.get_by_label/role/placeholder/test_id/text()` | Available | introspection | N/A |
+| ARIA snapshots | `Locator.aria_snapshot()` | Available | functional | YAML |
+| Accessibility tree | `Page.accessibility.snapshot()` | Available | functional | JSON |
+| Frame locator | `Page.frame_locator()` | Available | introspection | N/A |
+| Event system | `Page.on/once(event_name)` | Available | introspection | N/A |
+| File upload | `Page.set_input_files()` | Available | introspection | N/A |
+| Storage state | `Browser.new_context(storage_state=...)` | Available | introspection | N/A |
+
+**Total**: 11/11 (100%)
+
+---
+
+## Verification Methodology
+
+### Phase 1: API Introspection
+
+```bash
+uvx --from playwright --with playwright python -c "
+from playwright.sync_api import Page, BrowserContext, Browser, Locator
+import inspect
+
+# Check method signatures
+print('Page.screenshot mask param:', 'mask' in str(inspect.signature(Page.screenshot)))
+print('BrowserContext.tracing:', hasattr(BrowserContext, 'tracing'))
+print('Locator.aria_snapshot:', hasattr(Locator, 'aria_snapshot'))
+"
+```
+
+### Phase 2: Functional Testing
+
+```bash
+# Install browsers
+uvx --from playwright playwright install chromium
+
+# Test ARIA APIs
+uvx --from playwright --with playwright python -c "
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page()
+    page.set_content('''
+        <form>
+            <label for=\"name\">Name:</label>
+            <input id=\"name\" type=\"text\" />
+            <button aria-label=\"Submit\">Submit</button>
+        </form>
+    ''')
+
+    # Locator.aria_snapshot() → YAML
+    form = page.locator('form')
+    print(form.aria_snapshot())
+
+    # Page.accessibility.snapshot() → JSON
+    print(page.accessibility.snapshot())
+
+    browser.close()
+"
+```
+
+---
+
+## ARIA API Details
+
+### Locator.aria_snapshot()
+
+**Output format**: YAML string
+**Example**:
+```yaml
+- text: "Name:"
+- textbox "Name:"
+- button "Submit"
+```
+
+**Usage**:
+```python
+form = page.locator('form')
+yaml_output = form.aria_snapshot()
+Path('aria_002.yaml').write_text(yaml_output)
+```
+
+### Page.accessibility.snapshot()
+
+**Output format**: JSON dict
+**Example**:
+```json
+{
+  "role": "WebArea",
+  "name": "",
+  "children": [
+    {"role": "text", "name": "Name:"},
+    {"role": "textbox", "name": "Name:"},
+    {"role": "button", "name": "Submit"}
+  ]
+}
+```
+
+**Usage**:
+```python
+acc_tree = page.accessibility.snapshot()
+Path('accessibility.json').write_text(json.dumps(acc_tree, indent=2))
+```
+
+---
+
+## SLO Compliance
+
+**Specification**: [`/specifications/slo.yaml`](/Users/terryli/own/insurance/specifications/slo.yaml)
+
+| Category | Status | Details |
+|----------|--------|---------|
+| Availability | Pass | 11/11 APIs present (100%) |
+| Correctness | Pending | Implementation required |
+| Observability | Pending | Implementation required |
+| Maintainability | Pass | No deprecated APIs, v1.55.0 pinned |
+
+---
+
+## Artifact Requirements
+
+Per SLO specification, required artifacts:
+
+```
+artifacts/YYYY-MM-DD_HH-MM-SS/
+├── 001_initial.png
+├── 002_filled.png
+├── 003_submitted.png
+├── 002_filled.dom.html
+├── 003_submitted.dom.html
+├── aria_002.yaml
+├── aria_003.yaml
+├── session.har
+├── trace.zip
+├── telemetry.ndjson
+└── index.json
+```
+
+---
+
+## Implementation Guidance
+
+### ARIA Snapshot Integration
+
+**Checkpoint 1** (after field fill):
+```python
+form_locator = page.locator('form')
+aria_yaml = form_locator.aria_snapshot()
+Path('artifacts/aria_002.yaml').write_text(aria_yaml)
+```
+
+**Checkpoint 2** (after submit):
+```python
+body_locator = page.locator('body')
+aria_yaml = body_locator.aria_snapshot()
+Path('artifacts/aria_003.yaml').write_text(aria_yaml)
+```
+
+### Manifest Entry
+
+```json
+{
+  "aria_snapshots": {
+    "after_fill": "aria_002.yaml",
+    "after_submit": "aria_003.yaml"
+  }
+}
+```
+
+---
+
+## Version Constraints
+
+**requirements.txt**:
+```
+playwright>=1.55.0,<2.0.0
+```
+
+**Rationale**: Major version lock prevents API breakage
+
+---
+
+## References
+
+**Specifications**:
+- [`/specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml)
+- [`/specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml)
+- [`/specifications/slo.yaml`](/Users/terryli/own/insurance/specifications/slo.yaml)
+
+**Playwright Docs**:
+- [ARIA Snapshots](https://playwright.dev/docs/aria-snapshots)
+- [Accessibility Testing](https://playwright.dev/docs/accessibility-testing)
+- [Locator API](https://playwright.dev/docs/api/class-locator#locator-aria-snapshot)

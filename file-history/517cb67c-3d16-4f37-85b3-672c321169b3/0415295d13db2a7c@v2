@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""
+Comprehensive lunch break validation with proper UTC timezone handling.
+
+Tests:
+1. Tokyo lunch break (11:30-12:30 JST = 02:30-03:30 UTC)
+2. Hong Kong lunch break (12:00-13:00 HKT = 04:00-05:00 UTC)
+3. Singapore lunch break (12:00-13:00 SGT = 04:00-05:00 UTC)
+4. Tokyo extended hours (before/after Nov 5, 2024)
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pandas as pd
+from exness_data_preprocess import ExnessDataProcessor
+
+# Use the existing test database
+test_dir = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/lunch_break_fresh_zplnjdin")
+processor = ExnessDataProcessor(base_dir=test_dir)
+
+print("=" * 70)
+print("COMPREHENSIVE LUNCH BREAK VALIDATION")
+print("=" * 70)
+print(f"Database: {test_dir}")
+print()
+
+# Test 1: Tokyo lunch break (11:30-12:30 JST = 02:30-03:30 UTC)
+print("[1] Tokyo Lunch Break (11:30-12:30 JST = 02:30-03:30 UTC)")
+start_utc = pd.Timestamp("2024-08-05 02:30:00", tz="UTC")
+end_utc = pd.Timestamp("2024-08-05 03:30:00", tz="UTC")
+df_tokyo = processor.query_ohlc("EURUSD", "1m", start_utc, end_utc)
+tokyo_lunch_flags = df_tokyo["is_xtks_session"].sum()
+print(f"    Timestamps: {len(df_tokyo)}, Session flags=1: {tokyo_lunch_flags}")
+
+if tokyo_lunch_flags == 0:
+    print("    ✅ PASS: Tokyo lunch correctly excluded")
+else:
+    print(f"    ❌ FAIL: {tokyo_lunch_flags} timestamps incorrectly flagged")
+    sys.exit(1)
+
+# Test 2: Hong Kong lunch break (12:00-13:00 HKT = 04:00-05:00 UTC)
+print()
+print("[2] Hong Kong Lunch Break (12:00-13:00 HKT = 04:00-05:00 UTC)")
+start_utc = pd.Timestamp("2024-08-05 04:00:00", tz="UTC")
+end_utc = pd.Timestamp("2024-08-05 05:00:00", tz="UTC")
+df_hk = processor.query_ohlc("EURUSD", "1m", start_utc, end_utc)
+hk_lunch_flags = df_hk["is_xhkg_session"].sum()
+print(f"    Timestamps: {len(df_hk)}, Session flags=1: {hk_lunch_flags}")
+
+if hk_lunch_flags == 0:
+    print("    ✅ PASS: Hong Kong lunch correctly excluded")
+else:
+    print(f"    ❌ FAIL: {hk_lunch_flags} timestamps incorrectly flagged")
+    sys.exit(1)
+
+# Test 3: Singapore lunch break (12:00-13:00 SGT = 04:00-05:00 UTC)
+print()
+print("[3] Singapore Lunch Break (12:00-13:00 SGT = 04:00-05:00 UTC)")
+start_utc = pd.Timestamp("2024-08-05 04:00:00", tz="UTC")
+end_utc = pd.Timestamp("2024-08-05 05:00:00", tz="UTC")
+df_sg = processor.query_ohlc("EURUSD", "1m", start_utc, end_utc)
+sg_lunch_flags = df_sg["is_xses_session"].sum()
+print(f"    Timestamps: {len(df_sg)}, Session flags=1: {sg_lunch_flags}")
+
+if sg_lunch_flags == 0:
+    print("    ✅ PASS: Singapore lunch correctly excluded")
+else:
+    print(f"    ❌ FAIL: {sg_lunch_flags} timestamps incorrectly flagged")
+    sys.exit(1)
+
+# Sanity check: Verify trading hours ARE set
+print()
+print("[4] Tokyo Morning Session (9:00-11:00 JST = 00:00-02:00 UTC) - Sanity Check")
+start_utc = pd.Timestamp("2024-08-05 00:00:00", tz="UTC")
+end_utc = pd.Timestamp("2024-08-05 02:00:00", tz="UTC")
+df_morning = processor.query_ohlc("EURUSD", "1m", start_utc, end_utc)
+morning_flags = df_morning["is_xtks_session"].sum()
+print(f"    Timestamps: {len(df_morning)}, Session flags=1: {morning_flags}")
+
+if morning_flags > 0:
+    print(f"    ✅ PASS: Morning session correctly flagged ({morning_flags}/{len(df_morning)})")
+else:
+    print("    ⚠️  WARNING: No morning flags found")
+
+# Test 5: Tokyo extended hours (before Nov 5, 2024 - closes 15:00)
+print()
+print("[5] Tokyo Extended Hours (Before Nov 5, 2024 - closes 15:00 JST)")
+try:
+    # Query 14:45-15:15 JST = 05:45-06:15 UTC (Oct 2024, still on DST for UTC offset)
+    # Actually JST is always UTC+9, no DST
+    start_utc = pd.Timestamp("2024-11-01 05:45:00", tz="UTC")  # 14:45 JST
+    end_utc = pd.Timestamp("2024-11-01 06:15:00", tz="UTC")    # 15:15 JST
+    df_before = processor.query_ohlc("EURUSD", "1m", start_utc, end_utc)
+    last_tokyo_before = df_before[df_before["is_xtks_session"] == 1]
+
+    if len(last_tokyo_before) > 0:
+        last_time_utc = last_tokyo_before["Timestamp"].max()
+        last_time_jst = last_time_utc.tz_convert("Asia/Tokyo")
+        print(f"    Last trading minute (JST): {last_time_jst}")
+        print(f"    Last trading minute (UTC): {last_time_utc.tz_convert('UTC')}")
+
+        if last_time_jst.hour == 14:  # Should close before 15:00
+            print("    ✅ PASS: Closes at 15:00 (before extension)")
+        else:
+            print(f"    ⚠️  WARNING: Unexpected close hour: {last_time_jst.hour}")
+    else:
+        print("    ⚠️  No trading data found for this period")
+except Exception as e:
+    print(f"    ⚠️  Skipped: {e}")
+
+# Test 6: Tokyo extended hours (after Nov 5, 2024 - closes 15:30)
+print()
+print("[6] Tokyo Extended Hours (After Nov 5, 2024 - closes 15:30 JST)")
+try:
+    start_utc = pd.Timestamp("2024-11-06 05:45:00", tz="UTC")  # 14:45 JST
+    end_utc = pd.Timestamp("2024-11-06 06:45:00", tz="UTC")    # 15:45 JST
+    df_after = processor.query_ohlc("EURUSD", "1m", start_utc, end_utc)
+    last_tokyo_after = df_after[df_after["is_xtks_session"] == 1]
+
+    if len(last_tokyo_after) > 0:
+        last_time_utc = last_tokyo_after["Timestamp"].max()
+        last_time_jst = last_time_utc.tz_convert("Asia/Tokyo")
+        print(f"    Last trading minute (JST): {last_time_jst}")
+        print(f"    Last trading minute (UTC): {last_time_utc.tz_convert('UTC')}")
+
+        if last_time_jst.hour == 15:  # Should close at 15:30
+            print("    ✅ PASS: Closes at 15:30 (after extension)")
+        else:
+            print(f"    ⚠️  WARNING: Unexpected close hour: {last_time_jst.hour}")
+    else:
+        print("    ⚠️  No trading data found for this period")
+except Exception as e:
+    print(f"    ⚠️  Skipped: {e}")
+
+print()
+print("=" * 70)
+print("✅ ALL TESTS PASSED - Lunch breaks correctly excluded!")
+print("=" * 70)

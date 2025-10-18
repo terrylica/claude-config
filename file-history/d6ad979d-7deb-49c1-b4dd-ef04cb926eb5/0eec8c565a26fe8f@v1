@@ -1,0 +1,95 @@
+openapi: 3.1.0
+info:
+  title: Manulife Par Form Specification
+  version: 1.0.0
+  description: Field mappings and success criteria for Manulife Participating insurance application
+
+components:
+  schemas:
+    ManulifeParConfig:
+      allOf:
+        - $ref: './playwright-automation.yaml#/components/schemas/AutomationConfig'
+        - type: object
+          properties:
+            start_url:
+              const: https://www.insurance.manulife.ca/dda
+            form_description:
+              const: Participating insurance application form in advisor portal
+            success_criteria:
+              type: object
+              properties:
+                success_indicators:
+                  type: array
+                  items:
+                    enum:
+                      - submitted
+                      - success
+                      - confirmation
+                      - application created
+                success_url_pattern:
+                  const: /confirmation|success|applications|summary/i
+                policy_id_present:
+                  type: boolean
+                  default: true
+
+    ManulifeParPayload:
+      allOf:
+        - $ref: './playwright-automation.yaml#/components/schemas/FormPayload'
+        - type: object
+          required:
+            - first_name
+            - last_name
+            - email
+            - advisor_id
+            - policy
+          properties:
+            first_name:
+              type: string
+              minLength: 1
+            last_name:
+              type: string
+              minLength: 1
+            email:
+              type: string
+              format: email
+            advisor_id:
+              type: string
+              pattern: ^[A-Z]\d{6}$
+              example: A123456
+            policy:
+              type: string
+              pattern: ^PAR-\d{8}$
+              example: PAR-00112233
+            phone:
+              type: string
+              pattern: ^\d{3}-\d{3}-\d{4}$
+            address:
+              type: string
+            city:
+              type: string
+            province:
+              type: string
+              enum: [ON, QC, BC, AB, SK, MB, NS, NB, PE, NL, YT, NT, NU]
+            postal:
+              type: string
+              pattern: ^[A-Z]\d[A-Z] \d[A-Z]\d$
+              example: M5V 2T6
+
+x-doppler-secrets:
+  project: insurance
+  config: prd
+  required:
+    - MANULIFE_PAR_USERNAME
+    - MANULIFE_PAR_PASSWORD
+  optional:
+    - MANULIFE_PAR_ADVISOR_ID
+
+x-authentication:
+  method: passkey
+  storage_state: storage-state.json
+  notes: |
+    Authentication pre-established via Playwright storage state.
+    Passkey flow captured during initial setup.
+
+x-script-name: fill_par_form.py
+x-artifacts-base: artifacts/

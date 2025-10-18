@@ -1,0 +1,251 @@
+# CLAUDE.md
+
+Documentation hub for Claude Code (claude.ai/code) when working with this repository.
+
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure
+**Updated**: 2025-10-16
+
+---
+
+## Repository Overview
+
+`~/scripts` is a collection of macOS automation tools, system utilities, and infrastructure configurations. Each module is self-contained with dedicated documentation.
+
+**Core Principles**:
+- Single Source of Truth per topic
+- Version-tracked evolution
+- Progressive disclosure (essentials → detailed docs)
+- Technical, factual documentation
+
+---
+
+## Module Index
+
+### System Automation
+
+**[homebrew-autoupdate/](homebrew-autoupdate/README.md)**
+- Daily Homebrew + uv tool auto-update via LaunchAgent
+- Pipeline: Homebrew upgrades pipx → pipx upgrades Python tools
+- Runs at 5 AM daily
+- Version: 1.1.0 (added uv tool support 2025-10-16)
+
+**[macos_maintenance/](macos_maintenance/CLAUDE.md)**
+- Collection of macOS system utilities
+- System performance, photos backup, video tools, audio device monitor
+- Modular architecture with dual import pattern
+- See module-specific CLAUDE.md for details
+
+### Infrastructure
+
+**[ssh-infrastructure/](ssh-infrastructure/README.md)**
+- Multi-account GitHub authentication (v1.0.0: 2025-10-16)
+- SSH + Doppler shared keys with directory-based account selection
+- TCA system with ZeroTier failover
+- IDE integration (Cursor, VS Code, JetBrains)
+
+### Development Tools
+
+**[cursor-uv-test/](cursor-uv-test/README.md)**
+- uv package manager test environment
+- Python project template
+
+**[tools/](tools/README.md)**
+- Cross-machine utility scripts
+- git-cliff, noti process monitoring, etc.
+
+---
+
+## Quick Reference
+
+### Multi-Account GitHub Authentication (New: 2025-10-16)
+
+**Architecture**: Option 1b (SSH + Doppler Shared Keys)
+
+```bash
+# Automatic account selection by directory
+cd ~/scripts        # → Uses tainora account
+cd ~/ml-experiments # → Uses terrylica account
+cd ~/459ecs         # → Uses 459ecs account
+
+# New machine setup
+doppler login
+sync-ssh-keys  # < 2 minutes
+
+# Details: ssh-infrastructure/docs/MULTI_ACCOUNT_GITHUB_AUTH.md
+```
+
+### System Maintenance
+
+```bash
+# Homebrew auto-update (runs daily at 5 AM)
+launchctl list | grep homebrew-autoupdate
+
+# Manual Homebrew + uv tool update
+cd ~/scripts/homebrew-autoupdate && ./brew_autoupdate.sh
+```
+
+### SSH Infrastructure
+
+```bash
+# TCA auto-failover connection (local → ZeroTier)
+ssh tca
+
+# Direct ZeroTier (IDE-optimized)
+ssh tca-zt
+
+# Details: ssh-infrastructure/README.md
+```
+
+---
+
+## Documentation Architecture
+
+### Hub-and-Spoke Pattern
+
+**This file (CLAUDE.md)**: Central hub with links to all modules
+
+**Module README files**: Entry points with Quick Start + architecture overview
+
+**Module docs/ directories**: Detailed guides, troubleshooting, API specs
+
+**Example path**: `CLAUDE.md` → `ssh-infrastructure/README.md` → `ssh-infrastructure/docs/MULTI_ACCOUNT_GITHUB_AUTH.md`
+
+### Version Tracking
+
+Modules use SemVer 2.0.0:
+- MAJOR: Breaking changes
+- MINOR: Additive features
+- PATCH: Fixes
+
+Version history tracked in module documentation, not promotional changelog.
+
+---
+
+## Development Standards
+
+### Python Execution
+
+**ALWAYS use**: `uv run --active python -m module_name`
+
+Never use: `python script.py`, pip, conda, setuptools, poetry
+
+### Build Backend
+
+- **hatchling** (pure Python)
+- **maturin** (Rust integration)
+
+### Security
+
+- Validate all user inputs before file operations
+- Never use unvalidated `rm -rf` with `-exec` or `-delete`
+- Never use unchecked `sudo` operations
+- See `macos_maintenance/CLAUDE.md` for detailed security guidelines
+
+---
+
+## Credential Management
+
+### Doppler Integration (v1.0.0: 2025-10-16)
+
+**Projects**:
+- `claude-config` (dev/dev_personal/stg/prd): Pushover, PyPI, SSH keys, Atuin
+- `aws-credentials` (dev): AWS IAM user credentials
+
+**Usage**: `doppler run --project <project> --config <config> -- <command>`
+
+**SSH Keys**: Synced via `~/.local/bin/sync-ssh-keys` from `claude-config/dev`
+
+**Details**: ssh-infrastructure/docs/DOPPLER_SSH_INTEGRATION.md
+
+---
+
+## Key Files
+
+### Configuration
+
+- `~/.ssh/config` - SSH configuration with Match directives for multi-account + failover
+- `~/.gitconfig` - Git config with conditional includes per directory
+- `~/.zshrc` - Shell aliases and functions
+
+### Scripts
+
+- `~/.local/bin/sync-ssh-keys` - Doppler SSH key sync (20 LOC, v1.0.0)
+- `~/bin/cleanup` - Empty file/directory cleanup (symlinked from macos_maintenance)
+
+### LaunchAgents
+
+- `~/Library/LaunchAgents/com.github.domt4.homebrew-autoupdate.plist` - Daily updates
+- `~/Library/LaunchAgents/com.terryli.audio_device_monitor.plist` - Audio device switching
+
+---
+
+## Module-Specific Documentation
+
+### For Detailed Guides
+
+- **macOS Maintenance**: `macos_maintenance/CLAUDE.md`
+- **SSH Infrastructure**: `ssh-infrastructure/README.md`
+- **Homebrew Auto-Update**: `homebrew-autoupdate/README.md`
+- **Development Tools**: `tools/README.md`
+
+### For Troubleshooting
+
+- **SSH Issues**: `ssh-infrastructure/docs/TROUBLESHOOTING_GUIDE.md`
+- **IDE Integration**: `ssh-infrastructure/docs/IDE_INTEGRATION_GUIDE.md`
+
+---
+
+## Recent Updates
+
+### 2025-10-16: Multi-Account GitHub Authentication
+
+**Added**:
+- SSH + Doppler Shared Keys (Option 1b)
+- Directory-based automatic account selection
+- `sync-ssh-keys` utility for cross-machine sync
+- AOD/IOI compliant documentation in Doppler
+
+**Architecture Decision**: Option 1b vs 1c analysis
+- 1b: 20 LOC, 15 min setup, zero maintenance
+- 1c: 150+ LOC, 3-4 hrs setup, ongoing overhead
+- Decision: 1b for KISS/DRY compliance
+
+**Details**: ssh-infrastructure/docs/MULTI_ACCOUNT_GITHUB_AUTH.md
+
+### 2025-10-16: Homebrew Auto-Update v1.1.0
+
+**Added**:
+- uv tool auto-upgrade support
+- Pipeline: Homebrew → uv → Python tools
+- Non-fatal uv errors (allows Homebrew to complete)
+
+**Details**: homebrew-autoupdate/README.md (lines 18-27)
+
+---
+
+## For Claude Code Assistant
+
+**Start with this file** for project overview and navigation
+
+**Module selection**:
+- SSH/GitHub authentication → `ssh-infrastructure/`
+- macOS utilities → `macos_maintenance/`
+- System automation → `homebrew-autoupdate/`
+
+**Documentation depth**:
+1. CLAUDE.md (this file) - Hub with essentials
+2. Module README - Entry point with Quick Start
+3. Module docs/ - Detailed guides
+
+**Key architectural patterns**:
+- Modular self-contained design
+- Dual import pattern (Python)
+- SSH Match directives for context-based routing
+- LaunchAgents for background services
+- Doppler for credential management
+
+---
+
+*Central Documentation Hub*
+*Location: `/Users/terryli/scripts/CLAUDE.md`*
+*Architecture: Link Farm + Hub-and-Spoke with Progressive Disclosure*

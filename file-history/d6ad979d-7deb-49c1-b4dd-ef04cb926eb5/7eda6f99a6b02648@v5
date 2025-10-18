@@ -1,0 +1,237 @@
+# Insurance Project Memory
+
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure
+
+**Purpose**: Personal insurance automation and credential management
+
+**Documentation Hub**: [`docs/INDEX.md`](/Users/terryli/own/insurance/docs/INDEX.md)
+
+---
+
+## Quick Links
+
+**Automation**: [`docs/automation/manulife-par.md`](/Users/terryli/own/insurance/docs/automation/manulife-par.md) - Playwright form workflows
+**Specifications**: [`specifications/`](/Users/terryli/own/insurance/specifications/) - OpenAPI 3.1.0 specs
+**SLOs**: [`specifications/slo.yaml`](/Users/terryli/own/insurance/specifications/slo.yaml) - Service level objectives
+**Audit**: [`docs/AUDIT.md`](/Users/terryli/own/insurance/docs/AUDIT.md) - API verification (v1.1.0, 2025-10-16)
+**Decisions**: [`docs/decisions/`](/Users/terryli/own/insurance/docs/decisions/) - Technology evaluations
+**Scripts**: [`scripts/playwright/`](/Users/terryli/own/insurance/scripts/playwright/) - Executable automation
+
+---
+
+## Credential Management
+
+**Doppler Project**: `insurance` (production config: `prd`)
+
+**Access Pattern**:
+```bash
+doppler run --project insurance --config prd -- <command>
+```
+
+**View Secrets**:
+```bash
+doppler secrets --project insurance --config prd
+```
+
+**Current Credentials**:
+- Manulife Par Account (`MANULIFE_PAR_USERNAME`, `MANULIFE_PAR_PASSWORD`)
+- Manulife Passkey (`MANULIFE_PAR_PASSKEY_*`) - For CDP WebAuthn automation
+
+**Migration Workflow**: [`docs/workflows/credential-sync.md`](/Users/terryli/own/insurance/docs/workflows/credential-sync.md)
+**Auth Implementation**: [`docs/workflows/authentication-implementation.md`](/Users/terryli/own/insurance/docs/workflows/authentication-implementation.md)
+
+---
+
+## Playwright Automation
+
+**Framework**: Playwright (Python) with `uv`
+**Authentication**: Passkey via `storage-state.json` (gitignored)
+**Artifacts**: Screenshots, DOM dumps, HAR, trace, telemetry (no video)
+
+**Key Features**:
+- **PII-safe**: Masked screenshots, log keys only
+- **ARIA-first selectors**: Stable, accessibility-driven targeting
+- **Comprehensive capture**: HAR, trace with snapshots, telemetry NDJSON
+- **Iframe-proof**: Automatic frame detection
+- **Offline replay**: `routeFromHAR` for analysis
+
+**Usage**:
+```bash
+# Reconnaissance (discovery only, no submission)
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.playwright.reconnaissance
+
+# Automation (fill form, controlled submission)
+export FORM_JSON='{"first_name":"Ada",...}'
+export SUBMIT=true  # Omit or set false for dry-run
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.playwright.fill_par_form
+```
+
+**Documentation**: [`docs/automation/manulife-par.md`](/Users/terryli/own/insurance/docs/automation/manulife-par.md)
+**Specification**: [`specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml)
+
+---
+
+## Authentication
+
+**Method**: Automated passkey via CDP WebAuthn → `storage-state.json`
+**Script**: `scripts/setup/final_auth.py `
+**Implementation**: [`docs/workflows/authentication-implementation.md`](/Users/terryli/own/insurance/docs/workflows/authentication-implementation.md) (v1.0.0)
+
+**Usage**:
+```bash
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.final_auth
+```
+
+---
+
+## Implementation Strategy
+
+**Approach**: Two-phase for highly dynamic forms
+
+**Phase 1 - Reconnaissance**: Discovery script captures form structure without submission
+- Navigate with auth via `storage-state.json`
+- Wait for `networkidle` to ensure full page load
+- Capture: trace (timeline), HAR (network), DOM dumps, ARIA snapshots, telemetry
+- Output: `artifacts/reconnaissance_YYYY-MM-DD_HH-MM-SS/`
+- Purpose: Document actual form structure, timing, API dependencies
+
+**Phase 2 - Automation**: Spec-driven form filling with environment-controlled submission
+- Read specifications with dynamic metadata (`x-wait-strategy`, `x-timeout`, `x-conditionals`)
+- Single selector strategy per field (ARIA label from specs)
+- Explicit waits based on form behavior (no heuristic fallbacks)
+- Environment flag `SUBMIT=true` required for actual submission
+- Fail-fast on errors with artifact capture
+
+**Rationale**: Dynamic forms require perfect specifications - reconnaissance discovers ground truth, automation follows deterministic plan
+
+**Alternative Considered**: Stagehand (AI-native framework) - Incompatible due to runtime LLM dependency, self-healing behavior, and non-deterministic execution. See [`docs/decisions/stagehand-evaluation.md`](/Users/terryli/own/insurance/docs/decisions/stagehand-evaluation.md)
+
+---
+
+## Dynamic Form Handling
+
+**Constraint**: No selector fallbacks or retry logic - explicit waits only
+
+**Playwright Wait Strategies**:
+- **Lazy loading**: `locator.wait_for(state='visible')` - wait for element appearance
+- **API-driven dropdowns**: `page.wait_for_response(url_pattern)` - wait for data fetch
+- **SPA transitions**: `page.wait_for_load_state('networkidle')` - wait for route change
+- **Conditional fields**: `x-depends-on` in specs defines prerequisite fields
+- **Multi-step forms**: `x-form-steps` array defines navigation sequence
+- **Iframe content**: `frame_locator().locator().wait_for()` - wait for nested elements
+
+**Timeout Configuration**: Per-field via `x-timeout` in specifications (default 15s)
+**Failure Mode**: Timeout exceptions with artifacts (screenshots, trace, HAR, telemetry)
+
+---
+
+## Environment Variables
+
+**FORM_JSON**: JSON payload with form field values
+```bash
+export FORM_JSON='{"first_name":"Ada","last_name":"Lovelace","email":"ada@example.com","advisor_id":"A123456","policy":"PAR-00112233"}'
+```
+
+**SUBMIT**: Controls form submission (default: `false`)
+```bash
+export SUBMIT=true   # Actually submit form
+export SUBMIT=false  # Dry-run: fill but don't submit
+# Omit variable = dry-run mode
+```
+
+**Doppler Secrets**: Injected via `doppler run --project insurance --config prd`
+- `MANULIFE_PAR_USERNAME` - Usage determined during reconnaissance
+- `MANULIFE_PAR_PASSWORD` - Usage determined during reconnaissance
+
+---
+
+## AI Agent Brief
+
+For any AI coding agent implementing form automation:
+
+> **Environment**: Python + Playwright, auth via `storage-state.json`, secrets via Doppler
+> **Input**: JSON payload in `FORM_JSON` env var
+> **Artifacts**: Screenshots (PII-masked), DOM dumps, HAR, trace, telemetry NDJSON
+> **No video recording**
+> **Implementation**: ARIA-first selectors, explicit waits (no retry logic), fail-fast on errors
+> **Submission**: Environment-controlled via `SUBMIT=true` flag
+> **Output**: `artifacts/YYYY-MM-DD_HH-MM-SS/` with `index.json` manifest
+
+**Full specification**: [`specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml)
+
+---
+
+## Development Standards
+
+**Python**: `uv run --active python -m <module>`
+**Versioning**: SemVer 2.0.0
+**Paths**: Always absolute (`/Users/terryli/...`), space after extension
+**Security**: Doppler injection only, never commit secrets
+**Machine-Readable**: OpenAPI 3.1.0 specs prioritized over human docs
+
+---
+
+## Project Structure
+
+```
+~/own/insurance/
+├── CLAUDE.md                           # This file (project hub)
+├── .gitignore                          # Excludes secrets, artifacts, auth state
+├── docs/                               # Documentation
+│   ├── INDEX.md                       # Documentation hub
+│   ├── AUDIT.md                       # Playwright API verification (v1.1.0)
+│   ├── automation/                    # Playwright automation docs
+│   │   └── manulife-par.md           # Manulife Par form workflow
+│   ├── decisions/                     # Technology evaluations
+│   │   └── stagehand-evaluation.md   # Stagehand compatibility analysis (v1.0.0)
+│   └── workflows/                     # Operational workflows
+│       ├── credential-sync.md        # 1Password → Doppler migration
+│       └── authentication-implementation.md  # Auth with passkey via CDP (v1.0.0)
+├── specifications/                     # Machine-readable specs
+│   ├── playwright-automation.yaml    # Universal automation spec (OpenAPI 3.1.0)
+│   ├── manulife-par-form.yaml       # Manulife-specific form mappings
+│   └── slo.yaml                      # Service level objectives
+├── scripts/                           # Executable scripts
+│   ├── setup/                        # Authentication setup
+│   │   └── final_auth.py            # Automated passkey authentication (v1.0.0)
+│   └── playwright/                   # Playwright automation
+│       ├── reconnaissance.py         # Phase 1: Form structure discovery
+│       └── fill_par_form.py         # Phase 2: Spec-driven automation
+├── artifacts/                         # Generated artifacts (gitignored)
+│   └── .gitkeep
+└── storage-state.json                 # Playwright auth state (gitignored)
+```
+
+---
+
+## Playwright Feature Requirements
+
+Specifications define required Playwright capabilities:
+
+- [x] **Tracing**: screenshots + DOM snapshots via `BrowserContext.tracing.start()`
+- [x] **HAR recording**: Network capture via `Browser.new_context(record_har=...)`
+- [x] **PII-safe screenshots**: Mask sensitive fields via `Page.screenshot(mask=[...])`
+- [x] **ARIA-first selectors**: `getByLabel/Role/Placeholder` priority
+- [x] **ARIA snapshots**: Accessibility tree via `Locator.aria_snapshot()` (YAML)
+- [x] **Iframe handling**: `FrameLocator` for nested forms
+- [x] **Network telemetry**: `request/response/requestfailed` events logged
+- [x] **Console capture**: JS errors and logs via `console/pageerror` events
+- [x] **Offline replay**: `routeFromHAR` for analysis
+- [x] **File upload**: `setInputFiles` for PDF/documents
+- [x] **Wait strategies**: `wait_for_load_state`, `wait_for_response`, `locator.wait_for`
+- [x] **No video recording**: Performance/PII concerns
+
+**API Verification**: [`docs/AUDIT.md`](/Users/terryli/own/insurance/docs/AUDIT.md) v1.1.0 (11/11 APIs confirmed)
+**Specifications**: [`specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml) `x-implementation-requirements`
+
+---
+
+## Global Resources
+
+**Parent Config**: [`~/.claude/CLAUDE.md`](/Users/terryli/.claude/CLAUDE.md)
+**Doppler Integration**: [`~/.claude/specifications/doppler-integration.yaml`](/Users/terryli/.claude/specifications/doppler-integration.yaml)
+**Toolchain**: [`~/.claude/docs/setup/toolchain.md`](/Users/terryli/.claude/docs/setup/toolchain.md)
+**Credential Management**: [`~/.claude/docs/setup/credential-management.md`](/Users/terryli/.claude/docs/setup/credential-management.md)

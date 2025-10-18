@@ -1,0 +1,373 @@
+"""Manulife Par form page object.
+
+This page object encapsulates interactions with the Manulife Par insurance
+application form, following the Page Object Model (POM) pattern.
+
+Status: Minimal implementation - will be expanded during Phase 4 refactor
+
+Reference: https://playwright.dev/python/docs/pom
+"""
+
+from pages.base_page import BasePage
+
+
+class ManulifeParPage(BasePage):
+    """Page object for Manulife Par insurance application form.
+
+    This class will eventually contain methods for all form interactions,
+    but currently serves as an example of the POM pattern during Phase 2.
+
+    Attributes:
+        page: Inherited from BasePage - Playwright Page instance
+        welcome_url: Entry point URL for the form
+    """
+
+    def __init__(self, page):
+        """Initialize Manulife Par page object.
+
+        Args:
+            page: Playwright Page object from fixture
+        """
+        super().__init__(page)
+        self.welcome_url = "https://www.insurance.manulife.ca/dda/welcomeInformation"
+
+    # Example method demonstrating POM pattern
+    def select_riders(self, choice: str) -> None:
+        """Select riders option using custom React component pattern.
+
+        This method demonstrates the correct way to interact with custom
+        React button components that require JavaScript event dispatch.
+
+        Args:
+            choice: "Yes" or "No"
+
+        Raises:
+            ValueError: If choice is not "Yes" or "No"
+
+        Example:
+            >>> manulife_page = ManulifeParPage(page)
+            >>> manulife_page.select_riders("No")
+
+        Technical Notes:
+            Uses BasePage.dispatch_click_event() to handle custom React components.
+            See: docs/analysis/custom-react-components-spike.md
+        """
+        if choice not in ["Yes", "No"]:
+            raise ValueError(f"Invalid choice: {choice}. Must be 'Yes' or 'No'")
+
+        # Map choice to element ID
+        button_id = "RIDER_STATUS_ID-0" if choice == "Yes" else "RIDER_STATUS_ID-1"
+
+        # Scroll into view first
+        self.scroll_into_view(f"#{button_id}")
+
+        # Use inherited dispatch_click_event for custom React component
+        self.dispatch_click_event(f"#{button_id}")
+
+    #
+    # ===== INSURED PERSON DETAILS =====
+    #
+
+    def fill_insured_name(self, first_name: str, last_name: str, middle_initial: str = "") -> None:
+        """Fill insured person's name fields.
+
+        Args:
+            first_name: First name (max 20 characters)
+            last_name: Last name (max 25 characters)
+            middle_initial: Optional middle initial (1 character)
+
+        Example:
+            >>> page_obj.fill_insured_name("Ada", "Lovelace", "")
+        """
+        self.page.get_by_label("First name").fill(first_name)
+        if middle_initial:
+            self.page.get_by_label("Middle initial (optional)").fill(middle_initial)
+        self.page.get_by_label("Last name").fill(last_name)
+
+    def select_sex(self, sex: str) -> None:
+        """Select sex/gender option.
+
+        Args:
+            sex: Either "Male" or "Female"
+
+        Raises:
+            ValueError: If sex is not "Male" or "Female"
+
+        Example:
+            >>> page_obj.select_sex("Female")
+        """
+        if sex not in ["Male", "Female"]:
+            raise ValueError(f"Invalid sex: {sex}. Must be 'Male' or 'Female'")
+
+        self.page.get_by_role("radio", name=sex).click()
+
+    def fill_date_of_birth(self, day: str, month: str, year: str) -> None:
+        """Fill date of birth fields.
+
+        Args:
+            day: Day as 2-digit string (e.g., "15")
+            month: Month as full name (e.g., "January", "june")
+                  Case-insensitive
+            year: Year as 4-digit string (e.g., "1990")
+
+        Example:
+            >>> page_obj.fill_date_of_birth("10", "December", "1990")
+
+        Note:
+            Insurance age is auto-calculated after filling DOB
+        """
+        self.page.get_by_label("Day (dd)").fill(day)
+        self.page.get_by_label("Month").select_option(month.lower())
+        self.page.get_by_label("Year (yyyy)").fill(year)
+
+        # Wait for insurance age to be calculated
+        self.page.wait_for_timeout(500)
+
+    def get_insurance_age(self) -> str:
+        """Get the auto-calculated insurance age.
+
+        Returns:
+            Insurance age as string (e.g., "35")
+
+        Example:
+            >>> age = page_obj.get_insurance_age()
+            >>> print(f"Insurance age: {age}")
+        """
+        return self.page.get_by_label("Insurance ageLearn more").input_value()
+
+    def select_smoking_status(self, status: str) -> None:
+        """Select illustrated smoking status.
+
+        Args:
+            status: Either "Smoker" or "Non-Smoker"
+
+        Raises:
+            ValueError: If status is not valid
+
+        Example:
+            >>> page_obj.select_smoking_status("Non-Smoker")
+        """
+        if status not in ["Smoker", "Non-Smoker"]:
+            raise ValueError(f"Invalid smoking status: {status}")
+
+        self.page.get_by_label("Illustrated smoking status").select_option(status)
+
+    #
+    # ===== COVERAGE DETAILS =====
+    #
+
+    def fill_coverage_details(
+        self,
+        coverage_type: str = "Single",
+        premium_duration: str = "Pay for 10 years",
+        amount: str = "100000",
+        dividend_option: str = "Paid-up insurance"
+    ) -> None:
+        """Fill all coverage detail fields.
+
+        Args:
+            coverage_type: Coverage type (default: "Single")
+            premium_duration: Premium payment duration
+                            Options: "Pay for 10 years", "Pay for 20 years",
+                                     "Pay to age 90", "Pay to age 100"
+            amount: Insurance amount in dollars (e.g., "250000")
+                   Will be auto-formatted with thousand separators
+            dividend_option: Dividend option
+                           Options: "Paid-up insurance", "Cash"
+
+        Example:
+            >>> page_obj.fill_coverage_details(
+            ...     coverage_type="Single",
+            ...     premium_duration="Pay for 10 years",
+            ...     amount="250000",
+            ...     dividend_option="Paid-up insurance"
+            ... )
+        """
+        self.page.get_by_label("Coverage type").select_option(coverage_type)
+        self.page.get_by_label("Premium Duration").select_option(premium_duration)
+        self.page.get_by_label("Amount of insurance, dollar").fill(amount)
+        self.page.get_by_label("Dividend option").select_option(dividend_option)
+
+    #
+    # ===== CUSTOM REACT RADIO BUTTONS (Require JS Dispatch) =====
+    #
+
+    def select_quebec_policy(self, choice: str) -> None:
+        """Select whether policy will be issued in Quebec.
+
+        CRITICAL: Uses custom React component requiring JS dispatch.
+
+        Args:
+            choice: "Yes" or "No"
+
+        Raises:
+            ValueError: If choice is not "Yes" or "No"
+
+        Example:
+            >>> page_obj.select_quebec_policy("No")
+        """
+        if choice not in ["Yes", "No"]:
+            raise ValueError(f"Invalid choice: {choice}. Must be 'Yes' or 'No'")
+
+        # Map choice to element ID
+        button_id = "wel-pol-quebec-0" if choice == "Yes" else "wel-pol-quebec-1"
+
+        self.scroll_into_view(f"#{button_id}")
+        self.dispatch_click_event(f"#{button_id}")
+
+    def select_additional_products(self, choice: str) -> None:
+        """Select whether applying for additional products.
+
+        CRITICAL: Uses custom React component requiring JS dispatch.
+
+        Args:
+            choice: "Yes" or "No"
+
+        Raises:
+            ValueError: If choice is not "Yes" or "No"
+
+        Example:
+            >>> page_obj.select_additional_products("No")
+        """
+        if choice not in ["Yes", "No"]:
+            raise ValueError(f"Invalid choice: {choice}. Must be 'Yes' or 'No'")
+
+        # Map choice to element ID
+        button_id = "wel-multiple-prod-0" if choice == "Yes" else "wel-multiple-prod-1"
+
+        self.scroll_into_view(f"#{button_id}")
+        self.dispatch_click_event(f"#{button_id}")
+
+    def select_medical_info_method(self, method: str) -> None:
+        """Select how medical information will be provided.
+
+        CRITICAL: Uses custom React component requiring JS dispatch.
+
+        Args:
+            method: "On this electronic application" or "A tele-interview"
+
+        Raises:
+            ValueError: If method is not valid
+
+        Example:
+            >>> page_obj.select_medical_info_method("On this electronic application")
+        """
+        if method not in ["On this electronic application", "A tele-interview"]:
+            raise ValueError(f"Invalid method: {method}")
+
+        # Map choice to element ID
+        button_id = "wel-electronic-app-0" if method == "On this electronic application" else "wel-electronic-app-1"
+
+        self.scroll_into_view(f"#{button_id}")
+        self.dispatch_click_event(f"#{button_id}")
+
+    #
+    # ===== FORM ACTIONS =====
+    #
+
+    def click_validate_button(self) -> None:
+        """Click 'Start a new application' button to trigger validation.
+
+        IMPORTANT DISCOVERY (2025-10-17):
+        This button is a CLIENT-SIDE VALIDATION button, NOT a navigation
+        or submission button. It will:
+        - Validate all form fields
+        - Show/hide validation errors
+        - Format data (e.g., add thousand separators to amounts)
+        - NOT navigate to a new page
+        - NOT submit to server
+
+        Use check_for_validation_errors() after clicking to verify success.
+
+        Example:
+            >>> page_obj.click_validate_button()
+            >>> errors = page_obj.check_for_validation_errors()
+            >>> if not errors:
+            ...     print("Validation passed!")
+
+        Reference:
+            docs/analysis/FINAL-CONCLUSION.md
+        """
+        button = self.page.get_by_role("button", name="Start a new application")
+        button.scroll_into_view_if_needed()
+        button.click()
+
+        # Wait for validation to complete
+        self.page.wait_for_timeout(1000)
+
+    #
+    # ===== HIGH-LEVEL HELPER METHODS =====
+    #
+
+    def fill_complete_form(
+        self,
+        first_name: str,
+        last_name: str,
+        sex: str,
+        dob_day: str,
+        dob_month: str,
+        dob_year: str,
+        smoking_status: str,
+        coverage_type: str = "Single",
+        premium_duration: str = "Pay for 10 years",
+        amount: str = "100000",
+        dividend_option: str = "Paid-up insurance",
+        riders: str = "No",
+        quebec: str = "No",
+        additional_products: str = "No",
+        medical_info: str = "On this electronic application",
+        middle_initial: str = ""
+    ) -> None:
+        """Fill the entire coverage form with all required fields.
+
+        This is a convenience method that calls all individual field methods
+        in the correct order.
+
+        Args:
+            first_name: Insured person's first name
+            last_name: Insured person's last name
+            sex: "Male" or "Female"
+            dob_day: Day of birth (e.g., "15")
+            dob_month: Month of birth (e.g., "June")
+            dob_year: Year of birth (e.g., "1990")
+            smoking_status: "Smoker" or "Non-Smoker"
+            coverage_type: Coverage type (default: "Single")
+            premium_duration: Premium payment duration
+            amount: Insurance amount in dollars
+            dividend_option: Dividend option
+            riders: Add riders? "Yes" or "No" (default: "No")
+            quebec: Quebec policy? "Yes" or "No" (default: "No")
+            additional_products: Additional products? "Yes" or "No" (default: "No")
+            medical_info: Medical info method (default: "On this electronic application")
+            middle_initial: Optional middle initial
+
+        Example:
+            >>> page_obj.fill_complete_form(
+            ...     first_name="Ada",
+            ...     last_name="Lovelace",
+            ...     sex="Female",
+            ...     dob_day="10",
+            ...     dob_month="December",
+            ...     dob_year="1990",
+            ...     smoking_status="Non-Smoker",
+            ...     amount="250000"
+            ... )
+
+        Note:
+            This method does NOT click the validation button.
+            Call click_validate_button() separately if needed.
+        """
+        # Insured person details
+        self.fill_insured_name(first_name, last_name, middle_initial)
+        self.select_sex(sex)
+        self.fill_date_of_birth(dob_day, dob_month, dob_year)
+        self.select_smoking_status(smoking_status)
+
+        # Coverage details
+        self.fill_coverage_details(coverage_type, premium_duration, amount, dividend_option)
+
+        # Custom React radio buttons
+        self.select_riders(riders)
+        self.select_quebec_policy(quebec)
+        self.select_additional_products(additional_products)
+        self.select_medical_info_method(medical_info)

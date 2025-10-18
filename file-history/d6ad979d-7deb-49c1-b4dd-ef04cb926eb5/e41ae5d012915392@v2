@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""
+Complete automated multi-step authentication - FINAL VERSION.
+
+Strategy: Click passkey button whenever it appears (no downside!)
+
+Authentication Flow:
+1. Username + password → submit
+2. Look for passkey button → click it
+3. Wait for navigation
+4. REPEAT: Look for passkey button → if found, click again
+5. Continue until we're off signin/mfa pages
+6. Save storage-state.json
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.setup.final_auth
+"""
+
+import base64
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+from jwcrypto import jwk
+
+
+def add_base64_padding(s: str) -> str:
+    """Add base64 padding if needed."""
+    missing_padding = len(s) % 4
+    if missing_padding:
+        return s + '=' * (4 - missing_padding)
+    return s
+
+
+def jwk_to_pkcs8_base64(jwk_base64: str) -> str:
+    """Convert JWK format private key to PKCS#8 format."""
+    jwk_base64 = add_base64_padding(jwk_base64)
+    jwk_json = base64.b64decode(jwk_base64).decode('utf-8')
+    jwk_dict = json.loads(jwk_json)
+    key = jwk.JWK(**jwk_dict)
+    pkcs8_pem = key.export_to_pem(private_key=True, password=None)
+    pem_lines = pkcs8_pem.decode('utf-8').strip().split('\n')
+    pkcs8_base64 = ''.join(line for line in pem_lines if not line.startswith('-----'))
+    return pkcs8_base64
+
+
+def log(msg: str, level: str = "INFO"):
+    """Timestamped logging."""
+    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    prefix = {
+        "INFO": "ℹ️ ",
+        "SUCCESS": "✅",
+        "WARNING": "⚠️ ",
+        "ERROR": "❌",
+        "STEP": "📍",
+    }.get(level, "  ")
+    print(f"[{timestamp}] {prefix} {msg}")
+
+
+def try_click_passkey_button(page, artifacts_dir: Path, step_name: str) -> bool:
+    """
+    Try to find and click passkey button.
+    Returns True if button found and clicked, False otherwise.
+    """
+    log(f"Looking for passkey button on current page...", "INFO")
+
+    passkey_selectors = [
+        ("button:has-text('Passkey')", "Button with 'Passkey'"),
+        ("button:has-text('passkey')", "Button with 'passkey' (lowercase)"),
+        ("button[id='passkey']", "Button with id=passkey"),
+        ("button:has-text('Use passkey')", "Button with 'Use passkey'"),
+        ("button:has-text('Sign in with passkey')", "Button with 'Sign in with passkey'"),
+    ]
+
+    for selector, description in passkey_selectors:
+        try:
+            element = page.locator(selector).first
+            if element.is_visible(timeout=1000):
+                btn_text = element.inner_text()
+                log(f"  FOUND: {description}", "SUCCESS")
+                log(f"  Button text: '{btn_text}'", "SUCCESS")
+
+                # Screenshot before click
+                screenshot_path = artifacts_dir / f"{step_name}_before_click.png"
+                page.screenshot(path=str(screenshot_path))
+                log(f"  Screenshot: {screenshot_path.name}", "INFO")
+
+                # Click it
+                log(f"  Clicking passkey button...", "INFO")
+                element.click()
+
+                # Wait for response
+                log(f"  Waiting for navigation...", "INFO")
+                page.wait_for_load_state("networkidle", timeout=15000)
+
+                # Screenshot after click
+                screenshot_path = artifacts_dir / f"{step_name}_after_click.png"
+                page.screenshot(path=str(screenshot_path))
+                log(f"  Screenshot: {screenshot_path.name}", "INFO")
+
+                log(f"  Current URL: {page.url}", "INFO")
+                return True
+
+        except Exception as e:
+            log(f"  Not found: {selector} - {e}", "INFO")
+            continue
+
+    log("  No passkey button found", "WARNING")
+    return False
+
+
+def main() -> int:
+    """Execute complete automated authentication."""
+    log("=" * 80, "STEP")
+    log("Complete Automated Multi-Step Authentication", "STEP")
+    log("=" * 80, "STEP")
+
+    # Setup
+    project_root = Path(__file__).parent.parent.parent
+    storage_state_path = project_root / "storage-state.json"
+    artifacts_dir = project_root / "artifacts" / f"final_auth_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"Artifacts directory: {artifacts_dir}", "INFO")
+
+    # Get credentials
+    username = os.getenv("MANULIFE_PAR_USERNAME")
+    password = os.getenv("MANULIFE_PAR_PASSWORD")
+    passkey_credential_id_raw = os.getenv("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID")
+    passkey_rp_id = os.getenv("MANULIFE_PAR_PASSKEY_RP_ID")
+    passkey_user_handle_raw = os.getenv("MANULIFE_PAR_PASSKEY_USER_HANDLE")
+    passkey_private_key_jwk = os.getenv("MANULIFE_PAR_PASSKEY_PRIVATE_KEY")
+
+    # Validate
+    missing = []
+    for name, value in [
+        ("MANULIFE_PAR_USERNAME", username),
+        ("MANULIFE_PAR_PASSWORD", password),
+        ("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID", passkey_credential_id_raw),
+        ("MANULIFE_PAR_PASSKEY_RP_ID", passkey_rp_id),
+        ("MANULIFE_PAR_PASSKEY_USER_HANDLE", passkey_user_handle_raw),
+        ("MANULIFE_PAR_PASSKEY_PRIVATE_KEY", passkey_private_key_jwk),
+    ]:
+        if not value:
+            missing.append(name)
+
+    if missing:
+        log(f"Missing credentials: {', '.join(missing)}", "ERROR")
+        return 1
+
+    log(f"Username: {username}", "INFO")
+    log(f"Passkey RP ID: {passkey_rp_id}", "INFO")
+
+    # Fix base64 padding
+    passkey_credential_id = add_base64_padding(passkey_credential_id_raw)
+    passkey_user_handle = add_base64_padding(passkey_user_handle_raw)
+
+    try:
+        # Convert JWK to PKCS#8
+        log("Converting JWK private key to PKCS#8...", "INFO")
+        pkcs8_private_key = jwk_to_pkcs8_base64(passkey_private_key_jwk)
+        log("Key conversion successful", "SUCCESS")
+
+        with sync_playwright() as p:
+            log("Launching browser...", "INFO")
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(viewport={"width": 1280, "height": 720})
+            page = context.new_page()
+
+            # Setup virtual authenticator
+            log("Creating CDP session...", "INFO")
+            cdp = context.new_cdp_session(page)
+            cdp.send("WebAuthn.enable")
+
+            log("Creating virtual authenticator...", "INFO")
+            result = cdp.send("WebAuthn.addVirtualAuthenticator", {
+                "options": {
+                    "protocol": "ctap2",
+                    "ctap2Version": "ctap2_1",
+                    "transport": "internal",
+                    "hasResidentKey": True,
+                    "hasUserVerification": True,
+                    "automaticPresenceSimulation": True,
+                    "isUserVerified": True
+                }
+            })
+            authenticator_id = result["authenticatorId"]
+            log(f"Virtual authenticator ID: {authenticator_id}", "SUCCESS")
+
+            log("Injecting passkey credential...", "INFO")
+            cdp.send("WebAuthn.addCredential", {
+                "authenticatorId": authenticator_id,
+                "credential": {
+                    "credentialId": passkey_credential_id,
+                    "privateKey": pkcs8_private_key,
+                    "rpId": passkey_rp_id,
+                    "userHandle": passkey_user_handle,
+                    "signCount": 0,
+                    "isResidentCredential": True
+                }
+            })
+            log("Passkey credential injected successfully", "SUCCESS")
+
+            # STEP 1: Navigate and signin
+            log("=" * 80, "STEP")
+            log("STEP 1: Navigate to Signin Page", "STEP")
+            log("=" * 80, "STEP")
+
+            signin_url = "https://id.manulife.ca/advisor/signin"
+            log(f"Navigating to: {signin_url}", "INFO")
+            page.goto(signin_url, wait_until="networkidle", timeout=30000)
+            log(f"Current URL: {page.url}", "INFO")
+
+            page.screenshot(path=str(artifacts_dir / "01_signin_page.png"))
+
+            # Fill credentials
+            log("Filling username and password...", "INFO")
+            page.wait_for_selector("#username", timeout=10000)
+            page.locator("#username").fill(username)
+            page.locator("#password").fill(password)
+
+            page.screenshot(path=str(artifacts_dir / "02_credentials_filled.png"))
+
+            # Submit
+            log("Submitting signin form...", "INFO")
+            page.locator("#button-id-react-aria-16").click()
+            page.wait_for_load_state("networkidle", timeout=30000)
+
+            log(f"Current URL after submit: {page.url}", "INFO")
+            page.screenshot(path=str(artifacts_dir / "03_after_submit.png"))
+
+            # CRITICAL: Wait for page to settle after form submission
+            # The passkey button may take a moment to appear dynamically
+            log("Waiting for page to fully settle after submission...", "INFO")
+            time.sleep(3)  # Give React app time to render passkey button
+
+            # STEP 2: Click passkey buttons in loop until we're authenticated
+            log("=" * 80, "STEP")
+            log("STEP 2: Click Passkey Buttons Until Authenticated", "STEP")
+            log("=" * 80, "STEP")
+
+            max_passkey_clicks = 5  # Safety limit
+            passkey_clicks = 0
+
+            while passkey_clicks < max_passkey_clicks:
+                current_url = page.url.lower()
+
+                # Check if we're still on auth pages
+                if "signin" not in current_url and "mfa" not in current_url and "login" not in current_url:
+                    log("Not on authentication page anymore - likely authenticated!", "SUCCESS")
+                    break
+
+                # Try to find and click passkey button
+                log(f"Passkey click attempt #{passkey_clicks + 1}", "INFO")
+                step_name = f"04_passkey_click_{passkey_clicks + 1}"
+
+                if try_click_passkey_button(page, artifacts_dir, step_name):
+                    passkey_clicks += 1
+                    log(f"Passkey button clicked (total: {passkey_clicks})", "SUCCESS")
+
+                    # Wait a moment
+                    time.sleep(1)
+                else:
+                    log("No passkey button found - checking if authenticated...", "INFO")
+                    break
+
+            # STEP 3: Verify final state
+            log("=" * 80, "STEP")
+            log("STEP 3: Verify Final Authentication State", "STEP")
+            log("=" * 80, "STEP")
+
+            current_url = page.url
+            page_title = page.title()
+
+            log(f"Final URL: {current_url}", "INFO")
+            log(f"Final title: {page_title}", "INFO")
+            log(f"Total passkey clicks: {passkey_clicks}", "INFO")
+
+            page.screenshot(path=str(artifacts_dir / "05_final_state.png"))
+
+            # Save page HTML for inspection
+            html_path = artifacts_dir / "05_final_state.html"
+            html_path.write_text(page.content())
+            log(f"Final page HTML: {html_path}", "INFO")
+
+            # Check if we're authenticated
+            if "signin" in current_url.lower() or "login" in current_url.lower():
+                log("WARNING: Still on signin/login page", "WARNING")
+
+                # Check for errors
+                try:
+                    error = page.locator("[role='alert']").first
+                    if error.is_visible(timeout=2000):
+                        error_text = error.inner_text()
+                        log(f"Error message: {error_text}", "ERROR")
+                        return 1
+                except Exception:
+                    pass
+            else:
+                log("Successfully navigated away from signin/login!", "SUCCESS")
+
+            # Save storage state
+            log("Saving storage state...", "INFO")
+            context.storage_state(path=str(storage_state_path))
+            log(f"Storage state saved: {storage_state_path}", "SUCCESS")
+
+            log("=" * 80, "STEP")
+            log("AUTHENTICATION COMPLETE", "STEP")
+            log("=" * 80, "STEP")
+            log(f"Artifacts: {artifacts_dir}", "INFO")
+            log(f"Storage state: {storage_state_path}", "INFO")
+            log(f"Passkey clicks: {passkey_clicks}", "INFO")
+            log("", "INFO")
+            log("Next step: Run reconnaissance", "INFO")
+            log("  doppler run --project insurance --config prd -- \\", "INFO")
+            log("    uv run --active python -m scripts.playwright.reconnaissance", "INFO")
+
+            browser.close()
+            return 0
+
+    except Exception as e:
+        log(f"EXCEPTION: {e}", "ERROR")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

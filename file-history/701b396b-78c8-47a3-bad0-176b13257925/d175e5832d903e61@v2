@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""
+Regenerate OHLC table with Phase7 v1.2.0 schema (13 columns)
+
+Upgrades test database from 9-column (v1.1.0) to 13-column (v1.2.0) schema
+by adding normalized spread metrics:
+- range_per_spread
+- range_per_tick
+- body_per_spread
+- body_per_tick
+"""
+
+import sys
+from pathlib import Path
+
+# Add project source to path
+project_src = Path("/Users/terryli/eon/exness-data-preprocess/src")
+sys.path.insert(0, str(project_src))
+
+from exness_data_preprocess.processor import ExnessDataProcessor
+
+def main():
+    # Initialize processor with test database directory
+    base_dir = Path("/tmp/exness-duckdb-test/refactored")
+    processor = ExnessDataProcessor(base_dir=base_dir)
+
+    print("=== Phase 1: Regenerating OHLC with v1.2.0 Schema ===\n")
+
+    # Get database path directly
+    duckdb_path = base_dir / "eurusd.duckdb"
+
+    # Check current schema
+    print("Before regeneration:")
+    import duckdb
+    conn = duckdb.connect(str(duckdb_path))
+    result = conn.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE table_name = 'ohlc_1m' ORDER BY column_index"
+    ).fetchall()
+    print(f"Current columns ({len(result)}): {[row[0] for row in result]}\n")
+    conn.close()
+
+    # Drop old table and recreate with v1.2.0 schema
+    print("Dropping old ohlc_1m table...")
+    conn = duckdb.connect(str(duckdb_path))
+    conn.execute("DROP TABLE IF EXISTS ohlc_1m")
+    print("✅ Dropped old table\n")
+
+    # Create new table with v1.2.0 schema (13 columns)
+    print("Creating new ohlc_1m table with v1.2.0 schema...")
+    from exness_data_preprocess.schema import OHLCSchema
+    conn.execute(OHLCSchema.get_create_table_sql())
+    print("✅ Created new table with 13 columns\n")
+
+    # Add comments
+    print("Adding schema comments...")
+    conn.execute(OHLCSchema.get_table_comment_sql())
+    for comment_sql in OHLCSchema.get_column_comment_sqls():
+        conn.execute(comment_sql)
+    conn.close()
+    print("✅ Comments added\n")
+
+    # Now regenerate OHLC data
+    print("Regenerating OHLC data...")
+    processor._regenerate_ohlc(duckdb_path)
+    print("✅ Data regenerated\n")
+
+    # Verify new schema
+    print("After regeneration:")
+    conn = duckdb.connect(str(duckdb_path), read_only=True)
+    result = conn.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE table_name = 'ohlc_1m' ORDER BY column_index"
+    ).fetchall()
+    columns = [row[0] for row in result]
+    print(f"New columns ({len(columns)}): {columns}\n")
+
+    # Check for normalized columns
+    normalized_cols = ['range_per_spread', 'range_per_tick', 'body_per_spread', 'body_per_tick']
+    print("Normalized columns status:")
+    for col in normalized_cols:
+        status = "✅ EXISTS" if col in columns else "❌ MISSING"
+        print(f"  {status}: {col}")
+
+    # Quick stats
+    print("\nQuick validation:")
+    stats = conn.execute("""
+        SELECT
+            COUNT(*) as total_bars,
+            COUNT(range_per_spread) as non_null_range_per_spread,
+            COUNT(body_per_spread) as non_null_body_per_spread,
+            AVG(range_per_spread) as avg_range_per_spread,
+            AVG(body_per_spread) as avg_body_per_spread
+        FROM ohlc_1m
+    """).fetchone()
+
+    print(f"  Total bars: {stats[0]:,}")
+    print(f"  Non-NULL range_per_spread: {stats[1]:,} ({100*stats[1]/stats[0]:.1f}%)")
+    print(f"  Non-NULL body_per_spread: {stats[2]:,} ({100*stats[2]/stats[0]:.1f}%)")
+    print(f"  Avg range_per_spread: {stats[3]:.4f}" if stats[3] else "  Avg range_per_spread: NULL")
+    print(f"  Avg body_per_spread: {stats[4]:.4f}" if stats[4] else "  Avg body_per_spread: NULL")
+
+    conn.close()
+    print("\n✅ Phase 1 Complete")
+
+if __name__ == "__main__":
+    main()

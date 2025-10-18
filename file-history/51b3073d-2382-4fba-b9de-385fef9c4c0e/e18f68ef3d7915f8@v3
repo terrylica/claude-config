@@ -1,0 +1,259 @@
+openapi: 3.1.0
+info:
+  title: Playwright Automation SLO Specification
+  version: 1.0.0
+  description: |
+    Service Level Objectives for insurance form automation.
+    Excludes performance/speed and security SLOs per requirements.
+
+components:
+  schemas:
+    SLOTarget:
+      type: object
+      required:
+        - objective
+        - measurement
+        - target
+        - measurement_method
+      properties:
+        objective:
+          type: string
+        measurement:
+          type: string
+        target:
+          type: string
+        measurement_method:
+          type: string
+        validation:
+          type: string
+
+x-slos:
+  availability:
+    package_availability:
+      objective: Playwright package accessible via uv/uvx
+      measurement: Package installation success rate
+      target: 100%
+      measurement_method: uvx --from playwright --with playwright python -c "import playwright; print('OK')"
+      validation: Returns "OK" without errors
+
+    browser_availability:
+      objective: Chromium browser binary available post-install
+      measurement: Browser launch success rate
+      target: 100%
+      measurement_method: playwright install chromium && verify binary exists
+      validation: Browser launches without errors
+
+    api_surface_complete:
+      objective: All documented APIs exist in installed version
+      measurement: Required API method availability
+      target: 100% of documented methods present
+      measurement_method: Introspection via inspect.signature()
+      validation: |
+        Required APIs present:
+        - Page.screenshot(mask=...)
+        - BrowserContext.tracing.start/stop
+        - Page.route_from_har(not_found=...)
+        - Page.frame_locator()
+        - Page.get_by_label/role/placeholder/test_id/text()
+        - Page.on/once(event_name)
+        - Page.set_input_files()
+        - Browser.new_context(record_har=..., storage_state=...)
+
+  correctness:
+    har_recording:
+      objective: Network traffic captured accurately to HAR format
+      measurement: HAR file validity
+      target: HAR parses successfully with standard tools
+      measurement_method: Chrome DevTools can import generated HAR
+      validation: All request/response pairs present, no truncation
+
+    trace_completeness:
+      objective: Trace captures all actions with screenshots and snapshots
+      measurement: Trace file completeness
+      target: All actions logged with visual evidence
+      measurement_method: playwright show-trace can render timeline
+      validation: Screenshots present at each action, DOM snapshots retrievable
+
+    pii_masking:
+      objective: Sensitive fields masked in screenshots
+      measurement: Screenshot content analysis
+      target: Specified mask locators not visible in PNG
+      measurement_method: Visual inspection or OCR comparison
+      validation: Masked regions show mask_color, not field content
+
+    field_targeting:
+      objective: ARIA-first selectors locate correct form fields
+      measurement: Fill success rate
+      target: 95%+ fields filled on first attempt
+      measurement_method: Log filled_fields_count / total_fields_count
+      validation: Failure logs show which fields not found
+
+    form_submission:
+      objective: Submit action executes without client-side errors
+      measurement: Submission success rate
+      target: 100% when form data valid
+      measurement_method: Check for validation error elements post-submit
+      validation: Success criteria met OR failure_reason logged
+
+  observability:
+    artifact_manifest:
+      objective: All artifacts cataloged in index.json
+      measurement: Manifest completeness
+      target: 100% of artifacts listed
+      measurement_method: Verify each artifact path exists on filesystem
+      validation: |
+        Required artifacts:
+        - screenshots/ (001_initial.png, 002_filled.png, 003_submitted.png)
+        - dom/ (002_filled.dom.html, 003_submitted.dom.html)
+        - session.har
+        - trace.zip
+        - aria_snapshots/ (aria_002.yaml, aria_003.yaml)
+        - telemetry.ndjson
+        - index.json
+
+    telemetry_coverage:
+      objective: Network and console events logged to telemetry.ndjson
+      measurement: Event capture rate
+      target: All page events logged (request/response/console/pageerror)
+      measurement_method: Count event types in telemetry.ndjson
+      validation: At least one event of each type present during typical run
+
+    trace_viewability:
+      objective: Generated traces viewable in Playwright trace viewer
+      measurement: Trace viewer compatibility
+      target: 100% of traces render without errors
+      measurement_method: playwright show-trace <trace.zip>
+      validation: Timeline loads, screenshots visible, DOM snapshots accessible
+
+    failure_transparency:
+      objective: Failures documented with reason in artifacts
+      measurement: Failure documentation rate
+      target: 100% of failures have failure_reason in index.json
+      measurement_method: Check index.json.notes on non-zero exit
+      validation: notes field contains actionable error description
+
+  maintainability:
+    version_pinning:
+      objective: Playwright version pinned to tested release
+      measurement: Version consistency
+      target: Version specified in requirements or lock file
+      measurement_method: Check pyproject.toml or requirements.txt
+      validation: playwright>=1.55.0,<2.0.0 (major version locked)
+
+    api_deprecation_tracking:
+      objective: No usage of deprecated Playwright APIs
+      measurement: Deprecation warning count
+      target: Zero deprecation warnings during execution
+      measurement_method: Monitor stderr for DeprecationWarning
+      validation: Clean execution without API deprecation notices
+
+    selector_resilience:
+      objective: Selectors use stable attributes (ARIA, test IDs)
+      measurement: Brittle selector usage
+      target: 0% usage of positional CSS selectors (nth-child, index)
+      measurement_method: Code review of locator calls
+      validation: All locators use getBy* methods or semantic attributes
+
+    configuration_externalization:
+      objective: No hardcoded URLs, credentials, or field mappings
+      measurement: Hardcoded value count in code
+      target: Zero hardcoded values
+      measurement_method: Grep for http://, password=, policy=
+      validation: All config via env vars or specification files
+
+    documentation_currency:
+      objective: Specifications match actual API surface
+      measurement: Doc-code drift
+      target: 100% documented features implemented correctly
+      measurement_method: API probe validation
+      validation: This audit process itself
+
+x-audit-results:
+  initial_audit:
+    timestamp: "2025-10-16T06:40:00Z"
+    status: incorrect
+    error: "Probed Page.aria_snapshot instead of Locator.aria_snapshot()"
+    action: corrected
+
+  corrected_audit:
+    timestamp: "2025-10-16T07:15:00Z"
+    playwright_version: "1.55.0"
+    python_version: "3.13.6"
+    platform: darwin_arm64
+    method: API probe + functional testing
+
+  api_probe_summary:
+    probed_features:
+      - name: screenshot_masking
+        status: available
+        signature: "Page.screenshot(mask=...)"
+        verified: introspection
+      - name: tracing
+        status: available
+        methods: [start, stop, start_chunk, stop_chunk]
+        verified: introspection
+      - name: har_recording
+        status: available
+        signature: "Browser.new_context(record_har=...)"
+        verified: introspection
+      - name: har_replay
+        status: available
+        signature: "Page.route_from_har(not_found=...)"
+        verified: introspection
+      - name: aria_selectors
+        status: available
+        methods: [get_by_label, get_by_role, get_by_placeholder, get_by_test_id, get_by_text]
+        verified: introspection
+      - name: aria_snapshot_locator
+        status: available
+        signature: "Locator.aria_snapshot()"
+        output_format: YAML string
+        verified: functional_test
+      - name: accessibility_snapshot
+        status: available
+        signature: "Page.accessibility.snapshot()"
+        output_format: JSON dict
+        verified: functional_test
+      - name: frame_locator
+        status: available
+        verified: introspection
+      - name: event_system
+        status: available
+        methods: [on, once]
+        verified: introspection
+      - name: file_upload
+        status: available
+        method: set_input_files
+        verified: introspection
+      - name: storage_state
+        status: available
+        signature: "Browser.new_context(storage_state=...)"
+        verified: introspection
+
+  corrections_applied:
+    - timestamp: "2025-10-16T07:15:00Z"
+      specification: playwright-automation.yaml
+      section: components.schemas.ArtifactManifest.properties.aria_snapshots
+      action: restored
+      reason: API available via Locator.aria_snapshot()
+
+    - specification: playwright-automation.yaml
+      section: x-implementation-requirements.aria_snapshots
+      action: restored
+      reason: API available via Locator.aria_snapshot()
+
+    - specification: docs/automation/manulife-par.md
+      section: Artifact Manifest example
+      action: restored aria_snapshots keys
+      reason: API available via Locator.aria_snapshot()
+
+    - specification: CLAUDE.md
+      section: Playwright Enhancement Checklist
+      action: restored ARIA snapshots item
+      reason: API available via Locator.aria_snapshot()
+
+  slo_compliance:
+    availability: pass
+    correctness: pending_implementation
+    observability: pending_implementation
+    maintainability: pass

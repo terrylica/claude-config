@@ -1,0 +1,62 @@
+name: Pre-commit Autoupdate
+
+# Automatically update pre-commit hook versions weekly
+# Creates a PR when updates are available
+# Runs every Monday at 9 AM UTC
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9 AM UTC
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  autoupdate:
+    name: Update pre-commit hooks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit autoupdate
+        run: pre-commit autoupdate
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: update/pre-commit-hooks
+          delete-branch: true
+          commit-message: 'chore: update pre-commit hooks to latest versions'
+          title: 'chore: update pre-commit hooks'
+          body: |
+            ## Pre-commit Hook Updates
+
+            Automated weekly update of pre-commit hook versions.
+
+            ### Changes
+            This PR updates hook repositories to their latest stable versions.
+
+            ### Verification
+            - [ ] Review version changes in `.pre-commit-config.yaml`
+            - [ ] CI tests pass
+            - [ ] No breaking changes in hook behavior
+
+            ### Auto-merge
+            This PR can be auto-merged if CI passes and changes are minor version bumps only.
+
+            ---
+            🤖 This PR was created automatically by the `pre-commit-autoupdate` workflow.
+          labels: |
+            dependencies
+            automated
+            pre-commit
+          assignees: terryli

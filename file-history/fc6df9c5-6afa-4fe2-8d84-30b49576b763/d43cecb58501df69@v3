@@ -1,0 +1,104 @@
+
+#ifndef __LAGUERRE_RSI_MODULE_MQH__
+#define __LAGUERRE_RSI_MODULE_MQH__
+
+#include "..\\DataExportCore.mqh"
+
+bool LaguerreRSIModule_Load(const string symbol,
+                            const ENUM_TIMEFRAMES timeframe,
+                            const int bars,
+                            const string instanceID,
+                            const int atrPeriod,
+                            const int smoothPeriod,
+                            const ENUM_MA_METHOD smoothMethod,
+                            IndicatorColumn &laguerreColumn,
+                            IndicatorColumn &signalColumn,
+                            IndicatorColumn &adaptivePeriodColumn,
+                            IndicatorColumn &atrColumn,
+                            string &errorMessage)
+  {
+   // Create indicator handle
+   int handle=iCustom(
+      symbol,
+      timeframe,
+      "Custom\\PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+      instanceID,
+      atrPeriod,
+      PRICE_CLOSE,
+      smoothPeriod,
+      smoothMethod,
+      0.85,
+      0.15
+   );
+
+   if(handle==INVALID_HANDLE)
+     {
+      errorMessage="Laguerre RSI handle creation failed";
+      return(false);
+     }
+
+   // Buffer 0: Laguerre RSI values
+   laguerreColumn.header=StringFormat("Laguerre_RSI_%d",atrPeriod);
+   laguerreColumn.digits=6;
+   ArrayResize(laguerreColumn.values,bars);
+   ArraySetAsSeries(laguerreColumn.values,true);
+
+   int copied=CopyBuffer(handle,0,0,bars,laguerreColumn.values);
+
+   if(copied!=bars)
+     {
+      IndicatorRelease(handle);
+      errorMessage=StringFormat("Laguerre RSI CopyBuffer expected %d, got %d",bars,copied);
+      return(false);
+     }
+
+   // Buffer 1: Signal classification
+   signalColumn.header="Laguerre_Signal";
+   signalColumn.digits=0;
+   ArrayResize(signalColumn.values,bars);
+   ArraySetAsSeries(signalColumn.values,true);
+
+   copied=CopyBuffer(handle,1,0,bars,signalColumn.values);
+
+   if(copied!=bars)
+     {
+      IndicatorRelease(handle);
+      errorMessage=StringFormat("Laguerre Signal CopyBuffer expected %d, got %d",bars,copied);
+      return(false);
+     }
+
+   // Buffer 3: Adaptive Period (now exposed by modified indicator)
+   adaptivePeriodColumn.header="Adaptive_Period";
+   adaptivePeriodColumn.digits=2;
+   ArrayResize(adaptivePeriodColumn.values,bars);
+   ArraySetAsSeries(adaptivePeriodColumn.values,true);
+
+   copied=CopyBuffer(handle,3,0,bars,adaptivePeriodColumn.values);
+
+   if(copied!=bars)
+     {
+      IndicatorRelease(handle);
+      errorMessage=StringFormat("Adaptive Period CopyBuffer expected %d, got %d",bars,copied);
+      return(false);
+     }
+
+   // Buffer 4: ATR (now exposed by modified indicator)
+   atrColumn.header=StringFormat("ATR_%d",atrPeriod);
+   atrColumn.digits=6;
+   ArrayResize(atrColumn.values,bars);
+   ArraySetAsSeries(atrColumn.values,true);
+
+   copied=CopyBuffer(handle,4,0,bars,atrColumn.values);
+
+   if(copied!=bars)
+     {
+      IndicatorRelease(handle);
+      errorMessage=StringFormat("ATR CopyBuffer expected %d, got %d",bars,copied);
+      return(false);
+     }
+
+   IndicatorRelease(handle);
+   return(true);
+  }
+
+#endif // __LAGUERRE_RSI_MODULE_MQH__

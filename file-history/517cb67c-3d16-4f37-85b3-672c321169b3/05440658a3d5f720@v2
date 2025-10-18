@@ -1,0 +1,102 @@
+"""
+Analyze Sunday trading hours to verify correct behavior.
+
+The test shows:
+- Sunday Nov 10 at 14:05 PST (Pacific Time, UTC-8)
+- Asian exchanges showing session flags
+- US/European exchanges showing 0 flags
+
+Need to verify: Is this Sunday evening UTC when forex reopens?
+"""
+
+from datetime import datetime
+import pytz
+
+# Sunday Nov 10, 2024 at 14:05 PST
+pst = pytz.timezone('US/Pacific')
+sunday_pst = pst.localize(datetime(2024, 11, 10, 14, 5))
+
+# Convert to UTC
+sunday_utc = sunday_pst.astimezone(pytz.UTC)
+
+# Convert to Asian timezones
+tokyo_tz = pytz.timezone('Asia/Tokyo')
+hongkong_tz = pytz.timezone('Asia/Hong_Kong')
+singapore_tz = pytz.timezone('Asia/Singapore')
+
+tokyo_time = sunday_utc.astimezone(tokyo_tz)
+hongkong_time = sunday_utc.astimezone(hongkong_tz)
+singapore_time = sunday_utc.astimezone(singapore_tz)
+
+print("=" * 80)
+print("Timezone Analysis: Sunday Trading Hours")
+print("=" * 80)
+print()
+print(f"Database timestamp: {sunday_pst.strftime('%Y-%m-%d %H:%M %Z')}")
+print(f"UTC time:           {sunday_utc.strftime('%Y-%m-%d %H:%M %Z')}")
+print()
+print("Asian Market Times (same moment):")
+print(f"Tokyo:              {tokyo_time.strftime('%A %Y-%m-%d %H:%M %Z')}")
+print(f"Hong Kong:          {hongkong_time.strftime('%A %Y-%m-%d %H:%M %Z')}")
+print(f"Singapore:          {singapore_time.strftime('%A %Y-%m-%d %H:%M %Z')}")
+print()
+
+# Forex market reopens Sunday 22:00 UTC
+forex_reopen_utc = pytz.UTC.localize(datetime(2024, 11, 10, 22, 0))
+hours_until_reopen = (forex_reopen_utc - sunday_utc).total_seconds() / 3600
+
+print("Forex Market Schedule:")
+print(f"  Closes: Friday 22:00 UTC")
+print(f"  Reopens: Sunday 22:00 UTC")
+print()
+print(f"Time until forex reopens: {hours_until_reopen:.1f} hours")
+print()
+
+if hours_until_reopen < 0:
+    print("✅ Forex market IS OPEN (past Sunday 22:00 UTC)")
+    print(f"  → Market reopened {abs(hours_until_reopen):.1f} hours ago")
+    print()
+    print("Expected Behavior:")
+    print("  - Asian exchanges: OPEN (Monday morning in Asia)")
+    print("  - US exchanges: CLOSED (Sunday evening in US)")
+    print("  - European exchanges: CLOSED (Sunday night in Europe)")
+else:
+    print("❌ Forex market IS CLOSED (before Sunday 22:00 UTC)")
+    print(f"  → Market opens in {hours_until_reopen:.1f} hours")
+
+print()
+print("=" * 80)
+print("Trading Hours Check")
+print("=" * 80)
+
+# Tokyo trading hours: 9:00-15:30 JST (with lunch 11:30-12:30)
+tokyo_hour = tokyo_time.hour
+if tokyo_hour >= 9 and tokyo_hour < 15:
+    print(f"Tokyo (07:05 JST):   ✅ IN TRADING HOURS (9:00-15:30)")
+elif tokyo_hour == 15 and tokyo_time.minute < 30:
+    print(f"Tokyo (07:05 JST):   ✅ IN TRADING HOURS (9:00-15:30)")
+else:
+    print(f"Tokyo (07:05 JST):   ❌ OUTSIDE TRADING HOURS")
+
+# Hong Kong trading hours: 9:30-16:00 HKT (with lunch 12:00-13:00)
+hk_hour = hongkong_time.hour
+if hk_hour >= 9 and hk_hour < 16:
+    if hk_hour == 9 and hongkong_time.minute < 30:
+        print(f"Hong Kong (06:05 HKT): ❌ BEFORE OPEN (opens 9:30)")
+    else:
+        print(f"Hong Kong (06:05 HKT): ✅ IN TRADING HOURS (9:30-16:00)")
+elif hk_hour == 16 and hongkong_time.minute == 0:
+    print(f"Hong Kong (06:05 HKT): ✅ IN TRADING HOURS (9:30-16:00)")
+else:
+    print(f"Hong Kong (06:05 HKT): ❌ OUTSIDE TRADING HOURS")
+
+# Singapore trading hours: 9:00-17:00 SGT (with lunch 12:00-13:00)
+sg_hour = singapore_time.hour
+if sg_hour >= 9 and sg_hour < 17:
+    print(f"Singapore (06:05 SGT): ❌ BEFORE OPEN (opens 9:00)")
+elif sg_hour == 17 and singapore_time.minute == 0:
+    print(f"Singapore (06:05 SGT): ✅ IN TRADING HOURS (9:00-17:00)")
+else:
+    print(f"Singapore (06:05 SGT): ❌ OUTSIDE TRADING HOURS")
+
+print()

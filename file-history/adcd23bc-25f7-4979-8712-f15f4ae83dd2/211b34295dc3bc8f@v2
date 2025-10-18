@@ -1,0 +1,221 @@
+# SSH Key Mapping Discovery
+
+**Date**: 2025-10-16
+**Status**: Implementation successful, configuration issue discovered
+
+---
+
+## TL;DR
+
+✅ **Option 1b implementation complete** - All SSH keys synced to Doppler with AOD/IOI documentation
+
+⚠️ **Configuration issue discovered**: All 3 SSH keys (`id_ed25519_tainora`, `id_ed25519_eonlabs`, `id_ed25519_459ecs`) are currently registered to the **terrylica GitHub account only**
+
+---
+
+## Implementation Status
+
+### ✅ Completed Successfully
+
+1. **SSH keys uploaded to Doppler** (`claude-config/dev`):
+   - `SSH_KEY_TAINORA`
+   - `SSH_KEY_EONLABS`
+   - `SSH_KEY_459ECS`
+
+2. **AOD/IOI compliant documentation attached**:
+   - Machine-readable YAML notes
+   - Version-tracked evolution
+   - Intent over implementation focus
+   - No promotional language
+
+3. **sync-ssh-keys script created**: `~/.local/bin/sync-ssh-keys`
+   - 20 lines of code
+   - Automatic permission fixing (600)
+   - Sanity checks for file size
+
+4. **SSH config fixed**:
+   - Match directives now properly control key selection
+   - Directory-based patterns functional
+   - `IdentitiesOnly yes` properly enforced
+
+### 🔍 Discovery: SSH Key Registration Mismatch
+
+**Test results** (all keys → terrylica account):
+
+```bash
+$ ssh -o IdentityFile=~/.ssh/id_ed25519_tainora -T git@github.com
+Hi terrylica! You've successfully authenticated...
+
+$ ssh -o IdentityFile=~/.ssh/id_ed25519_eonlabs -T git@github.com
+Hi terrylica! You've successfully authenticated...
+
+$ ssh -o IdentityFile=~/.ssh/id_ed25519_459ecs -T git@github.com
+Hi terrylica! You've successfully authenticated...
+```
+
+**What this means**:
+- All 3 SSH private keys have their corresponding public keys registered on GitHub
+- But ALL 3 public keys are registered to the **terrylica** account only
+- The tainora and 459ecs accounts either:
+  - Don't have these keys registered yet, OR
+  - Don't exist as separate GitHub accounts
+
+**Evidence of intended multi-account setup**:
+- `~/.gitconfig-tainora` exists with `username = tainora` and `email = usalchemist@gmail.com`
+- SSH config has directory-based patterns: `/scripts` → tainora, `/eon/|ml-` → terrylica, `/459ecs` → 459ecs
+- Git includeIf directive: `gitdir:/Users/terryli/scripts/` → `.gitconfig-tainora`
+
+---
+
+## Current Architecture (As-Implemented)
+
+```
+SSH Keys (all registered to terrylica):
+├── id_ed25519_tainora    → terrylica@github.com
+├── id_ed25519_eonlabs    → terrylica@github.com
+└── id_ed25519_459ecs     → terrylica@github.com
+
+Directory Patterns (functional, but all use same account):
+├── /scripts     → uses id_ed25519_tainora (but authenticates as terrylica)
+├── /eon/|ml-    → uses id_ed25519_eonlabs (authenticates as terrylica)
+└── /459ecs      → uses id_ed25519_459ecs (but authenticates as terrylica)
+
+Git Identity (works correctly):
+├── /scripts     → commits as "tainora <usalchemist@gmail.com>"
+└── other dirs   → commits as default git identity
+```
+
+**Current behavior**:
+- ✅ Git commits use correct identity (via gitconfig includeIf)
+- ✅ Different SSH keys used per directory (via SSH Match)
+- ⚠️ All GitHub operations authenticate as terrylica account
+- ⚠️ Cannot push to tainora/* repositories (permission denied - wrong account)
+
+---
+
+## Resolution Options
+
+### Option A: Register Keys to Correct GitHub Accounts
+
+**Assumption**: tainora and 459ecs GitHub accounts exist
+
+**Steps**:
+1. Log into tainora@github.com → Settings → SSH Keys
+2. Add public key from `~/.ssh/id_ed25519_tainora.pub`
+3. Remove this key from terrylica@github.com (to avoid conflicts)
+4. Repeat for 459ecs account
+
+**Result**: True multi-account setup with automatic selection
+
+**Verification**:
+```bash
+cd ~/scripts && ssh -T git@github.com  # Should show "Hi tainora!"
+cd ~/eon && ssh -T git@github.com      # Should show "Hi terrylica!"
+cd ~/459ecs && ssh -T git@github.com   # Should show "Hi 459ecs!"
+```
+
+---
+
+### Option B: Generate New Keys for Each Account
+
+**Use when**: You want unique keys per account (better security)
+
+**Steps**:
+```bash
+# Generate new key for tainora
+ssh-keygen -t ed25519 -C "usalchemist@gmail.com" -f ~/.ssh/id_ed25519_tainora_new
+
+# Add to GitHub tainora account
+cat ~/.ssh/id_ed25519_tainora_new.pub  # Copy and add to GitHub
+
+# Update Doppler
+doppler secrets set SSH_KEY_TAINORA \
+  --project claude-config \
+  --config dev \
+  --silent < ~/.ssh/id_ed25519_tainora_new
+
+# Move new key to proper location
+mv ~/.ssh/id_ed25519_tainora ~/.ssh/id_ed25519_tainora_old
+mv ~/.ssh/id_ed25519_tainora_new ~/.ssh/id_ed25519_tainora
+
+# Repeat for 459ecs
+```
+
+**Advantage**: Each account has unique keys (better security isolation)
+
+**Disadvantage**: Current keys need to be regenerated and re-registered
+
+---
+
+### Option C: Keep Current Setup (Single Account)
+
+**Use when**: You only need different git commit identities, not different GitHub accounts
+
+**Current behavior**:
+- All GitHub operations use terrylica account
+- Git commits in `/scripts` show author as "tainora <usalchemist@gmail.com>"
+- Different SSH keys per directory (defense in depth if one key compromised)
+
+**When this works**:
+- terrylica account has access to all repositories
+- You only need different commit author identities
+- Example: Personal vs work commits, but same GitHub account
+
+---
+
+## Recommended Next Steps
+
+1. **Verify GitHub accounts exist**:
+   ```bash
+   # Check if these GitHub accounts exist
+   curl -s https://api.github.com/users/tainora | jq '.login'
+   curl -s https://api.github.com/users/459ecs | jq '.login'
+   ```
+
+2. **Choose resolution option** based on verification results
+
+3. **Update Doppler notes** to reflect actual configuration after resolution
+
+---
+
+## Files Created
+
+### Documentation
+- `/tmp/option-1b-implementation.md` - Complete implementation guide
+- `/tmp/option-1b-vs-1c-complexity-analysis.md` - Decision analysis (1b vs 1c)
+- `/tmp/doppler-ssh-key-note-schema.yaml` - AOD/IOI note schema specification
+- `/tmp/ssh-key-mapping-discovery.md` - This file
+
+### Notes (uploaded to Doppler)
+- `/tmp/ssh-key-notes/SSH_KEY_TAINORA.yaml`
+- `/tmp/ssh-key-notes/SSH_KEY_EONLABS.yaml`
+- `/tmp/ssh-key-notes/SSH_KEY_459ECS.yaml`
+
+### Scripts
+- `~/.local/bin/sync-ssh-keys` - SSH key sync utility (20 LOC)
+- `/tmp/implement-option-1b.sh` - One-time implementation script
+
+---
+
+## Success Criteria (Current Status)
+
+- ✅ All 3 SSH keys stored in Doppler with AOD/IOI compliant notes
+- ✅ `sync-ssh-keys` script created and tested
+- ✅ SSH config properly configured for directory-based key selection
+- ✅ Git commit identity switching works (via gitconfig includeIf)
+- ✅ Zero workflow friction for sync (1 command on new machines)
+- ⚠️ **Blocked**: Multi-account GitHub authentication (keys registered to wrong accounts)
+
+---
+
+## User Action Required
+
+**Question**: Do the GitHub accounts `tainora` and `459ecs` exist?
+
+**If YES** → Proceed with Option A (register keys to correct accounts)
+
+**If NO** → Choose between:
+- Create the GitHub accounts, then Option A
+- Option C (keep single account, different commit identities only)
+
+**If UNCERTAIN** → Run the verification commands above

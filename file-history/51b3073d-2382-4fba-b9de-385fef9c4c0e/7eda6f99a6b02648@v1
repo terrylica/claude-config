@@ -1,0 +1,110 @@
+# Insurance Project Memory
+
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure
+
+**Purpose**: Personal insurance accounts, credentials, and financial records management
+
+---
+
+## Credential Management
+
+**Doppler Project**: `insurance` (production config: `prd`)
+
+**Current Credentials**:
+- Manulife Par Account (`MANULIFE_PAR_*`)
+
+**Access Pattern**:
+```bash
+doppler run --project insurance --config prd -- <command>
+```
+
+**Inline Retrieval**:
+```bash
+doppler secrets get <SECRET_NAME> --project insurance --config prd --plain
+```
+
+**View All Secrets**:
+```bash
+doppler secrets --project insurance --config prd
+```
+
+---
+
+## 1Password CLI Integration
+
+**Tool**: `op` (CLI v2.32.0+)
+**Authentication**: Desktop app integration (biometric)
+**Source Vault**: Employee
+
+### Migration Workflow
+
+**1. Discover Items**:
+```bash
+# Search across all vaults
+op item list --format json | jq -r '.[] | select(.title | contains("<keyword>"))'
+
+# List items in specific vault
+op item list --vault <vault-name>
+```
+
+**2. Inspect Structure**:
+```bash
+# Get item metadata
+op item get <item-id-or-name> --format json | jq '{title, category, fields: [.fields[] | {label, type}]}'
+```
+
+**3. Extract Credentials**:
+```bash
+# Get specific field (concealed fields require --reveal)
+op item get <item-id> --fields label=<field-name> --reveal
+```
+
+**4. Migrate to Doppler**:
+```bash
+# Set secret
+op item get <item-id> --fields label=<field> --reveal | \
+  doppler secrets set <SECRET_NAME> --project insurance --config prd
+
+# Add detailed note
+cat << 'EOF' | doppler secrets notes set <SECRET_NAME> --project insurance
+Source: 1Password <Vault> Vault
+Item: <item-title>
+Category: <category>
+Item ID: <item-id>
+Created: <timestamp>
+Updated: <timestamp>
+Migrated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+```
+
+**5. Verify**:
+```bash
+doppler run --project insurance --config prd -- env | grep <SECRET_PREFIX>
+```
+
+---
+
+## Global Toolchain
+
+**Parent Config**: [`~/.claude/CLAUDE.md`](/Users/terryli/.claude/CLAUDE.md)
+**Doppler Integration**: [`~/.claude/specifications/doppler-integration.yaml`](/Users/terryli/.claude/specifications/doppler-integration.yaml)
+**Credential Management**: [`~/.claude/docs/setup/credential-management.md`](/Users/terryli/.claude/docs/setup/credential-management.md)
+
+---
+
+## Development Standards
+
+**Python**: `uv run --active python -m <module>`
+**Versioning**: SemVer 2.0.0
+**Paths**: Always absolute (`/Users/terryli/...`), space after extension
+**Security**: Never commit secrets; use Doppler injection
+
+---
+
+## Project Structure
+
+```
+~/own/insurance/
+├── CLAUDE.md          # This file (project memory)
+└── .git/              # Version control
+```

@@ -1,0 +1,1004 @@
+# Universal Validation Architecture - Phased Migration Plan
+
+**Date**: 2025-10-16
+**Status**: Ready for implementation (pending spike test validation)
+**Estimated Duration**: 2-3 days (assuming spikes pass)
+
+---
+
+## Pre-Requisites
+
+### Spike Tests (MUST PASS FIRST)
+1. ✅ Spike 1: MT5 Python API custom indicator access → `/tmp/spike_1_mt5_indicator_access.py`
+2. ✅ Spike 2: Registry configuration pattern → `/tmp/spike_2_registry_pattern.py`
+3. ✅ Spike 3: DuckDB performance (5000+ bars) → `/tmp/spike_3_duckdb_performance.py`
+4. ✅ Spike 4: Backward compatibility → `/tmp/spike_4_backward_compatibility.py`
+
+**Action**: Run all 4 spike tests and document results before proceeding.
+
+### Dependencies Installation
+```bash
+# Install Python packages (Wine Python environment)
+CX_BOTTLE="MetaTrader 5" \
+WINEPREFIX="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5" \
+wine "C:\\Program Files\\Python312\\python.exe" -m pip install duckdb pyyaml
+```
+
+---
+
+## Phase 1: Core Infrastructure (Day 1, Morning)
+
+**Goal**: Create registry.yaml + DuckDB schema + validation logic
+**Duration**: 3-4 hours
+**Risk**: LOW (isolated new files, no existing code modified)
+
+### Task 1.1: Create registry.yaml
+**File**: `users/crossover/indicators/registry.yaml`
+**Content**: Full Laguerre RSI indicator configuration
+
+```yaml
+indicators:
+  laguerre_rsi:
+    name: "ATR Adaptive Laguerre RSI"
+    mql5:
+      file: "PythonInterop/ATR_Adaptive_Laguerre_RSI.mq5"
+      compiled: "PythonInterop/ATR_Adaptive_Laguerre_RSI.ex5"
+      buffers:
+        - index: 0
+          name: "laguerre_rsi"
+          type: "double"
+        - index: 1
+          name: "signal"
+          type: "int"
+        - index: 2
+          name: "smoothed_price"
+          type: "double"
+      parameters:
+        - name: "inpInstanceID"
+          type: "string"
+          default: "A"
+        - name: "inpAtrPeriod"
+          type: "int"
+          default: 32
+        - name: "inpRsiPrice"
+          type: "enum"
+          default: "PRICE_CLOSE"
+          enum_values:
+            - PRICE_CLOSE: 0
+            - PRICE_OPEN: 1
+            - PRICE_HIGH: 2
+            - PRICE_LOW: 3
+            - PRICE_MEDIAN: 4
+            - PRICE_TYPICAL: 5
+            - PRICE_WEIGHTED: 6
+        - name: "inpRsiMaPeriod"
+          type: "int"
+          default: 5
+        - name: "inpRsiMaType"
+          type: "enum"
+          default: "MODE_EMA"
+          enum_values:
+            - MODE_SMA: 0
+            - MODE_EMA: 1
+            - MODE_SMMA: 2
+            - MODE_LWMA: 3
+        - name: "inpLevelUp"
+          type: "double"
+          default: 0.85
+        - name: "inpLevelDown"
+          type: "double"
+          default: 0.15
+    python:
+      module: "indicators.laguerre_rsi"
+      function: "calculate_laguerre_rsi_indicator"
+      parameters:
+        - name: "atr_period"
+          mql5_param: "inpAtrPeriod"
+        - name: "price_type"
+          mql5_param: "inpRsiPrice"
+          mapping:
+            PRICE_CLOSE: "close"
+            PRICE_OPEN: "open"
+            PRICE_HIGH: "high"
+            PRICE_LOW: "low"
+            PRICE_MEDIAN: "median"
+            PRICE_TYPICAL: "typical"
+            PRICE_WEIGHTED: "weighted"
+        - name: "price_smooth_period"
+          mql5_param: "inpRsiMaPeriod"
+        - name: "price_smooth_method"
+          mql5_param: "inpRsiMaType"
+          mapping:
+            MODE_SMA: "sma"
+            MODE_EMA: "ema"
+            MODE_SMMA: "smma"
+            MODE_LWMA: "lwma"
+        - name: "level_up"
+          mql5_param: "inpLevelUp"
+        - name: "level_down"
+          mql5_param: "inpLevelDown"
+    validation:
+      warmup_bars: 100
+      metrics:
+        - name: "pearson_r"
+          threshold: 0.999
+          operator: ">="
+          description: "Pearson correlation coefficient"
+        - name: "rmse"
+          threshold: 0.0001
+          operator: "<="
+          description: "Root Mean Square Error"
+        - name: "mae"
+          threshold: 0.0001
+          operator: "<="
+          description: "Mean Absolute Error"
+        - name: "max_error"
+          threshold: 0.001
+          operator: "<="
+          description: "Maximum absolute error"
+```
+
+**Validation**:
+- Load with `yaml.safe_load()`
+- Verify all sections present
+- Test enum mappings
+
+---
+
+### Task 1.2: Create DuckDB schema initialization
+**File**: `users/crossover/validation_schema.sql`
+**Purpose**: Reusable schema creation script
+
+```sql
+-- Sequences for auto-increment
+CREATE SEQUENCE IF NOT EXISTS run_id_seq START 1;
+CREATE SEQUENCE IF NOT EXISTS metric_id_seq START 1;
+
+-- Validation runs metadata
+CREATE TABLE IF NOT EXISTS validation_runs (
+    run_id INTEGER PRIMARY KEY DEFAULT nextval('run_id_seq'),
+    indicator_name VARCHAR,
+    symbol VARCHAR,
+    timeframe VARCHAR,
+    scenario VARCHAR,
+    bars_count INTEGER,
+    warmup_bars INTEGER,
+    parameters JSON,
+    timestamp TIMESTAMP,
+    passed BOOLEAN,
+    notes VARCHAR
+);
+
+-- Time series data (OHLC + indicator values)
+CREATE TABLE IF NOT EXISTS indicator_timeseries (
+    run_id INTEGER,
+    bar_index INTEGER,
+    time TIMESTAMP,
+    open DOUBLE,
+    high DOUBLE,
+    low DOUBLE,
+    close DOUBLE,
+    tick_volume BIGINT,
+    -- MQL5 indicator values (generic columns for flexibility)
+    mql5_buffer_0 DOUBLE,
+    mql5_buffer_1 DOUBLE,
+    mql5_buffer_2 DOUBLE,
+    -- Python indicator values
+    python_buffer_0 DOUBLE,
+    python_buffer_1 DOUBLE,
+    python_buffer_2 DOUBLE,
+    -- Metadata
+    is_warmup BOOLEAN,
+    PRIMARY KEY (run_id, bar_index),
+    FOREIGN KEY (run_id) REFERENCES validation_runs(run_id)
+);
+
+-- Validation metrics
+CREATE TABLE IF NOT EXISTS validation_metrics (
+    metric_id INTEGER PRIMARY KEY DEFAULT nextval('metric_id_seq'),
+    run_id INTEGER,
+    metric_name VARCHAR,
+    metric_value DOUBLE,
+    threshold DOUBLE,
+    operator VARCHAR,
+    passed BOOLEAN,
+    timestamp TIMESTAMP,
+    FOREIGN KEY (run_id) REFERENCES validation_runs(run_id)
+);
+
+-- Indexes for query performance
+CREATE INDEX IF NOT EXISTS idx_validation_runs_indicator ON validation_runs(indicator_name);
+CREATE INDEX IF NOT EXISTS idx_validation_runs_timestamp ON validation_runs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_timeseries_run_warmup ON indicator_timeseries(run_id, is_warmup);
+CREATE INDEX IF NOT EXISTS idx_metrics_run ON validation_metrics(run_id);
+```
+
+**Validation**:
+- Execute SQL in DuckDB
+- Verify all tables created
+- Test auto-increment sequences
+
+---
+
+### Task 1.3: Create validate_indicator.py (core logic)
+**File**: `users/crossover/validate_indicator.py`
+**Purpose**: Universal validation script
+
+**Key functions**:
+
+```python
+def load_registry(registry_path: str) -> dict:
+    """Load and parse registry.yaml."""
+    with open(registry_path) as f:
+        return yaml.safe_load(f)
+
+
+def get_indicator_config(registry: dict, indicator_name: str) -> dict:
+    """Get configuration for specific indicator."""
+    if indicator_name not in registry['indicators']:
+        raise ValueError(f"Indicator {indicator_name} not found in registry")
+    return registry['indicators'][indicator_name]
+
+
+def read_mql5_indicator(
+    config: dict,
+    symbol: str,
+    timeframe: int,
+    bars: int,
+    parameters: list
+) -> dict:
+    """Read MQL5 indicator buffer values using MT5 Python API.
+
+    Returns:
+        dict: {
+            'buffer_0': np.array,
+            'buffer_1': np.array,
+            'buffer_2': np.array,
+            ...
+        }
+    """
+    # Create indicator handle
+    handle = mt5.create_indicator(
+        symbol=symbol,
+        timeframe=timeframe,
+        indicator_name=config['mql5']['file'].replace('.mq5', ''),
+        parameters=parameters
+    )
+
+    if handle is None or handle == -1:
+        raise RuntimeError(f"Failed to create indicator: {mt5.last_error()}")
+
+    # Read all configured buffers
+    buffers = {}
+    for buffer_config in config['mql5']['buffers']:
+        buffer_idx = buffer_config['index']
+        buffer_name = buffer_config['name']
+        values = mt5.copy_buffer(handle, buffer_idx, 0, bars)
+
+        if values is None or len(values) == 0:
+            raise RuntimeError(f"Failed to read buffer {buffer_idx}: {mt5.last_error()}")
+
+        buffers[f'buffer_{buffer_idx}'] = values
+
+    # Release handle
+    mt5.release_indicator(handle)
+
+    return buffers
+
+
+def read_python_indicator(
+    config: dict,
+    df: pd.DataFrame,
+    parameters: dict
+) -> pd.DataFrame:
+    """Dynamically import and call Python indicator function.
+
+    Returns:
+        pd.DataFrame with indicator columns
+    """
+    # Dynamic import
+    module_name = config['python']['module']
+    function_name = config['python']['function']
+
+    module = importlib.import_module(module_name)
+    func = getattr(module, function_name)
+
+    # Call function
+    result = func(df, **parameters)
+    return result
+
+
+def compare_indicators(
+    mql5_values: np.array,
+    python_values: np.array,
+    warmup_bars: int
+) -> dict:
+    """Calculate validation metrics (correlation, RMSE, MAE, etc.)."""
+    # Exclude warmup bars
+    mql5 = mql5_values[warmup_bars:]
+    python = python_values[warmup_bars:]
+
+    # Remove NaN values
+    mask = ~(np.isnan(mql5) | np.isnan(python))
+    mql5_clean = mql5[mask]
+    python_clean = python[mask]
+
+    # Calculate metrics
+    metrics = {
+        'pearson_r': np.corrcoef(mql5_clean, python_clean)[0, 1],
+        'rmse': np.sqrt(np.mean((mql5_clean - python_clean) ** 2)),
+        'mae': np.mean(np.abs(mql5_clean - python_clean)),
+        'max_error': np.max(np.abs(mql5_clean - python_clean)),
+        'r_squared': 1.0 - np.sum((mql5_clean - python_clean) ** 2) / np.sum((mql5_clean - mql5_clean.mean()) ** 2)
+    }
+
+    return metrics
+
+
+def store_validation_run(
+    conn: duckdb.DuckDBPyConnection,
+    metadata: dict,
+    timeseries: pd.DataFrame,
+    metrics: dict
+) -> int:
+    """Store validation results in DuckDB."""
+    # Insert run metadata
+    run_id = conn.execute("""
+        INSERT INTO validation_runs
+        (indicator_name, symbol, timeframe, scenario, bars_count, warmup_bars, parameters, timestamp, passed, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING run_id
+    """, [
+        metadata['indicator_name'],
+        metadata['symbol'],
+        metadata['timeframe'],
+        metadata.get('scenario', 'baseline'),
+        metadata['bars_count'],
+        metadata['warmup_bars'],
+        metadata['parameters'],
+        datetime.now(),
+        metadata['passed'],
+        metadata.get('notes', '')
+    ]).fetchone()[0]
+
+    # Insert timeseries
+    timeseries['run_id'] = run_id
+    conn.execute("INSERT INTO indicator_timeseries SELECT * FROM timeseries")
+
+    # Insert metrics
+    for metric_name, metric_data in metrics.items():
+        conn.execute("""
+            INSERT INTO validation_metrics
+            (run_id, metric_name, metric_value, threshold, operator, passed, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, [
+            run_id,
+            metric_name,
+            metric_data['value'],
+            metric_data['threshold'],
+            metric_data['operator'],
+            metric_data['passed'],
+            datetime.now()
+        ])
+
+    return run_id
+
+
+def validate_indicator(
+    indicator_name: str,
+    symbol: str,
+    timeframe: str,
+    bars: int,
+    registry_path: str = "indicators/registry.yaml",
+    db_path: str = "validation.ddb"
+) -> bool:
+    """Main validation function."""
+    # Load registry
+    registry = load_registry(registry_path)
+    config = get_indicator_config(registry, indicator_name)
+
+    # MT5 connection
+    if not mt5.initialize():
+        raise RuntimeError(f"MT5 initialization failed: {mt5.last_error()}")
+
+    try:
+        # Select symbol
+        if not mt5.symbol_select(symbol, True):
+            raise RuntimeError(f"Failed to select {symbol}: {mt5.last_error()}")
+
+        # Fetch OHLC data
+        timeframe_mt5 = parse_timeframe(timeframe)
+        rates = mt5.copy_rates_from_pos(symbol, timeframe_mt5, 0, bars)
+
+        if rates is None or len(rates) == 0:
+            raise RuntimeError(f"Failed to fetch rates: {mt5.last_error()}")
+
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+
+        # Read MQL5 indicator
+        mql5_buffers = read_mql5_indicator(config, symbol, timeframe_mt5, bars, get_mql5_parameters(config))
+
+        # Read Python indicator
+        python_result = read_python_indicator(config, df, get_python_parameters(config))
+
+        # Compare indicators
+        metrics = compare_indicators(
+            mql5_buffers['buffer_0'],
+            python_result['laguerre_rsi'].values,
+            config['validation']['warmup_bars']
+        )
+
+        # Evaluate metrics
+        passed = evaluate_metrics(metrics, config['validation']['metrics'])
+
+        # Store results
+        conn = duckdb.connect(db_path)
+        run_id = store_validation_run(conn, metadata, timeseries, metrics)
+        conn.close()
+
+        return passed
+
+    finally:
+        mt5.shutdown()
+```
+
+**Validation**:
+- Test with mock data
+- Verify all functions work
+- Test error handling
+
+---
+
+## Phase 2: Integration (Day 1, Afternoon)
+
+**Goal**: Extend export_aligned.py with --validate flag
+**Duration**: 2-3 hours
+**Risk**: LOW (opt-in extension, existing usage unchanged)
+
+### Task 2.1: Extend export_aligned.py
+**File**: `users/crossover/export_aligned.py`
+**Changes**:
+
+```python
+# Add new imports
+from pathlib import Path
+import sys
+
+# Add at end of file (before if __name__ == "__main__":)
+def validate_after_export(
+    symbol: str,
+    period_str: str,
+    num_bars: int,
+    validation_db: str
+):
+    """Run validation after export (optional)."""
+    print("\n" + "=" * 70)
+    print("Running Validation")
+    print("=" * 70)
+    print()
+
+    try:
+        from validate_indicator import validate_indicator
+
+        passed = validate_indicator(
+            indicator_name='laguerre_rsi',
+            symbol=symbol,
+            timeframe=period_str,
+            bars=num_bars,
+            db_path=validation_db
+        )
+
+        if passed:
+            print("\n✅ VALIDATION PASSED")
+            print("   All metrics within thresholds")
+        else:
+            print("\n⚠️  VALIDATION FAILED")
+            print("   Some metrics outside thresholds")
+            print("   Check validation database for details")
+
+        return passed
+
+    except Exception as e:
+        print(f"\n❌ VALIDATION ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+# Modify main() function
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(...)
+
+    # Add new arguments
+    parser.add_argument(
+        '--validate',
+        action='store_true',
+        default=False,
+        help='Run validation after export (default: False)'
+    )
+
+    parser.add_argument(
+        '--validation-db',
+        default=None,
+        help='Validation database path (default: C:\\Users\\crossover\\validation.ddb)'
+    )
+
+    args = parser.parse_args()
+
+    try:
+        # Existing export
+        filepath = export_data(
+            symbol=args.symbol.upper(),
+            period_str=args.period.upper(),
+            num_bars=args.bars,
+            output_dir=args.output,
+            laguerre_atr_period=args.laguerre_atr_period,
+            laguerre_price_smooth_period=args.laguerre_price_smooth_period,
+            laguerre_price_smooth_method=args.laguerre_price_smooth_method
+        )
+
+        print("=" * 70)
+        print("Export completed successfully!")
+        print("=" * 70)
+        print()
+        print(f"File: {filepath}")
+        print()
+
+        # NEW: Optional validation
+        if args.validate:
+            validation_db = args.validation_db or "C:\\Users\\crossover\\validation.ddb"
+            validation_passed = validate_after_export(
+                symbol=args.symbol.upper(),
+                period_str=args.period.upper(),
+                num_bars=args.bars,
+                validation_db=validation_db
+            )
+
+            if not validation_passed:
+                print("\nNote: Export completed but validation did not pass")
+                print("      Review validation database for details")
+                return 0  # Don't fail - export succeeded
+
+        print("Next: Run validation with validate_export.py")
+
+        return 0
+
+    except Exception as e:
+        # Existing error handling
+        ...
+```
+
+**Validation**:
+- Test existing usage: `python export_aligned.py --symbol EURUSD --period M1 --bars 5000`
+- Test new usage: `python export_aligned.py --symbol EURUSD --period M1 --bars 5000 --validate`
+
+---
+
+### Task 2.2: Update indicators/__init__.py
+**File**: `users/crossover/indicators/__init__.py`
+**Purpose**: Add registry loader helpers
+
+```python
+"""Indicators module - Laguerre RSI and registry utilities."""
+
+import yaml
+from pathlib import Path
+
+__all__ = ['load_indicator_registry', 'get_indicator_config', 'calculate_laguerre_rsi_indicator']
+
+from .laguerre_rsi import calculate_laguerre_rsi_indicator
+
+
+def load_indicator_registry(registry_path: str = None) -> dict:
+    """Load indicator registry.yaml.
+
+    Args:
+        registry_path: Path to registry.yaml (default: indicators/registry.yaml)
+
+    Returns:
+        dict: Registry configuration
+    """
+    if registry_path is None:
+        registry_path = Path(__file__).parent / 'registry.yaml'
+
+    with open(registry_path) as f:
+        return yaml.safe_load(f)
+
+
+def get_indicator_config(indicator_name: str, registry_path: str = None) -> dict:
+    """Get configuration for specific indicator.
+
+    Args:
+        indicator_name: Indicator name (e.g., 'laguerre_rsi')
+        registry_path: Path to registry.yaml (optional)
+
+    Returns:
+        dict: Indicator configuration
+    """
+    registry = load_indicator_registry(registry_path)
+
+    if 'indicators' not in registry:
+        raise ValueError("Registry missing 'indicators' section")
+
+    if indicator_name not in registry['indicators']:
+        raise ValueError(f"Indicator '{indicator_name}' not found in registry")
+
+    return registry['indicators'][indicator_name]
+```
+
+---
+
+## Phase 3: Testing (Day 2, Morning)
+
+**Goal**: End-to-end validation with real data
+**Duration**: 3-4 hours
+**Risk**: MEDIUM (may discover bugs in implementation)
+
+### Task 3.1: Baseline validation scenario
+**Command**:
+```bash
+CX_BOTTLE="MetaTrader 5" \
+WINEPREFIX="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5" \
+wine "C:\\Program Files\\Python312\\python.exe" \
+  "C:\\users\\crossover\\export_aligned.py" \
+  --symbol EURUSD --period M1 --bars 5000 --validate
+```
+
+**Expected results**:
+- Export CSV with 5000 bars
+- Validation runs successfully
+- Correlation ≥ 0.999
+- validation.ddb created with run_id=1
+
+**Verification**:
+```python
+import duckdb
+conn = duckdb.connect('C:\\Users\\crossover\\validation.ddb', read_only=True)
+
+# Check runs
+print(conn.execute("SELECT * FROM validation_runs").fetchall())
+
+# Check metrics
+print(conn.execute("SELECT metric_name, metric_value, passed FROM validation_metrics WHERE run_id = 1").fetchall())
+
+conn.close()
+```
+
+---
+
+### Task 3.2: Test with different parameters
+**Command**:
+```bash
+# Test with SMMA instead of EMA
+wine python export_aligned.py \
+  --symbol EURUSD --period M1 --bars 5000 \
+  --laguerre-price-smooth-method smma \
+  --validate
+```
+
+**Expected results**:
+- New run_id=2
+- Different adaptive_period values (SMMA vs EMA)
+- Correlation still ≥ 0.999
+
+---
+
+### Task 3.3: Test with different symbol/timeframe
+**Command**:
+```bash
+# Test with XAUUSD H1
+wine python export_aligned.py \
+  --symbol XAUUSD --period H1 --bars 1000 \
+  --validate
+```
+
+**Expected results**:
+- New run_id=3
+- Works with different market (gold)
+- Works with different timeframe (H1)
+
+---
+
+### Task 3.4: Test error handling
+**Tests**:
+1. Invalid symbol: `--symbol INVALID`
+2. Invalid timeframe: `--period X99`
+3. Missing indicator: Temporarily rename ATR_Adaptive_Laguerre_RSI.ex5
+
+**Expected results**:
+- Clear error messages
+- No database corruption
+- Export fails gracefully
+
+---
+
+## Phase 4: Documentation (Day 2, Afternoon)
+
+**Goal**: Document workflow and patterns
+**Duration**: 2-3 hours
+**Risk**: LOW (documentation only)
+
+### Task 4.1: Create VALIDATION_WORKFLOW.md
+**File**: `docs/guides/VALIDATION_WORKFLOW.md`
+**Content**:
+- Overview of validation architecture
+- Step-by-step usage guide
+- Registry.yaml structure reference
+- DuckDB schema reference
+- Adding new indicators
+- Troubleshooting guide
+
+---
+
+### Task 4.2: Update CLAUDE.md
+**File**: `CLAUDE.md`
+**Changes**:
+- Add VALIDATION_WORKFLOW.md to Core Guides
+- Update Single Source of Truth table
+- Add validation commands to Key Commands section
+- Update Next Steps section
+
+---
+
+### Task 4.3: Create validation report utility
+**File**: `users/crossover/validation_report.py`
+**Purpose**: Human-readable reports from validation.ddb
+
+```python
+"""Generate validation reports from DuckDB."""
+
+import duckdb
+import argparse
+from datetime import datetime
+
+
+def list_validation_runs(db_path: str):
+    """List all validation runs."""
+    conn = duckdb.connect(db_path, read_only=True)
+
+    runs = conn.execute("""
+        SELECT
+            run_id,
+            indicator_name,
+            symbol,
+            timeframe,
+            bars_count,
+            timestamp,
+            passed
+        FROM validation_runs
+        ORDER BY timestamp DESC
+    """).fetchall()
+
+    print("\nValidation Runs:")
+    print("=" * 100)
+    print(f"{'ID':<5} {'Indicator':<20} {'Symbol':<8} {'TF':<5} {'Bars':<6} {'Timestamp':<20} {'Passed':<7}")
+    print("-" * 100)
+
+    for row in runs:
+        passed_str = "✅ PASS" if row[6] else "❌ FAIL"
+        print(f"{row[0]:<5} {row[1]:<20} {row[2]:<8} {row[3]:<5} {row[4]:<6} {row[5]!s:<20} {passed_str:<7}")
+
+    conn.close()
+
+
+def show_run_details(db_path: str, run_id: int):
+    """Show detailed metrics for specific run."""
+    conn = duckdb.connect(db_path, read_only=True)
+
+    # Get run metadata
+    run = conn.execute("SELECT * FROM validation_runs WHERE run_id = ?", [run_id]).fetchone()
+
+    if not run:
+        print(f"Run ID {run_id} not found")
+        return
+
+    print(f"\nValidation Run #{run_id}")
+    print("=" * 70)
+    print(f"Indicator: {run[1]}")
+    print(f"Symbol: {run[2]}")
+    print(f"Timeframe: {run[3]}")
+    print(f"Bars: {run[5]}")
+    print(f"Warmup: {run[6]}")
+    print(f"Timestamp: {run[8]}")
+    print(f"Passed: {'✅ YES' if run[9] else '❌ NO'}")
+
+    # Get metrics
+    metrics = conn.execute("""
+        SELECT metric_name, metric_value, threshold, operator, passed
+        FROM validation_metrics
+        WHERE run_id = ?
+        ORDER BY metric_name
+    """, [run_id]).fetchall()
+
+    print("\nMetrics:")
+    print("-" * 70)
+    for metric in metrics:
+        status = "✅ PASS" if metric[4] else "❌ FAIL"
+        print(f"{status} {metric[0]:<15} = {metric[1]:.6f} {metric[3]} {metric[2]}")
+
+    conn.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Validation report generator')
+    parser.add_argument('--db', default='validation.ddb', help='Database path')
+
+    subparsers = parser.add_subparsers(dest='command')
+
+    # List command
+    subparsers.add_parser('list', help='List all validation runs')
+
+    # Show command
+    show_parser = subparsers.add_parser('show', help='Show run details')
+    show_parser.add_argument('run_id', type=int, help='Run ID')
+
+    args = parser.parse_args()
+
+    if args.command == 'list':
+        list_validation_runs(args.db)
+    elif args.command == 'show':
+        show_run_details(args.db, args.run_id)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**Usage**:
+```bash
+# List all runs
+python validation_report.py list
+
+# Show details for run 1
+python validation_report.py show 1
+```
+
+---
+
+## Phase 5: Future Expansion (Optional, Day 3+)
+
+**Goal**: Prepare for adding more indicators
+**Duration**: Variable
+**Risk**: LOW (incremental improvements)
+
+### Task 5.1: Document "Adding New Indicator" workflow
+**File**: `docs/guides/ADDING_INDICATORS.md`
+**Content**:
+- Step 1: Add indicator config to registry.yaml
+- Step 2: Implement Python indicator function
+- Step 3: Test with validate_indicator.py
+- Step 4: Document in CLAUDE.md
+
+---
+
+### Task 5.2: Create indicator template generator
+**File**: `tools/create_indicator_config.py`
+**Purpose**: Interactive tool to generate registry.yaml entries
+
+---
+
+### Task 5.3: Add more indicators to registry
+**Candidates**:
+- RSI (simple, good test case)
+- ATR (already implemented in Laguerre RSI)
+- Moving Averages (SMA, EMA, SMMA, LWMA)
+
+---
+
+## Rollback Plan
+
+If implementation fails at any phase:
+
+### Rollback Phase 1-2 (Files created, export_aligned.py modified)
+```bash
+# Revert export_aligned.py
+git checkout users/crossover/export_aligned.py
+
+# Remove new files
+rm users/crossover/indicators/registry.yaml
+rm users/crossover/validate_indicator.py
+rm users/crossover/validation_schema.sql
+rm users/crossover/validation.ddb
+```
+
+**Impact**: None (existing workflow unchanged)
+
+### Rollback Phase 3-4 (Testing/Documentation)
+```bash
+# Remove documentation
+rm docs/guides/VALIDATION_WORKFLOW.md
+rm users/crossover/validation_report.py
+
+# Restore CLAUDE.md
+git checkout CLAUDE.md
+```
+
+**Impact**: None (no functional changes)
+
+---
+
+## Success Criteria
+
+### Phase 1: Infrastructure
+- ✅ registry.yaml loads without errors
+- ✅ DuckDB schema creates successfully
+- ✅ validate_indicator.py passes unit tests
+
+### Phase 2: Integration
+- ✅ export_aligned.py existing usage works unchanged
+- ✅ export_aligned.py --validate flag works end-to-end
+- ✅ No breaking changes to API
+
+### Phase 3: Testing
+- ✅ Baseline validation (EURUSD M1) correlation ≥ 0.999
+- ✅ Different parameters work (SMMA, LWMA)
+- ✅ Different symbol/timeframe work (XAUUSD H1)
+- ✅ Error handling works gracefully
+
+### Phase 4: Documentation
+- ✅ VALIDATION_WORKFLOW.md complete
+- ✅ CLAUDE.md updated
+- ✅ validation_report.py works
+
+---
+
+## Timeline Summary
+
+| Phase | Duration | Risk | Status |
+|-------|----------|------|--------|
+| Spike Tests | 1-2 hours | HIGH | ⏳ Pending |
+| Phase 1: Infrastructure | 3-4 hours | LOW | ⏳ Waiting spikes |
+| Phase 2: Integration | 2-3 hours | LOW | ⏳ Waiting Phase 1 |
+| Phase 3: Testing | 3-4 hours | MEDIUM | ⏳ Waiting Phase 2 |
+| Phase 4: Documentation | 2-3 hours | LOW | ⏳ Waiting Phase 3 |
+| **TOTAL** | **11-16 hours** (2-3 days) | **MEDIUM** | **Ready** |
+
+---
+
+## Next Immediate Actions
+
+1. ✅ Run Spike 1 (MT5 Python API indicator access) - **CRITICAL**
+2. ✅ Run Spike 2 (Registry pattern)
+3. ✅ Run Spike 3 (DuckDB performance)
+4. ✅ Run Spike 4 (Backward compatibility)
+5. 📝 Document spike results
+6. 🚦 GO/NO-GO decision based on spike results
+7. 🏗️ Begin Phase 1 if all spikes pass
+
+---
+
+## Risk Mitigation
+
+### Risk 1: MT5 Python API doesn't support custom indicators
+**Mitigation**: Create LaguerreRSIModule.mqh + extend ExportAligned.mq5 (fallback)
+**Impact**: +4 hours implementation time
+
+### Risk 2: Registry pattern too complex
+**Mitigation**: Simplify to JSON or hard-coded config
+**Impact**: -2 hours (simpler), but less extensible
+
+### Risk 3: DuckDB performance inadequate
+**Mitigation**: Use SQLite or PostgreSQL instead
+**Impact**: +2 hours migration
+
+### Risk 4: Correlation < 0.999
+**Mitigation**: Review Python implementation, adjust warmup_bars
+**Impact**: Debugging time (variable)
+
+---
+
+## Conclusion
+
+**Ready to proceed**: ✅ YES (pending spike validation)
+
+**Confidence level**: HIGH
+- Plan is comprehensive
+- Risks identified and mitigated
+- Backward compatibility preserved
+- Rollback plan in place
+
+**Estimated success rate**: 85% (assuming spikes pass)

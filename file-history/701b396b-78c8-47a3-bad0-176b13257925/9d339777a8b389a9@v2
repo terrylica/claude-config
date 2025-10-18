@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""
+Phase 2: Statistical analysis of normalized OHLC metrics (v1.2.0)
+
+Analyzes the distribution and characteristics of:
+- range_per_spread: (High-Low) / standard_spread_avg
+- range_per_tick: (High-Low) / tick_count_standard
+- body_per_spread: abs(Close-Open) / standard_spread_avg
+- body_per_tick: abs(Close-Open) / tick_count_standard
+
+Generates comprehensive statistics and identifies interesting patterns.
+"""
+
+import sys
+from pathlib import Path
+
+# Add project source to path
+project_src = Path("/Users/terryli/eon/exness-data-preprocess/src")
+sys.path.insert(0, str(project_src))
+
+import duckdb
+import pandas as pd
+
+
+def main():
+    duckdb_path = Path("/tmp/exness-duckdb-test/refactored/eurusd.duckdb")
+
+    print("=== Phase 2: Statistical Analysis of Normalized Metrics ===\n")
+
+    conn = duckdb.connect(str(duckdb_path), read_only=True)
+
+    # 1. Basic descriptive statistics
+    print("1. Descriptive Statistics (All Metrics)")
+    print("=" * 80)
+    stats = conn.execute("""
+        SELECT
+            COUNT(*) as total_bars,
+            COUNT(range_per_spread) as non_null_count,
+            -- range_per_spread
+            MIN(range_per_spread) as range_per_spread_min,
+            AVG(range_per_spread) as range_per_spread_avg,
+            MEDIAN(range_per_spread) as range_per_spread_median,
+            MAX(range_per_spread) as range_per_spread_max,
+            STDDEV(range_per_spread) as range_per_spread_std,
+            -- range_per_tick
+            MIN(range_per_tick) as range_per_tick_min,
+            AVG(range_per_tick) as range_per_tick_avg,
+            MEDIAN(range_per_tick) as range_per_tick_median,
+            MAX(range_per_tick) as range_per_tick_max,
+            STDDEV(range_per_tick) as range_per_tick_std,
+            -- body_per_spread
+            MIN(body_per_spread) as body_per_spread_min,
+            AVG(body_per_spread) as body_per_spread_avg,
+            MEDIAN(body_per_spread) as body_per_spread_median,
+            MAX(body_per_spread) as body_per_spread_max,
+            STDDEV(body_per_spread) as body_per_spread_std,
+            -- body_per_tick
+            MIN(body_per_tick) as body_per_tick_min,
+            AVG(body_per_tick) as body_per_tick_avg,
+            MEDIAN(body_per_tick) as body_per_tick_median,
+            MAX(body_per_tick) as body_per_tick_max,
+            STDDEV(body_per_tick) as body_per_tick_std
+        FROM ohlc_1m
+    """).fetchone()
+
+    print(f"Total bars:        {stats[0]:,}")
+    print(f"Non-NULL bars:     {stats[1]:,} ({100*stats[1]/stats[0]:.1f}%)")
+    print(f"NULL bars:         {stats[0]-stats[1]:,} ({100*(stats[0]-stats[1])/stats[0]:.1f}%)")
+    print()
+
+    print("range_per_spread (Range normalized by standard spread):")
+    print(f"  Min:     {stats[2]:.6f}")
+    print(f"  Mean:    {stats[3]:.6f}")
+    print(f"  Median:  {stats[4]:.6f}")
+    print(f"  Max:     {stats[5]:.6f}")
+    print(f"  Std Dev: {stats[6]:.6f}")
+    print()
+
+    print("range_per_tick (Range per standard tick):")
+    print(f"  Min:     {stats[7]:.9f}")
+    print(f"  Mean:    {stats[8]:.9f}")
+    print(f"  Median:  {stats[9]:.9f}")
+    print(f"  Max:     {stats[10]:.9f}")
+    print(f"  Std Dev: {stats[11]:.9f}")
+    print()
+
+    print("body_per_spread (Body normalized by standard spread):")
+    print(f"  Min:     {stats[12]:.6f}")
+    print(f"  Mean:    {stats[13]:.6f}")
+    print(f"  Median:  {stats[14]:.6f}")
+    print(f"  Max:     {stats[15]:.6f}")
+    print(f"  Std Dev: {stats[16]:.6f}")
+    print()
+
+    print("body_per_tick (Body per standard tick):")
+    print(f"  Min:     {stats[17]:.9f}")
+    print(f"  Mean:    {stats[18]:.9f}")
+    print(f"  Median:  {stats[19]:.9f}")
+    print(f"  Max:     {stats[20]:.9f}")
+    print(f"  Std Dev: {stats[21]:.9f}")
+    print()
+
+    # 2. Percentile distribution
+    print("2. Percentile Distribution")
+    print("=" * 80)
+    percentiles = conn.execute("""
+        SELECT
+            QUANTILE_CONT(range_per_spread, 0.01) as range_spread_p1,
+            QUANTILE_CONT(range_per_spread, 0.05) as range_spread_p5,
+            QUANTILE_CONT(range_per_spread, 0.25) as range_spread_p25,
+            QUANTILE_CONT(range_per_spread, 0.75) as range_spread_p75,
+            QUANTILE_CONT(range_per_spread, 0.95) as range_spread_p95,
+            QUANTILE_CONT(range_per_spread, 0.99) as range_spread_p99,
+            QUANTILE_CONT(body_per_spread, 0.01) as body_spread_p1,
+            QUANTILE_CONT(body_per_spread, 0.05) as body_spread_p5,
+            QUANTILE_CONT(body_per_spread, 0.25) as body_spread_p25,
+            QUANTILE_CONT(body_per_spread, 0.75) as body_spread_p75,
+            QUANTILE_CONT(body_per_spread, 0.95) as body_spread_p95,
+            QUANTILE_CONT(body_per_spread, 0.99) as body_spread_p99
+        FROM ohlc_1m
+    """).fetchone()
+
+    print("range_per_spread percentiles:")
+    print(f"  1st:  {percentiles[0]:.4f}")
+    print(f"  5th:  {percentiles[1]:.4f}")
+    print(f"  25th: {percentiles[2]:.4f}")
+    print(f"  75th: {percentiles[3]:.4f}")
+    print(f"  95th: {percentiles[4]:.4f}")
+    print(f"  99th: {percentiles[5]:.4f}")
+    print()
+
+    print("body_per_spread percentiles:")
+    print(f"  1st:  {percentiles[6]:.4f}")
+    print(f"  5th:  {percentiles[7]:.4f}")
+    print(f"  25th: {percentiles[8]:.4f}")
+    print(f"  75th: {percentiles[9]:.4f}")
+    print(f"  95th: {percentiles[10]:.4f}")
+    print(f"  99th: {percentiles[11]:.4f}")
+    print()
+
+    # 3. Top volatility bars (high range_per_spread)
+    print("3. Top 20 Most Volatile Bars (Highest range_per_spread)")
+    print("=" * 80)
+    top_volatile = conn.execute("""
+        SELECT
+            Timestamp,
+            Open, High, Low, Close,
+            range_per_spread,
+            body_per_spread,
+            standard_spread_avg,
+            tick_count_standard
+        FROM ohlc_1m
+        WHERE range_per_spread IS NOT NULL
+        ORDER BY range_per_spread DESC
+        LIMIT 20
+    """).fetchall()
+
+    print(f"{'Timestamp':<20} {'Open':<10} {'High':<10} {'Low':<10} {'Close':<10} {'Range/Spd':<12} {'Body/Spd':<12} {'Spread':<8} {'Ticks':<6}")
+    print("-" * 120)
+    for row in top_volatile:
+        print(f"{str(row[0]):<20} {row[1]:<10.5f} {row[2]:<10.5f} {row[3]:<10.5f} {row[4]:<10.5f} {row[5]:<12.4f} {row[6]:<12.4f} {row[7]:<8.6f} {row[8]:<6}")
+    print()
+
+    # 4. Strong directional bars (high body_per_spread)
+    print("4. Top 20 Most Directional Bars (Highest body_per_spread)")
+    print("=" * 80)
+    top_directional = conn.execute("""
+        SELECT
+            Timestamp,
+            Open, High, Low, Close,
+            body_per_spread,
+            range_per_spread,
+            standard_spread_avg,
+            tick_count_standard
+        FROM ohlc_1m
+        WHERE body_per_spread IS NOT NULL
+        ORDER BY body_per_spread DESC
+        LIMIT 20
+    """).fetchall()
+
+    print(f"{'Timestamp':<20} {'Open':<10} {'High':<10} {'Low':<10} {'Close':<10} {'Body/Spd':<12} {'Range/Spd':<12} {'Spread':<8} {'Ticks':<6}")
+    print("-" * 120)
+    for row in top_directional:
+        print(f"{str(row[0]):<20} {row[1]:<10.5f} {row[2]:<10.5f} {row[3]:<10.5f} {row[4]:<10.5f} {row[5]:<12.4f} {row[6]:<12.4f} {row[7]:<8.6f} {row[8]:<6}")
+    print()
+
+    # 5. Correlation analysis
+    print("5. Correlation Analysis")
+    print("=" * 80)
+    corr = conn.execute("""
+        SELECT
+            CORR(range_per_spread, body_per_spread) as range_body_corr,
+            CORR(range_per_spread, standard_spread_avg) as range_spread_corr,
+            CORR(range_per_spread, tick_count_standard) as range_ticks_corr,
+            CORR(body_per_spread, standard_spread_avg) as body_spread_corr,
+            CORR(body_per_spread, tick_count_standard) as body_ticks_corr
+        FROM ohlc_1m
+    """).fetchone()
+
+    print(f"range_per_spread vs body_per_spread:    {corr[0]:.4f}")
+    print(f"range_per_spread vs standard_spread:    {corr[1]:.4f}")
+    print(f"range_per_spread vs tick_count:         {corr[2]:.4f}")
+    print(f"body_per_spread vs standard_spread:     {corr[3]:.4f}")
+    print(f"body_per_spread vs tick_count:          {corr[4]:.4f}")
+    print()
+
+    # 6. NULL value analysis
+    print("6. NULL Value Analysis")
+    print("=" * 80)
+    null_analysis = conn.execute("""
+        SELECT
+            COUNT(*) as null_count,
+            MIN(Timestamp) as first_null,
+            MAX(Timestamp) as last_null,
+            AVG(tick_count_raw_spread) as avg_raw_ticks_when_null
+        FROM ohlc_1m
+        WHERE range_per_spread IS NULL
+    """).fetchone()
+
+    print(f"NULL bars:                 {null_analysis[0]:,}")
+    print(f"First NULL:                {null_analysis[1]}")
+    print(f"Last NULL:                 {null_analysis[2]}")
+    print(f"Avg Raw_Spread ticks:      {null_analysis[3]:.1f}")
+    print()
+
+    # 7. Monthly aggregates
+    print("7. Monthly Aggregates")
+    print("=" * 80)
+    monthly = conn.execute("""
+        SELECT
+            DATE_TRUNC('month', Timestamp) as month,
+            COUNT(*) as bars,
+            AVG(range_per_spread) as avg_range_per_spread,
+            AVG(body_per_spread) as avg_body_per_spread,
+            AVG(range_per_tick) as avg_range_per_tick,
+            AVG(body_per_tick) as avg_body_per_tick,
+            COUNT(CASE WHEN range_per_spread IS NULL THEN 1 END) as null_count
+        FROM ohlc_1m
+        GROUP BY DATE_TRUNC('month', Timestamp)
+        ORDER BY month
+    """).fetchall()
+
+    print(f"{'Month':<12} {'Bars':<8} {'Range/Spd':<12} {'Body/Spd':<12} {'Range/Tick':<14} {'Body/Tick':<14} {'NULLs':<6}")
+    print("-" * 90)
+    for row in monthly:
+        month_str = str(row[0])[:7]
+        print(f"{month_str:<12} {row[1]:<8,} {row[2] if row[2] else 0:<12.4f} {row[3] if row[3] else 0:<12.4f} {row[4] if row[4] else 0:<14.9f} {row[5] if row[5] else 0:<14.9f} {row[6]:<6}")
+    print()
+
+    conn.close()
+
+    print("✅ Phase 2 Complete")
+
+
+if __name__ == "__main__":
+    main()

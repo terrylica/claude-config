@@ -17,8 +17,8 @@
 
 
 ---
-**Full Changelog**: https://github.com/Eon-Labs/rangebar/compare/v2.7.0...v2.8.0
+**Full Changelog**: https://github.com/terrylica/claude-config/compare/v2.7.0...v2.8.0
 
 
 ---
-*Full changelog: [CHANGELOG.md](https://github.com/Eon-Labs/claude-config/blob/v2.8.0/CHANGELOG.md)*
+*Full changelog: [CHANGELOG.md](https://github.com/terrylica/claude-config/blob/v2.8.0/CHANGELOG.md)*

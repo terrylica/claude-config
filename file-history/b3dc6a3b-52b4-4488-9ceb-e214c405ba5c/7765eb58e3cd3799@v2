@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+Add Technical Indicators to EURUSD DuckDB
+
+Demonstrates iterative indicator development workflow:
+1. Read data from DuckDB
+2. Calculate new indicator
+3. Update DuckDB with new column
+4. Add metadata describing the indicator
+
+This script adds:
+- RSI (14-period)
+- SMA (20-period, 50-period)
+- Bollinger Bands (20-period, 2 std dev)
+"""
+
+from pathlib import Path
+import duckdb
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
+
+
+def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """Calculate RSI indicator."""
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    return rsi
+
+
+def calculate_sma(series: pd.Series, period: int) -> pd.Series:
+    """Calculate Simple Moving Average."""
+    return series.rolling(window=period).mean()
+
+
+def calculate_bollinger_bands(series: pd.Series, period: int = 20, num_std: float = 2.0):
+    """Calculate Bollinger Bands."""
+    sma = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+
+    upper = sma + (num_std * std)
+    lower = sma - (num_std * std)
+
+    return sma, upper, lower
+
+
+def main():
+    duckdb_path = Path('/tmp/eurusd_data/duckdb/eurusd_1m_2022-2024.duckdb')
+
+    if not duckdb_path.exists():
+        print(f"✗ DuckDB not found: {duckdb_path}")
+        print("  Run process_3year_eurusd_historical.py first")
+        return
+
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║          Adding Technical Indicators to EURUSD Data          ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+
+    conn = duckdb.connect(str(duckdb_path))
+
+    # Get all monthly tables
+    tables = conn.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'main' AND table_name LIKE 'ohlc_%'
+        AND table_name != 'ohlc_all'
+        ORDER BY table_name
+    """).fetchall()
+
+    print(f"\nFound {len(tables)} monthly tables")
+    print(f"Processing each table to add indicators...")
+
+    total_bars = 0
+
+    for i, (table_name,) in enumerate(tables, 1):
+        print(f"\n[{i}/{len(tables)}] {table_name}: ", end='')
+
+        # Read data
+        df = conn.execute(f"SELECT * FROM {table_name}").df()
+        original_rows = len(df)
+
+        # Add RSI
+        df['rsi_14'] = calculate_rsi(df['Close'], period=14)
+
+        # Add SMAs
+        df['sma_20'] = calculate_sma(df['Close'], period=20)
+        df['sma_50'] = calculate_sma(df['Close'], period=50)
+
+        # Add Bollinger Bands
+        bb_middle, bb_upper, bb_lower = calculate_bollinger_bands(df['Close'], period=20, num_std=2.0)
+        df['bb_middle'] = bb_middle
+        df['bb_upper'] = bb_upper
+        df['bb_lower'] = bb_lower
+
+        # Drop and recreate table
+        conn.execute(f"DROP TABLE {table_name}")
+        conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM df")
+
+        # Add metadata for each indicator
+        timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.rsi_14 IS
+            '14-period RSI (Relative Strength Index). Values <30 = oversold, >70 = overbought. Added {timestamp_str}'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.sma_20 IS
+            '20-period Simple Moving Average of Close prices. Added {timestamp_str}'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.sma_50 IS
+            '50-period Simple Moving Average of Close prices. Added {timestamp_str}'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.bb_middle IS
+            'Bollinger Band middle line (20-period SMA). Added {timestamp_str}'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.bb_upper IS
+            'Bollinger Band upper line (middle + 2 std dev). Added {timestamp_str}'
+        """)
+
+        conn.execute(f"""
+            COMMENT ON COLUMN {table_name}.bb_lower IS
+            'Bollinger Band lower line (middle - 2 std dev). Added {timestamp_str}'
+        """)
+
+        print(f"✓ Added 6 indicators ({original_rows:,} bars)")
+        total_bars += original_rows
+
+    # Recreate unified view with new columns
+    print(f"\n{'─'*70}")
+    print("Recreating unified view with new indicators...")
+
+    conn.execute("DROP VIEW IF EXISTS ohlc_all")
+
+    tables = conn.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'main' AND table_name LIKE 'ohlc_%'
+        ORDER BY table_name
+    """).fetchall()
+
+    union_query = " UNION ALL ".join([f"SELECT * FROM {t[0]}" for t in tables])
+    conn.execute(f"""
+        CREATE VIEW ohlc_all AS
+        {union_query}
+        ORDER BY Timestamp
+    """)
+
+    print("✓ View recreated: ohlc_all")
+
+    # Show example of data with indicators
+    print(f"\n{'═'*70}")
+    print("Sample Data with Indicators (most recent 5 bars)")
+    print(f"{'═'*70}")
+
+    sample = conn.execute("""
+        SELECT
+            Timestamp,
+            ROUND(Close, 5) as Close,
+            ROUND(rsi_14, 2) as RSI_14,
+            ROUND(sma_20, 5) as SMA_20,
+            ROUND(sma_50, 5) as SMA_50,
+            ROUND(bb_upper, 5) as BB_Upper,
+            ROUND(bb_lower, 5) as BB_Lower
+        FROM ohlc_all
+        WHERE rsi_14 IS NOT NULL
+        ORDER BY Timestamp DESC
+        LIMIT 5
+    """).df()
+
+    print(sample.to_string(index=False))
+
+    # Find some trading signals
+    print(f"\n{'═'*70}")
+    print("Example Trading Signals")
+    print(f"{'═'*70}")
+
+    # RSI oversold signals
+    print("\n1. RSI Oversold (<30) - Last 10 occurrences:")
+    oversold = conn.execute("""
+        SELECT
+            Timestamp,
+            ROUND(Close, 5) as Close,
+            ROUND(rsi_14, 2) as RSI_14
+        FROM ohlc_all
+        WHERE rsi_14 < 30
+        ORDER BY Timestamp DESC
+        LIMIT 10
+    """).df()
+
+    if not oversold.empty:
+        print(oversold.to_string(index=False))
+    else:
+        print("  (No oversold signals in dataset)")
+
+    # Bollinger Band breakouts
+    print("\n2. Price Below Lower Bollinger Band - Last 10 occurrences:")
+    bb_breakout = conn.execute("""
+        SELECT
+            Timestamp,
+            ROUND(Close, 5) as Close,
+            ROUND(bb_lower, 5) as BB_Lower,
+            ROUND((Close - bb_lower) * 10000, 1) as distance_pips
+        FROM ohlc_all
+        WHERE Close < bb_lower
+        ORDER BY Timestamp DESC
+        LIMIT 10
+    """).df()
+
+    if not bb_breakout.empty:
+        print(bb_breakout.to_string(index=False))
+    else:
+        print("  (No BB breakouts in dataset)")
+
+    # Golden Cross signals (SMA 20 crosses above SMA 50)
+    print("\n3. Golden Cross Candidates (SMA20 > SMA50, recent):")
+    golden_cross = conn.execute("""
+        SELECT
+            Timestamp,
+            ROUND(Close, 5) as Close,
+            ROUND(sma_20, 5) as SMA_20,
+            ROUND(sma_50, 5) as SMA_50,
+            ROUND((sma_20 - sma_50) * 10000, 1) as diff_pips
+        FROM ohlc_all
+        WHERE sma_20 > sma_50
+        AND sma_20 IS NOT NULL
+        AND sma_50 IS NOT NULL
+        ORDER BY Timestamp DESC
+        LIMIT 10
+    """).df()
+
+    if not golden_cross.empty:
+        print(golden_cross.to_string(index=False))
+    else:
+        print("  (No golden cross signals found)")
+
+    # Show metadata
+    print(f"\n{'═'*70}")
+    print("Indicator Metadata (Sample)")
+    print(f"{'═'*70}")
+
+    metadata = conn.execute("""
+        SELECT
+            column_name,
+            comment
+        FROM duckdb_columns()
+        WHERE table_name LIKE 'ohlc_2024%'
+        AND column_name IN ('rsi_14', 'sma_20', 'sma_50', 'bb_middle', 'bb_upper', 'bb_lower')
+        LIMIT 6
+    """).df()
+
+    if not metadata.empty:
+        print(metadata.to_string(index=False))
+
+    conn.close()
+
+    # Final summary
+    print(f"\n{'═'*70}")
+    print("Summary")
+    print(f"{'═'*70}")
+    print(f"✓ Added 6 indicators to {len(tables)} monthly tables")
+    print(f"✓ Total bars processed: {total_bars:,}")
+    print(f"✓ Database size: {duckdb_path.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"\n✓ Indicators added:")
+    print(f"  - RSI (14-period)")
+    print(f"  - SMA (20-period, 50-period)")
+    print(f"  - Bollinger Bands (20-period, 2σ)")
+    print(f"\n✓ All indicators include metadata with calculation details")
+    print(f"\n✓ Ready for signal generation and backtesting!")
+
+
+if __name__ == '__main__':
+    main()

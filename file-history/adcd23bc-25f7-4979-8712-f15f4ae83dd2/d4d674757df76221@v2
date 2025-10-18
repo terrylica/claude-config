@@ -1,0 +1,161 @@
+#!/bin/bash
+# Automated SSH Key Registration via GitHub CLI
+# Registers each SSH key to the correct GitHub account
+
+set -euo pipefail
+
+# Color output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
+echo -e "${BLUE}=== Automated SSH Key Registration via GitHub CLI ===${NC}"
+echo ""
+
+# Key mapping
+declare -A KEY_MAP=(
+    ["tainora"]="$HOME/.ssh/id_ed25519_tainora.pub"
+    ["terrylica"]="$HOME/.ssh/id_ed25519_eonlabs.pub"
+    ["459ecs"]="$HOME/.ssh/id_ed25519_459ecs.pub"
+)
+
+# Step 1: Show current SSH key status for all accounts
+echo -e "${YELLOW}Step 1: Checking current SSH keys for all accounts...${NC}"
+echo ""
+
+for account in tainora terrylica 459ecs; do
+    echo -e "${BLUE}Account: $account${NC}"
+    gh auth switch --user "$account" 2>/dev/null
+    echo "Current SSH keys:"
+    gh ssh-key list 2>/dev/null || echo "  (none or error listing)"
+    echo ""
+done
+
+# Step 2: Add tainora key to tainora account
+echo -e "${YELLOW}Step 2: Adding tainora SSH key to tainora account...${NC}"
+gh auth switch --user tainora
+KEY_FINGERPRINT=$(ssh-keygen -lf "${KEY_MAP[tainora]}" | awk '{print $2}')
+echo "Key fingerprint: $KEY_FINGERPRINT"
+
+# Check if key already exists
+if gh ssh-key list 2>/dev/null | grep -q "$KEY_FINGERPRINT"; then
+    echo -e "${GREEN}✓${NC} Key already registered to tainora account"
+else
+    echo -n "Adding key... "
+    if gh ssh-key add "${KEY_MAP[tainora]}" --title "MacBook Pro - tainora (Option 1b)" 2>&1; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo "Error: Failed to add key to tainora account"
+    fi
+fi
+echo ""
+
+# Step 3: Add 459ecs key to 459ecs account
+echo -e "${YELLOW}Step 3: Adding 459ecs SSH key to 459ecs account...${NC}"
+gh auth switch --user 459ecs
+KEY_FINGERPRINT=$(ssh-keygen -lf "${KEY_MAP[459ecs]}" | awk '{print $2}')
+echo "Key fingerprint: $KEY_FINGERPRINT"
+
+# Check if key already exists
+if gh ssh-key list 2>/dev/null | grep -q "$KEY_FINGERPRINT"; then
+    echo -e "${GREEN}✓${NC} Key already registered to 459ecs account"
+else
+    echo -n "Adding key... "
+    if gh ssh-key add "${KEY_MAP[459ecs]}" --title "MacBook Pro - 459ecs (Option 1b)" 2>&1; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo "Error: Failed to add key to 459ecs account"
+    fi
+fi
+echo ""
+
+# Step 4: Clean up terrylica account (remove tainora and 459ecs keys if present)
+echo -e "${YELLOW}Step 4: Cleaning up terrylica account (removing other accounts' keys)...${NC}"
+gh auth switch --user terrylica
+
+# Get fingerprints to remove
+TAINORA_FP=$(ssh-keygen -lf "${KEY_MAP[tainora]}" | awk '{print $2}')
+FIVECS_FP=$(ssh-keygen -lf "${KEY_MAP[459ecs]}" | awk '{print $2}')
+
+echo "Checking for duplicate keys..."
+KEYS_TO_DELETE=()
+
+# List all keys and find IDs for keys to delete
+while IFS=$'\t' read -r id fingerprint title; do
+    if [[ "$fingerprint" == "$TAINORA_FP" ]]; then
+        echo -e "  ${YELLOW}Found tainora key: $title (ID: $id)${NC}"
+        KEYS_TO_DELETE+=("$id")
+    elif [[ "$fingerprint" == "$FIVECS_FP" ]]; then
+        echo -e "  ${YELLOW}Found 459ecs key: $title (ID: $id)${NC}"
+        KEYS_TO_DELETE+=("$id")
+    fi
+done < <(gh ssh-key list --json id,key | jq -r '.[] | "\(.id)\t\(.key | split(" ") | .[1] | @base64d | @sh | gsub("[\\n\\r]"; "") | split(" ") | .[1])\t\(.key | split(" ") | .[2] // "no-comment")"' 2>/dev/null || echo "")
+
+if [[ ${#KEYS_TO_DELETE[@]} -eq 0 ]]; then
+    echo -e "${GREEN}✓${NC} No duplicate keys found on terrylica account"
+else
+    echo ""
+    echo -e "${YELLOW}Found ${#KEYS_TO_DELETE[@]} key(s) to remove from terrylica account${NC}"
+    read -p "Delete these keys from terrylica account? (y/N) " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        for key_id in "${KEYS_TO_DELETE[@]}"; do
+            echo -n "Deleting key ID $key_id... "
+            if gh ssh-key delete "$key_id" --yes 2>&1 >/dev/null; then
+                echo -e "${GREEN}✓${NC}"
+            else
+                echo -e "${RED}✗${NC}"
+            fi
+        done
+    else
+        echo "Skipped deletion"
+    fi
+fi
+echo ""
+
+# Step 5: Verify terrylica key is still present
+echo -e "${YELLOW}Step 5: Verifying terrylica key is still on terrylica account...${NC}"
+gh auth switch --user terrylica
+TERRYLICA_FP=$(ssh-keygen -lf "${KEY_MAP[terrylica]}" | awk '{print $2}')
+
+if gh ssh-key list 2>/dev/null | grep -q "$TERRYLICA_FP"; then
+    echo -e "${GREEN}✓${NC} Terrylica key present on terrylica account"
+else
+    echo -e "${YELLOW}!${NC} Terrylica key not found, adding it..."
+    gh ssh-key add "${KEY_MAP[terrylica]}" --title "MacBook Pro - terrylica (Option 1b)"
+fi
+echo ""
+
+# Step 6: Final verification
+echo -e "${YELLOW}Step 6: Final verification - Testing SSH authentication...${NC}"
+echo ""
+
+# Switch back to terrylica as active (for subsequent operations)
+gh auth switch --user terrylica
+
+echo -e "${BLUE}Test 1: tainora key authentication${NC}"
+ssh -o IdentitiesOnly=yes -o IdentityFile="${KEY_MAP[tainora]%.pub}" -T git@github.com 2>&1 | grep "Hi" || echo "  Failed"
+echo ""
+
+echo -e "${BLUE}Test 2: terrylica key authentication${NC}"
+ssh -o IdentitiesOnly=yes -o IdentityFile="${KEY_MAP[terrylica]%.pub}" -T git@github.com 2>&1 | grep "Hi" || echo "  Failed"
+echo ""
+
+echo -e "${BLUE}Test 3: 459ecs key authentication${NC}"
+ssh -o IdentitiesOnly=yes -o IdentityFile="${KEY_MAP[459ecs]%.pub}" -T git@github.com 2>&1 | grep "Hi" || echo "  Failed"
+echo ""
+
+echo -e "${GREEN}=== SSH Key Registration Complete ===${NC}"
+echo ""
+echo "Next steps:"
+echo "  1. Test directory-based authentication:"
+echo "     cd ~/scripts && ssh -T git@github.com  # Should show 'Hi tainora!'"
+echo "     cd ~/ml-experiments && ssh -T git@github.com  # Should show 'Hi terrylica!'"
+echo "     cd ~/459ecs && ssh -T git@github.com  # Should show 'Hi 459ecs!'"
+echo ""
+echo "  2. Try git operations in different directories to verify automatic account selection"

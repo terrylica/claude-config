@@ -1,0 +1,271 @@
+"""Tests for ETag-based HTTP caching functionality.
+
+Validates the ETag cache manager's ability to reduce bandwidth usage
+by avoiding re-downloads of immutable Binance Vision data.
+
+SLO Targets:
+    Availability: 100% - handles cache corruption gracefully
+    Correctness: 100% - cache mismatches trigger full download
+    Observability: All cache hits/misses logged
+"""
+
+import json
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from gapless_crypto_data.utils.etag_cache import ETagCache
+
+
+class TestETagCacheBasics:
+    """Test basic ETag cache operations."""
+
+    def test_cache_initialization_creates_directory(self):
+        """Test that cache initialization creates XDG-compliant directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "test_cache"
+            cache = ETagCache(cache_dir=cache_dir)
+
+            assert cache.cache_dir.exists()
+            assert cache.cache_file == cache_dir / "etags.json"
+
+    def test_empty_cache_returns_none(self):
+        """Test that empty cache returns None for any URL."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+            etag = cache.get_etag("https://example.com/file.zip")
+
+            assert etag is None
+
+    def test_update_and_retrieve_etag(self):
+        """Test basic ETag storage and retrieval."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+            test_url = "https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2024-01.zip"
+            test_etag = "efcd0b4716abb9d950262a26fcb6ba43"
+            test_size = 12845632
+
+            # Update cache
+            cache.update_etag(test_url, test_etag, test_size)
+
+            # Retrieve ETag
+            retrieved_etag = cache.get_etag(test_url)
+            assert retrieved_etag == test_etag
+
+    def test_cache_persistence_across_instances(self):
+        """Test that cache persists across ETagCache instances."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            test_url = "https://data.binance.vision/test.zip"
+            test_etag = "abc123"
+
+            # First instance - store ETag
+            cache1 = ETagCache(cache_dir=cache_dir)
+            cache1.update_etag(test_url, test_etag, 1024)
+
+            # Second instance - retrieve ETag
+            cache2 = ETagCache(cache_dir=cache_dir)
+            retrieved_etag = cache2.get_etag(test_url)
+
+            assert retrieved_etag == test_etag
+
+
+class TestETagCacheMetadata:
+    """Test ETag cache metadata storage."""
+
+    def test_etag_entry_includes_metadata(self):
+        """Test that cache entries include all required metadata."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+            test_url = "https://example.com/file.zip"
+
+            cache.update_etag(test_url, "etag123", 5000)
+
+            # Read cache file directly to verify structure
+            with open(cache.cache_file) as f:
+                cache_data = json.load(f)
+
+            assert test_url in cache_data
+            entry = cache_data[test_url]
+            assert "etag" in entry
+            assert "last_checked" in entry
+            assert "file_size" in entry
+            assert entry["etag"] == "etag123"
+            assert entry["file_size"] == 5000
+
+    def test_last_checked_timestamp_format(self):
+        """Test that last_checked uses ISO 8601 UTC format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+            test_url = "https://example.com/file.zip"
+
+            cache.update_etag(test_url, "etag456", 2000)
+
+            with open(cache.cache_file) as f:
+                cache_data = json.load(f)
+
+            timestamp = cache_data[test_url]["last_checked"]
+            # Should end with 'Z' for UTC
+            assert timestamp.endswith("Z")
+            # Should be ISO 8601 format (contains T separator)
+            assert "T" in timestamp
+
+
+class TestETagCacheInvalidation:
+    """Test cache invalidation scenarios."""
+
+    def test_invalidate_removes_entry(self):
+        """Test that invalidate removes URL from cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+            test_url = "https://example.com/file.zip"
+
+            # Add entry
+            cache.update_etag(test_url, "etag789", 3000)
+            assert cache.get_etag(test_url) == "etag789"
+
+            # Invalidate
+            cache.invalidate(test_url)
+            assert cache.get_etag(test_url) is None
+
+    def test_invalidate_nonexistent_entry_is_safe(self):
+        """Test that invalidating non-existent entry doesn't raise error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+
+            # Should not raise
+            cache.invalidate("https://example.com/nonexistent.zip")
+
+
+class TestETagCacheCorruption:
+    """Test cache corruption handling."""
+
+    def test_corrupted_cache_file_raises_error(self):
+        """Test that corrupted cache file raises ValueError and auto-deletes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            cache_file = cache_dir / "etags.json"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write invalid JSON
+            with open(cache_file, "w") as f:
+                f.write("{ invalid json }")
+
+            # Should raise ValueError (not JSONDecodeError)
+            with pytest.raises(ValueError, match="ETag cache corrupted"):
+                ETagCache(cache_dir=cache_dir)
+
+            # Cache file should be deleted
+            assert not cache_file.exists()
+
+    def test_empty_cache_file_is_valid(self):
+        """Test that empty cache file doesn't cause errors."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            cache_file = cache_dir / "etags.json"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write empty JSON object
+            with open(cache_file, "w") as f:
+                json.dump({}, f)
+
+            # Should load successfully
+            cache = ETagCache(cache_dir=cache_dir)
+            assert cache.get_cache_stats()["total_entries"] == 0
+
+
+class TestETagCacheStatistics:
+    """Test cache statistics and observability."""
+
+    def test_cache_stats_empty(self):
+        """Test cache statistics for empty cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+            stats = cache.get_cache_stats()
+
+            assert stats["total_entries"] == 0
+            assert stats["total_cached_size"] == 0
+
+    def test_cache_stats_with_entries(self):
+        """Test cache statistics with multiple entries."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+
+            # Add multiple entries
+            cache.update_etag("https://example.com/file1.zip", "etag1", 1000)
+            cache.update_etag("https://example.com/file2.zip", "etag2", 2000)
+            cache.update_etag("https://example.com/file3.zip", "etag3", 3000)
+
+            stats = cache.get_cache_stats()
+            assert stats["total_entries"] == 3
+            assert stats["total_cached_size"] == 6000
+
+    def test_cache_stats_after_invalidation(self):
+        """Test cache statistics correctly update after invalidation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+
+            cache.update_etag("https://example.com/file1.zip", "etag1", 1000)
+            cache.update_etag("https://example.com/file2.zip", "etag2", 2000)
+
+            # Invalidate one entry
+            cache.invalidate("https://example.com/file1.zip")
+
+            stats = cache.get_cache_stats()
+            assert stats["total_entries"] == 1
+            assert stats["total_cached_size"] == 2000
+
+
+class TestETagCacheClear:
+    """Test cache clearing functionality."""
+
+    def test_clear_cache_removes_all_entries(self):
+        """Test that clear_cache removes all entries and file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+
+            # Add entries
+            cache.update_etag("https://example.com/file1.zip", "etag1", 1000)
+            cache.update_etag("https://example.com/file2.zip", "etag2", 2000)
+
+            # Clear cache
+            cache.clear_cache()
+
+            # Verify empty
+            assert cache.get_cache_stats()["total_entries"] == 0
+            assert not cache.cache_file.exists()
+
+    def test_clear_empty_cache_is_safe(self):
+        """Test that clearing empty cache doesn't raise error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ETagCache(cache_dir=Path(tmpdir))
+
+            # Should not raise
+            cache.clear_cache()
+
+
+class TestETagCacheXDGCompliance:
+    """Test XDG Base Directory Specification compliance."""
+
+    def test_default_cache_location(self):
+        """Test that default cache uses XDG-compliant location."""
+        cache = ETagCache()
+
+        # Should be in ~/.cache/gapless-crypto-data/
+        expected_parent = Path.home() / ".cache" / "gapless-crypto-data"
+        assert cache.cache_dir == expected_parent
+        assert cache.cache_file == expected_parent / "etags.json"
+
+    def test_custom_cache_directory_override(self):
+        """Test that custom cache directory overrides default."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            custom_dir = Path(tmpdir) / "custom_cache"
+            cache = ETagCache(cache_dir=custom_dir)
+
+            assert cache.cache_dir == custom_dir
+            assert cache.cache_file == custom_dir / "etags.json"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

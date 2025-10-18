@@ -1,0 +1,772 @@
+# Universal Validation Architecture - Refactoring Analysis
+
+**Date**: 2025-10-16
+**Task**: Major refactoring to implement DuckDB-based universal validation architecture
+**Scope**: Replace indicator-specific scripts with registry-driven universal approach
+
+---
+
+## Executive Summary
+
+**Current State**: Indicator calculations only in Python (no MQL5 comparison)
+**Desired State**: Universal validation framework comparing MQL5 vs Python for ALL indicators
+**Approach**: Registry.yaml + DuckDB + MT5 Python API (no indicator-specific scripts)
+
+**Files affected**: 7 Python files, 0 MQL5 files (pure extension, no breaking changes)
+**Risk level**: MEDIUM (major refactoring, but existing workflow preserved)
+
+---
+
+## Current Architecture Analysis
+
+### Python Workspace (users/crossover/)
+
+#### **1. export_aligned.py** (318 lines)
+**Current flow**:
+```
+MT5 Python API → fetch OHLC → calculate Python indicators → CSV export
+```
+
+**Key functions**:
+- `export_data()`: Main export orchestrator (lines 76-210)
+- `calculate_rsi()`: Python RSI calculation (lines 19-50)
+- `parse_timeframe()`: Timeframe string → MT5 constant (lines 53-73)
+
+**Integration points**:
+- Line 16: `from indicators.laguerre_rsi import calculate_laguerre_rsi_indicator`
+- Lines 162-174: Laguerre RSI calculation
+- Line 196: CSV export with columns: Time, Open, High, Low, Close, Volume, RSI, Laguerre_RSI, Laguerre_Signal, Adaptive_Period, ATR
+
+**Critical gap**:
+- Calculates Laguerre RSI in Python **without comparing to MQL5 indicator**
+- No mechanism to read MQL5 indicator buffers for validation
+
+**Refactoring impact**: EXTEND (add MQL5 indicator buffer reading, preserve existing export)
+
+---
+
+#### **2. validate_export.py** (263 lines)
+**Current capability**: Validates RSI only (hardcoded)
+
+**Key functions**:
+- `load_mt5_csv()`: Load CSV with column normalization (lines 21-79)
+- `validate_data_integrity()`: OHLC sanity checks (lines 82-109)
+- `compute_rsi_pandas()`: Python RSI calculation (lines 112-136)
+- `compare_indicators()`: Statistical comparison (correlation, MAE, max error) (lines 139-189)
+
+**Pattern identified** (lines 139-189):
+```python
+def compare_indicators(df, indicator_col, computed, tolerance=1e-2):
+    """Compare MT5 indicator values with Python computed values."""
+    mt5_values = df[indicator_col].values
+    py_values = computed.values
+
+    # Calculate metrics
+    correlation = np.corrcoef(mt5_valid, py_valid)[0, 1]
+    mae = np.mean(np.abs(mt5_valid - py_valid))
+    max_error = np.max(np.abs(mt5_valid - py_valid))
+
+    return {
+        "correlation": correlation,
+        "mean_absolute_error": mae,
+        "max_absolute_error": max_error,
+        "within_tolerance": within_tolerance,
+        "total_compared": len(mt5_valid)
+    }
+```
+
+**Limitations**:
+- RSI-only (not extensible to other indicators)
+- No metadata tracking (no validation history)
+- No self-documenting schema
+
+**Refactoring impact**: REPLACE with universal validate_indicator.py + DuckDB
+
+---
+
+#### **3. indicators/laguerre_rsi.py** (456 lines)
+**Status**: Implementation complete, validation pending
+
+**Key functions** (9 total):
+1. `calculate_true_range()` (lines 14-47)
+2. `calculate_atr()` (lines 50-72)
+3. `calculate_atr_min_max()` (lines 75-98)
+4. `calculate_adaptive_coefficient()` (lines 101-135)
+5. `calculate_adaptive_period()` (lines 138-162)
+6. `get_price_series()` (lines 165-234) - Supports 4 MA methods: SMA, EMA, SMMA, LWMA
+7. `calculate_laguerre_filter()` (lines 237-296)
+8. `calculate_laguerre_rsi()` (lines 299-353)
+9. `calculate_laguerre_rsi_indicator()` (lines 383-455) - Main API
+
+**Parameters**:
+- `atr_period=32`: ATR period
+- `price_type='close'`: Price to use
+- `price_smooth_period=5`: Smoothing period
+- `price_smooth_method='ema'`: Smoothing method (sma/ema/smma/lwma)
+- `level_up=0.85`: Upper threshold
+- `level_down=0.15`: Lower threshold
+
+**Output columns**:
+- `laguerre_rsi`: Main RSI values (0.0 to 1.0)
+- `signal`: Classification (0=neutral, 1=bullish, 2=bearish)
+- `adaptive_period`: Adaptive period used
+- `atr`: ATR values
+- `tr`: True Range values
+
+**Refactoring impact**: NO CHANGE (already complete, just needs validation)
+
+---
+
+#### **4. indicators/__init__.py**
+**Status**: Module initialization (likely empty or minimal)
+
+**Refactoring impact**: NO CHANGE
+
+---
+
+#### **5. test_mt5_connection.py**
+**Purpose**: MT5 connection diagnostics
+
+**Refactoring impact**: NO CHANGE (independent diagnostic tool)
+
+---
+
+#### **6. test_xauusd_info.py**
+**Purpose**: Symbol information testing
+
+**Refactoring impact**: NO CHANGE (independent diagnostic tool)
+
+---
+
+### MQL5 Infrastructure (Program Files/MetaTrader 5/MQL5/)
+
+#### **7. Scripts/DataExport/ExportAligned.mq5** (81 lines)
+**Current capability**: Export OHLC + RSI to CSV
+
+**Key pattern** (lines 45-57):
+```mql5
+if(InpUseRSI)
+  {
+   IndicatorColumn rsiColumn;
+   string rsiError="";
+   if(!RSIModule_Load(symbol,InpTimeframe,series.count,InpRSIPeriod,rsiColumn,rsiError))
+     {
+      PrintFormat("RSI module failed: %s",rsiError);
+      return;
+     }
+   ArrayResize(columns,columnCount+1);
+   columns[columnCount]=rsiColumn;
+   columnCount++;
+  }
+```
+
+**Refactoring impact**: NO CHANGE (could be extended for Laguerre RSI, but NOT required for universal approach)
+
+---
+
+#### **8. Include/DataExport/DataExportCore.mqh** (101 lines)
+**Purpose**: Core CSV export infrastructure
+
+**Key structures**:
+```mql5
+struct BarSeries {
+   MqlRates data[];
+   int count;
+};
+
+struct IndicatorColumn {
+   string header;
+   double values[];
+   int digits;
+};
+```
+
+**Key functions**:
+- `LoadRates()`: Fetch OHLC data (lines 21-36)
+- `OpenCsv()`: Open CSV file handle (lines 38-45)
+- `WriteCsvHeader()`: Write column headers (lines 47-66)
+- `WriteCsvRows()`: Write data rows (lines 68-98)
+
+**Refactoring impact**: NO CHANGE (reusable infrastructure)
+
+---
+
+#### **9. Include/DataExport/modules/RSIModule.mqh** (36 lines)
+**Purpose**: RSI indicator data export module
+
+**Key pattern** (lines 7-33):
+```mql5
+bool RSIModule_Load(const string symbol,
+                    const ENUM_TIMEFRAMES timeframe,
+                    const int bars,
+                    const int period,
+                    IndicatorColumn &column,
+                    string &errorMessage)
+  {
+   column.header=StringFormat("RSI_%d",period);
+   column.digits=2;
+   ArrayResize(column.values,bars);
+   ArraySetAsSeries(column.values,true);
+
+   int handle=iRSI(symbol,timeframe,period,PRICE_CLOSE);
+   if(handle==INVALID_HANDLE)
+     {
+      errorMessage="RSI handle creation failed";
+      return(false);
+     }
+   int copied=CopyBuffer(handle,0,0,bars,column.values);
+   IndicatorRelease(handle);
+   if(copied!=bars)
+     {
+      errorMessage=StringFormat("RSI CopyBuffer expected %d bars, received %d",bars,copied);
+      return(false);
+     }
+   return(true);
+  }
+```
+
+**Pattern**: `iRSI()` → `CopyBuffer()` → populate IndicatorColumn
+
+**Refactoring impact**: REFERENCE (pattern to replicate in Python for iCustom())
+
+---
+
+#### **10. PythonInterop/ATR_Adaptive_Laguerre_RSI.mq5** (MQL5 indicator)
+**Purpose**: Source of truth for Laguerre RSI calculation
+
+**Key parameters** (lines 18-24):
+```mql5
+input string             inpInstanceID  = "A";            // Instance ID
+input int                inpAtrPeriod   = 32;             // ATR period
+input ENUM_APPLIED_PRICE inpRsiPrice    = PRICE_CLOSE;    // Price
+input int                inpRsiMaPeriod = 5;              // Price smoothing period
+input ENUM_MA_METHOD     inpRsiMaType   = MODE_EMA;       // Price smoothing method
+input double             inpLevelUp     = 0.85;           // Level up
+input double             inpLevelDown   = 0.15;           // Level down
+```
+
+**Buffers**:
+- Buffer 0: `val[]` - Main Laguerre RSI values (0.0 to 1.0)
+- Buffer 1: `valc[]` - Color index (signal classification)
+- Buffer 2: `prices[]` - Smoothed price values
+
+**Refactoring impact**: NO CHANGE (source of truth, read via mt5.copy_buffer())
+
+---
+
+## Dependency Graph
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Python Validation Workflow (Proposed)                     │
+└─────────────────────────────────────────────────────────────┘
+                         │
+                         ├─→ registry.yaml (NEW)
+                         │   └─ Indicator metadata + parameters
+                         │
+                         ├─→ validate_indicator.py (NEW)
+                         │   ├─ read_mql5_indicator() (NEW)
+                         │   │  └─ mt5.create_indicator() + mt5.copy_buffer()
+                         │   ├─ read_python_indicator() (REUSE)
+                         │   │  └─ indicators/laguerre_rsi.py
+                         │   └─ compare_and_store() (NEW)
+                         │      └─ DuckDB validation.ddb
+                         │
+                         └─→ export_aligned.py (EXTEND)
+                             └─ Preserve existing workflow
+                                ├─ Add optional validation mode
+                                └─ Call validate_indicator.py after export
+
+┌─────────────────────────────────────────────────────────────┐
+│  MQL5 Infrastructure (No Changes)                           │
+└─────────────────────────────────────────────────────────────┘
+                         │
+                         ├─→ PythonInterop/ATR_Adaptive_Laguerre_RSI.mq5
+                         │   └─ Compiled indicator (read-only, source of truth)
+                         │
+                         └─→ DataExport infrastructure (optional, not used)
+                             ├─ ExportAligned.mq5
+                             ├─ DataExportCore.mqh
+                             └─ modules/RSIModule.mqh
+```
+
+---
+
+## Files to Create
+
+### 1. **registry.yaml** (NEW)
+**Location**: `users/crossover/indicators/registry.yaml`
+**Purpose**: Central configuration for all indicators
+
+**Structure**:
+```yaml
+indicators:
+  laguerre_rsi:
+    name: "ATR Adaptive Laguerre RSI"
+    mql5:
+      file: "PythonInterop/ATR_Adaptive_Laguerre_RSI.mq5"
+      compiled: "PythonInterop/ATR_Adaptive_Laguerre_RSI.ex5"
+      buffers:
+        - index: 0
+          name: "laguerre_rsi"
+          type: "double"
+        - index: 1
+          name: "signal"
+          type: "int"
+      parameters:
+        - name: "inpInstanceID"
+          type: "string"
+          default: "A"
+        - name: "inpAtrPeriod"
+          type: "int"
+          default: 32
+        - name: "inpRsiPrice"
+          type: "enum"
+          default: "PRICE_CLOSE"
+        - name: "inpRsiMaPeriod"
+          type: "int"
+          default: 5
+        - name: "inpRsiMaType"
+          type: "enum"
+          default: "MODE_EMA"
+        - name: "inpLevelUp"
+          type: "double"
+          default: 0.85
+        - name: "inpLevelDown"
+          type: "double"
+          default: 0.15
+    python:
+      module: "indicators.laguerre_rsi"
+      function: "calculate_laguerre_rsi_indicator"
+      parameters:
+        - name: "atr_period"
+          mql5_param: "inpAtrPeriod"
+        - name: "price_type"
+          mql5_param: "inpRsiPrice"
+          mapping:
+            PRICE_CLOSE: "close"
+            PRICE_OPEN: "open"
+            PRICE_HIGH: "high"
+            PRICE_LOW: "low"
+        - name: "price_smooth_period"
+          mql5_param: "inpRsiMaPeriod"
+        - name: "price_smooth_method"
+          mql5_param: "inpRsiMaType"
+          mapping:
+            MODE_SMA: "sma"
+            MODE_EMA: "ema"
+            MODE_SMMA: "smma"
+            MODE_LWMA: "lwma"
+        - name: "level_up"
+          mql5_param: "inpLevelUp"
+        - name: "level_down"
+          mql5_param: "inpLevelDown"
+    validation:
+      warmup_bars: 100
+      metrics:
+        - name: "pearson_r"
+          threshold: 0.999
+          operator: ">="
+        - name: "rmse"
+          threshold: 0.0001
+          operator: "<="
+        - name: "mae"
+          threshold: 0.0001
+          operator: "<="
+        - name: "max_error"
+          threshold: 0.001
+          operator: "<="
+```
+
+---
+
+### 2. **validate_indicator.py** (NEW)
+**Location**: `users/crossover/validate_indicator.py`
+**Purpose**: Universal validation script for ANY indicator
+
+**Key functions**:
+- `load_registry()`: Parse registry.yaml
+- `read_mql5_indicator()`: Use mt5.create_indicator() + mt5.copy_buffer()
+- `read_python_indicator()`: Import and call Python function
+- `compare_indicators()`: Statistical comparison
+- `store_results()`: Save to DuckDB
+- `generate_report()`: SQL-based validation report
+
+**Dependencies**:
+- MetaTrader5 (mt5.create_indicator, mt5.copy_buffer)
+- pandas, numpy
+- duckdb
+- pyyaml
+- importlib (dynamic Python imports)
+
+---
+
+### 3. **validation.ddb** (NEW)
+**Location**: `users/crossover/validation.ddb`
+**Purpose**: Single-file database for all validation runs
+
+**Tables**:
+1. **validation_runs**: Metadata for each validation run
+2. **indicator_timeseries**: OHLC + MQL5 + Python values
+3. **validation_metrics**: Computed metrics (correlation, RMSE, MAE, etc.)
+
+**Schema**: See duckdb_validation_spike.py (lines 26-120)
+
+---
+
+### 4. **validation_report.py** (NEW, OPTIONAL)
+**Location**: `users/crossover/validation_report.py`
+**Purpose**: Generate human-readable reports from validation.ddb
+
+**Capabilities**:
+- List all validation runs
+- Show metrics for specific run
+- Compare multiple runs
+- Generate charts (matplotlib)
+
+---
+
+## Files to Modify
+
+### 1. **export_aligned.py** (EXTEND)
+**Changes**:
+- Add `--validate` flag (optional, default False)
+- Add `--validation-db` parameter (default: validation.ddb)
+- After export, optionally call validate_indicator.py
+- Preserve existing workflow (no breaking changes)
+
+**Modified flow**:
+```python
+def export_data(..., validate=False, validation_db=None):
+    # Existing export logic (unchanged)
+    filepath = export_to_csv()
+
+    # NEW: Optional validation
+    if validate:
+        from validate_indicator import validate_against_mql5
+        validate_against_mql5(
+            indicator='laguerre_rsi',
+            symbol=symbol,
+            period=period_str,
+            bars=num_bars,
+            db_path=validation_db
+        )
+
+    return filepath
+```
+
+---
+
+### 2. **indicators/__init__.py** (EXTEND)
+**Changes**:
+- Add registry loader: `load_indicator_registry()`
+- Add helper: `get_indicator_config(name)`
+
+---
+
+## Files NOT Modified
+
+- `validate_export.py` - Keep for RSI-only validation (legacy)
+- `indicators/laguerre_rsi.py` - Already complete
+- `test_mt5_connection.py` - Independent diagnostic
+- `test_xauusd_info.py` - Independent diagnostic
+- All MQL5 files - No changes needed (read-only via mt5 API)
+
+---
+
+## Integration Points
+
+### A. **MT5 Python API → MQL5 Indicator**
+**Pattern** (from RSIModule.mqh, adapted for Python):
+```python
+import MetaTrader5 as mt5
+
+def read_mql5_indicator(indicator_path, symbol, timeframe, bars, parameters):
+    """Read MQL5 indicator buffers using MT5 Python API.
+
+    Pattern inspired by RSIModule.mqh (iRSI + CopyBuffer).
+    For custom indicators, use iCustom path.
+    """
+    # Create indicator handle (equivalent to iCustom())
+    handle = mt5.create_indicator(
+        symbol=symbol,
+        timeframe=timeframe,
+        indicator_name=indicator_path,
+        parameters=parameters
+    )
+
+    if handle is None or handle == -1:
+        raise RuntimeError(f"Failed to create indicator handle: {mt5.last_error()}")
+
+    # Read buffer values (equivalent to CopyBuffer())
+    buffer_0 = mt5.copy_buffer(handle, 0, 0, bars)  # Laguerre RSI values
+    buffer_1 = mt5.copy_buffer(handle, 1, 0, bars)  # Signal classification
+
+    # Release handle
+    mt5.release_indicator(handle)
+
+    return {
+        'laguerre_rsi': buffer_0,
+        'signal': buffer_1
+    }
+```
+
+**Critical assumption to test**: Does `mt5.create_indicator()` work with custom indicators?
+
+---
+
+### B. **Registry → Python Function Call**
+**Pattern**:
+```python
+import importlib
+import yaml
+
+def load_python_indicator(config, df):
+    """Dynamically import and call Python indicator function."""
+    module_name = config['python']['module']
+    function_name = config['python']['function']
+
+    # Dynamic import
+    module = importlib.import_module(module_name)
+    func = getattr(module, function_name)
+
+    # Map MQL5 parameters to Python parameters
+    kwargs = {}
+    for param in config['python']['parameters']:
+        python_name = param['name']
+        mql5_value = ... # Get from config or command line
+
+        # Apply mapping if exists
+        if 'mapping' in param:
+            kwargs[python_name] = param['mapping'].get(mql5_value, mql5_value)
+        else:
+            kwargs[python_name] = mql5_value
+
+    # Call function
+    result = func(df, **kwargs)
+    return result
+```
+
+---
+
+### C. **Validation → DuckDB**
+**Pattern** (from duckdb_validation_spike.py):
+```python
+import duckdb
+
+def store_validation_run(conn, run_metadata, timeseries, metrics):
+    """Store validation results in DuckDB."""
+    # Insert run metadata
+    run_id = conn.execute("""
+        INSERT INTO validation_runs (indicator_name, symbol, timeframe, ...)
+        VALUES (?, ?, ?, ...)
+        RETURNING run_id
+    """, run_metadata).fetchone()[0]
+
+    # Insert timeseries data
+    conn.execute("""
+        INSERT INTO indicator_timeseries
+        SELECT ? as run_id, * FROM timeseries_df
+    """, [run_id])
+
+    # Insert metrics
+    for metric_name, metric_value in metrics.items():
+        conn.execute("""
+            INSERT INTO validation_metrics (run_id, metric_name, metric_value, ...)
+            VALUES (?, ?, ?, ...)
+        """, [run_id, metric_name, metric_value, ...])
+
+    return run_id
+```
+
+---
+
+## Critical Assumptions to Test (Spikes Required)
+
+### Spike 1: MT5 Python API Indicator Access
+**Question**: Can we use `mt5.create_indicator()` with custom indicators?
+
+**Test**:
+```python
+import MetaTrader5 as mt5
+
+mt5.initialize()
+mt5.symbol_select("EURUSD", True)
+
+# Test with custom indicator
+handle = mt5.create_indicator(
+    symbol="EURUSD",
+    timeframe=mt5.TIMEFRAME_M1,
+    indicator_name="PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+    parameters=["A", 32, 0, 5, 1, 0.85, 0.15]  # Match MQL5 input order
+)
+
+if handle and handle != -1:
+    buffer_0 = mt5.copy_buffer(handle, 0, 0, 100)
+    print(f"Success! Read {len(buffer_0)} values")
+    print(f"Sample values: {buffer_0[:5]}")
+    mt5.release_indicator(handle)
+else:
+    print(f"Failed: {mt5.last_error()}")
+
+mt5.shutdown()
+```
+
+**Expected outcome**: Successfully read indicator buffer values
+**Risk if fails**: Need fallback to MQL5 export scripts
+
+---
+
+### Spike 2: Registry Configuration Pattern
+**Question**: Does YAML registry pattern cover all parameter types?
+
+**Test**: Create registry.yaml and test loading/parsing with all edge cases:
+- Enum parameters (PRICE_CLOSE → "close")
+- String parameters (Instance ID)
+- Nested parameters
+- Buffer index mapping
+
+---
+
+### Spike 3: DuckDB Performance with Realistic Data
+**Question**: Can DuckDB handle 5000+ bars with multiple buffers efficiently?
+
+**Test**: Insert 5000 bars × 10 columns (OHLC + 6 indicator buffers)
+- Measure insert time
+- Measure query time (correlation calculation)
+- Measure database file size
+
+**Expected**: < 1 second for insert + query, < 10MB file size
+
+---
+
+### Spike 4: Backward Compatibility
+**Question**: Does extending export_aligned.py break existing usage?
+
+**Test**:
+```bash
+# Existing usage (must still work)
+python export_aligned.py --symbol EURUSD --period M1 --bars 5000
+
+# New validation mode (optional flag)
+python export_aligned.py --symbol EURUSD --period M1 --bars 5000 --validate
+```
+
+**Expected**: Existing scripts work unchanged, validation is opt-in
+
+---
+
+## Risk Analysis
+
+### HIGH RISK
+None identified (all changes are extensions, not replacements)
+
+### MEDIUM RISK
+1. **MT5 Python API indicator access**
+   - Risk: `mt5.create_indicator()` may not work with custom indicators
+   - Mitigation: Spike test FIRST, fallback to MQL5 export if fails
+   - Impact: Would require creating LaguerreRSIModule.mqh
+
+2. **Registry parameter mapping complexity**
+   - Risk: Enum/type conversions may be fragile
+   - Mitigation: Comprehensive spike testing with all parameter types
+   - Impact: May need more sophisticated mapping logic
+
+### LOW RISK
+1. **DuckDB performance**
+   - Risk: Slow queries with large datasets
+   - Mitigation: Spike test with realistic data volumes
+   - Impact: Acceptable (validation is offline, not real-time)
+
+2. **Backward compatibility**
+   - Risk: Breaking existing export_aligned.py users
+   - Mitigation: Make validation opt-in (--validate flag)
+   - Impact: None (existing usage unchanged)
+
+---
+
+## Dependencies
+
+### Python Packages Required
+- `MetaTrader5` (already installed)
+- `pandas` (already installed)
+- `numpy` (already installed)
+- `duckdb` (NEW - need to install via Wine Python)
+- `pyyaml` (NEW - need to install via Wine Python)
+
+### Installation (Wine Python):
+```bash
+CX_BOTTLE="MetaTrader 5" \
+WINEPREFIX="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5" \
+wine "C:\\Program Files\\Python312\\python.exe" -m pip install duckdb pyyaml
+```
+
+---
+
+## Next Steps (Phased Approach)
+
+### Phase 1: Spike Tests (CURRENT)
+1. Create spike_mt5_indicator_access.py
+2. Create spike_registry_pattern.py
+3. Create spike_duckdb_performance.py
+4. Create spike_backward_compatibility.py
+5. Document results and adjust plan
+
+### Phase 2: Core Infrastructure
+1. Create registry.yaml (Laguerre RSI only)
+2. Create validate_indicator.py (universal script)
+3. Create validation.ddb schema
+4. Test end-to-end with Laguerre RSI
+
+### Phase 3: Integration
+1. Extend export_aligned.py with --validate flag
+2. Test backward compatibility
+3. Document usage patterns
+
+### Phase 4: Documentation
+1. Update CLAUDE.md with validation workflow
+2. Create VALIDATION_WORKFLOW.md guide
+3. Document adding new indicators to registry
+
+### Phase 5: Future Expansion
+1. Add more indicators to registry.yaml
+2. Create validation_report.py for analytics
+3. Integrate with CI/CD for automated validation
+
+---
+
+## Success Criteria
+
+### Phase 1 (Spikes)
+- ✅ MT5 Python API can read custom indicator buffers
+- ✅ Registry pattern handles all parameter types
+- ✅ DuckDB performs adequately (< 1s for validation)
+- ✅ Backward compatibility maintained
+
+### Phase 2 (Core)
+- ✅ validate_indicator.py validates Laguerre RSI with correlation ≥ 0.999
+- ✅ All validation runs stored in validation.ddb
+- ✅ SQL queries generate validation reports
+
+### Phase 3 (Integration)
+- ✅ export_aligned.py --validate flag works end-to-end
+- ✅ Existing export_aligned.py usage unchanged
+
+### Phase 4 (Documentation)
+- ✅ Complete workflow documentation
+- ✅ Clear instructions for adding new indicators
+
+---
+
+## Conclusion
+
+**Refactoring scope**: Major, but well-isolated
+**Risk assessment**: MEDIUM (depends on MT5 Python API capabilities)
+**Mitigation strategy**: Spike tests FIRST before implementation
+**Backward compatibility**: PRESERVED (validation is opt-in extension)
+
+**Files to create**: 4 new files (registry.yaml, validate_indicator.py, validation.ddb schema, spikes)
+**Files to modify**: 2 files (export_aligned.py EXTEND, indicators/__init__.py EXTEND)
+**Files unchanged**: 11 files (all MQL5, existing Python tools)
+
+**Next immediate action**: Create and run 4 spike tests to validate critical assumptions.

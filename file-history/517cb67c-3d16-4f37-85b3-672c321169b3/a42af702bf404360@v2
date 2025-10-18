@@ -1,0 +1,98 @@
+"""
+Test to verify corrected exchange session logic (v1.6.0).
+
+Tests that is_nyse_session column correctly checks both trading day AND trading hours.
+"""
+import pandas as pd
+from datetime import datetime
+import sys
+sys.path.insert(0, '/Users/terryli/eon/exness-data-preprocess/src')
+
+from exness_data_preprocess.session_detector import SessionDetector
+from exness_data_preprocess.exchanges import EXCHANGES
+
+# Test Case: Monday, January 8, 2024 (a normal trading day)
+# NYSE trading hours: 9:30 AM - 4:00 PM ET (14:30 UTC - 21:00 UTC in January/EST)
+
+test_timestamps = [
+    "2024-01-08 08:00:00",  # 3:00 AM ET - Before NYSE opens (should be 0)
+    "2024-01-08 14:00:00",  # 9:00 AM ET - Still before NYSE opens (should be 0)
+    "2024-01-08 14:30:00",  # 9:30 AM ET - NYSE just opened (should be 1)
+    "2024-01-08 15:00:00",  # 10:00 AM ET - NYSE is open (should be 1)
+    "2024-01-08 19:00:00",  # 2:00 PM ET - NYSE is open (should be 1)
+    "2024-01-08 20:59:00",  # 3:59 PM ET - NYSE about to close (should be 1)
+    "2024-01-08 21:00:00",  # 4:00 PM ET - NYSE just closed (should be 0)
+    "2024-01-08 23:00:00",  # 6:00 PM ET - After NYSE closes (should be 0)
+]
+
+print("=" * 80)
+print("v1.6.0 SESSION DETECTION TEST")
+print("=" * 80)
+print()
+print("Date: Monday, January 8, 2024 (normal trading day)")
+print(f"NYSE Hours: {EXCHANGES['nyse'].open_hour:02d}:{EXCHANGES['nyse'].open_minute:02d}-{EXCHANGES['nyse'].close_hour:02d}:{EXCHANGES['nyse'].close_minute:02d} ET")
+print()
+
+# Create test DataFrame with timezone-aware timestamps
+dates_df = pd.DataFrame({
+    "ts": pd.to_datetime(test_timestamps, utc=True)
+})
+
+# Add date column (required by session detector)
+dates_df["date"] = dates_df["ts"].dt.date
+
+print(f"Created test DataFrame with {len(dates_df)} timestamps")
+print()
+
+# Initialize session detector
+detector = SessionDetector()
+print()
+
+# Run session detection
+result = detector.detect_sessions_and_holidays(dates_df)
+
+print(f"{'UTC Time':<20} {'ET Time':<15} {'is_nyse_session':<15} {'Expected':<15} {'Status'}")
+print("-" * 80)
+
+failures = 0
+for _, row in result.iterrows():
+    ts = row["ts"]
+    et_time = ts.tz_convert('America/New_York')
+    current_value = row["is_nyse_session"]
+
+    # Expected value: should be 1 ONLY during trading hours (9:30 AM - 4:00 PM ET)
+    et_hour = et_time.hour
+    et_minute = et_time.minute
+
+    # Expected: 1 if between 9:30 AM and 4:00 PM ET (exclusive of 4:00 PM)
+    expected_value = 1 if (
+        (et_hour > 9 or (et_hour == 9 and et_minute >= 30)) and
+        et_hour < 16
+    ) else 0
+
+    status = "✓" if current_value == expected_value else "✗ MISMATCH"
+    if current_value != expected_value:
+        failures += 1
+
+    print(f"{ts.strftime('%Y-%m-%d %H:%M:%S'):<20} {et_time.strftime('%I:%M %p ET'):<15} {current_value:<15} {expected_value:<15} {status}")
+
+print()
+print("=" * 80)
+print("TEST SUMMARY")
+print("=" * 80)
+print()
+
+if failures == 0:
+    print("✅ ALL TESTS PASSED!")
+    print()
+    print("v1.6.0 session detection is working correctly:")
+    print("- Checks both trading DAY (via exchange_calendars)")
+    print("- Checks trading HOURS (via timezone conversion + hour range)")
+    print()
+else:
+    print(f"❌ {failures} TEST(S) FAILED")
+    print()
+    print("Session detection is NOT working as expected.")
+    print()
+
+print("=" * 80)

@@ -1,0 +1,75 @@
+// Demonstration of volume conservation bug
+// This file shows why volume conservation fails
+
+use rangebar::{AggTrade, FixedPoint, RangeBarProcessor};
+
+fn main() {
+    let mut processor = RangeBarProcessor::new(50); // 0.5% threshold
+
+    let trades = vec![
+        // Bar 1: Opens at 50000
+        create_trade(1, 50000.0, 1000),
+        // Bar 1: Breaches upward (50300 > 50250), closes bar
+        create_trade(2, 50300.0, 2000),
+        // Bar 2: Opens at 50300
+        create_trade(3, 50310.0, 3000),
+        // Bar 2: Small movement, doesn't breach (threshold is 50300 ± 0.5% = 50048-50552)
+        create_trade(4, 50320.0, 4000),  // ← This trade is in INCOMPLETE bar!
+    ];
+
+    // Process WITHOUT incomplete bars (default behavior)
+    let bars = processor.process_agg_trade_records(&trades).unwrap();
+
+    println!("=== WITHOUT INCOMPLETE BARS (default) ===");
+    println!("Number of bars: {}", bars.len());
+    println!();
+
+    let total_bar_volume: i64 = bars.iter().map(|bar| bar.volume.0).sum();
+    let total_trade_volume: i64 = trades.iter().map(|trade| trade.volume.0).sum();
+
+    println!("Total bar volume: {} (from {} completed bars)", total_bar_volume, bars.len());
+    println!("Total trade volume: {} (from {} trades)", total_trade_volume, trades.len());
+    println!("Volume LOST: {} (trades in incomplete bar)", total_trade_volume - total_bar_volume);
+    println!("Bars account for: {}/{} trades ({:.1}%)",
+        bars.len() - 1 + 1,  // First bar has 2 trades, second would have 2 but incomplete
+        trades.len(),
+        ((bars.len() as f64 * 2.0) / trades.len() as f64) * 100.0
+    );
+
+    if total_bar_volume != total_trade_volume {
+        println!("\n❌ VOLUME CONSERVATION VIOLATED!");
+        println!("   Incomplete bar contains {} trades with volume {}",
+            trades.len() - 2,  // 4 total - 2 in completed bar
+            total_trade_volume - total_bar_volume);
+    }
+
+    println!("\n=== WITH INCOMPLETE BARS (analysis mode) ===");
+    let bars_with_incomplete = processor
+        .process_agg_trade_records_with_incomplete(&trades)
+        .unwrap();
+
+    println!("Number of bars: {}", bars_with_incomplete.len());
+
+    let total_bar_volume_with_incomplete: i64 = bars_with_incomplete.iter().map(|bar| bar.volume.0).sum();
+    println!("Total bar volume: {} (from {} bars including incomplete)",
+        total_bar_volume_with_incomplete,
+        bars_with_incomplete.len());
+    println!("Total trade volume: {} (from {} trades)", total_trade_volume, trades.len());
+
+    if total_bar_volume_with_incomplete == total_trade_volume {
+        println!("\n✅ VOLUME CONSERVATION RESTORED with incomplete bars!");
+    }
+}
+
+fn create_trade(id: i64, price: f64, timestamp: i64) -> AggTrade {
+    AggTrade {
+        agg_trade_id: id,
+        price: FixedPoint::from_str(&format!("{:.8}", price)).unwrap(),
+        volume: FixedPoint::from_str("1.50000000").unwrap(),
+        first_trade_id: id * 10,
+        last_trade_id: id * 10 + 5,
+        timestamp,
+        is_buyer_maker: id % 2 == 0,
+        is_best_match: None,
+    }
+}

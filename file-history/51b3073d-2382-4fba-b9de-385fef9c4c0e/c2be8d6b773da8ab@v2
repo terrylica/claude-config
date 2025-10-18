@@ -1,0 +1,213 @@
+# Manulife Par Form Automation
+
+**Status**: Design
+**Specification**: [`/specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml)
+**Script**: [`/scripts/playwright/fill_par_form.py`](/Users/terryli/own/insurance/scripts/playwright/fill_par_form.py)
+
+---
+
+## Overview
+
+Playwright-based automation for Manulife Participating insurance application forms using AI agent-friendly capture:
+- **No video recording** (PII/performance concerns)
+- **Comprehensive artifacts**: Screenshots, DOM dumps, HAR, trace, telemetry
+- **PII-safe**: Masked screenshots, log keys only
+- **ARIA-first selectors**: Stable, accessibility-driven targeting
+- **Iframe-proof**: Automatic frame detection and switching
+
+---
+
+## Architecture
+
+### Flow
+
+1. **Pre-auth**: Passkey authentication state loaded from `storage-state.json`
+2. **Navigation**: Start at `/dda` portal
+3. **Form discovery**: Detect iframe containing application form
+4. **Field filling**: Heuristic targeting with alias matching
+5. **Submission**: Click submit and verify success criteria
+6. **Artifact generation**: Timestamped directory with all captures
+
+### Artifact Manifest
+
+Generated at `artifacts/YYYY-MM-DD_HH-MM-SS/index.json`:
+
+```json
+{
+  "start_url": "https://www.insurance.manulife.ca/dda",
+  "screens": [
+    {"path": "001_initial.png", "desc": "initial state"},
+    {"path": "002_filled.png", "desc": "after fill"},
+    {"path": "003_submitted.png", "desc": "after submit"}
+  ],
+  "dom": {
+    "after_fill": "002_filled.dom.html",
+    "after_submit": "003_submitted.dom.html"
+  },
+  "har": "session.har",
+  "trace": "trace.zip",
+  "aria_snapshots": {
+    "after_fill": "aria_002.yaml",
+    "after_submit": "aria_003.yaml"
+  },
+  "telemetry": "telemetry.ndjson",
+  "notes": "passkey auth via storage_state.json"
+}
+```
+
+---
+
+## Usage
+
+### Prerequisites
+
+```bash
+# Install Playwright with uv
+uv pip install playwright
+uv run playwright install chromium
+
+# Verify Doppler secrets
+doppler run --project insurance --config prd -- env | grep MANULIFE
+```
+
+### Execution
+
+```bash
+# Set form payload via environment variable
+export FORM_JSON='{"first_name":"Ada","last_name":"Lovelace","email":"ada@analytical.engine","advisor_id":"A123456","policy":"PAR-00112233","phone":"555-555-0100","address":"10 Downing St","city":"Toronto","province":"ON","postal":"M5V 2T6"}'
+
+# Run automation with Doppler
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.playwright.fill_par_form
+
+# Outputs artifacts directory path at completion
+```
+
+### Offline Analysis
+
+```bash
+# View Playwright trace locally
+npx playwright show-trace artifacts/2025-01-15_14-30-00/trace.zip
+
+# Replay network from HAR (for debugging without prod access)
+# Uses routeFromHAR in a separate analysis script
+```
+
+---
+
+## Field Mappings
+
+See [`/specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml) for complete alias definitions.
+
+**Heuristic targeting priority**:
+1. `getByLabel` - Label association
+2. `getByRole` - ARIA role
+3. `getByPlaceholder` - Placeholder text
+4. `getByTestId` - Test ID attribute
+5. CSS selector fallback
+
+**Common aliases** (case-insensitive partial match):
+- `first_name`: "first name", "given name", "fname"
+- `advisor_id`: "advisor id", "advisor number", "rep id"
+- `policy`: "policy", "policy number", "contract number"
+- `postal`: "postal", "postal code", "zip"
+
+---
+
+## Success Criteria
+
+Automation marks success when **any** condition is met:
+1. Success/confirmation banner visible (text: "submitted", "success", "confirmation", "application created")
+2. URL matches pattern: `/confirmation|success|applications|summary/i`
+3. Page contains a generated policy/application ID
+
+On failure, all artifacts are still produced with `failure_reason` in `index.json`.
+
+---
+
+## Telemetry
+
+`telemetry.ndjson` contains timestamped NDJSON events:
+
+```jsonl
+{"ts":"2025-01-15T14:30:05Z","type":"request","method":"POST","url":"https://.../api/applications","status":null}
+{"ts":"2025-01-15T14:30:06Z","type":"response","method":"POST","url":"https://.../api/applications","status":201}
+{"ts":"2025-01-15T14:30:06Z","type":"console","level":"info","text":"Form validation passed"}
+```
+
+**Logged events**: request, response, requestfailed, console, pageerror
+**PII protection**: URLs and status codes only, never payload data
+
+---
+
+## Debugging
+
+### Trace Viewer
+
+```bash
+npx playwright show-trace artifacts/<timestamp>/trace.zip
+```
+
+Shows:
+- Timeline filmstrip with screenshots
+- DOM snapshots at each action
+- Network activity
+- Console logs
+
+### HAR Analysis
+
+```bash
+# View in Chrome DevTools
+# 1. Open DevTools → Network tab
+# 2. Right-click → "Import HAR file"
+# 3. Load artifacts/<timestamp>/session.har
+```
+
+### DOM Dumps
+
+Open `002_filled.dom.html` in browser to inspect the exact state when fields were filled.
+
+---
+
+## Security Notes
+
+- **Never commit** `storage-state.json` (auth cookies/localStorage)
+- **PII masking**: Screenshots automatically mask fields by label
+- **Logging**: Only logs field keys ("first_name filled"), never values
+- **Doppler injection**: All secrets via env vars, never hardcoded
+- **Artifacts**: Review before sharing with AI models
+
+---
+
+## AI Agent Prompt
+
+See [`/specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml) for the complete agent brief in OpenAPI extensions.
+
+**Condensed version** for quick handoff:
+
+> You are implementing `/scripts/playwright/fill_par_form.py` using Playwright (Python).
+>
+> - Auth: `storage_state="storage-state.json"`
+> - Secrets: Doppler env vars
+> - Input: `FORM_JSON` env var with payload
+> - Navigate: https://www.insurance.manulife.ca/dda
+> - Target: Participating insurance application form (may be in iframe)
+> - Fill: Use ARIA-first selectors with alias matching
+> - Artifacts: Screenshots (PII-masked), DOM dumps, HAR, trace, telemetry NDJSON
+> - No video recording
+> - Output: `artifacts/YYYY-MM-DD_HH-MM-SS/` with `index.json` manifest
+
+---
+
+## References
+
+**Specifications**:
+- [`playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml) - Universal automation patterns
+- [`manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml) - Manulife-specific config
+
+**Playwright Docs**:
+- [Tracing](https://playwright.dev/docs/trace-viewer) - Filmstrip debugging
+- [HAR Recording](https://playwright.dev/docs/mock#recording-a-har-file) - Network capture
+- [FrameLocator](https://playwright.dev/docs/api/class-framelocator) - Iframe handling
+- [Locators](https://playwright.dev/docs/locators) - ARIA-first selectors
+- [Screenshots](https://playwright.dev/docs/screenshots) - PII masking options

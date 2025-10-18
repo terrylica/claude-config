@@ -1,0 +1,593 @@
+#!/usr/bin/env python3
+"""
+SPIKE: Complete multi-step authentication with EXTREME LOGGING.
+
+Purpose: Discovery and debugging - capture everything that happens.
+
+This script logs:
+- Every page transition with URL, title, timing
+- All network requests/responses
+- All console messages and errors
+- DOM snapshots at each step
+- Screenshots at every transition
+- All visible buttons/links on each page
+- ARIA tree snapshots
+- Form field discovery
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.setup.spike_complete_auth
+"""
+
+import base64
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+from jwcrypto import jwk
+
+
+def add_base64_padding(s: str) -> str:
+    """Add base64 padding if needed."""
+    missing_padding = len(s) % 4
+    if missing_padding:
+        return s + '=' * (4 - missing_padding)
+    return s
+
+
+def jwk_to_pkcs8_base64(jwk_base64: str) -> str:
+    """Convert JWK format private key to PKCS#8 format (base64-encoded)."""
+    jwk_base64 = add_base64_padding(jwk_base64)
+    jwk_json = base64.b64decode(jwk_base64).decode('utf-8')
+    jwk_dict = json.loads(jwk_json)
+    key = jwk.JWK(**jwk_dict)
+    pkcs8_pem = key.export_to_pem(private_key=True, password=None)
+    pem_lines = pkcs8_pem.decode('utf-8').strip().split('\n')
+    pkcs8_base64 = ''.join(line for line in pem_lines if not line.startswith('-----'))
+    return pkcs8_base64
+
+
+def log(msg: str, level: str = "INFO"):
+    """Timestamped logging."""
+    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    prefix = {
+        "INFO": "ℹ️ ",
+        "SUCCESS": "✅",
+        "WARNING": "⚠️ ",
+        "ERROR": "❌",
+        "DEBUG": "🔍",
+        "STEP": "📍",
+    }.get(level, "  ")
+    print(f"[{timestamp}] {prefix} {msg}")
+
+
+def capture_page_state(page, artifacts_dir: Path, name: str, step_num: int):
+    """Capture comprehensive page state."""
+    log(f"Capturing page state: {name}", "DEBUG")
+
+    prefix = f"{step_num:02d}_{name}"
+
+    # Screenshot
+    screenshot_path = artifacts_dir / f"{prefix}.png"
+    page.screenshot(path=str(screenshot_path), full_page=True)
+    log(f"  Screenshot: {screenshot_path.name}", "DEBUG")
+
+    # DOM HTML
+    dom_path = artifacts_dir / f"{prefix}.html"
+    dom_path.write_text(page.content())
+    log(f"  DOM HTML: {dom_path.name}", "DEBUG")
+
+    # ARIA snapshot
+    try:
+        aria_path = artifacts_dir / f"{prefix}.aria.yaml"
+        body = page.locator("body")
+        aria_yaml = body.aria_snapshot()
+        aria_path.write_text(aria_yaml)
+        log(f"  ARIA tree: {aria_path.name}", "DEBUG")
+    except Exception as e:
+        log(f"  ARIA snapshot failed: {e}", "WARNING")
+
+    # Page metadata
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "url": page.url,
+        "title": page.title(),
+        "viewport": page.viewport_size,
+    }
+    metadata_path = artifacts_dir / f"{prefix}.metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+    log(f"  Metadata: {metadata_path.name}", "DEBUG")
+
+
+def discover_all_buttons_and_links(page, artifacts_dir: Path, name: str, step_num: int):
+    """Discover all interactive elements on page."""
+    log(f"Discovering all buttons and links on page...", "DEBUG")
+
+    discovered = {
+        "buttons": [],
+        "links": [],
+        "inputs": [],
+        "forms": [],
+    }
+
+    # Buttons
+    try:
+        buttons = page.locator("button").all()
+        log(f"  Found {len(buttons)} buttons", "DEBUG")
+        for i, btn in enumerate(buttons):
+            try:
+                if btn.is_visible(timeout=500):
+                    btn_info = {
+                        "index": i,
+                        "text": btn.inner_text(),
+                        "id": btn.get_attribute("id"),
+                        "class": btn.get_attribute("class"),
+                        "type": btn.get_attribute("type"),
+                        "aria-label": btn.get_attribute("aria-label"),
+                        "data-testid": btn.get_attribute("data-testid"),
+                    }
+                    discovered["buttons"].append(btn_info)
+                    log(f"    Button {i}: '{btn_info['text']}' (id={btn_info['id']})", "DEBUG")
+            except Exception as e:
+                log(f"    Button {i}: Error - {e}", "DEBUG")
+    except Exception as e:
+        log(f"  Button discovery failed: {e}", "WARNING")
+
+    # Links
+    try:
+        links = page.locator("a").all()
+        log(f"  Found {len(links)} links", "DEBUG")
+        for i, link in enumerate(links):
+            try:
+                if link.is_visible(timeout=500):
+                    link_info = {
+                        "index": i,
+                        "text": link.inner_text(),
+                        "href": link.get_attribute("href"),
+                        "id": link.get_attribute("id"),
+                        "class": link.get_attribute("class"),
+                    }
+                    discovered["links"].append(link_info)
+                    if link_info["text"]:  # Only log non-empty text
+                        log(f"    Link {i}: '{link_info['text']}' → {link_info['href']}", "DEBUG")
+            except Exception as e:
+                log(f"    Link {i}: Error - {e}", "DEBUG")
+    except Exception as e:
+        log(f"  Link discovery failed: {e}", "WARNING")
+
+    # Input fields
+    try:
+        inputs = page.locator("input").all()
+        log(f"  Found {len(inputs)} input fields", "DEBUG")
+        for i, inp in enumerate(inputs):
+            try:
+                inp_info = {
+                    "index": i,
+                    "type": inp.get_attribute("type"),
+                    "name": inp.get_attribute("name"),
+                    "id": inp.get_attribute("id"),
+                    "placeholder": inp.get_attribute("placeholder"),
+                    "autocomplete": inp.get_attribute("autocomplete"),
+                }
+                discovered["inputs"].append(inp_info)
+                log(f"    Input {i}: type={inp_info['type']}, name={inp_info['name']}, id={inp_info['id']}", "DEBUG")
+            except Exception as e:
+                log(f"    Input {i}: Error - {e}", "DEBUG")
+    except Exception as e:
+        log(f"  Input discovery failed: {e}", "WARNING")
+
+    # Save discovery results
+    discovery_path = artifacts_dir / f"{step_num:02d}_{name}_discovery.json"
+    discovery_path.write_text(json.dumps(discovered, indent=2))
+    log(f"  Discovery results: {discovery_path.name}", "DEBUG")
+
+    return discovered
+
+
+def setup_network_logging(page, artifacts_dir: Path):
+    """Setup comprehensive network logging."""
+    log("Setting up network logging...", "DEBUG")
+
+    network_log_path = artifacts_dir / "network.ndjson"
+    network_log = open(network_log_path, "w")
+
+    def log_network_event(event_type: str, data: dict):
+        event = {
+            "ts": datetime.now().isoformat(),
+            "type": event_type,
+            **data
+        }
+        network_log.write(json.dumps(event) + "\n")
+        network_log.flush()
+
+    page.on("request", lambda req: log_network_event("request", {
+        "method": req.method,
+        "url": req.url,
+        "resourceType": req.resource_type,
+    }))
+
+    page.on("response", lambda resp: log_network_event("response", {
+        "method": resp.request.method,
+        "url": resp.url,
+        "status": resp.status,
+        "statusText": resp.status_text,
+    }))
+
+    page.on("requestfailed", lambda req: log_network_event("requestfailed", {
+        "method": req.method,
+        "url": req.url,
+        "failure": req.failure,
+    }))
+
+    page.on("console", lambda msg: log_network_event("console", {
+        "level": msg.type,
+        "text": msg.text,
+    }))
+
+    page.on("pageerror", lambda error: log_network_event("pageerror", {
+        "message": str(error),
+    }))
+
+    log(f"  Network log: {network_log_path}", "DEBUG")
+    return network_log
+
+
+def setup_cdp_event_monitoring(cdp, artifacts_dir: Path):
+    """Setup CDP event monitoring for WebAuthn."""
+    log("Setting up CDP WebAuthn event monitoring...", "DEBUG")
+
+    cdp_log_path = artifacts_dir / "webauthn_events.ndjson"
+    cdp_log = open(cdp_log_path, "w")
+
+    def log_cdp_event(event_name: str, params: dict):
+        event = {
+            "ts": datetime.now().isoformat(),
+            "event": event_name,
+            "params": params
+        }
+        cdp_log.write(json.dumps(event) + "\n")
+        cdp_log.flush()
+        log(f"  WebAuthn Event: {event_name}", "DEBUG")
+
+    # Monitor WebAuthn events
+    cdp.on("WebAuthn.credentialAsserted", lambda params: log_cdp_event("credentialAsserted", params))
+    cdp.on("WebAuthn.credentialAdded", lambda params: log_cdp_event("credentialAdded", params))
+
+    log(f"  WebAuthn log: {cdp_log_path}", "DEBUG")
+    return cdp_log
+
+
+def main() -> int:
+    """Execute spiking authentication with extreme logging."""
+    log("=" * 80, "STEP")
+    log("SPIKE: Multi-Step Authentication with Extreme Logging", "STEP")
+    log("=" * 80, "STEP")
+
+    # Setup
+    project_root = Path(__file__).parent.parent.parent
+    storage_state_path = project_root / "storage-state.json"
+    artifacts_dir = project_root / "artifacts" / f"spike_auth_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"Artifacts directory: {artifacts_dir}", "INFO")
+
+    # Get credentials
+    username = os.getenv("MANULIFE_PAR_USERNAME")
+    password = os.getenv("MANULIFE_PAR_PASSWORD")
+    passkey_credential_id_raw = os.getenv("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID")
+    passkey_rp_id = os.getenv("MANULIFE_PAR_PASSKEY_RP_ID")
+    passkey_user_handle_raw = os.getenv("MANULIFE_PAR_PASSKEY_USER_HANDLE")
+    passkey_private_key_jwk = os.getenv("MANULIFE_PAR_PASSKEY_PRIVATE_KEY")
+
+    # Validate
+    missing = []
+    for name, value in [
+        ("MANULIFE_PAR_USERNAME", username),
+        ("MANULIFE_PAR_PASSWORD", password),
+        ("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID", passkey_credential_id_raw),
+        ("MANULIFE_PAR_PASSKEY_RP_ID", passkey_rp_id),
+        ("MANULIFE_PAR_PASSKEY_USER_HANDLE", passkey_user_handle_raw),
+        ("MANULIFE_PAR_PASSKEY_PRIVATE_KEY", passkey_private_key_jwk),
+    ]:
+        if not value:
+            missing.append(name)
+
+    if missing:
+        log(f"Missing credentials: {', '.join(missing)}", "ERROR")
+        return 1
+
+    log(f"Username: {username}", "INFO")
+    log(f"Passkey RP ID: {passkey_rp_id}", "INFO")
+
+    # Fix base64 padding
+    passkey_credential_id = add_base64_padding(passkey_credential_id_raw)
+    passkey_user_handle = add_base64_padding(passkey_user_handle_raw)
+
+    step_num = 0
+    network_log = None
+    cdp_log = None
+
+    try:
+        # Convert JWK to PKCS#8
+        log("Converting JWK private key to PKCS#8...", "INFO")
+        pkcs8_private_key = jwk_to_pkcs8_base64(passkey_private_key_jwk)
+        log("Key conversion successful", "SUCCESS")
+
+        with sync_playwright() as p:
+            log("Launching Chromium browser (headless=False)...", "INFO")
+            browser = p.chromium.launch(
+                headless=False,
+                args=['--disable-blink-features=AutomationControlled']  # Hide automation
+            )
+
+            log("Creating browser context...", "INFO")
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+
+            page = context.new_page()
+
+            # Setup logging
+            network_log = setup_network_logging(page, artifacts_dir)
+
+            # Setup CDP and virtual authenticator
+            log("Creating CDP session...", "INFO")
+            cdp = context.new_cdp_session(page)
+
+            cdp_log = setup_cdp_event_monitoring(cdp, artifacts_dir)
+
+            log("Enabling WebAuthn domain...", "INFO")
+            cdp.send("WebAuthn.enable")
+
+            log("Creating virtual authenticator...", "INFO")
+            result = cdp.send("WebAuthn.addVirtualAuthenticator", {
+                "options": {
+                    "protocol": "ctap2",
+                    "ctap2Version": "ctap2_1",
+                    "transport": "internal",
+                    "hasResidentKey": True,
+                    "hasUserVerification": True,
+                    "automaticPresenceSimulation": True,
+                    "isUserVerified": True
+                }
+            })
+            authenticator_id = result["authenticatorId"]
+            log(f"Virtual authenticator ID: {authenticator_id}", "SUCCESS")
+
+            log("Injecting passkey credential...", "INFO")
+            cdp.send("WebAuthn.addCredential", {
+                "authenticatorId": authenticator_id,
+                "credential": {
+                    "credentialId": passkey_credential_id,
+                    "privateKey": pkcs8_private_key,
+                    "rpId": passkey_rp_id,
+                    "userHandle": passkey_user_handle,
+                    "signCount": 0,
+                    "isResidentCredential": True
+                }
+            })
+
+            # Verify credential was added
+            log("Verifying credential injection...", "DEBUG")
+            creds = cdp.send("WebAuthn.getCredentials", {"authenticatorId": authenticator_id})
+            log(f"Stored credentials: {len(creds['credentials'])}", "SUCCESS")
+            for cred in creds["credentials"]:
+                log(f"  - RP ID: {cred['rpId']}, Credential ID: {cred['credentialId'][:16]}...", "DEBUG")
+
+            # STEP 1: Navigate to signin page
+            step_num += 1
+            log("=" * 80, "STEP")
+            log(f"STEP {step_num}: Navigate to Signin Page", "STEP")
+            log("=" * 80, "STEP")
+
+            signin_url = "https://id.manulife.ca/advisor/signin"
+            log(f"Navigating to: {signin_url}", "INFO")
+            start_time = time.time()
+            page.goto(signin_url, wait_until="networkidle", timeout=30000)
+            elapsed = time.time() - start_time
+            log(f"Page loaded in {elapsed:.2f}s", "INFO")
+            log(f"Current URL: {page.url}", "INFO")
+            log(f"Page title: {page.title()}", "INFO")
+
+            capture_page_state(page, artifacts_dir, "signin_page", step_num)
+            discover_all_buttons_and_links(page, artifacts_dir, "signin_page", step_num)
+
+            # STEP 2: Fill username + password
+            step_num += 1
+            log("=" * 80, "STEP")
+            log(f"STEP {step_num}: Fill Username and Password", "STEP")
+            log("=" * 80, "STEP")
+
+            log("Waiting for username field...", "INFO")
+            page.wait_for_selector("#username", timeout=10000)
+            log("Username field ready", "SUCCESS")
+
+            log(f"Entering username: {username}", "INFO")
+            page.locator("#username").fill(username)
+
+            log("Entering password: [REDACTED]", "INFO")
+            page.locator("#password").fill(password)
+
+            capture_page_state(page, artifacts_dir, "before_submit", step_num)
+
+            # STEP 3: Submit signin form
+            step_num += 1
+            log("=" * 80, "STEP")
+            log(f"STEP {step_num}: Submit Signin Form", "STEP")
+            log("=" * 80, "STEP")
+
+            log("Clicking Sign In button...", "INFO")
+            start_time = time.time()
+            page.locator("#button-id-react-aria-16").click()
+
+            log("Waiting for page navigation...", "INFO")
+            page.wait_for_load_state("networkidle", timeout=30000)
+            elapsed = time.time() - start_time
+            log(f"Navigation completed in {elapsed:.2f}s", "INFO")
+            log(f"Current URL: {page.url}", "INFO")
+            log(f"Page title: {page.title()}", "INFO")
+
+            capture_page_state(page, artifacts_dir, "after_password_submit", step_num)
+            discovered = discover_all_buttons_and_links(page, artifacts_dir, "after_password_submit", step_num)
+
+            # STEP 4: Analyze 2FA page for passkey button
+            step_num += 1
+            log("=" * 80, "STEP")
+            log(f"STEP {step_num}: Search for Passkey Button on 2FA Page", "STEP")
+            log("=" * 80, "STEP")
+
+            log("Waiting for page to settle...", "INFO")
+            page.wait_for_timeout(2000)
+
+            # Search for passkey-related text in buttons
+            log("Analyzing discovered buttons for passkey keywords...", "INFO")
+            passkey_keywords = ["passkey", "security key", "authenticator", "fido", "webauthn"]
+
+            passkey_candidates = []
+            for btn in discovered["buttons"]:
+                btn_text = (btn.get("text") or "").lower()
+                btn_id = (btn.get("id") or "").lower()
+                btn_class = (btn.get("class") or "").lower()
+                btn_aria = (btn.get("aria-label") or "").lower()
+
+                for keyword in passkey_keywords:
+                    if keyword in btn_text or keyword in btn_id or keyword in btn_class or keyword in btn_aria:
+                        passkey_candidates.append(btn)
+                        log(f"  CANDIDATE: Button {btn['index']} - '{btn['text']}'", "WARNING")
+                        break
+
+            if not passkey_candidates:
+                log("No passkey button candidates found in discovered buttons", "WARNING")
+                log("Trying comprehensive selector search...", "INFO")
+
+            # Try all possible selectors
+            passkey_selectors = [
+                ("button:has-text('Passkey')", "Button with text 'Passkey'"),
+                ("button:has-text('passkey')", "Button with text 'passkey' (lowercase)"),
+                ("button:has-text('Use passkey')", "Button with 'Use passkey'"),
+                ("button:has-text('Use a passkey')", "Button with 'Use a passkey'"),
+                ("button:has-text('Sign in with passkey')", "Button with 'Sign in with passkey'"),
+                ("a:has-text('Passkey')", "Link with 'Passkey'"),
+                ("a:has-text('passkey')", "Link with 'passkey'"),
+                ("button:has-text('Security key')", "Button with 'Security key'"),
+                ("button:has-text('Authenticator')", "Button with 'Authenticator'"),
+                ("[data-testid*='passkey']", "Element with passkey in data-testid"),
+                ("[aria-label*='passkey' i]", "Element with passkey in aria-label"),
+                ("button:has-text('FIDO')", "Button with 'FIDO'"),
+                ("button:has-text('WebAuthn')", "Button with 'WebAuthn'"),
+            ]
+
+            passkey_button_found = False
+            for selector, description in passkey_selectors:
+                log(f"Trying: {description} ({selector})", "DEBUG")
+                try:
+                    element = page.locator(selector).first
+                    if element.is_visible(timeout=1000):
+                        btn_text = element.inner_text()
+                        log(f"  FOUND: {description}", "SUCCESS")
+                        log(f"  Button text: '{btn_text}'", "SUCCESS")
+                        log(f"  Selector: {selector}", "SUCCESS")
+
+                        # Take screenshot highlighting the button
+                        element.scroll_into_view_if_needed()
+                        page.wait_for_timeout(500)
+                        capture_page_state(page, artifacts_dir, "passkey_button_found", step_num)
+
+                        # Click it
+                        log("Clicking passkey button...", "INFO")
+                        start_time = time.time()
+                        element.click()
+                        passkey_button_found = True
+
+                        log("Waiting for WebAuthn challenge...", "INFO")
+                        page.wait_for_load_state("networkidle", timeout=15000)
+                        elapsed = time.time() - start_time
+                        log(f"WebAuthn flow completed in {elapsed:.2f}s", "INFO")
+
+                        break
+                except Exception as e:
+                    log(f"  Not found: {e}", "DEBUG")
+
+            if not passkey_button_found:
+                log("Passkey button NOT FOUND with any selector", "ERROR")
+                log("Check artifacts for manual inspection:", "ERROR")
+                log(f"  - {artifacts_dir / f'{step_num:02d}_after_password_submit.png'}", "ERROR")
+                log(f"  - {artifacts_dir / f'{step_num:02d}_after_password_submit.html'}", "ERROR")
+                log(f"  - {artifacts_dir / f'{step_num:02d}_after_password_submit_discovery.json'}", "ERROR")
+
+                # Keep browser open for manual inspection
+                log("Browser kept open for manual inspection. Press Enter to close...", "WARNING")
+                input()
+                return 1
+
+            # STEP 5: Verify authentication
+            step_num += 1
+            log("=" * 80, "STEP")
+            log(f"STEP {step_num}: Verify Authentication Success", "STEP")
+            log("=" * 80, "STEP")
+
+            current_url = page.url
+            log(f"Final URL: {current_url}", "INFO")
+            log(f"Final title: {page.title()}", "INFO")
+
+            capture_page_state(page, artifacts_dir, "final_authenticated", step_num)
+            discover_all_buttons_and_links(page, artifacts_dir, "final_authenticated", step_num)
+
+            if "signin" in current_url.lower() or "login" in current_url.lower():
+                log("WARNING: Still on signin/login page", "WARNING")
+
+                # Check for errors
+                try:
+                    error = page.locator("[role='alert']").first
+                    if error.is_visible(timeout=2000):
+                        error_text = error.inner_text()
+                        log(f"Error message: {error_text}", "ERROR")
+                except Exception:
+                    pass
+            else:
+                log("Successfully authenticated!", "SUCCESS")
+
+            # Save storage state
+            log("Saving storage state...", "INFO")
+            context.storage_state(path=str(storage_state_path))
+            log(f"Storage state saved: {storage_state_path}", "SUCCESS")
+
+            log("=" * 80, "STEP")
+            log("SPIKE COMPLETE - Summary", "STEP")
+            log("=" * 80, "STEP")
+            log(f"Artifacts directory: {artifacts_dir}", "INFO")
+            log(f"Storage state: {storage_state_path}", "INFO")
+            log(f"Network log: {artifacts_dir / 'network.ndjson'}", "INFO")
+            log(f"WebAuthn events: {artifacts_dir / 'webauthn_events.ndjson'}", "INFO")
+            log(f"Total steps: {step_num}", "INFO")
+
+            # Keep browser open for inspection
+            log("Browser kept open for inspection. Press Enter to close...", "INFO")
+            input()
+
+            browser.close()
+            return 0
+
+    except Exception as e:
+        log(f"EXCEPTION: {e}", "ERROR")
+        import traceback
+        traceback.print_exc()
+
+        # Keep browser open for debugging
+        log("Browser kept open for debugging. Press Enter to close...", "WARNING")
+        input()
+        return 1
+
+    finally:
+        if network_log:
+            network_log.close()
+        if cdp_log:
+            cdp_log.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

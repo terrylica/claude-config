@@ -1,0 +1,267 @@
+"""Base page class with common methods for all page objects.
+
+Implements DRY principle for Playwright automation following best practices.
+"""
+
+from pathlib import Path
+from typing import Any, Literal, Optional
+from playwright.sync_api import Page, Locator, expect
+
+
+class BasePage:
+    """Base class for all page objects with common automation methods."""
+
+    def __init__(self, page: Page):
+        """Initialize base page with Playwright page instance.
+
+        Args:
+            page: Playwright Page instance
+        """
+        self.page = page
+
+    # Wait Strategies
+
+    def wait_for_visible(
+        self,
+        locator: Locator,
+        timeout: int = 15000,
+        description: Optional[str] = None
+    ) -> Locator:
+        """Wait for element to be visible.
+
+        Args:
+            locator: Playwright locator
+            timeout: Timeout in milliseconds (default 15s)
+            description: Optional description for logging
+
+        Returns:
+            The locator after waiting
+        """
+        locator.wait_for(state="visible", timeout=timeout)
+        return locator
+
+    def wait_for_enabled(
+        self,
+        locator: Locator,
+        timeout: int = 5000,
+        description: Optional[str] = None
+    ) -> Locator:
+        """Wait for element to be enabled.
+
+        Args:
+            locator: Playwright locator
+            timeout: Timeout in milliseconds (default 5s)
+            description: Optional description for logging
+
+        Returns:
+            The locator after waiting
+        """
+        locator.wait_for(state="enabled", timeout=timeout)
+        return locator
+
+    def wait_for_network_idle(self, timeout: int = 15000) -> None:
+        """Wait for network to be idle.
+
+        Args:
+            timeout: Timeout in milliseconds (default 15s)
+        """
+        self.page.wait_for_load_state("networkidle", timeout=timeout)
+
+    def wait_for_response(
+        self,
+        url_pattern: str,
+        timeout: int = 10000
+    ) -> Any:
+        """Wait for specific API response.
+
+        Args:
+            url_pattern: URL pattern to match (can be regex)
+            timeout: Timeout in milliseconds (default 10s)
+
+        Returns:
+            Response object
+        """
+        with self.page.expect_response(url_pattern, timeout=timeout) as response_info:
+            return response_info.value
+
+    # ARIA-First Selectors
+
+    def get_by_label(self, text: str, **kwargs) -> Locator:
+        """Get element by accessible label (ARIA-first approach).
+
+        Args:
+            text: Label text
+            **kwargs: Additional locator options
+
+        Returns:
+            Locator for the element
+        """
+        return self.page.get_by_label(text, **kwargs)
+
+    def get_by_role(
+        self,
+        role: str,
+        name: Optional[str] = None,
+        **kwargs
+    ) -> Locator:
+        """Get element by ARIA role (ARIA-first approach).
+
+        Args:
+            role: ARIA role (button, textbox, etc.)
+            name: Optional accessible name
+            **kwargs: Additional locator options
+
+        Returns:
+            Locator for the element
+        """
+        if name:
+            return self.page.get_by_role(role, name=name, **kwargs)
+        return self.page.get_by_role(role, **kwargs)
+
+    def get_by_text(self, text: str, **kwargs) -> Locator:
+        """Get element by visible text.
+
+        Args:
+            text: Visible text
+            **kwargs: Additional locator options
+
+        Returns:
+            Locator for the element
+        """
+        return self.page.get_by_text(text, **kwargs)
+
+    # Form Interactions
+
+    def fill_react_field(
+        self,
+        locator: Locator,
+        value: str,
+        delay: int = 50
+    ) -> None:
+        """Fill React form field using type() to trigger onChange events.
+
+        React forms require .type() instead of .fill() to trigger validation.
+
+        Args:
+            locator: Field locator
+            value: Value to fill
+            delay: Delay between keystrokes in ms (default 50)
+        """
+        locator.click()
+        locator.fill("")  # Clear existing value
+        locator.type(value, delay=delay)
+
+    def select_option(
+        self,
+        locator: Locator,
+        value: str,
+        wait_enabled: bool = True
+    ) -> None:
+        """Select option from dropdown.
+
+        Args:
+            locator: Dropdown locator
+            value: Option value or label to select
+            wait_enabled: Wait for dropdown to be enabled first
+        """
+        if wait_enabled:
+            self.wait_for_enabled(locator)
+        locator.select_option(value)
+
+    def click_button(
+        self,
+        locator: Locator,
+        wait_enabled: bool = True,
+        wait_visible: bool = True
+    ) -> None:
+        """Click button with optional waits.
+
+        Args:
+            locator: Button locator
+            wait_enabled: Wait for button to be enabled first
+            wait_visible: Wait for button to be visible first
+        """
+        if wait_visible:
+            self.wait_for_visible(locator)
+        if wait_enabled:
+            self.wait_for_enabled(locator)
+        locator.click()
+
+    # Optional Element Handling
+
+    def dismiss_if_present(
+        self,
+        locator: Locator,
+        timeout: int = 2000,
+        description: str = "element"
+    ) -> bool:
+        """Dismiss optional element if present (e.g., cookie banner).
+
+        Args:
+            locator: Element locator
+            timeout: Short timeout for checking presence
+            description: Description for logging
+
+        Returns:
+            True if element was dismissed, False if not present
+        """
+        try:
+            if locator.is_visible(timeout=timeout):
+                locator.click()
+                return True
+        except Exception:
+            pass
+        return False
+
+    # Assertions
+
+    def expect_visible(self, locator: Locator, timeout: int = 5000) -> None:
+        """Assert element is visible.
+
+        Args:
+            locator: Element locator
+            timeout: Timeout in milliseconds
+        """
+        expect(locator).to_be_visible(timeout=timeout)
+
+    def expect_url_pattern(self, pattern: str, timeout: int = 10000) -> None:
+        """Assert URL matches pattern.
+
+        Args:
+            pattern: URL pattern (can be regex)
+            timeout: Timeout in milliseconds
+        """
+        expect(self.page).to_have_url(pattern, timeout=timeout)
+
+    # Navigation
+
+    def navigate_to(self, url: str, wait_until: Literal["load", "domcontentloaded", "networkidle"] = "networkidle") -> None:
+        """Navigate to URL and wait for page load.
+
+        Args:
+            url: Target URL
+            wait_until: Wait strategy (default: networkidle for SPAs)
+        """
+        self.page.goto(url, wait_until=wait_until)
+
+    @property
+    def url(self) -> str:
+        """Get current page URL.
+
+        Returns:
+            Current URL
+        """
+        return self.page.url
+
+    # Iframe Handling
+
+    def get_frame_locator(self, selector: str) -> Any:
+        """Get frame locator for iframe content.
+
+        Args:
+            selector: iframe selector
+
+        Returns:
+            FrameLocator instance
+        """
+        return self.page.frame_locator(selector)

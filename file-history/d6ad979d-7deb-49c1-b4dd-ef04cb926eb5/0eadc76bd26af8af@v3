@@ -1,0 +1,91 @@
+"""Base page class with common patterns for all page objects.
+
+This class provides reusable methods that are common across all pages,
+following the Page Object Model (POM) best practice pattern.
+
+Reference: https://playwright.dev/python/docs/pom
+"""
+
+from playwright.sync_api import Page
+
+
+class BasePage:
+    """Base class for all page objects.
+
+    Attributes:
+        page: Playwright Page instance for browser interactions
+    """
+
+    def __init__(self, page: Page):
+        """Initialize base page with Playwright page instance.
+
+        Args:
+            page: Playwright Page object from fixture
+        """
+        self.page = page
+
+    def navigate_to(self, url: str, wait_until: str = "networkidle") -> None:
+        """Navigate to URL with proper waiting strategy.
+
+        Args:
+            url: Target URL to navigate to
+            wait_until: Playwright load state to wait for
+                       Options: "load", "domcontentloaded", "networkidle"
+                       Default: "networkidle" for React SPAs
+        """
+        self.page.goto(url, wait_until=wait_until, timeout=30000)
+
+    def dispatch_click_event(self, selector: str, timeout: int = 500) -> None:
+        """Handle custom React components requiring JavaScript event dispatch.
+
+        Critical Pattern (Discovered 2025-10-17):
+        Manulife form uses custom <button role="radio"> components that
+        DON'T respond to standard Playwright .click() methods. They require
+        JavaScript event dispatch to trigger React synthetic event handlers.
+
+        Args:
+            selector: CSS selector for the element (e.g., "#RIDER_STATUS_ID-1")
+            timeout: Wait time after dispatch for React state update (ms)
+
+        Example:
+            >>> # For custom radio button with ID "RIDER_STATUS_ID-1"
+            >>> self.dispatch_click_event("#RIDER_STATUS_ID-1")
+
+        Reference:
+            docs/analysis/custom-react-components-spike.md
+        """
+        self.page.evaluate(f"""
+            const btn = document.querySelector('{selector}');
+            if (!btn) {{
+                throw new Error('Element not found: {selector}');
+            }}
+            btn.click();
+            btn.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        """)
+
+        # Allow React state to update before proceeding
+        if timeout > 0:
+            self.page.wait_for_timeout(timeout)
+
+    def wait_for_element(self, selector: str, state: str = "visible", timeout: int = 15000) -> None:
+        """Wait for element to reach desired state.
+
+        Args:
+            selector: Locator or CSS selector
+            state: Element state to wait for
+                  Options: "attached", "detached", "visible", "hidden"
+            timeout: Maximum wait time in milliseconds
+        """
+        locator = self.page.locator(selector) if isinstance(selector, str) else selector
+        locator.wait_for(state=state, timeout=timeout)
+
+    def scroll_into_view(self, selector: str) -> None:
+        """Scroll element into viewport.
+
+        Useful for long forms where elements might be below fold.
+
+        Args:
+            selector: CSS selector for the element to scroll to
+        """
+        locator = self.page.locator(selector)
+        locator.scroll_into_view_if_needed()

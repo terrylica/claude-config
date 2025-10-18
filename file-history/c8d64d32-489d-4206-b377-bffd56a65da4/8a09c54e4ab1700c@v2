@@ -1,0 +1,325 @@
+# Systematic Dependency Analysis & Fixes
+
+**Date**: 2025-10-10
+**Session**: Data-First Debugging Protocol Applied
+**Goal**: Root cause analysis of import failures and systematic fixes
+
+---
+
+## Summary
+
+Applied systematic probing to understand optional dependency usage and idiomatic fix patterns. Successfully fixed **5 critical import issues**, but discovered torch is deeply embedded across **35 files**, making it effectively required for basic functionality.
+
+---
+
+## Fixes Applied
+
+### ✅ Fix 1: Replace torch with numpy in primitive_functions.py
+**Problem**: `primitive_functions.py` imported torch at module level for mathematical functions
+**Root Cause**: Functions like `radian_sin_torch()` used torch but had numpy equivalents
+**Fix**: Replaced all 8 torch functions with mathematically equivalent numpy versions
+
+**Functions Fixed**:
+- `radian_sin_torch(x)`: `torch.sin(torch.pi * x)` → `np.sin(np.pi * x)`
+- `radian_cos_torch(x)`: `torch.cos(torch.pi * x)` → `np.cos(np.pi * x)`
+- `gaussian_torch(x)`: `torch.exp()` → `np.exp()`
+- `protected_division_torch()`: `torch.where/divide` → `np.where/divide`
+- `analytical_quotient_torch()`: `torch.sqrt()` → `np.sqrt()`
+- `abs_log_torch()`: `torch.log()` → `np.log()`
+- `analytical_log_torch()`: `torch.log/sqrt()` → `np.log/sqrt()`
+- `protect_sqrt_torch()`: `torch.sqrt()` → `np.sqrt()`
+
+**Status**: ✅ Validated - functions work identically with numpy
+
+---
+
+### ✅ Fix 2: Make skorch optional in attention_layer.py
+**Problem**: `attention_layer.py` imported skorch unconditionally
+**Root Cause**: Skorch (PyTorch wrapper) only needed for neural meta-learning
+**Fix**: Optional import with HAS_SKORCH flag and runtime validation
+
+**Pattern Applied**:
+```python
+try:
+    import torch
+    import torch.nn as nn
+    from skorch import NeuralNetRegressor
+    from skorch.callbacks import EarlyStopping
+    HAS_SKORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    NeuralNetRegressor = object
+    EarlyStopping = object
+    HAS_SKORCH = False
+
+# In AttentionMetaWrapper.__init__
+if not HAS_SKORCH:
+    raise ImportError(
+        "skorch and torch are required for AttentionMetaWrapper. "
+        "Install with: uv pip install torch skorch"
+    )
+```
+
+**Status**: ✅ Module imports without skorch, fails gracefully when trying to use AttentionMetaWrapper
+
+---
+
+### ✅ Fix 3: Improve tpot.base optional import in multigene_gp.py
+**Problem**: Type hint `tpot_model: TPOTBase = None` fails when TPOTBase is None
+**Root Cause**: tpot.base.TPOTBase removed in tpot >= 1.0.0, import already optional but type hint wasn't
+**Fix**: Removed type hint, added runtime validation
+
+**Before**:
+```python
+try:
+    from tpot.base import TPOTBase
+    HAS_TPOT = True
+except ImportError:
+    TPOTBase = None
+    HAS_TPOT = False
+
+def __init__(self, ..., tpot_model: TPOTBase = None, ...):  # ❌ Fails when TPOTBase is None
+    if tpot_model != None:
+        self.base_model = tpot_model._toolbox.individual()
+```
+
+**After**:
+```python
+try:
+    from tpot.base import TPOTBase
+    HAS_TPOT = True
+except ImportError:
+    TPOTBase = None
+    HAS_TPOT = False
+
+def __init__(self, ..., tpot_model=None, ...):  # ✅ Generic type
+    if tpot_model is not None:
+        if not HAS_TPOT:
+            raise ImportError(
+                "tpot is required for Hybrid mode (tpot_model parameter). "
+                "Install with: uv pip install 'tpot>=0.11.7'"
+            )
+        self.base_model = tpot_model._toolbox.individual()
+```
+
+**Status**: ✅ Works without tpot, clear error when trying to use Hybrid mode
+
+---
+
+### ✅ Fix 4: Make gradient_descent.py torch optional
+**Problem**: `gradient_descent.py` imported torch unconditionally for gradient optimization
+**Root Cause**: Entire module for advanced optimization using PyTorch
+**Fix**: Optional import with HAS_TORCH flag and runtime guards
+
+**Pattern Applied**:
+```python
+try:
+    import torch
+    import torch.optim as optim
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    optim = None
+    HAS_TORCH = False
+
+# Conditional import
+if HAS_TORCH:
+    from evolutionary_forest.utility.gradient_optimization.scaling import (
+        feature_standardization_torch,
+    )
+else:
+    feature_standardization_torch = None
+
+def fit_ridge_model(features, target):
+    if not HAS_TORCH:
+        raise ImportError(
+            "torch is required for gradient optimization. "
+            "Install with: uv pip install torch"
+        )
+    # ... torch code
+```
+
+**Status**: ✅ Module imports without torch, functions raise clear errors when called
+
+---
+
+### ✅ Fix 5: Make value_alignment.py torch optional
+**Problem**: `value_alignment.py` imported torch for tensor type checking
+**Root Cause**: Designed to handle both numpy and torch tensors, but torch import unconditional
+**Fix**: Optional import with graceful degradation to numpy-only mode
+
+**Pattern Applied**:
+```python
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    HAS_TORCH = False
+
+def contains_tensor(result):
+    if not HAS_TORCH:
+        return False
+    return any(isinstance(yp, torch.Tensor) for yp in result)
+
+def handle_inf_nan(result, include_tensor):
+    if not include_tensor or not HAS_TORCH:
+        # Numpy-only path
+        result = np.array([
+            np.nan_to_num(yp, posinf=0, neginf=0)
+            if isinstance(yp, np.ndarray)
+            else yp
+            for yp in result
+        ])
+    else:
+        # Torch path (when available and needed)
+        result = [
+            torch.nan_to_num(...)
+            for yp in result
+        ]
+    return result
+```
+
+**Status**: ✅ Works in numpy-only mode, torch features available when installed
+
+---
+
+### ⚠️ Fix 6: Added missing numba dependency
+**Problem**: `ModuleNotFoundError: No module named 'numba'` during testing
+**Root Cause**: numba used in codebase but not listed in dependencies
+**Fix**: Added `numba>=0.57.0` to main dependencies in pyproject.toml
+
+**Status**: ✅ Installed and working
+
+---
+
+## Deep Import Chain Analysis
+
+### Torch Dependency Scope
+**35 files** import torch directly, spanning:
+
+#### Core Functionality (blocking basic usage):
+- `component/primitive_functions.py` - ✅ FIXED (torch → numpy)
+- `component/post_processing/value_alignment.py` - ✅ FIXED (optional)
+- `component/gradient_optimization/gradient_descent.py` - ✅ FIXED (optional)
+- `component/evaluation.py` → `component/stgp/strongly_type_gp_utility.py` → gplearn dependency
+
+#### Advanced Features (optional usage):
+- `model/attention_layer.py` - ✅ FIXED (skorch optional)
+- `model/VAE.py`, `model/ASGAN.py`, `model/TSK.py` - Generative models
+- `model/tab_ddpm/` - Diffusion models
+- `component/equation_learner/` - EQL symbolic regression
+- `component/deep_clustering/` - VAE clustering
+- `component/crossover/` - Deep semantic crossover, KAN
+- `component/ensemble_selection/` - Deep ensemble selection
+- `utility/mlp_tools/` - MLP utilities
+
+### Import Chain That Blocks Basic Usage:
+```
+forest.py
+→ component/archive.py
+  → component/evaluation.py
+    → component/gradient_optimization/gradient_descent.py (✅ FIXED)
+    → component/post_processing/value_alignment.py (✅ FIXED)
+    → component/stgp/strongly_type_gp_utility.py
+      → gplearn (ModuleNotFoundError) ← CURRENT BLOCKER
+```
+
+---
+
+## Recommendations
+
+### Option 1: Move Core Dependencies to Main (RECOMMENDED)
+**Rationale**: Import chains show torch, gplearn deeply embedded in core functionality
+**Action**: Move to main dependencies in pyproject.toml:
+```toml
+dependencies = [
+    # ... existing ...
+    "numba>=0.57.0",  # ✅ Already added
+    "torch>=2.0.0",   # 35 files use it
+    "gplearn",        # Blocks basic import
+]
+```
+
+**Pros**:
+- Users get working package immediately
+- No confusing import errors
+- Matches actual architecture
+
+**Cons**:
+- Larger install footprint
+- ~500MB torch download
+
+---
+
+### Option 2: Continue Deep Fixes (NOT RECOMMENDED)
+**Estimated Work**: 30+ files need optional import patterns
+**Risk**: High - deep interconnections make it error-prone
+**Effort**: ~8-16 hours systematic fixing + testing
+
+**Remaining Blockers**:
+1. Make `strongly_type_gp_utility.py` gplearn optional
+2. Find next blocker (likely another torch import)
+3. Repeat 30+ times
+
+---
+
+### Option 3: Lazy Imports (PARTIAL SOLUTION)
+Only import advanced features when actually used, but won't solve basic import chain issues.
+
+---
+
+## Testing Results
+
+### ✅ Passed Tests:
+1. **primitive_functions numpy replacement**: Functions work identically
+   ```
+   sin(π*x) sample: [0.0, 0.707, 1.0]
+   cos(π*x) sample: [1.0, 0.707, 0.0]
+   gaussian(x) sample: [1.0, 0.969, 0.882]
+   ```
+
+2. **Standalone module imports**: Fixed modules can be imported individually
+
+### ❌ Blocked Tests:
+1. **Full EvolutionaryForestRegressor import**: Blocked by gplearn dependency in deep import chain
+2. **CI/CD verification**: Cannot test without resolving import chain
+
+---
+
+## Lessons Learned
+
+1. **Probe Before Fix**: Systematic probing (/tmp/probe_*.py) saved time by understanding usage patterns first
+2. **Import Chains Are Deep**: 6+ layers of imports make "optional" dependencies effectively required
+3. **Type Hints vs Runtime**: Optional imports need both import guards AND type hint removal
+4. **Test Incrementally**: Each fix validated before moving to next
+
+---
+
+## Next Steps
+
+1. **Immediate**: Decide on Option 1 (move torch to main deps) vs Option 2 (continue fixing)
+2. **If Option 1**: Update pyproject.toml, test CI, document in README
+3. **If Option 2**: Continue systematic fixes starting with gplearn, expect 20+ more files
+
+---
+
+## Files Modified
+
+1. `evolutionary_forest/component/primitive_functions.py` - torch → numpy
+2. `evolutionary_forest/model/attention_layer.py` - skorch optional
+3. `evolutionary_forest/multigene_gp.py` - tpot.base optional (improved)
+4. `evolutionary_forest/component/gradient_optimization/gradient_descent.py` - torch optional
+5. `evolutionary_forest/component/post_processing/value_alignment.py` - torch optional
+6. `pyproject.toml` - added numba>=0.57.0
+
+---
+
+## Probe Files Created (for reference)
+
+- `/tmp/probe_torch.py` - Analyzed torch usage in primitive_functions
+- `/tmp/probe_skorch.py` - Analyzed skorch/torch neural network usage
+- `/tmp/probe_tpot.py` - Analyzed tpot.base version compatibility
+
+These probes guided the idiomatic fix patterns applied.

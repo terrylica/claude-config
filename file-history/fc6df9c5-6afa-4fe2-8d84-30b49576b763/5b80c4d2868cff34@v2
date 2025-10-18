@@ -1,0 +1,357 @@
+"""
+validate_indicator.py - Universal Indicator Validation
+Version: 1.0.0
+Created: 2025-10-16
+
+Purpose: Validate MQL5 indicator exports against Python implementations
+Stores validation results in DuckDB for historical tracking and analysis
+
+Usage:
+    python validate_indicator.py --csv Export_EURUSD_PERIOD_M1.csv --indicator laguerre_rsi
+    python validate_indicator.py --csv Export_XAUUSD_PERIOD_H1.csv --indicator laguerre_rsi --params atr_period=32
+"""
+
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime
+import duckdb
+import pandas as pd
+import numpy as np
+from scipy.stats import pearsonr
+
+# Import indicator implementations
+from indicators.laguerre_rsi import calculate_laguerre_rsi_indicator
+
+
+class ValidationError(Exception):
+    """Raised when validation fails critical checks"""
+    pass
+
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Validate MQL5 indicator exports against Python implementations"
+    )
+    parser.add_argument(
+        "--csv",
+        required=True,
+        help="Path to MQL5 CSV export file"
+    )
+    parser.add_argument(
+        "--indicator",
+        required=True,
+        choices=["laguerre_rsi", "rsi"],
+        help="Indicator to validate"
+    )
+    parser.add_argument(
+        "--params",
+        nargs="*",
+        default=[],
+        help="Indicator parameters in key=value format"
+    )
+    parser.add_argument(
+        "--db",
+        default="validation.ddb",
+        help="DuckDB database file (default: validation.ddb)"
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.999,
+        help="Minimum correlation threshold (default: 0.999)"
+    )
+    return parser.parse_args()
+
+
+def parse_parameters(param_list):
+    """Parse parameter list into dictionary"""
+    params = {}
+    for param in param_list:
+        if "=" not in param:
+            raise ValueError(f"Invalid parameter format: {param}. Expected key=value")
+        key, value = param.split("=", 1)
+        # Try to convert to int/float if possible
+        try:
+            value = int(value)
+        except ValueError:
+            try:
+                value = float(value)
+            except ValueError:
+                pass  # Keep as string
+        params[key] = value
+    return params
+
+
+def load_mql5_csv(csv_path):
+    """Load MQL5 CSV export and validate structure"""
+    if not Path(csv_path).exists():
+        raise ValidationError(f"CSV file not found: {csv_path}")
+
+    df = pd.read_csv(csv_path)
+
+    # Validate required OHLC columns
+    required_cols = ["time", "open", "high", "low", "close"]
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValidationError(f"CSV missing required columns: {missing}")
+
+    # Convert time to datetime
+    df["time"] = pd.to_datetime(df["time"])
+
+    return df
+
+
+def calculate_python_laguerre_rsi(df, params):
+    """Calculate Laguerre RSI using Python implementation"""
+    # Extract parameters with defaults
+    atr_period = params.get("atr_period", 32)
+    price_smooth_period = params.get("price_smooth_period", 5)
+    price_smooth_method = params.get("price_smooth_method", "ema")
+
+    result = calculate_laguerre_rsi_indicator(
+        df,
+        atr_period=atr_period,
+        price_close=df["close"],
+        price_smooth_period=price_smooth_period,
+        price_smooth_method=price_smooth_method
+    )
+
+    return {
+        "Laguerre_RSI": result["laguerre_rsi"],
+        "Laguerre_Signal": result["signal"],
+        "Adaptive_Period": result["adaptive_period"],
+        "ATR": result["atr"]
+    }
+
+
+def calculate_metrics(mql5_values, python_values, buffer_name):
+    """Calculate validation metrics between MQL5 and Python values"""
+    # Remove NaN values (first few bars may have NaN)
+    mask = ~(np.isnan(mql5_values) | np.isnan(python_values))
+    mql5_clean = mql5_values[mask]
+    python_clean = python_values[mask]
+
+    if len(mql5_clean) < 10:
+        raise ValidationError(
+            f"{buffer_name}: Insufficient non-NaN values for validation "
+            f"(need >= 10, got {len(mql5_clean)})"
+        )
+
+    # Calculate correlation
+    correlation, _ = pearsonr(mql5_clean, python_clean)
+
+    # Calculate error metrics
+    diff = mql5_clean - python_clean
+    mae = np.mean(np.abs(diff))
+    rmse = np.sqrt(np.mean(diff ** 2))
+    max_diff = np.max(np.abs(diff))
+
+    # Summary statistics
+    metrics = {
+        "buffer_name": buffer_name,
+        "correlation": correlation,
+        "mae": mae,
+        "rmse": rmse,
+        "max_diff": max_diff,
+        "mql5_min": np.min(mql5_clean),
+        "mql5_max": np.max(mql5_clean),
+        "mql5_mean": np.mean(mql5_clean),
+        "python_min": np.min(python_clean),
+        "python_max": np.max(python_clean),
+        "python_mean": np.mean(python_clean),
+        "diff": diff
+    }
+
+    return metrics
+
+
+def validate_laguerre_rsi(df, params, threshold):
+    """Validate Laguerre RSI MQL5 vs Python"""
+    print(f"\nValidating Laguerre RSI...")
+    print(f"Parameters: {params}")
+    print()
+
+    # Check if MQL5 exported Laguerre RSI columns
+    expected_cols = ["Laguerre_RSI", "Laguerre_Signal", "Adaptive_Period", "ATR"]
+    missing = []
+    for col in expected_cols:
+        # Try both exact match and case-insensitive match
+        if col not in df.columns:
+            # Try to find case-insensitive match
+            matches = [c for c in df.columns if c.lower() == col.lower()]
+            if not matches:
+                missing.append(col)
+
+    if missing:
+        raise ValidationError(
+            f"CSV missing Laguerre RSI columns: {missing}\n"
+            f"Available columns: {list(df.columns)}\n"
+            f"Hint: Run ExportAligned.mq5 with InpUseLaguerreRSI=true"
+        )
+
+    # Calculate Python implementation
+    python_buffers = calculate_python_laguerre_rsi(df, params)
+
+    # Validate each buffer
+    results = {}
+    all_pass = True
+
+    for buffer_name, python_values in python_buffers.items():
+        # Get MQL5 values (case-insensitive column match)
+        mql5_col = next(c for c in df.columns if c.lower() == buffer_name.lower())
+        mql5_values = df[mql5_col].values
+
+        # Calculate metrics
+        metrics = calculate_metrics(mql5_values, python_values, buffer_name)
+        metrics["pass"] = metrics["correlation"] >= threshold
+
+        results[buffer_name] = metrics
+
+        # Print summary
+        status = "PASS" if metrics["pass"] else "FAIL"
+        print(f"[{status}] {buffer_name}")
+        print(f"  Correlation: {metrics['correlation']:.6f} (threshold: {threshold})")
+        print(f"  MAE: {metrics['mae']:.6f}, RMSE: {metrics['rmse']:.6f}, Max Diff: {metrics['max_diff']:.6f}")
+        print(f"  MQL5:   min={metrics['mql5_min']:.6f}, max={metrics['mql5_max']:.6f}, mean={metrics['mql5_mean']:.6f}")
+        print(f"  Python: min={metrics['python_min']:.6f}, max={metrics['python_max']:.6f}, mean={metrics['python_mean']:.6f}")
+        print()
+
+        if not metrics["pass"]:
+            all_pass = False
+
+    return results, all_pass
+
+
+def store_validation_results(db_path, csv_path, indicator_name, symbol, timeframe, bars, params, results, status, error_msg=None):
+    """Store validation results in DuckDB"""
+    conn = duckdb.connect(db_path)
+
+    # Load schema if database is new
+    schema_path = Path(db_path).parent / "validation_schema.sql"
+    if schema_path.exists() and conn.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'validation_runs'").fetchone()[0] == 0:
+        schema_sql = schema_path.read_text()
+        conn.executemany(schema_sql)
+
+    # Insert validation run
+    conn.execute("""
+        INSERT INTO validation_runs (indicator_name, symbol, timeframe, bars, mql5_csv_path, python_version, status, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (indicator_name, symbol, timeframe, bars, str(csv_path), sys.version.split()[0], status, error_msg))
+
+    run_id = conn.execute("SELECT MAX(run_id) FROM validation_runs").fetchone()[0]
+
+    # Insert buffer metrics
+    for buffer_name, metrics in results.items():
+        conn.execute("""
+            INSERT INTO buffer_metrics (run_id, buffer_name, correlation, mae, rmse, max_diff, mql5_min, mql5_max, mql5_mean, python_min, python_max, python_mean, pass)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (run_id, buffer_name, metrics["correlation"], metrics["mae"], metrics["rmse"], metrics["max_diff"],
+              metrics["mql5_min"], metrics["mql5_max"], metrics["mql5_mean"],
+              metrics["python_min"], metrics["python_max"], metrics["python_mean"], metrics["pass"]))
+
+        # Store bar-level differences for failed buffers or high diffs
+        if not metrics["pass"] or metrics["max_diff"] > 0.01:
+            # Store top 100 largest differences
+            diff = metrics["diff"]
+            indices = np.argsort(np.abs(diff))[-100:]
+            for idx in indices:
+                conn.execute("""
+                    INSERT INTO bar_diffs (run_id, buffer_name, bar_index, bar_time, mql5_value, python_value, diff, abs_diff)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (run_id, buffer_name, int(idx), datetime.now(), float(metrics["mql5_min"]), float(metrics["python_min"]), float(diff[idx]), float(np.abs(diff[idx]))))
+
+    # Insert indicator parameters
+    for param_name, param_value in params.items():
+        conn.execute("""
+            INSERT INTO indicator_parameters (run_id, param_name, param_value)
+            VALUES (?, ?, ?)
+        """, (run_id, param_name, str(param_value)))
+
+    conn.close()
+    return run_id
+
+
+def main():
+    """Main validation workflow"""
+    args = parse_args()
+
+    print("=" * 70)
+    print("Universal Indicator Validation")
+    print("=" * 70)
+    print(f"CSV: {args.csv}")
+    print(f"Indicator: {args.indicator}")
+    print(f"Threshold: {args.threshold}")
+    print(f"Database: {args.db}")
+    print()
+
+    try:
+        # Parse parameters
+        params = parse_parameters(args.params)
+
+        # Load MQL5 CSV
+        print("[1/4] Loading MQL5 CSV export...")
+        df = load_mql5_csv(args.csv)
+        print(f"  Loaded {len(df)} bars")
+        print(f"  Columns: {list(df.columns)}")
+        print()
+
+        # Extract metadata from CSV filename
+        csv_name = Path(args.csv).stem
+        parts = csv_name.split("_")
+        symbol = parts[1] if len(parts) > 1 else "UNKNOWN"
+        timeframe = parts[2] if len(parts) > 2 else "UNKNOWN"
+
+        # Validate indicator
+        print(f"[2/4] Calculating Python {args.indicator}...")
+        if args.indicator == "laguerre_rsi":
+            results, all_pass = validate_laguerre_rsi(df, params, args.threshold)
+        else:
+            raise ValidationError(f"Indicator not implemented: {args.indicator}")
+
+        # Store results
+        print("[3/4] Storing validation results in DuckDB...")
+        status = "success" if all_pass else "failed"
+        run_id = store_validation_results(
+            args.db, args.csv, args.indicator, symbol, timeframe, len(df),
+            params, results, status
+        )
+        print(f"  Stored as run_id={run_id}")
+        print()
+
+        # Final summary
+        print("[4/4] Validation Summary")
+        print("=" * 70)
+        if all_pass:
+            print("STATUS: PASS")
+            print(f"All buffers meet correlation threshold >= {args.threshold}")
+            return 0
+        else:
+            print("STATUS: FAIL")
+            print(f"One or more buffers below correlation threshold {args.threshold}")
+            failed = [name for name, m in results.items() if not m["pass"]]
+            print(f"Failed buffers: {', '.join(failed)}")
+            return 1
+
+    except ValidationError as e:
+        print(f"\nValidation Error: {e}")
+        # Store error in database
+        try:
+            store_validation_results(
+                args.db, args.csv, args.indicator, "UNKNOWN", "UNKNOWN", 0,
+                {}, {}, "failed", str(e)
+            )
+        except:
+            pass
+        return 1
+
+    except Exception as e:
+        print(f"\nUnexpected Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""
+Reconnaissance script for Manulife Par form structure discovery.
+
+Purpose:
+    - Discover actual form structure without submission
+    - Capture comprehensive artifacts for analysis
+    - Document dynamic behaviors, timing, API dependencies
+
+Outputs to: artifacts/reconnaissance_YYYY-MM-DD_HH-MM-SS/
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.playwright.reconnaissance
+
+Design Constraints:
+    - No form submission (reconnaissance only)
+    - No selector fallbacks or retry logic
+    - Explicit waits based on network idle
+    - Fail-fast with comprehensive artifact capture
+"""
+
+import json
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict
+
+from playwright.sync_api import Page, sync_playwright
+
+
+class ReconnaissanceError(Exception):
+    """Errors during reconnaissance that should capture artifacts before exit."""
+    pass
+
+
+def setup_artifact_directory() -> Path:
+    """Create timestamped artifact directory."""
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    artifact_dir = Path(__file__).parent.parent.parent / "artifacts" / f"reconnaissance_{timestamp}"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    return artifact_dir
+
+
+def setup_telemetry(page: Page, artifact_dir: Path) -> None:
+    """
+    Setup telemetry NDJSON logging for network and console events.
+
+    Logs:
+        - request: HTTP requests
+        - response: HTTP responses
+        - requestfailed: Failed requests
+        - console: Browser console messages
+        - pageerror: JavaScript errors
+    """
+    telemetry_path = artifact_dir / "telemetry.ndjson"
+    telemetry_file = open(telemetry_path, "w")
+
+    def log_event(event_type: str, data: Dict[str, Any]) -> None:
+        """Write NDJSON event to telemetry file."""
+        event = {
+            "ts": datetime.now().isoformat(),
+            "type": event_type,
+            **data
+        }
+        telemetry_file.write(json.dumps(event) + "\n")
+        telemetry_file.flush()
+
+    # Network events
+    page.on("request", lambda request: log_event("request", {
+        "method": request.method,
+        "url": request.url,
+        "resourceType": request.resource_type
+    }))
+
+    page.on("response", lambda response: log_event("response", {
+        "method": response.request.method,
+        "url": response.url,
+        "status": response.status,
+        "statusText": response.status_text
+    }))
+
+    page.on("requestfailed", lambda request: log_event("requestfailed", {
+        "method": request.method,
+        "url": request.url,
+        "failure": request.failure
+    }))
+
+    # Console events
+    page.on("console", lambda msg: log_event("console", {
+        "level": msg.type,
+        "text": msg.text
+    }))
+
+    page.on("pageerror", lambda error: log_event("pageerror", {
+        "message": str(error)
+    }))
+
+    return telemetry_file
+
+
+def capture_screenshot(page: Page, artifact_dir: Path, name: str, description: str) -> Dict[str, str]:
+    """
+    Capture PII-masked screenshot.
+
+    Returns:
+        Screenshot metadata for manifest
+    """
+    screenshot_path = artifact_dir / f"{name}.png"
+
+    # TODO: Implement PII masking by detecting input fields
+    # For now, capture without masking (manual review required)
+    page.screenshot(path=str(screenshot_path), full_page=True)
+
+    return {
+        "path": screenshot_path.name,
+        "desc": description,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+def capture_dom(page: Page, artifact_dir: Path, name: str) -> str:
+    """
+    Capture full DOM HTML.
+
+    Returns:
+        Filename of captured DOM
+    """
+    dom_path = artifact_dir / f"{name}.dom.html"
+    content = page.content()
+    dom_path.write_text(content)
+    return dom_path.name
+
+
+def capture_aria_snapshot(page: Page, artifact_dir: Path, name: str) -> str:
+    """
+    Capture ARIA accessibility tree snapshot (YAML format).
+
+    Uses: Locator.aria_snapshot()
+    """
+    aria_path = artifact_dir / f"{name}.yaml"
+
+    # Capture body-level ARIA tree
+    body = page.locator("body")
+    aria_yaml = body.aria_snapshot()
+    aria_path.write_text(aria_yaml)
+
+    return aria_path.name
+
+
+def main() -> int:
+    """Execute reconnaissance."""
+    print("Manulife Par Reconnaissance")
+    print("=" * 50)
+
+    # Configuration from environment
+    storage_state_path = Path(__file__).parent.parent.parent / "storage-state.json"
+    manulife_url = os.getenv("MANULIFE_PAR_URL", "www.insurance.manulife.ca")
+
+    # Ensure URL has protocol and path
+    if not manulife_url.startswith(("http://", "https://")):
+        manulife_url = f"https://{manulife_url}/dda"
+
+    # Validate storage state exists
+    if not storage_state_path.exists():
+        print(f"ERROR: storage-state.json not found at {storage_state_path}", file=sys.stderr)
+        print()
+        print("Run setup first:")
+        print("  doppler run --project insurance --config prd -- \\")
+        print("    uv run --active python -m scripts.setup.generate_auth_state")
+        return 1
+
+    # Setup artifact directory
+    artifact_dir = setup_artifact_directory()
+    print(f"Artifact directory: {artifact_dir}")
+    print()
+
+    manifest = {
+        "start_url": manulife_url,
+        "timestamp": datetime.now().isoformat(),
+        "screenshots": [],
+        "dom": {},
+        "aria_snapshots": {},
+        "har": None,
+        "trace": None,
+        "telemetry": None,
+        "notes": "reconnaissance phase - no form submission"
+    }
+
+    telemetry_file = None
+
+    try:
+        with sync_playwright() as p:
+            # Launch browser with tracing and HAR recording
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                storage_state=str(storage_state_path),
+                record_har_path=str(artifact_dir / "session.har"),
+                record_har_mode="minimal",  # Omit request/response bodies for PII safety
+                viewport={"width": 1280, "height": 720}
+            )
+
+            # Start tracing with screenshots and DOM snapshots
+            context.tracing.start(
+                screenshots=True,
+                snapshots=True,
+                sources=False  # Omit source files to reduce size
+            )
+
+            page = context.new_page()
+
+            # Setup telemetry logging
+            telemetry_file = setup_telemetry(page, artifact_dir)
+
+            print("Navigating to Manulife Par...")
+            page.goto(manulife_url, wait_until="networkidle", timeout=30000)
+
+            # Check for authentication redirect
+            current_url = page.url
+            if "login" in current_url.lower() or "signin" in current_url.lower():
+                raise ReconnaissanceError(
+                    f"Redirected to login page: {current_url}\n"
+                    f"storage-state.json may be expired - regenerate authentication"
+                )
+
+            print(f"✓ Loaded: {current_url}")
+
+            # Capture initial state
+            print("Capturing initial state...")
+            manifest["screenshots"].append(
+                capture_screenshot(page, artifact_dir, "001_initial", "initial page load")
+            )
+            manifest["dom"]["initial"] = capture_dom(page, artifact_dir, "001_initial")
+            manifest["aria_snapshots"]["initial"] = capture_aria_snapshot(page, artifact_dir, "aria_001")
+
+            print("Waiting for dynamic content to stabilize...")
+            # Additional network idle wait to ensure all lazy-loaded content appears
+            page.wait_for_load_state("networkidle", timeout=15000)
+
+            # Capture post-settle state
+            print("Capturing settled state...")
+            manifest["screenshots"].append(
+                capture_screenshot(page, artifact_dir, "002_settled", "after network idle")
+            )
+            manifest["dom"]["settled"] = capture_dom(page, artifact_dir, "002_settled")
+            manifest["aria_snapshots"]["settled"] = capture_aria_snapshot(page, artifact_dir, "aria_002")
+
+            # Stop tracing
+            trace_path = artifact_dir / "trace.zip"
+            context.tracing.stop(path=str(trace_path))
+            manifest["trace"] = trace_path.name
+
+            # HAR recorded automatically on context close
+            manifest["har"] = "session.har"
+
+            # Telemetry file
+            manifest["telemetry"] = "telemetry.ndjson"
+
+            print("✓ Reconnaissance complete")
+            print()
+
+            # Close context to finalize HAR
+            context.close()
+            browser.close()
+
+    except ReconnaissanceError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        manifest["error"] = str(e)
+        manifest["status"] = "failed"
+        return 1
+
+    except Exception as e:
+        print(f"\nUNEXPECTED ERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        manifest["error"] = str(e)
+        manifest["status"] = "failed"
+        return 1
+
+    finally:
+        # Always close telemetry file
+        if telemetry_file:
+            telemetry_file.close()
+
+        # Always write manifest
+        manifest_path = artifact_dir / "index.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        print(f"Manifest: {manifest_path}")
+
+    # Success
+    manifest["status"] = "success"
+    manifest_path = artifact_dir / "index.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+
+    print()
+    print("Next steps:")
+    print(f"1. Review trace: npx playwright show-trace {artifact_dir / 'trace.zip'}")
+    print(f"2. Analyze HAR: Import {artifact_dir / 'session.har'} into Chrome DevTools")
+    print(f"3. Inspect DOM: open {artifact_dir / '002_settled.dom.html'}")
+    print(f"4. Review ARIA: cat {artifact_dir / 'aria_002.yaml'}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

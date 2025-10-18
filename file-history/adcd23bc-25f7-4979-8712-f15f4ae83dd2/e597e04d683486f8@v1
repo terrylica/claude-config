@@ -1,0 +1,102 @@
+---
+schema_version: "1.0.0"
+secret_type: ssh_private_key
+metadata:
+  created: "2025-10-16"
+  last_reviewed: "2025-10-16"
+  evolution_stage: "stable"
+
+# Intent Over Implementation
+intent:
+  problem: |
+    Multi-account GitHub authentication requires directory-aware automatic
+    account selection without manual intervention. User maintains 3 GitHub
+    accounts (tainora, terrylica, 459ecs) mapped to distinct project directories.
+    Manual gh auth switch creates workflow friction.
+
+  constraints:
+    - Must work seamlessly across multiple macOS machines
+    - Cannot compromise existing directory-based SSH config Match directives
+    - Zero workflow friction requirement (git operations must work transparently)
+    - Passphrase protection non-negotiable for offline key security
+
+  decision_rationale: |
+    Option 1b (SSH + Doppler Shared Keys) chosen over:
+    - 1a: Eliminated cross-machine sync burden (manual SCP/rsync)
+    - 1c: Rejected due to 6-7hr implementation overhead for marginal security gain
+         (Doppler token compromise exposes all secrets, not just SSH keys)
+    - 2: HTTPS requires manual gh auth switch per directory transition
+
+    Analysis: /tmp/option-1b-vs-1c-complexity-analysis.md
+
+# Abstractions Over Details
+architecture:
+  pattern: "SSH + Doppler Shared Keys (Option 1b)"
+  alternative_patterns_considered:
+    - "SSH + Unique Keys Per Machine (Option 1a) - manual sync burden"
+    - "SSH + Doppler Ephemeral Mounting (Option 1c) - 150+ LOC, 3-4hr setup"
+    - "HTTPS + gh CLI Auto-Switch (Option 2) - manual account switching"
+
+  key_invariants:
+    - "Directory pattern /eon/ OR ml- triggers terrylica account selection"
+    - "SSH config Match directive: exec 'echo $PWD | grep -q -E \"(/eon/|ml-)\"'"
+    - "Passphrase protection maintained across all machines"
+    - "Single Source of Truth: Doppler claude-config/dev"
+
+# Version Tracking
+evolution:
+  v1_0_0:
+    date: "2025-10-16"
+    change: "Initial Doppler migration from local-only SSH keys"
+    trigger: "Cross-machine maintenance burden identified during git push auth failure"
+    decision_doc: "/tmp/option-1b-vs-1c-complexity-analysis.md"
+    complexity_tradeoff: "1b: 20 LOC vs 1c: 150+ LOC - 6-7hr savings"
+
+# Cross-Machine Context
+deployment:
+  sync_mechanism: "~/.local/bin/sync-ssh-keys"
+  target_location: "~/.ssh/id_ed25519_terrylica"
+  file_permissions: "600 (SSH enforced)"
+
+  integration_points:
+    ssh_config: |
+      Match host github.com exec "echo $PWD | grep -q -E '(/eon/|ml-)'"
+        IdentityFile ~/.ssh/id_ed25519_terrylica
+
+    git_config: |
+      # Note: terrylica uses default git config (no includeIf needed)
+      # Verification via ~/.gitconfig-terrylica if needed
+
+# Usage Context
+usage:
+  account: "terrylica"
+  organization: "Eon-Labs"
+  directory_patterns:
+    - "/eon/" - EonLabs organizational projects
+    - "ml-*" - Machine learning feature repositories
+  primary_repositories:
+    - "Eon-Labs/ml-feature-experiments"
+    - "EonLabs machine learning projects"
+  activation_trigger: "Working directory contains '/eon/' OR starts with 'ml-'"
+
+# Security Properties
+security:
+  passphrase_protected: true
+  algorithm: "ed25519"
+  key_rotation_policy: "On-demand (compromise, security upgrade, annual audit)"
+  threat_model: |
+    Primary: Personal machine compromise
+    Defense: Passphrase provides last-line protection
+  risk_acceptance: |
+    Doppler token compromise exposes ALL secrets (SSH, Pushover, PyPI, AWS).
+    Accepted because Option 1c (ephemeral mounting) has equivalent token exposure
+    with 6-7hr complexity overhead and no additional security for this threat model.
+
+# Maintenance
+maintenance:
+  sync_procedure: "Run sync-ssh-keys on new machine or after key rotation"
+  test_procedure: |
+    cd ~/ml-experiments && git clone git@github.com:Eon-Labs/test-repo.git
+    Expected: Automatic terrylica account selection, no manual auth required
+  monitoring: "Manual verification via git operations in /eon/ or ml-* directories"
+  rotation_trigger: "Suspected compromise, passphrase change, annual review"

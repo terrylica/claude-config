@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""
+Final verification with freshly generated database using CURRENT code.
+Only generates 1 week of data for speed.
+"""
+
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pandas as pd
+from exness_data_preprocess import ExnessDataProcessor
+
+# Create new temporary directory
+test_dir = Path(tempfile.mkdtemp(prefix="lunch_final_verify_"))
+print(f"Test database: {test_dir}")
+
+processor = ExnessDataProcessor(base_dir=test_dir)
+
+print("\n" + "="*70)
+print("GENERATING DATABASE WITH CURRENT CODE (1 week for speed)")
+print("="*70)
+
+# Generate just 1 week of data (Aug 5-11, 2024)
+try:
+    result = processor.update_data("EURUSD", start_date="2024-08-05", delete_zip=True)
+    print(f"\n✅ Generated: {result.months_added} months, {result.ohlc_bars:,} bars")
+except Exception as e:
+    print(f"\n❌ Failed: {e}")
+    sys.exit(1)
+
+print("\n" + "="*70)
+print("VERIFICATION TESTS")
+print("="*70)
+
+# Test 1: Tokyo lunch (should be 0)
+print("\n[1] Tokyo Lunch (11:30-12:30 JST = 02:30-03:30 UTC)")
+start = pd.Timestamp("2024-08-05 02:30:00", tz="UTC")
+end = pd.Timestamp("2024-08-05 03:30:00", tz="UTC")
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+lunch_flags = df["is_xtks_session"].sum()
+print(f"    Session flags: {lunch_flags}/{len(df)} (should be 0)")
+if lunch_flags == 0:
+    print("    ✅ PASS")
+else:
+    print(f"    ❌ FAIL")
+    sys.exit(1)
+
+# Test 2: Tokyo morning (should be >0)
+print("\n[2] Tokyo Morning (9:00-11:00 JST = 00:00-02:00 UTC)")
+start = pd.Timestamp("2024-08-05 00:00:00", tz="UTC")
+end = pd.Timestamp("2024-08-05 02:00:00", tz="UTC")
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+morning_flags = df["is_xtks_session"].sum()
+print(f"    Session flags: {morning_flags}/{len(df)} (should be >0)")
+if morning_flags > 0:
+    print(f"    ✅ PASS ({morning_flags} correctly flagged)")
+else:
+    print(f"    ❌ FAIL - morning hours not detected!")
+    sys.exit(1)
+
+# Test 3: Tokyo afternoon (should be >0)
+print("\n[3] Tokyo Afternoon (13:00-15:00 JST = 04:00-06:00 UTC)")
+start = pd.Timestamp("2024-08-05 04:00:00", tz="UTC")
+end = pd.Timestamp("2024-08-05 06:00:00", tz="UTC")
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+afternoon_flags = df["is_xtks_session"].sum()
+print(f"    Session flags: {afternoon_flags}/{len(df)} (should be >0)")
+if afternoon_flags > 0:
+    print(f"    ✅ PASS ({afternoon_flags} correctly flagged)")
+else:
+    print(f"    ❌ FAIL - afternoon hours not detected!")
+    sys.exit(1)
+
+print("\n" + "="*70)
+print("✅ ALL TESTS PASSED")
+print("="*70)
+print(f"\nDatabase: {test_dir}")

@@ -1,0 +1,680 @@
+# MQL5 to Python Indicator Migration - Complete Workflow
+
+**Version**: 1.0.0
+**Status**: ✅ PRODUCTION-READY
+**Last Updated**: 2025-10-17
+**Methodology Validated**: Laguerre RSI (1.000000 correlation)
+
+---
+
+## Purpose
+
+This guide provides the **complete, battle-tested workflow** for migrating any MQL5 indicator to Python with validated accuracy. This workflow incorporates all hard-learned lessons from 3+ hours of debugging, 11+ failed CLI compilation attempts, and external AI research breakthroughs.
+
+---
+
+## Prerequisites
+
+### Required Tools
+- **MT5**: Installed via CrossOver on macOS, logged in to account
+- **Python 3.12+**: With pandas, numpy, scipy
+- **Wine Python 3.12**: Installed in CrossOver bottle at `C:\Program Files\Python312\`
+- **MetaTrader5 Package**: Installed in Wine Python (`pip install MetaTrader5`)
+
+### Critical Knowledge
+Before starting, read these hard-learned lessons:
+- **[EXTERNAL_RESEARCH_BREAKTHROUGHS.md](EXTERNAL_RESEARCH_BREAKTHROUGHS.md)** - MQL5 CLI pitfalls, Python API limitations
+- **[PYTHON_INDICATOR_VALIDATION_FAILURES.md](PYTHON_INDICATOR_VALIDATION_FAILURES.md)** - 3-hour debugging journey
+- **[LAGUERRE_RSI_VALIDATION_SUCCESS.md](../reports/LAGUERRE_RSI_VALIDATION_SUCCESS.md)** - Success methodology
+
+---
+
+## Overview: 7-Phase Workflow
+
+```
+Phase 1: Locate & Analyze MQL5 Indicator
+Phase 2: Modify MQL5 to Export Indicator Buffers
+Phase 3: CLI Compile (CrossOver --cx-app method)
+Phase 4: Fetch Historical Data (5000+ bars via Wine Python MT5 API)
+Phase 5: Implement Python Indicator
+Phase 6: Validate with Historical Warmup
+Phase 7: Document & Archive Lessons
+```
+
+**Time Estimate**: 2-4 hours for first indicator, 30-60 minutes for subsequent indicators
+
+---
+
+## Related Documentation
+
+**Before You Start**:
+- 🔥 **[LESSONS_LEARNED_PLAYBOOK.md](LESSONS_LEARNED_PLAYBOOK.md)** - Read Gotchas #1-8 (prevents 50+ hours debugging)
+- ✨ **[INDICATOR_MIGRATION_CHECKLIST.md](../templates/INDICATOR_MIGRATION_CHECKLIST.md)** - Copy-paste version of this workflow
+
+**Technical References** (for troubleshooting):
+- **CLI Compilation Issues** → [MQL5_CLI_COMPILATION_SUCCESS.md](MQL5_CLI_COMPILATION_SUCCESS.md) - Complete troubleshooting
+- **Path Navigation** → [WINE_PYTHON_EXECUTION.md](WINE_PYTHON_EXECUTION.md) - macOS ↔ Wine path handling
+- **Encoding Issues** → [MQL5_ENCODING_SOLUTIONS.md](MQL5_ENCODING_SOLUTIONS.md) - UTF-8 vs UTF-16LE
+- **Validation Failures** → [PYTHON_INDICATOR_VALIDATION_FAILURES.md](PYTHON_INDICATOR_VALIDATION_FAILURES.md) - Debugging patterns
+
+**Architecture Context**:
+- **Why This Approach** → [HEADLESS_EXECUTION_PLAN.md](../plans/HEADLESS_EXECUTION_PLAN.md) - v2/v3/v4 evolution
+- **Success Methodology** → [LAGUERRE_RSI_VALIDATION_SUCCESS.md](../reports/LAGUERRE_RSI_VALIDATION_SUCCESS.md) - 1.000000 correlation
+
+---
+
+## Phase 1: Locate & Analyze MQL5 Indicator
+
+### Step 1.1: Find the Indicator File
+
+```bash
+# Bottle root
+BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+
+# Search by name
+find "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators" -name "*YourIndicator*"
+
+# List all custom indicators
+find "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom" -name "*.mq5"
+```
+
+**Example**:
+```bash
+# ATR adaptive smoothed Laguerre RSI
+find "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators" -name "*Laguerre*"
+# Result: /Users/.../MQL5/Indicators/Custom/ATR adaptive smoothed Laguerre RSI 2 (extended).mq5
+```
+
+### Step 1.2: Read and Understand the Algorithm
+
+```bash
+# Read the MQL5 file (handles UTF-8 and UTF-16LE automatically)
+python3 << 'EOF'
+from pathlib import Path
+import chardet
+
+mq5_file = "/Users/.../ATR adaptive smoothed Laguerre RSI 2 (extended).mq5"
+with Path(mq5_file).open('rb') as f:
+    raw = f.read(10_000)
+    encoding = chardet.detect(raw)['encoding']
+
+content = Path(mq5_file).read_text(encoding=encoding)
+print(content)
+EOF
+```
+
+### Step 1.3: Identify Key Components
+
+Document in a new guide (e.g., `LAGUERRE_RSI_ANALYSIS.md`):
+
+1. **Indicator Buffers**: What values does it calculate?
+   - Example: Laguerre RSI has 4 buffers (Laguerre_RSI, Signal, Adaptive_Period, ATR)
+
+2. **Input Parameters**: What's configurable?
+   - Example: `inpAtrPeriod=32`, `inpPriceSmoothing=5`, `inpPriceSmoothingMethod=EMA`
+
+3. **Dependencies**: What includes does it use?
+   - Search: `grep "#include" indicator.mq5`
+   - Example: `#include <MovingAverages.mqh>`
+
+4. **Algorithm Steps**: Break down the calculation logic
+   - ATR calculation → Adaptive gamma → Laguerre filter → Signal detection
+
+5. **Temporal Dependencies**: Does it access future bars?
+   - ⚠️ **CRITICAL**: Check for `buffer[i+1]` (look-ahead bias)
+   - See `LAGUERRE_RSI_TEMPORAL_AUDIT.md` for audit methodology
+
+---
+
+## Phase 2: Modify MQL5 to Export Indicator Buffers
+
+### Step 2.1: Copy to PythonInterop Project Folder
+
+```bash
+BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+cp "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom/YourIndicator.mq5" \
+   "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom/PythonInterop/YourIndicator_Export.mq5"
+```
+
+### Step 2.2: Add Buffer Exposure
+
+Modify the indicator to expose internal buffers for CSV export:
+
+```mql5
+// Original: Only 2 buffers exposed
+#property indicator_buffers 2
+#property indicator_plots   2
+
+// Modified: Expose ALL buffers for Python validation
+#property indicator_buffers 4
+#property indicator_plots   4
+
+// Add plot declarations for hidden buffers
+#property indicator_label3  "Adaptive_Period"
+#property indicator_type3   DRAW_LINE
+#property indicator_color3  clrOrange
+#property indicator_style3  STYLE_DOT
+#property indicator_width3  1
+
+#property indicator_label4  "ATR"
+#property indicator_type4   DRAW_LINE
+#property indicator_color4  clrBlue
+#property indicator_style4  STYLE_DOT
+#property indicator_width4  1
+```
+
+**Critical**: All buffers you want to validate in Python MUST be exposed as indicator plots.
+
+### Step 2.3: Document Changes
+
+Create a buffer fix document (e.g., `BUFFER_FIX_COMPLETE.md`) documenting:
+- Which buffers were hidden
+- Which were exposed
+- Compilation results (0 errors, 0 warnings)
+
+---
+
+## Phase 3: CLI Compile
+
+### Step 3.1: Copy to Simple Path (CRITICAL)
+
+**Hard-Learned Lesson**: Paths with spaces cause silent compilation failures in Wine/CrossOver.
+
+```bash
+BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+
+# Copy to C:/ root with simple name (NO SPACES)
+cp "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom/PythonInterop/Your Indicator (extended).mq5" \
+   "$BOTTLE/drive_c/Indicator.mq5"
+```
+
+### Step 3.2: Compile via CrossOver --cx-app
+
+```bash
+CX="$HOME/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
+BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+
+# Compile (Note: ~/Applications NOT /Applications)
+"$CX" --bottle "MetaTrader 5" --cx-app "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
+  /log /compile:"C:/Indicator.mq5" /inc:"C:/Program Files/MetaTrader 5/MQL5"
+```
+
+**Hard-Learned Lesson**: Do NOT add `/inc` unless using external includes. The `/inc` parameter OVERRIDES (not augments) default search paths. See `EXTERNAL_RESEARCH_BREAKTHROUGHS.md` for details.
+
+**Correct (for standard indicators)**:
+```bash
+"$CX" --bottle "MetaTrader 5" --cx-app "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
+  /log /compile:"C:/Indicator.mq5"
+```
+
+### Step 3.3: Verify Compilation
+
+```bash
+# Check MetaEditor log
+python3 << 'EOF'
+from pathlib import Path
+log = Path.home() / "Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c/Program Files/MetaTrader 5/logs/metaeditor.log"
+lines = log.read_text(encoding='utf-16-le').strip().split('\n')
+print(lines[-1])
+EOF
+
+# Expected: "0 errors, 1 warnings, 1080 msec elapsed"
+
+# Verify .ex5 file created
+ls -lh "$BOTTLE/drive_c/Indicator.ex5"
+```
+
+### Step 3.4: Move to Custom Indicators
+
+```bash
+cp "$BOTTLE/drive_c/Indicator.ex5" \
+   "$BOTTLE/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Custom/PythonInterop/YourIndicator_Export.ex5"
+```
+
+**See Also**: `MQL5_CLI_COMPILATION_SUCCESS.md` for complete troubleshooting guide
+
+---
+
+## Phase 4: Fetch Historical Data (5000+ Bars)
+
+### Step 4.1: Ensure MT5 is Running
+
+```bash
+# Start MT5 if not running
+CX="$HOME/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
+"$CX" --bottle "MetaTrader 5" "C:/Program Files/MetaTrader 5/terminal64.exe" &
+sleep 5
+```
+
+### Step 4.2: Fetch 5000 Bars via Wine Python MT5 API
+
+**Hard-Learned Lesson**: Python implementations need IDENTICAL historical context as MQL5. Cannot compare MQL5 indicator with full history to Python cold start (produces ~0.95 correlation). Must fetch 5000+ bars. See `PYTHON_INDICATOR_VALIDATION_FAILURES.md`.
+
+```bash
+BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+CX="$HOME/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
+
+# Fetch historical data
+"$CX" --bottle "MetaTrader 5" "C:\\Program Files\\Python312\\python.exe" -c '
+import MetaTrader5 as mt5
+import pandas as pd
+
+# Initialize MT5
+if not mt5.initialize():
+    print(f"MT5 initialize failed: {mt5.last_error()}")
+    exit(1)
+
+# Select symbol
+symbol = "EURUSD"
+if not mt5.symbol_select(symbol, True):
+    print(f"Failed to select {symbol}")
+    mt5.shutdown()
+    exit(1)
+
+# Fetch 5000 M1 bars (minimum for stable warmup)
+rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 5000)
+if rates is None or len(rates) == 0:
+    print(f"Failed to fetch rates: {mt5.last_error()}")
+    mt5.shutdown()
+    exit(1)
+
+print(f"Fetched {len(rates)} bars")
+
+# Convert to DataFrame
+df = pd.DataFrame(rates)
+df["time"] = pd.to_datetime(df["time"], unit="s")
+
+# Save to CSV
+output_path = "C:\\users\\crossover\\EURUSD_M1_5000bars.csv"
+df[["time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume"]].to_csv(output_path, index=False)
+print(f"Saved to {output_path}")
+
+mt5.shutdown()
+'
+```
+
+### Step 4.3: Verify CSV Created
+
+```bash
+BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5"
+ls -lh "$BOTTLE/drive_c/users/crossover/EURUSD_M1_5000bars.csv"
+# Expected: ~305KB, 5000 rows
+```
+
+**See Also**: `WINE_PYTHON_EXECUTION.md` for path navigation and troubleshooting
+
+---
+
+## Phase 5: Implement Python Indicator
+
+### Step 5.1: Create Python Module
+
+```bash
+cd users/crossover
+mkdir -p indicators
+touch indicators/__init__.py
+```
+
+### Step 5.2: Implement Indicator Functions
+
+Create `indicators/your_indicator.py`:
+
+```python
+"""
+Your Indicator - Python Implementation
+Validated against MQL5 reference implementation
+"""
+
+import pandas as pd
+import numpy as np
+
+
+def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    Calculate ATR (Average True Range)
+
+    CRITICAL: Must match MQL5 expanding window behavior
+    - First N bars: sum / period (not sum / actual_window_size)
+    - After N bars: sliding window mean
+    """
+    # True Range
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    # ATR with MQL5-compatible expanding window
+    atr = pd.Series(index=tr.index, dtype=float)
+
+    for i in range(len(tr)):
+        if i < period:
+            # Expanding window: sum all available bars, divide by period
+            atr.iloc[i] = tr.iloc[:i+1].sum() / period
+        else:
+            # Sliding window: average of last `period` bars
+            atr.iloc[i] = tr.iloc[i-period+1:i+1].mean()
+
+    return atr
+
+
+def calculate_your_indicator(
+    df: pd.DataFrame,
+    param1: int = 32,
+    param2: str = 'ema'
+) -> dict:
+    """
+    Calculate Your Indicator
+
+    Args:
+        df: DataFrame with OHLC data
+        param1: First parameter
+        param2: Second parameter
+
+    Returns:
+        dict with indicator buffers: {'buffer1': Series, 'buffer2': Series, ...}
+    """
+    # Implement your indicator logic here
+    # Return all buffers as a dictionary
+
+    result = {
+        'buffer1': buffer1_values,
+        'buffer2': buffer2_values,
+    }
+
+    return result
+```
+
+### Step 5.3: Handle Pandas Behavioral Differences
+
+**Hard-Learned Lesson**: Pandas `rolling().mean()` returns NaN until full window is available. MQL5 ATR uses expanding window (sum/period). See `PYTHON_INDICATOR_VALIDATION_FAILURES.md` for details.
+
+**Avoid**:
+```python
+# WRONG: Returns NaN for first 31 bars
+atr = tr.rolling(window=32).mean()
+```
+
+**Use**:
+```python
+# RIGHT: Matches MQL5 behavior
+for i in range(len(tr)):
+    if i < period:
+        atr.iloc[i] = tr.iloc[:i+1].sum() / period
+    else:
+        atr.iloc[i] = tr.iloc[i-period+1:i+1].mean()
+```
+
+---
+
+## Phase 6: Validate with Historical Warmup
+
+### Step 6.1: Attach Indicator to MT5 Chart
+
+1. Open MT5
+2. Open EURUSD M1 chart
+3. Drag `YourIndicator_Export.ex5` from Navigator onto chart
+4. Configure with same parameters as Python implementation
+5. Let indicator warm up (wait 10 seconds)
+6. Right-click chart → "Data Window" to verify indicator values
+
+### Step 6.2: Export MQL5 Indicator Values
+
+Attach indicator to chart, then export last 100 bars:
+
+```mql5
+// In indicator OnCalculate(), add export code
+if(rates_total > 5000)  // Only export after full warmup
+{
+    string filename = "Export_" + Symbol() + "_" + EnumToString(Period()) + ".csv";
+    int handle = FileOpen(filename, FILE_WRITE|FILE_CSV);
+
+    // Export last 100 bars
+    for(int i = rates_total - 100; i < rates_total; i++)
+    {
+        FileWrite(handle,
+            TimeToString(time[i]),
+            open[i], high[i], low[i], close[i],
+            Buffer1[i], Buffer2[i]);  // Your indicator buffers
+    }
+    FileClose(handle);
+}
+```
+
+Or use existing `ExportAligned.mq5` script (if available).
+
+### Step 6.3: Calculate Python Indicator on Full 5000 Bars
+
+```python
+import pandas as pd
+from indicators.your_indicator import calculate_your_indicator
+
+# Load 5000-bar dataset
+df_5000 = pd.read_csv("EURUSD_M1_5000bars.csv")
+df_5000["time"] = pd.to_datetime(df_5000["time"])
+
+# Calculate on ALL 5000 bars (provides historical warmup)
+result_5000 = calculate_your_indicator(df_5000, param1=32, param2='ema')
+
+# Extract last 100 bars for comparison
+result_last100 = result_5000.iloc[-100:].copy()
+```
+
+### Step 6.4: Run Universal Validator
+
+```bash
+cd users/crossover
+
+# Validate with 0.999 correlation threshold
+python validate_indicator.py \
+  --csv ../../../MT5/MQL5/Files/Export_EURUSD_PERIOD_M1.csv \
+  --indicator your_indicator \
+  --threshold 0.999
+```
+
+**Expected Output** (success):
+```
+[PASS] Buffer1
+  Correlation: 1.000000 (threshold: 0.999)
+  MAE: 0.000000, RMSE: 0.000000
+
+[PASS] Buffer2
+  Correlation: 0.999987 (threshold: 0.999)
+  MAE: 0.000000, RMSE: 0.000000
+
+STATUS: PASS
+All buffers meet correlation threshold >= 0.999
+```
+
+### Step 6.5: Debug if Validation Fails
+
+**Common Issues**:
+
+1. **Correlation ~0.95** → Historical warmup mismatch
+   - Solution: Ensure Python calculates on full 5000 bars, compare last 100
+
+2. **NaN values** → Pandas rolling window behavior
+   - Solution: Use manual loops for expanding windows (see Phase 5.3)
+
+3. **Small differences (correlation ~0.999)** → Floating-point precision
+   - Solution: Acceptable if < 0.001 MAE
+
+4. **Large differences** → Algorithm mismatch
+   - Solution: Re-read MQL5 code, check for EMA vs SMA, SMMA differences
+
+**See Also**: `PYTHON_INDICATOR_VALIDATION_FAILURES.md` for complete debugging guide
+
+---
+
+## Phase 7: Document & Archive Lessons
+
+### Step 7.1: Create Validation Success Report
+
+Document your success in `docs/reports/YOUR_INDICATOR_VALIDATION_SUCCESS.md`:
+
+```markdown
+# Your Indicator Python Implementation - Validation Success
+
+**Date**: 2025-10-17
+**Status**: ✅ VALIDATED
+**Correlation**: 1.000000 (perfect match)
+
+## Validation Results
+
+| Buffer | Correlation | MAE | Result |
+|--------|-------------|-----|--------|
+| Buffer1 | 1.000000 | 0.000000 | ✅ PASS |
+| Buffer2 | 0.999987 | 0.000000 | ✅ PASS |
+
+## Key Implementation Details
+
+- Historical warmup: 5000 bars
+- Python implementation: `indicators/your_indicator.py`
+- MQL5 reference: `MQL5/Indicators/Custom/PythonInterop/YourIndicator_Export.mq5`
+
+## Lessons Learned
+
+- [Document any specific challenges or solutions]
+```
+
+### Step 7.2: Update CLAUDE.md
+
+Add to Core Guides section:
+```markdown
+- **[YOUR_INDICATOR_ANALYSIS.md](docs/guides/YOUR_INDICATOR_ANALYSIS.md)** - Algorithm breakdown
+```
+
+Add to Single Source of Truth table:
+```markdown
+| Your Indicator Algorithm & Translation | `docs/guides/YOUR_INDICATOR_ANALYSIS.md` |
+| Your Indicator Validation Success | `docs/reports/YOUR_INDICATOR_VALIDATION_SUCCESS.md` |
+```
+
+### Step 7.3: Archive in Git
+
+```bash
+git add .
+git commit -m "feat: Add Your Indicator Python implementation with validation
+
+- Python implementation: indicators/your_indicator.py
+- MQL5 export version: PythonInterop/YourIndicator_Export.mq5
+- Validation: 1.000000 correlation (5000-bar warmup)
+- Documentation: YOUR_INDICATOR_VALIDATION_SUCCESS.md"
+```
+
+---
+
+## Critical Success Factors (Checklist)
+
+Before declaring success, verify ALL of these:
+
+- [ ] **MQL5 Compilation**: 0 errors, .ex5 file created (~25KB)
+- [ ] **Buffer Exposure**: All buffers visible in Data Window
+- [ ] **Historical Data**: 5000+ bars fetched successfully
+- [ ] **Python Implementation**: All functions implemented, no pandas NaN traps
+- [ ] **Warmup Methodology**: Python calculated on full 5000 bars, compared last 100
+- [ ] **Validation Pass**: Correlation ≥ 0.999 for ALL buffers
+- [ ] **Documentation**: Analysis, success report, and CLAUDE.md updated
+- [ ] **No Temporal Violations**: No `buffer[i+1]` look-ahead bias
+
+---
+
+## Common Pitfalls (What To Avoid)
+
+### ❌ NEVER Do This
+
+1. **Never add `/inc` to CLI compilation unless using external includes**
+   - The `/inc` parameter OVERRIDES default paths, breaks standard library includes
+   - See `EXTERNAL_RESEARCH_BREAKTHROUGHS.md`
+
+2. **Never compare MQL5 with full history to Python cold start**
+   - Will produce ~0.95 correlation (systematic bias)
+   - Always fetch 5000+ bars for both implementations
+
+3. **Never use `pandas.rolling().mean()` without understanding NaN behavior**
+   - Returns NaN until full window available
+   - MQL5 ATR divides by period even for partial windows
+
+4. **Never compile MQL5 files with spaces in paths via Wine CLI**
+   - Causes silent failures
+   - Always copy to simple path like `C:/Indicator.mq5`
+
+5. **Never trust "good enough" correlation (0.95)**
+   - Production requires ≥ 0.999
+   - 0.95 means systematic errors that compound
+
+### ✅ ALWAYS Do This
+
+1. **Always fetch 5000+ bars for validation**
+   - ATR needs 32-bar lookback
+   - Adaptive periods need 64-bar warmup
+   - More is better for stability
+
+2. **Always document hard-learned lessons**
+   - Create analysis guide for algorithm
+   - Document failures in addition to successes
+   - Update CLAUDE.md hub-and-spoke links
+
+3. **Always verify compilation with log AND .ex5 existence**
+   - Exit code 0 doesn't guarantee success
+   - Check MetaEditor log for "0 errors"
+   - Verify .ex5 file size (~25KB typical)
+
+4. **Always calculate Python indicator on full historical dataset**
+   - Don't subset data before calculation
+   - Calculate on 5000 bars, THEN extract last 100
+
+---
+
+## Time Estimates
+
+| Phase | First Time | Subsequent |
+|-------|-----------|------------|
+| 1. Locate & Analyze | 30-60 min | 10-15 min |
+| 2. Modify MQL5 | 15-30 min | 5-10 min |
+| 3. CLI Compile | 10-20 min | 2-5 min |
+| 4. Fetch Historical Data | 5-10 min | 2-3 min |
+| 5. Implement Python | 1-2 hours | 30-60 min |
+| 6. Validate | 15-30 min | 5-10 min |
+| 7. Document | 20-30 min | 10-15 min |
+| **Total** | **2-4 hours** | **1-2 hours** |
+
+**Includes**: Debugging time, documentation, learning curve
+
+---
+
+## Success Metrics
+
+**Target**: 100% accuracy replication (correlation ≥ 0.999)
+
+**Achieved** (as of 2025-10-17):
+- **Laguerre RSI**: 1.000000 correlation ✅
+- **ATR**: 0.999987 correlation ✅
+- **Adaptive Period**: 1.000000 correlation ✅
+
+**Methodology**: 5000-bar historical warmup, universal validator framework
+
+---
+
+## References
+
+### Hard-Learned Lessons
+- **[EXTERNAL_RESEARCH_BREAKTHROUGHS.md](EXTERNAL_RESEARCH_BREAKTHROUGHS.md)** - External AI research findings
+- **[PYTHON_INDICATOR_VALIDATION_FAILURES.md](PYTHON_INDICATOR_VALIDATION_FAILURES.md)** - 3-hour debugging journey
+- **[LAGUERRE_RSI_VALIDATION_SUCCESS.md](../reports/LAGUERRE_RSI_VALIDATION_SUCCESS.md)** - Success methodology
+
+### Technical Guides
+- **[MQL5_CLI_COMPILATION_SUCCESS.md](MQL5_CLI_COMPILATION_SUCCESS.md)** - CrossOver CLI compilation
+- **[WINE_PYTHON_EXECUTION.md](WINE_PYTHON_EXECUTION.md)** - v3.0.0 Wine Python workflow
+- **[MT5_FILE_LOCATIONS.md](MT5_FILE_LOCATIONS.md)** - File paths and locations
+- **[MQL5_ENCODING_SOLUTIONS.md](MQL5_ENCODING_SOLUTIONS.md)** - UTF-8/UTF-16LE handling
+
+### Example Implementation
+- **[LAGUERRE_RSI_ANALYSIS.md](LAGUERRE_RSI_ANALYSIS.md)** - Complete algorithm breakdown
+- **Python Implementation**: `users/crossover/indicators/laguerre_rsi.py`
+- **MQL5 Export Version**: `MQL5/Indicators/Custom/PythonInterop/ATR_Adaptive_Laguerre_RSI.mq5`
+
+---
+
+**Status**: Documentation complete - Ready for next indicator migration
+**Confidence**: High - All steps empirically validated through Laguerre RSI success
+**Next**: Apply this workflow to your next indicator

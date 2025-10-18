@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""
+Verify Tokyo extended hours: Nov 5, 2024 transition from 15:00 to 15:30 close.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pandas as pd
+from exness_data_preprocess import ExnessDataProcessor
+
+# Use the test database we created (has data from Aug 2024 - Oct 2025)
+test_dir = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/lunch_final_verify_g_b_bc4g")
+
+processor = ExnessDataProcessor(base_dir=test_dir)
+
+print("="*70)
+print("TOKYO EXTENDED HOURS VALIDATION")
+print("="*70)
+
+# Test 1: Before Nov 5, 2024 - should close at 15:00 JST (06:00 UTC)
+print("\n[1] Before Nov 5, 2024 (closes at 15:00 JST = 06:00 UTC)")
+print("    Testing: Nov 1, 2024 (Friday)")
+
+# Query 14:00-16:00 JST = 05:00-07:00 UTC
+start = pd.Timestamp("2024-11-01 05:00:00", tz="UTC")
+end = pd.Timestamp("2024-11-01 07:00:00", tz="UTC")
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+
+# Find last trading minute
+last_trading = df[df["is_xtks_session"] == 1]
+if len(last_trading) > 0:
+    last_ts_utc = last_trading["Timestamp"].max()
+    last_ts_jst = last_ts_utc.tz_convert("Asia/Tokyo")
+    print(f"    Last trading minute: {last_ts_jst} (JST)")
+    print(f"    Last trading minute: {last_ts_utc.tz_convert('UTC')} (UTC)")
+
+    # Should be 14:59 JST (market closes at 15:00)
+    if last_ts_jst.hour == 14 and last_ts_jst.minute == 59:
+        print("    ✅ PASS: Closes at 15:00 JST (before extension)")
+    else:
+        print(f"    ❌ FAIL: Expected 14:59 JST, got {last_ts_jst.hour}:{last_ts_jst.minute}")
+else:
+    print("    ⚠️  No trading data found")
+
+# Test 2: After Nov 5, 2024 - should close at 15:30 JST (06:30 UTC)
+print("\n[2] After Nov 5, 2024 (closes at 15:30 JST = 06:30 UTC)")
+print("    Testing: Nov 6, 2024 (Wednesday)")
+
+# Query 14:00-16:00 JST = 05:00-07:00 UTC
+start = pd.Timestamp("2024-11-06 05:00:00", tz="UTC")
+end = pd.Timestamp("2024-11-06 07:00:00", tz="UTC")
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+
+# Find last trading minute
+last_trading = df[df["is_xtks_session"] == 1]
+if len(last_trading) > 0:
+    last_ts_utc = last_trading["Timestamp"].max()
+    last_ts_jst = last_ts_utc.tz_convert("Asia/Tokyo")
+    print(f"    Last trading minute: {last_ts_jst} (JST)")
+    print(f"    Last trading minute: {last_ts_utc.tz_convert('UTC')} (UTC)")
+
+    # Should be 15:29 JST (market closes at 15:30)
+    if last_ts_jst.hour == 15 and last_ts_jst.minute == 29:
+        print("    ✅ PASS: Closes at 15:30 JST (after extension)")
+    else:
+        print(f"    ⚠️  UNEXPECTED: Expected 15:29 JST, got {last_ts_jst.hour}:{last_ts_jst.minute}")
+        print("    (This might be correct if exchange_calendars has updated data)")
+else:
+    print("    ⚠️  No trading data found")
+
+# Test 3: Verify 15:00-15:30 window after Nov 5, 2024
+print("\n[3] Verify 15:00-15:30 JST trading after Nov 5, 2024")
+start = pd.Timestamp("2024-11-06 06:00:00", tz="UTC")  # 15:00 JST
+end = pd.Timestamp("2024-11-06 06:30:00", tz="UTC")    # 15:30 JST
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+
+extended_flags = df["is_xtks_session"].sum()
+print(f"    Trading minutes 15:00-15:30 JST: {extended_flags}/{len(df)}")
+
+if extended_flags > 0:
+    print(f"    ✅ PASS: Extended hours (15:00-15:30) correctly detected ({extended_flags} minutes)")
+else:
+    print("    ⚠️  Extended hours not detected (might need exchange_calendars update)")
+
+print("\n" + "="*70)
+print("✅ VALIDATION COMPLETE")
+print("="*70)

@@ -1,0 +1,547 @@
+# Test Strategy - Multi-Page Form Automation
+
+**Purpose**: Document systematic approach for exploring and automating Manulife PAR multi-page form
+**Status**: Active - Phase 0 complete, Phase 1 pending
+**Version**: 1.0.0
+**Date**: 2025-10-17
+
+---
+
+## Overview
+
+This document outlines the **3-phase strategy** for automating the Manulife PAR application form, a complex multi-page wizard with unknown structure.
+
+**Challenge**: Cannot automate what we haven't explored - the form structure beyond the welcome page is undocumented.
+
+**Solution**: Systematic discovery → structured documentation → modular implementation
+
+---
+
+## Phase Strategy
+
+### Phase 0: Structural Foundation ✅
+
+**Status**: **COMPLETED** (2025-10-17)
+
+**Goal**: Restructure project to follow Playwright best practices
+
+**Deliverables**:
+- ✅ Directory structure following industry standards
+- ✅ Base page class with common methods
+- ✅ Artifact manager utility (DRY principle)
+- ✅ Pytest fixtures for shared setup
+- ✅ Page-level specifications (modular approach)
+- ✅ Migrated authentication script to reusable module
+- ✅ Refactored reconnaissance to pytest framework
+- ✅ Architecture documentation
+
+**Key Files**:
+- `/pages/base_page.py` - Base page with common methods
+- `/utils/artifact_manager.py` - Centralized artifact capture
+- `/tests/conftest.py` - Shared pytest fixtures
+- `/specifications/pages/welcome-page.yaml` - Welcome page spec
+- `/auth/passkey_authenticator.py` - Reusable auth module
+- `/tests/reconnaissance/explore_welcome_page.py` - Welcome page exploration
+- `/tests/reconnaissance/explore_full_form.py` - Full form exploration (stub)
+
+**Outcome**: Production-ready structure that follows best practices and scales for multi-page automation.
+
+---
+
+### Phase 1: Systematic Discovery 🔄
+
+**Status**: **PENDING** (Next)
+
+**Goal**: Explore complete form structure without implementing automation
+
+**Approach**: Session-based exploratory testing with comprehensive artifact capture
+
+#### Phase 1.1: Form Exploration
+
+**Task**: Navigate through entire multi-page form and capture artifacts at each transition.
+
+**Implementation**:
+- Enhance `/tests/reconnaissance/explore_full_form.py`
+- Execute welcome page entry flow (cookies → select Par → start)
+- Iterate through all form pages programmatically
+- Capture state snapshot at each page:
+  - Screenshot (PII-masked)
+  - DOM HTML
+  - ARIA tree (YAML)
+  - Form fields inventory
+  - Validation messages (if any)
+
+**Exit Criteria**:
+- All form pages discovered and documented
+- Artifacts captured for every page
+- No errors during navigation flow
+- Clear page transition map
+
+**Artifacts Location**: `artifacts/explore_full_form/`
+
+**Estimated Effort**: 1-2 hours (depends on form complexity)
+
+#### Phase 1.2: Structure Documentation
+
+**Task**: Analyze captured artifacts and create canonical documentation.
+
+**Deliverables**:
+
+**Page Inventory** (`docs/analysis/page-inventory.md`):
+```markdown
+## Form Pages
+
+1. Welcome Page ✓ (documented)
+   - URL: /dda/welcomeInformation
+   - Fields: product (dropdown)
+   - Actions: accept cookies, select product, start
+
+2. Page 1: [Name TBD]
+   - URL: [to be discovered]
+   - Fields: [to be discovered]
+   - Validation: [to be discovered]
+
+3. Page 2: [Name TBD]
+   ...
+```
+
+**Field Catalog** (`docs/analysis/field-catalog.md`):
+```markdown
+## All Form Fields
+
+### Page 1
+| Field Name | Type | Required | Validation | Selector |
+|------------|------|----------|------------|----------|
+| first_name | text | yes | minLength: 1 | #first-name |
+| ... | ... | ... | ... | ... |
+
+### Page 2
+...
+```
+
+**Exit Criteria**:
+- Complete page inventory with URLs
+- Complete field catalog with types, validation, selectors
+- All conditional fields documented
+- All page transitions mapped
+
+**Estimated Effort**: 2-3 hours
+
+#### Phase 1.3: State Transition Mapping
+
+**Task**: Document navigation flow and conditional logic.
+
+**Deliverable**: State diagram showing:
+- Page transitions (linear or conditional)
+- Required fields per page
+- Conditional field appearance logic
+- Navigation controls (Next, Back, Save, Submit)
+
+**Format**: Mermaid diagram in `docs/analysis/form-flow.md`
+
+**Exit Criteria**:
+- Clear understanding of form navigation
+- Conditional logic documented
+- Edge cases identified
+
+**Estimated Effort**: 1 hour
+
+**Phase 1 Completion**: Commit "Phase 1 complete - full form documented"
+
+---
+
+### Phase 2: Structured Documentation 🔄
+
+**Status**: **PENDING** (After Phase 1)
+
+**Goal**: Design automation architecture based on discovered structure
+
+**Approach**: Create specifications and design page objects without implementation
+
+#### Phase 2.1: Page Object Design
+
+**Task**: Design page object classes for each form page.
+
+**Deliverable**: Design document (`docs/architecture/page-objects.md`):
+
+```markdown
+## Page Object Classes
+
+### WelcomePage
+**Specification**: /specifications/pages/welcome-page.yaml ✓
+**Methods**:
+- load() - Navigate to welcome page
+- accept_cookies() - Dismiss cookie banner
+- select_product(product: str) - Select from dropdown
+- start_application() - Click start button
+
+### FormPage1
+**Specification**: /specifications/pages/form-page-1.yaml
+**Methods**:
+- fill_personal_info(data: Dict) - Fill name, email, etc.
+- validate_fields() - Check validation messages
+- click_next() - Navigate to next page
+
+...
+```
+
+**Exit Criteria**:
+- One page object designed per form page
+- Clear method signatures
+- Specification references
+
+**Estimated Effort**: 2-3 hours
+
+#### Phase 2.2: Specification Updates
+
+**Task**: Create OpenAPI specifications for each form page.
+
+**Deliverables**:
+- `specifications/pages/form-page-1.yaml`
+- `specifications/pages/form-page-2.yaml`
+- ... (one per page)
+
+**Specification Structure** (following `welcome-page.yaml` pattern):
+- `components.schemas.<Page>Fields` - Field definitions
+- `x-page-metadata` - URL, auth requirements
+- `x-navigation` - Entry/exit flow
+- `x-selectors` - Element selectors
+- `x-wait-strategies` - Wait configurations
+- `x-artifacts` - Capture points
+
+**Exit Criteria**:
+- Complete specification for each page
+- All fields documented with selectors and validation
+- Wait strategies defined
+- Artifact capture points identified
+
+**Estimated Effort**: 3-4 hours
+
+#### Phase 2.3: Test Data Definition
+
+**Task**: Define test data sets for dry-run and live submission.
+
+**Deliverable**: Test fixtures in `fixtures/`
+
+**Example**: `fixtures/test_data.py`
+```python
+VALID_APPLICATION = {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@example.com",
+    ...
+}
+
+INVALID_EMAIL = {
+    "email": "not-an-email",
+    ...
+}
+```
+
+**Exit Criteria**:
+- Valid test data set (for live submission)
+- Invalid test data sets (for validation testing)
+- Edge case test data
+
+**Estimated Effort**: 1-2 hours
+
+**Phase 2 Completion**: Commit "Phase 2 complete - specs finalized"
+
+---
+
+### Phase 3: Modular Implementation 🔄
+
+**Status**: **PENDING** (After Phase 2)
+
+**Goal**: Implement page objects and end-to-end automation
+
+**Approach**: Incremental implementation with testing at each step
+
+#### Phase 3.1: Page Object Implementation
+
+**Task**: Implement page object classes following designs from Phase 2.
+
+**Deliverables**:
+- `pages/welcome_page.py` ✓ (stub exists)
+- `pages/form_page_1.py`
+- `pages/form_page_2.py`
+- ... (one per page)
+
+**Implementation Pattern**:
+```python
+from pages.base_page import BasePage
+
+class FormPage1(BasePage):
+    """First form page."""
+
+    URL_PATTERN = r"/dda/page-1"  # From Phase 1 discovery
+
+    def fill_personal_info(self, data: Dict):
+        """Fill personal information fields."""
+        self.fill_react_field(
+            self.get_by_label("First Name"),
+            data["first_name"]
+        )
+        # ... more fields
+
+    def click_next(self):
+        """Navigate to next page."""
+        button = self.get_by_role("button", name="Next")
+        self.click_button(button)
+        self.wait_for_network_idle()
+```
+
+**Testing**: Unit test each page object method as implemented.
+
+**Exit Criteria**:
+- All page objects implemented
+- All methods working as designed
+- Unit tests passing
+
+**Estimated Effort**: 4-6 hours
+
+#### Phase 3.2: Form Orchestrator
+
+**Task**: Build orchestrator to coordinate multi-page form flow.
+
+**Deliverable**: `tests/automation/fill_par_form.py`
+
+**Orchestrator Responsibilities**:
+- Load test data
+- Instantiate page objects
+- Execute form flow:
+  1. Authenticate (if needed)
+  2. Welcome page → select product → start
+  3. Page 1 → fill fields → next
+  4. Page 2 → fill fields → next
+  5. ... continue for all pages
+  6. Final page → submit (if `SUBMIT=true`)
+- Capture artifacts at each step
+- Handle errors with comprehensive artifact capture
+
+**Exit Criteria**:
+- Orchestrator navigates complete form flow
+- Dry-run mode working (no submission)
+- Live submission mode working (with `SUBMIT=true`)
+- Artifacts captured at all steps
+
+**Estimated Effort**: 3-4 hours
+
+#### Phase 3.3: End-to-End Testing
+
+**Task**: Test complete automation flow.
+
+**Test Scenarios**:
+
+**Dry-Run** (`SUBMIT=false` or unset):
+```bash
+export FORM_JSON='{"first_name":"Ada",...}'
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v tests/automation/fill_par_form.py
+```
+
+**Expected**: Form filled but not submitted, artifacts captured.
+
+**Live Submission** (`SUBMIT=true`):
+```bash
+export FORM_JSON='{"first_name":"Ada",...}'
+export SUBMIT=true
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v tests/automation/fill_par_form.py
+```
+
+**Expected**: Form submitted, success criteria met, policy ID captured.
+
+**Exit Criteria**:
+- Dry-run completes without errors
+- Live submission succeeds
+- Artifacts captured successfully
+- Success criteria validated
+
+**Estimated Effort**: 2-3 hours (including debugging)
+
+**Phase 3 Completion**: Commit "Phase 3 complete - production ready"
+
+---
+
+## Testing Principles
+
+### 1. Fail-Fast Philosophy
+
+**No Retry Logic**: Explicit waits only, no selector fallbacks or retry loops.
+
+**Rationale**:
+- Deterministic execution
+- Fast failure with clear errors
+- Comprehensive artifact capture on failure
+
+**On Failure**:
+1. Capture screenshot (PII-masked)
+2. Capture DOM snapshot
+3. Capture ARIA tree
+4. Save artifacts to session directory
+5. Exit with error code 1
+6. Review trace: `npx playwright show-trace artifacts/<session>/trace.zip`
+
+### 2. ARIA-First Selectors
+
+**Priority Order**:
+1. ARIA labels/roles (`get_by_label`, `get_by_role`)
+2. Visible text (`get_by_text`)
+3. Semantic HTML (`select`, `button`)
+4. CSS/XPath (last resort, avoid if possible)
+
+**Rationale**:
+- Stable (less brittle than IDs/classes)
+- Accessible (benefits users with screen readers)
+- Playwright-recommended best practice
+
+### 3. Comprehensive Artifact Capture
+
+**Artifacts Per Session**:
+- Screenshots: PII-masked, full-page
+- DOM: Complete HTML at each step
+- ARIA: Accessibility tree (YAML)
+- HAR: Network activity (minimal mode for PII)
+- Trace: Playwright trace with snapshots
+- Telemetry: NDJSON event log (requests, console, errors)
+- Manifest: `index.json` with metadata
+
+**Purpose**:
+- Offline analysis without re-running tests
+- Debugging failures without production access
+- Documentation of form behavior
+
+### 4. Session-Based Testing
+
+**Each Test Session**:
+- Unique timestamped artifact directory
+- Independent browser context
+- Fresh storage state (authentication)
+- No cross-test pollution
+
+**Benefits**:
+- Reproducible test runs
+- Parallel execution possible
+- Easy debugging (isolated artifacts)
+
+---
+
+## Success Criteria
+
+### Phase 1 Success
+- [ ] All form pages discovered
+- [ ] Complete page inventory documented
+- [ ] Complete field catalog created
+- [ ] State transition diagram created
+- [ ] Artifacts captured for every page
+
+### Phase 2 Success
+- [ ] Page object designs complete
+- [ ] Specifications created for all pages
+- [ ] Test data sets defined
+- [ ] Architecture reviewed and approved
+
+### Phase 3 Success
+- [ ] All page objects implemented
+- [ ] Form orchestrator working
+- [ ] Dry-run mode tested successfully
+- [ ] Live submission mode tested successfully
+- [ ] Artifacts captured at all steps
+- [ ] Success criteria validated
+- [ ] Production-ready automation
+
+---
+
+## Risk Mitigation
+
+### Risk 1: Form Structure Changes
+
+**Mitigation**: ARIA-first selectors are more stable than IDs/classes.
+
+**Recovery**: Re-run Phase 1 reconnaissance to re-discover structure.
+
+### Risk 2: Session Expiration
+
+**Mitigation**:
+- Document session duration (~30-35 min for Manulife)
+- Re-authenticate before long-running tests
+- Store authentication in reusable module
+
+### Risk 3: Conditional Fields
+
+**Mitigation**:
+- Document all conditional logic in Phase 1
+- Test data covers all code paths
+- Specifications include `x-depends-on` metadata
+
+### Risk 4: Rate Limiting / Bot Detection
+
+**Mitigation**:
+- Use `.type()` with delay to simulate human input
+- Respect network idle waits
+- Avoid excessive retries
+- Use real browser (not headless for live submission)
+
+---
+
+## Timeline Estimate
+
+| Phase | Tasks | Estimated Time |
+|-------|-------|---------------|
+| Phase 0 | ✅ Complete | ~4 hours |
+| Phase 1.1 | Form exploration | 1-2 hours |
+| Phase 1.2 | Structure documentation | 2-3 hours |
+| Phase 1.3 | State mapping | 1 hour |
+| Phase 2.1 | Page object design | 2-3 hours |
+| Phase 2.2 | Specification updates | 3-4 hours |
+| Phase 2.3 | Test data definition | 1-2 hours |
+| Phase 3.1 | Page object implementation | 4-6 hours |
+| Phase 3.2 | Form orchestrator | 3-4 hours |
+| Phase 3.3 | End-to-end testing | 2-3 hours |
+| **Total** | **All phases** | **23-32 hours** |
+
+**Note**: Estimates assume no major blockers. Actual time may vary based on form complexity.
+
+---
+
+## Current Status
+
+**Phase 0**: ✅ **COMPLETED** (2025-10-17)
+- Structural foundation in place
+- Best practices architecture established
+- Ready for Phase 1 exploration
+
+**Next Step**: Phase 1.1 - Run full form exploration using `/tests/reconnaissance/explore_full_form.py`
+
+**Command**:
+```bash
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v -m reconnaissance tests/reconnaissance/explore_full_form.py
+```
+
+---
+
+## References
+
+**Architecture**:
+- [`/docs/architecture/page-object-design.md`](/Users/terryli/own/insurance/docs/architecture/page-object-design.md) - POM architecture
+
+**Specifications**:
+- [`/specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml) - Universal automation spec
+- [`/specifications/pages/welcome-page.yaml`](/Users/terryli/own/insurance/specifications/pages/welcome-page.yaml) - Welcome page spec (example)
+
+**Workflows**:
+- [`/docs/workflows/welcome-page-automation.md`](/Users/terryli/own/insurance/docs/workflows/welcome-page-automation.md) - Welcome page entry flow
+- [`/docs/workflows/authentication-implementation.md`](/Users/terryli/own/insurance/docs/workflows/authentication-implementation.md) - Passkey auth flow
+
+**Analysis**:
+- [`/docs/analysis/reconnaissance-findings.md`](/Users/terryli/own/insurance/docs/analysis/reconnaissance-findings.md) - Welcome page analysis (v2.0.0)
+
+---
+
+## Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2025-10-17 | Initial test strategy following Phase 0 completion |

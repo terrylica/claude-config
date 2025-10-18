@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""
+Fresh E2E lunch break validation - regenerate database with current code.
+"""
+
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pandas as pd
+from exness_data_preprocess import ExnessDataProcessor
+
+# Create new temporary directory
+test_dir = Path(tempfile.mkdtemp(prefix="lunch_break_fresh_"))
+print(f"Test database directory: {test_dir}")
+
+processor = ExnessDataProcessor(base_dir=test_dir)
+
+# Generate test database with current code (Aug 2024)
+print("\n" + "="*70)
+print("GENERATING TEST DATABASE WITH CURRENT CODE")
+print("="*70)
+print("Date range: August 2024")
+print("This will download ~160 MB of tick data...")
+
+try:
+    result = processor.update_data("EURUSD", start_date="2024-08-01", delete_zip=True)
+    print(f"\n✅ Generated database:")
+    print(f"   - Months added: {result.months_added}")
+    print(f"   - OHLC bars: {result.ohlc_bars:,}")
+    print(f"   - Database size: {result.duckdb_size_mb:.2f} MB")
+except Exception as e:
+    print(f"\n❌ Failed to generate database: {e}")
+    sys.exit(1)
+
+# Test Tokyo lunch break (11:30-12:30 JST = 02:30-03:30 UTC)
+print("\n" + "="*70)
+print("VALIDATION: Tokyo Lunch Break (11:30-12:30 JST)")
+print("="*70)
+
+df_tokyo = processor.query_ohlc("EURUSD", "1m", "2024-08-05 02:30:00", "2024-08-05 03:30:00")
+tokyo_lunch_flags = df_tokyo['is_xtks_session'].sum()
+print(f"Timestamps: {len(df_tokyo)}, Session flags=1: {tokyo_lunch_flags}")
+
+if tokyo_lunch_flags == 0:
+    print("✅ PASS: Tokyo lunch correctly excluded")
+else:
+    print(f"❌ FAIL: {tokyo_lunch_flags} timestamps incorrectly flagged")
+    print("\nFirst 5 incorrect timestamps:")
+    print(df_tokyo[df_tokyo['is_xtks_session'] == 1][['ts', 'is_xtks_session']].head())
+    sys.exit(1)
+
+# Test Hong Kong lunch break (12:00-13:00 HKT = 04:00-05:00 UTC)
+print("\n" + "="*70)
+print("VALIDATION: Hong Kong Lunch Break (12:00-13:00 HKT)")
+print("="*70)
+
+df_hk = processor.query_ohlc("EURUSD", "1m", "2024-08-05 04:00:00", "2024-08-05 05:00:00")
+hk_lunch_flags = df_hk['is_xhkg_session'].sum()
+print(f"Timestamps: {len(df_hk)}, Session flags=1: {hk_lunch_flags}")
+
+if hk_lunch_flags == 0:
+    print("✅ PASS: Hong Kong lunch correctly excluded")
+else:
+    print(f"❌ FAIL: {hk_lunch_flags} timestamps incorrectly flagged")
+    sys.exit(1)
+
+# Test Singapore lunch break (12:00-13:00 SGT = 04:00-05:00 UTC)
+print("\n" + "="*70)
+print("VALIDATION: Singapore Lunch Break (12:00-13:00 SGT)")
+print("="*70)
+
+df_sg = processor.query_ohlc("EURUSD", "1m", "2024-08-05 04:00:00", "2024-08-05 05:00:00")
+sg_lunch_flags = df_sg['is_xses_session'].sum()
+print(f"Timestamps: {len(df_sg)}, Session flags=1: {sg_lunch_flags}")
+
+if sg_lunch_flags == 0:
+    print("✅ PASS: Singapore lunch correctly excluded")
+else:
+    print(f"❌ FAIL: {sg_lunch_flags} timestamps incorrectly flagged")
+    sys.exit(1)
+
+# Sanity check: Verify trading hours ARE set
+print("\n" + "="*70)
+print("SANITY CHECK: Tokyo Morning Session (9:00-11:00 JST)")
+print("="*70)
+
+df_morning = processor.query_ohlc("EURUSD", "1m", "2024-08-05 00:00:00", "2024-08-05 02:00:00")
+morning_flags = df_morning['is_xtks_session'].sum()
+print(f"Timestamps: {len(df_morning)}, Session flags=1: {morning_flags}")
+
+if morning_flags > 0:
+    print(f"✅ PASS: Morning session correctly flagged ({morning_flags}/{len(df_morning)})")
+else:
+    print("⚠️  WARNING: No morning flags found")
+
+print("\n" + "="*70)
+print("✅ ALL TESTS PASSED - Lunch breaks correctly excluded!")
+print("="*70)
+print(f"\nTest database location: {test_dir}")
+print("(You can delete this directory after validation)")

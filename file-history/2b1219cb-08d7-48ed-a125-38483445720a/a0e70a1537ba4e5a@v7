@@ -1,0 +1,176 @@
+"""
+VALIDATION-5: Tokyo Extended Hours Transition
+
+Test that Tokyo Stock Exchange trading hour extension is correctly detected:
+- Before Nov 5, 2024: Close at 15:00 JST (14:59 last minute)
+- On/After Nov 5, 2024: Close at 15:30 JST (15:29 last minute)
+
+This tests whether exchange_calendars library has the correct schedule data.
+"""
+
+from pathlib import Path
+import duckdb
+from datetime import datetime
+import pytz
+
+# Test database path
+DB_PATH = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/e2e_validation_nov2024_2_29t9ur/eurusd.duckdb")
+
+print("=" * 80)
+print("VALIDATION-5: Tokyo Extended Hours Transition")
+print("=" * 80)
+print(f"Database: {DB_PATH}")
+print()
+
+conn = duckdb.connect(str(DB_PATH))
+
+# Test 1: Before transition (November 1, 2024 - Friday before the change)
+print("Test 1: Before Transition (November 1, 2024)")
+print("-" * 80)
+
+df_before = conn.execute("""
+    SELECT
+        Timestamp,
+        Timestamp AT TIME ZONE 'Asia/Tokyo' as tokyo_time,
+        EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_hour,
+        EXTRACT(MINUTE FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_minute,
+        is_xtks_session
+    FROM ohlc_1m
+    WHERE DATE(Timestamp AT TIME ZONE 'UTC') = '2024-11-01'
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) >= 14
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) < 16
+    ORDER BY Timestamp
+""").df()
+
+if len(df_before) > 0:
+    # Find last minute with Tokyo flag = 1
+    last_trading = df_before[df_before['is_xtks_session'] == 1]
+    first_closed = df_before[df_before['is_xtks_session'] == 0]
+
+    print(f"Total bars 14:00-15:59 JST: {len(df_before)}")
+
+    if len(last_trading) > 0:
+        last = last_trading.iloc[-1]
+        print(f"\nLast trading minute:")
+        print(f"  Tokyo time: {last['tokyo_hour']:02.0f}:{last['tokyo_minute']:02.0f}")
+        print(f"  UTC: {last['Timestamp']}")
+        print(f"  Session flag: {last['is_xtks_session']}")
+
+        if last['tokyo_hour'] == 14 and last['tokyo_minute'] == 59:
+            print(f"  ✅ EXPECTED: Last minute is 14:59 JST (pre-extension close at 15:00)")
+        elif last['tokyo_hour'] == 15 and last['tokyo_minute'] == 29:
+            print(f"  ⚠️  UNEXPECTED: Last minute is 15:29 JST (should be 14:59 before Nov 5)")
+        else:
+            print(f"  ❌ UNEXPECTED: Last minute is {last['tokyo_hour']:02.0f}:{last['tokyo_minute']:02.0f}")
+
+    if len(first_closed) > 0:
+        first = first_closed.iloc[0]
+        print(f"\nFirst closed minute:")
+        print(f"  Tokyo time: {first['tokyo_hour']:02.0f}:{first['tokyo_minute']:02.0f}")
+        print(f"  Session flag: {first['is_xtks_session']}")
+else:
+    print("No data for November 1, 2024")
+
+print()
+
+# Test 2: On transition day (November 5, 2024 - Tuesday)
+print("Test 2: On Transition Day (November 5, 2024)")
+print("-" * 80)
+print("NOTE: This is the same day used for lunch break validation!")
+print()
+
+df_transition = conn.execute("""
+    SELECT
+        Timestamp,
+        Timestamp AT TIME ZONE 'Asia/Tokyo' as tokyo_time,
+        EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_hour,
+        EXTRACT(MINUTE FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_minute,
+        is_xtks_session
+    FROM ohlc_1m
+    WHERE DATE(Timestamp AT TIME ZONE 'UTC') = '2024-11-05'
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) >= 14
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) < 16
+    ORDER BY Timestamp
+""").df()
+
+if len(df_transition) > 0:
+    # Find last minute with Tokyo flag = 1
+    last_trading = df_transition[df_transition['is_xtks_session'] == 1]
+    first_closed = df_transition[df_transition['is_xtks_session'] == 0]
+
+    print(f"Total bars 14:00-15:59 JST: {len(df_transition)}")
+
+    if len(last_trading) > 0:
+        last = last_trading.iloc[-1]
+        print(f"\nLast trading minute:")
+        print(f"  Tokyo time: {last['tokyo_hour']:02.0f}:{last['tokyo_minute']:02.0f}")
+        print(f"  UTC: {last['Timestamp']}")
+        print(f"  Session flag: {last['is_xtks_session']}")
+
+        if last['tokyo_hour'] == 15 and last['tokyo_minute'] == 29:
+            print(f"  ✅ EXPECTED: Last minute is 15:29 JST (post-extension close at 15:30)")
+        elif last['tokyo_hour'] == 14 and last['tokyo_minute'] == 59:
+            print(f"  ⚠️  UNEXPECTED: Last minute is 14:59 JST (should be 15:29 after Nov 5)")
+        else:
+            print(f"  ❌ UNEXPECTED: Last minute is {last['tokyo_hour']:02.0f}:{last['tokyo_minute']:02.0f}")
+
+    if len(first_closed) > 0:
+        first = first_closed.iloc[0]
+        print(f"\nFirst closed minute after market:")
+        print(f"  Tokyo time: {first['tokyo_hour']:02.0f}:{first['tokyo_minute']:02.0f}")
+        print(f"  Session flag: {first['is_xtks_session']}")
+else:
+    print("No data for November 5, 2024")
+
+print()
+
+# Test 3: After transition (November 6, 2024 - Wednesday)
+print("Test 3: After Transition (November 6, 2024)")
+print("-" * 80)
+
+df_after = conn.execute("""
+    SELECT
+        Timestamp,
+        Timestamp AT TIME ZONE 'Asia/Tokyo' as tokyo_time,
+        EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_hour,
+        EXTRACT(MINUTE FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_minute,
+        is_xtks_session
+    FROM ohlc_1m
+    WHERE DATE(Timestamp AT TIME ZONE 'UTC') = '2024-11-06'
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) >= 14
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) < 16
+    ORDER BY Timestamp
+""").df()
+
+if len(df_after) > 0:
+    # Find last minute with Tokyo flag = 1
+    last_trading = df_after[df_after['is_xtks_session'] == 1]
+
+    print(f"Total bars 14:00-15:59 JST: {len(df_after)}")
+
+    if len(last_trading) > 0:
+        last = last_trading.iloc[-1]
+        print(f"\nLast trading minute:")
+        print(f"  Tokyo time: {last['tokyo_hour']:02.0f}:{last['tokyo_minute']:02.0f}")
+        print(f"  UTC: {last['Timestamp']}")
+        print(f"  Session flag: {last['is_xtks_session']}")
+
+        if last['tokyo_hour'] == 15 and last['tokyo_minute'] == 29:
+            print(f"  ✅ EXPECTED: Last minute is 15:29 JST (post-extension)")
+        else:
+            print(f"  ❌ UNEXPECTED: Last minute is {last['tokyo_hour']:02.0f}:{last['tokyo_minute']:02.0f}")
+else:
+    print("No data for November 6, 2024")
+
+print()
+print("=" * 80)
+print("VALIDATION-5 Summary")
+print("=" * 80)
+print("Expected Behavior:")
+print("- Before Nov 5, 2024: Tokyo closes at 15:00 JST (last minute 14:59)")
+print("- On/After Nov 5, 2024: Tokyo closes at 15:30 JST (last minute 15:29)")
+print()
+print("This tests whether exchange_calendars has been updated with the new schedule.")
+print()
+
+conn.close()

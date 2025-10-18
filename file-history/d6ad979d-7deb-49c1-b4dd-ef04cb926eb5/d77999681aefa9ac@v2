@@ -1,0 +1,133 @@
+"""Enhanced reconnaissance for complete PAR form exploration.
+
+Purpose:
+    - Navigate through welcome page entry flow
+    - Explore all pages of the multi-page form
+    - Capture comprehensive artifacts at each transition
+    - Document complete form journey for automation planning
+
+Outputs to: artifacts/explore_full_form/
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active pytest -v -m reconnaissance tests/reconnaissance/explore_full_form.py
+
+Design Constraints:
+    - No actual form submission (reconnaissance only)
+    - Capture artifacts at each page transition
+    - Document all fields, validation rules, conditional logic
+    - Map navigation flow and state transitions
+"""
+
+import pytest
+from playwright.sync_api import Page
+
+from utils.artifact_manager import ArtifactManager
+
+
+WELCOME_PAGE_URL = "https://www.insurance.manulife.ca/dda/welcomeInformation"
+
+
+@pytest.mark.reconnaissance
+def test_explore_complete_form_journey(
+    page: Page,
+    artifact_manager: ArtifactManager
+):
+    """Explore complete multi-page PAR form journey.
+
+    This test navigates through the entire form flow, capturing artifacts
+    at each page transition to document the complete form structure.
+
+    Args:
+        page: Playwright page instance (from conftest.py fixture)
+        artifact_manager: Artifact manager (from conftest.py fixture)
+    """
+    print("\nManulife Par Complete Form Exploration")
+    print("=" * 50)
+    print(f"Artifacts: {artifact_manager.session_path}")
+    print()
+
+    # Step 1: Navigate to welcome page
+    print("Step 1: Loading welcome page...")
+    page.goto(WELCOME_PAGE_URL, wait_until="networkidle", timeout=30000)
+
+    current_url = page.url
+    if "login" in current_url.lower() or "signin" in current_url.lower():
+        pytest.fail(
+            f"Redirected to login page: {current_url}\n"
+            f"storage-state.json may be expired"
+        )
+
+    print(f"✓ Welcome page loaded: {current_url}")
+
+    artifact_manager.capture_state_snapshot(page, "welcome_page")
+
+    # Step 2: Accept cookies if banner present
+    print("\nStep 2: Handling cookie banner...")
+    try:
+        cookie_button = page.locator("button:has-text('Accept all cookies')")
+        if cookie_button.is_visible(timeout=2000):
+            cookie_button.click()
+            print("✓ Cookies accepted")
+        else:
+            print("- Cookie banner not present")
+    except Exception:
+        print("- Cookie banner not present")
+
+    # Step 3: Select "Manulife Par" product
+    print("\nStep 3: Selecting Manulife Par product...")
+    product_dropdown = page.locator("select, [role='combobox']").first
+    product_dropdown.wait_for(state="visible", timeout=10000)
+
+    # Check if it's a standard select or custom combobox
+    if product_dropdown.evaluate("el => el.tagName") == "SELECT":
+        product_dropdown.select_option("Manulife Par")
+    else:
+        # Custom combobox - click and select
+        product_dropdown.click()
+        page.locator("text='Manulife Par'").click()
+
+    print("✓ Manulife Par selected")
+    artifact_manager.capture_screenshot(page, "product_selected")
+
+    # Step 4: Click "Start a new application"
+    print("\nStep 4: Starting application...")
+    start_button = page.get_by_text("Start a new application")
+    start_button.wait_for(state="visible", timeout=5000)
+    start_button.wait_for(state="enabled", timeout=5000)
+
+    start_button.click()
+
+    # Wait for navigation to first form page
+    print("Waiting for first form page to load...")
+    page.wait_for_load_state("networkidle", timeout=15000)
+
+    first_page_url = page.url
+    print(f"✓ First form page loaded: {first_page_url}")
+
+    # Capture first form page
+    artifact_manager.capture_state_snapshot(page, "first_form_page")
+
+    # TODO: Continue exploring subsequent pages
+    # This is a placeholder for Phase 1.1 - full form exploration
+    print("\n" + "=" * 50)
+    print("PHASE 1.1 TASK: Implement full form page exploration")
+    print("- Detect page count and structure")
+    print("- Capture each page's fields and validation rules")
+    print("- Map navigation flow between pages")
+    print("- Document conditional fields and logic")
+    print("=" * 50)
+
+    # Verify we successfully navigated away from welcome page
+    assert first_page_url != WELCOME_PAGE_URL, \
+        "Should have navigated away from welcome page"
+
+    assert "welcomeInformation" not in first_page_url, \
+        f"Should not be on welcome page, got {first_page_url}"
+
+    print("\n✓ Entry flow exploration complete")
+    print(f"✓ Successfully reached first form page")
+    print()
+    print("Next steps:")
+    print(f"1. Review trace: npx playwright show-trace {artifact_manager.get_trace_path()}")
+    print(f"2. Inspect artifacts: ls {artifact_manager.session_path}")

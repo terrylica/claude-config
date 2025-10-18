@@ -1,0 +1,154 @@
+#property script_show_inputs
+#property strict
+
+#include <DataExport/DataExportCore.mqh>
+#include <DataExport/modules/RSIModule.mqh>
+#include <DataExport/modules/SMAModule.mqh>
+#include <DataExport/modules/LaguerreRSIModule.mqh>
+
+input string          InpSymbol             = "EURUSD";
+input ENUM_TIMEFRAMES InpTimeframe          = PERIOD_M1;
+input int             InpBars               = 5000;
+input bool            InpUseRSI             = true;
+input int             InpRSIPeriod          = 14;
+input bool            InpUseSMA             = false;
+input int             InpSMAPeriod          = 14;
+input bool            InpUseLaguerreRSI     = false;
+input string          InpLaguerreInstanceID = "A";
+input int             InpLaguerreAtrPeriod  = 32;
+input int             InpLaguerreSmoothPeriod = 5;
+input ENUM_MA_METHOD  InpLaguerreSmoothMethod = MODE_EMA;
+input string          InpOutputName         = "";
+
+void OnStart()
+  {
+   string symbol=InpSymbol;
+   StringTrimLeft(symbol);
+   StringTrimRight(symbol);
+   if(StringLen(symbol)==0)
+     {
+      Print("Symbol input is empty");
+      return;
+     }
+   if(!SymbolSelect(symbol,true))
+     {
+      PrintFormat("SymbolSelect failed for %s (error %d)",symbol,GetLastError());
+      return;
+     }
+
+   // Wait for history download (Solution A pattern - max 5 seconds)
+   datetime from=TimeCurrent()-PeriodSeconds(InpTimeframe)*1000;
+
+   for(int i=0; i<50 && CopyTime(symbol,InpTimeframe,0,1,NULL)<1; i++)
+     {
+      Sleep(100);
+      if(i%10==0)
+         PrintFormat("Waiting for %s %s history... (%d/50)",symbol,EnumToString(InpTimeframe),i);
+     }
+
+   // Verify history available
+   if(CopyTime(symbol,InpTimeframe,0,1,NULL)<1)
+     {
+      PrintFormat("History timeout for %s %s",symbol,EnumToString(InpTimeframe));
+      return;
+     }
+
+   PrintFormat("Symbol loaded: %s %s",symbol,EnumToString(InpTimeframe));
+
+   BarSeries series;
+   if(!LoadRates(symbol,InpTimeframe,InpBars,series))
+     {
+      Print("LoadRates failed");
+      return;
+     }
+   if(series.count<=0)
+     {
+      Print("No bars returned");
+      return;
+     }
+
+   IndicatorColumn columns[];
+   int columnCount=0;
+
+   if(InpUseRSI)
+     {
+      IndicatorColumn rsiColumn;
+      string rsiError="";
+      if(!RSIModule_Load(symbol,InpTimeframe,series.count,InpRSIPeriod,rsiColumn,rsiError))
+        {
+         PrintFormat("RSI module failed: %s",rsiError);
+         return;
+        }
+      ArrayResize(columns,columnCount+1);
+      columns[columnCount]=rsiColumn;
+      columnCount++;
+     }
+
+   if(InpUseSMA)
+     {
+      IndicatorColumn smaColumn;
+      string smaError="";
+      if(!SMAModule_Load(symbol,InpTimeframe,series.count,InpSMAPeriod,smaColumn,smaError))
+        {
+         PrintFormat("SMA module failed: %s",smaError);
+         return;
+        }
+      ArrayResize(columns,columnCount+1);
+      columns[columnCount]=smaColumn;
+      columnCount++;
+     }
+
+   if(InpUseLaguerreRSI)
+     {
+      IndicatorColumn laguerreColumn, signalColumn, adaptivePeriodColumn, atrColumn;
+      string laguerreError="";
+      if(!LaguerreRSIModule_Load(
+            symbol,
+            InpTimeframe,
+            series.count,
+            InpLaguerreInstanceID,
+            InpLaguerreAtrPeriod,
+            InpLaguerreSmoothPeriod,
+            InpLaguerreSmoothMethod,
+            laguerreColumn,
+            signalColumn,
+            adaptivePeriodColumn,
+            atrColumn,
+            laguerreError))
+        {
+         PrintFormat("Laguerre RSI module failed: %s",laguerreError);
+         return;
+        }
+      ArrayResize(columns,columnCount+4);
+      columns[columnCount]=laguerreColumn;
+      columnCount++;
+      columns[columnCount]=signalColumn;
+      columnCount++;
+      columns[columnCount]=adaptivePeriodColumn;
+      columnCount++;
+      columns[columnCount]=atrColumn;
+      columnCount++;
+     }
+
+   string filename=InpOutputName;
+   if(StringLen(filename)==0)
+      filename=StringFormat("Export_%s_%s.csv",symbol,EnumToString(InpTimeframe));
+
+   int handle;
+   if(!OpenCsv(filename,handle))
+     {
+      PrintFormat("Failed to open output file %s (error %d)",filename,GetLastError());
+      return;
+     }
+
+   string baseHeaders[8]={"time","open","high","low","close","tick_volume","spread","real_volume"};
+   WriteCsvHeader(handle,baseHeaders,columns,columnCount);
+   if(!WriteCsvRows(handle,series,columns,columnCount))
+     {
+      FileClose(handle);
+      Print("Failed to write CSV rows");
+      return;
+     }
+   FileClose(handle);
+   PrintFormat("Export complete: %d bars for %s %s -> %s",series.count,symbol,EnumToString(InpTimeframe),filename);
+  }

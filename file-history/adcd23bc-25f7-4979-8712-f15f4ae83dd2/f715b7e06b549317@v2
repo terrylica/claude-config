@@ -1,0 +1,148 @@
+# GitHub CLI SSH Key Management Guide
+
+## Problem
+
+Your `gh` CLI tokens don't have permission to manage SSH keys yet. You need to grant the `admin:public_key` scope.
+
+## Step 1: Grant SSH Key Management Permissions
+
+Run these commands **one at a time** (each will open your browser for authentication):
+
+```bash
+# For tainora account
+gh auth refresh -h github.com -s admin:public_key --user tainora
+
+# For terrylica account
+gh auth refresh -h github.com -s admin:public_key --user terrylica
+
+# For 459ecs account
+gh auth refresh -h github.com -s admin:public_key --user 459ecs
+```
+
+**For each command**:
+1. Copy the one-time code shown
+2. Open the URL in your browser
+3. Paste the code
+4. Click "Authorize"
+5. Wait for "Authentication complete" message
+
+---
+
+## Step 2: Run Automated Registration Script
+
+After granting permissions to all 3 accounts, run:
+
+```bash
+/tmp/register-ssh-keys-via-gh.sh
+```
+
+This script will automatically:
+1. ✅ Add tainora SSH key to tainora account
+2. ✅ Add 459ecs SSH key to 459ecs account
+3. ✅ Keep terrylica SSH key on terrylica account
+4. ✅ Remove duplicate keys from terrylica (if any)
+5. ✅ Test authentication for all 3 keys
+
+---
+
+## Alternative: Manual Commands (If Script Fails)
+
+If the automated script doesn't work, use these commands manually:
+
+### Add tainora key to tainora account
+```bash
+gh auth switch --user tainora
+gh ssh-key add ~/.ssh/id_ed25519_tainora.pub --title "MacBook Pro - tainora (2025)"
+```
+
+### Add 459ecs key to 459ecs account
+```bash
+gh auth switch --user 459ecs
+gh ssh-key add ~/.ssh/id_ed25519_459ecs.pub --title "MacBook Pro - 459ecs (2025)"
+```
+
+### List keys on terrylica account (to find duplicates)
+```bash
+gh auth switch --user terrylica
+gh ssh-key list
+```
+
+**Expected output**:
+```
+ID                  TITLE                                KEY
+12345678            MacBook Pro - terrylica (2025)       SHA256:oktYw...
+87654321            Some old key                         SHA256:9mSP7...  ← DELETE if this is tainora's key
+```
+
+### Delete duplicate keys from terrylica
+```bash
+# Replace <ID> with the actual ID from gh ssh-key list
+gh ssh-key delete <ID> --yes
+```
+
+**How to identify which key to delete**:
+- Compare fingerprints shown in `gh ssh-key list` with:
+  ```bash
+  ssh-keygen -lf ~/.ssh/id_ed25519_tainora.pub  # SHA256:9mSP72ex...
+  ssh-keygen -lf ~/.ssh/id_ed25519_459ecs.pub   # SHA256:feiKlGOZ...
+  ```
+
+---
+
+## Step 3: Verify It Works
+
+After setup, test directory-based authentication:
+
+```bash
+# Test 1: Scripts directory (should use tainora)
+cd ~/scripts
+ssh -T git@github.com
+# Expected: "Hi tainora! You've successfully authenticated..."
+
+# Test 2: ML/Eon directory (should use terrylica)
+cd ~/ml-experiments  # or any directory with /eon/ or ml- in path
+ssh -T git@github.com
+# Expected: "Hi terrylica! You've successfully authenticated..."
+
+# Test 3: 459ecs directory (should use 459ecs)
+cd ~/459ecs
+ssh -T git@github.com
+# Expected: "Hi 459ecs! You've successfully authenticated..."
+```
+
+---
+
+## Troubleshooting
+
+### "This API operation needs the 'admin:public_key' scope"
+**Fix**: Run Step 1 again for the failing account
+
+### "Permission denied (publickey)"
+**Fix**: The key isn't registered yet. Run the `gh ssh-key add` command again
+
+### "Hi terrylica!" when expecting different account
+**Fix**:
+1. Check if key was added: `gh ssh-key list --user tainora`
+2. If not there, add it: `gh ssh-key add ~/.ssh/id_ed25519_tainora.pub --user tainora`
+3. Delete duplicate from terrylica: `gh ssh-key list --user terrylica` then `gh ssh-key delete <ID>`
+
+---
+
+## Quick Reference
+
+```bash
+# Switch accounts
+gh auth switch --user <username>
+
+# List SSH keys for current account
+gh ssh-key list
+
+# Add SSH key
+gh ssh-key add <path-to-public-key> --title "Description"
+
+# Delete SSH key
+gh ssh-key delete <key-id> --yes
+
+# Check which account is active
+gh auth status
+```

@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""
+Complete MFA authentication by clicking passkey button on MFA page.
+
+This script resumes from an existing storage-state.json that has us at the MFA page,
+then clicks the passkey button to complete full authentication.
+
+Authentication Flow:
+1. Load existing storage-state.json (from spike run)
+2. Navigate to MFA page (or let it redirect)
+3. Click passkey button on MFA page
+4. Wait for final authentication
+5. Save final storage-state.json
+
+Usage:
+    doppler run --project insurance --config prd -- \
+      uv run --active python -m scripts.setup.complete_mfa
+
+Prerequisites:
+    - storage-state.json exists (from spike_complete_auth.py)
+    - Virtual authenticator already configured
+"""
+
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+
+def log(msg: str, level: str = "INFO"):
+    """Timestamped logging."""
+    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    prefix = {
+        "INFO": "ℹ️ ",
+        "SUCCESS": "✅",
+        "WARNING": "⚠️ ",
+        "ERROR": "❌",
+        "STEP": "📍",
+    }.get(level, "  ")
+    print(f"[{timestamp}] {prefix} {msg}")
+
+
+def main() -> int:
+    """Complete MFA authentication."""
+    log("=" * 80, "STEP")
+    log("Complete MFA Authentication", "STEP")
+    log("=" * 80, "STEP")
+
+    # Setup
+    project_root = Path(__file__).parent.parent.parent
+    storage_state_path = project_root / "storage-state.json"
+    artifacts_dir = project_root / "artifacts" / f"complete_mfa_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    log(f"Artifacts directory: {artifacts_dir}", "INFO")
+
+    # Validate storage state exists
+    if not storage_state_path.exists():
+        log(f"ERROR: storage-state.json not found at {storage_state_path}", "ERROR")
+        log("Run spike_complete_auth.py first to generate initial state", "INFO")
+        return 1
+
+    log(f"Loading storage state from: {storage_state_path}", "INFO")
+
+    try:
+        with sync_playwright() as p:
+            log("Launching browser...", "INFO")
+            browser = p.chromium.launch(headless=False)
+
+            # Load existing storage state
+            context = browser.new_context(
+                storage_state=str(storage_state_path),
+                viewport={"width": 1280, "height": 720}
+            )
+            page = context.new_page()
+
+            # STEP 1: Navigate to MFA page or insurance form
+            log("=" * 80, "STEP")
+            log("STEP 1: Navigate and Check Current State", "STEP")
+            log("=" * 80, "STEP")
+
+            # Try navigating to the insurance form first - it will redirect to MFA if needed
+            insurance_url = "https://www.insurance.manulife.ca/dda"
+            log(f"Navigating to: {insurance_url}", "INFO")
+
+            try:
+                page.goto(insurance_url, wait_until="networkidle", timeout=30000)
+            except Exception as e:
+                log(f"Navigation issue: {e}", "WARNING")
+                log("Continuing to check current page...", "INFO")
+
+            current_url = page.url
+            page_title = page.title()
+            log(f"Current URL: {current_url}", "INFO")
+            log(f"Page title: {page_title}", "INFO")
+
+            page.screenshot(path=str(artifacts_dir / "01_initial_state.png"))
+
+            # STEP 2: Check if we're on MFA page and click passkey
+            log("=" * 80, "STEP")
+            log("STEP 2: Look for Passkey Button", "STEP")
+            log("=" * 80, "STEP")
+
+            # Check if we're on MFA page
+            if "mfa" in current_url.lower():
+                log("On MFA page - looking for passkey button...", "INFO")
+
+                # Wait a moment for page to settle
+                time.sleep(2)
+
+                # Try to find passkey button
+                passkey_selectors = [
+                    ("button[id='passkey']", "Button with id=passkey"),
+                    ("button:has-text('Passkey')", "Button with 'Passkey'"),
+                    ("button:has-text('passkey')", "Button with 'passkey' (lowercase)"),
+                ]
+
+                passkey_found = False
+                for selector, description in passkey_selectors:
+                    try:
+                        element = page.locator(selector).first
+                        if element.is_visible(timeout=2000):
+                            btn_text = element.inner_text()
+                            log(f"FOUND: {description}", "SUCCESS")
+                            log(f"Button text: '{btn_text}'", "SUCCESS")
+
+                            # Screenshot before click
+                            page.screenshot(path=str(artifacts_dir / "02_before_passkey_click.png"))
+
+                            # Click it
+                            log("Clicking passkey button...", "INFO")
+                            element.click()
+
+                            # Wait for navigation
+                            log("Waiting for authentication...", "INFO")
+                            page.wait_for_load_state("networkidle", timeout=30000)
+
+                            # Screenshot after click
+                            page.screenshot(path=str(artifacts_dir / "03_after_passkey_click.png"))
+
+                            passkey_found = True
+                            break
+
+                    except Exception as e:
+                        log(f"Selector '{selector}' not found: {e}", "INFO")
+                        continue
+
+                if not passkey_found:
+                    log("No passkey button found on MFA page", "WARNING")
+                    log("Saving current state for manual inspection...", "INFO")
+                    page.screenshot(path=str(artifacts_dir / "02_no_passkey_button.png"))
+                    html_path = artifacts_dir / "mfa_page.html"
+                    html_path.write_text(page.content())
+                    return 1
+
+            elif "signin" in current_url.lower() or "login" in current_url.lower():
+                log("Redirected to signin page - storage state may be expired", "ERROR")
+                page.screenshot(path=str(artifacts_dir / "02_signin_redirect.png"))
+                return 1
+            else:
+                log("Not on MFA or signin page - may already be authenticated!", "SUCCESS")
+
+            # STEP 3: Verify final state
+            log("=" * 80, "STEP")
+            log("STEP 3: Verify Final Authentication State", "STEP")
+            log("=" * 80, "STEP")
+
+            current_url = page.url
+            page_title = page.title()
+
+            log(f"Final URL: {current_url}", "INFO")
+            log(f"Final title: {page_title}", "INFO")
+
+            page.screenshot(path=str(artifacts_dir / "04_final_state.png"))
+
+            # Save page HTML for inspection
+            html_path = artifacts_dir / "04_final_state.html"
+            html_path.write_text(page.content())
+            log(f"Final page HTML: {html_path}", "INFO")
+
+            # Check if we're authenticated
+            if "signin" in current_url.lower() or "login" in current_url.lower() or "mfa" in current_url.lower():
+                log("WARNING: Still on authentication page", "WARNING")
+                log(f"Current URL: {current_url}", "WARNING")
+                return 1
+            else:
+                log("Successfully navigated away from authentication pages!", "SUCCESS")
+
+            # Save storage state
+            log("Saving final storage state...", "INFO")
+            context.storage_state(path=str(storage_state_path))
+            log(f"Storage state saved: {storage_state_path}", "SUCCESS")
+
+            log("=" * 80, "STEP")
+            log("AUTHENTICATION COMPLETE", "STEP")
+            log("=" * 80, "STEP")
+            log(f"Artifacts: {artifacts_dir}", "INFO")
+            log(f"Storage state: {storage_state_path}", "INFO")
+            log("", "INFO")
+            log("Next step: Run reconnaissance", "INFO")
+            log("  doppler run --project insurance --config prd -- \\", "INFO")
+            log("    uv run --active python -m scripts.playwright.reconnaissance", "INFO")
+
+            browser.close()
+            return 0
+
+    except Exception as e:
+        log(f"EXCEPTION: {e}", "ERROR")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

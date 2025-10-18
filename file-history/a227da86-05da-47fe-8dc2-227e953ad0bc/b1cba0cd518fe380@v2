@@ -1,0 +1,138 @@
+"""
+Verify exchange_calendars detection for Sunday evening UTC (Monday morning Asia).
+
+Check what exchange_calendars actually returns for specific timestamps on Sunday.
+"""
+
+from datetime import datetime
+import pytz
+import exchange_calendars as xcals
+import duckdb
+from pathlib import Path
+
+# Test database
+DB_PATH = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/e2e_validation_nov2024_2_29t9ur/eurusd.duckdb")
+
+print("=" * 80)
+print("exchange_calendars Verification: Sunday Evening UTC")
+print("=" * 80)
+print()
+
+# Load exchange calendars
+exchanges = {
+    'nyse': xcals.get_calendar('XNYS'),
+    'lse': xcals.get_calendar('XLON'),
+    'xswx': xcals.get_calendar('XSWX'),
+    'xfra': xcals.get_calendar('XFRA'),
+    'xtse': xcals.get_calendar('XTSE'),
+    'xnze': xcals.get_calendar('XNZE'),
+    'xtks': xcals.get_calendar('XTKS'),
+    'xasx': xcals.get_calendar('XASX'),
+    'xhkg': xcals.get_calendar('XHKG'),
+    'xses': xcals.get_calendar('XSES'),
+}
+
+# Test timestamp: Sunday Nov 10, 2024 22:05 UTC
+# (This is Monday morning in Asia)
+test_time = pytz.UTC.localize(datetime(2024, 11, 10, 22, 5))
+
+print(f"Test timestamp: {test_time} (Sunday evening UTC, Monday morning Asia)")
+print()
+print("exchange_calendars.is_open_on_minute() results:")
+print("-" * 80)
+
+for name, cal in exchanges.items():
+    is_open = cal.is_open_on_minute(test_time)
+    status = "✅ OPEN" if is_open else "❌ CLOSED"
+    print(f"{name.upper():8s}: {status}")
+
+print()
+print("=" * 80)
+print("Database Verification: What's Actually Stored")
+print("=" * 80)
+print()
+
+# Query actual database values for this timestamp
+conn = duckdb.connect(str(DB_PATH))
+
+result = conn.execute("""
+    SELECT
+        Timestamp,
+        is_nyse_session,
+        is_lse_session,
+        is_xswx_session,
+        is_xfra_session,
+        is_xtse_session,
+        is_xnze_session,
+        is_xtks_session,
+        is_xasx_session,
+        is_xhkg_session,
+        is_xses_session
+    FROM ohlc_1m
+    WHERE Timestamp >= '2024-11-10 22:00:00'::TIMESTAMP
+      AND Timestamp <= '2024-11-10 22:10:00'::TIMESTAMP
+    ORDER BY Timestamp
+    LIMIT 5
+""").df()
+
+if len(result) > 0:
+    print(f"Found {len(result)} bars between 22:00-22:10 UTC")
+    print()
+    for idx, row in result.iterrows():
+        print(f"Timestamp: {row['Timestamp']}")
+        print(f"  NYSE: {row['is_nyse_session']}")
+        print(f"  LSE: {row['is_lse_session']}")
+        print(f"  Tokyo: {row['is_xtks_session']}")
+        print(f"  Hong Kong: {row['is_xhkg_session']}")
+        print(f"  Singapore: {row['is_xses_session']}")
+        print(f"  Australia: {row['is_xasx_session']}")
+        print(f"  New Zealand: {row['is_xnze_session']}")
+        print()
+else:
+    print("No bars found in this time range")
+
+# Check first Sunday bar
+first_sunday = conn.execute("""
+    SELECT
+        Timestamp,
+        EXTRACT(DOW FROM Timestamp) as day_of_week,
+        is_xtks_session,
+        is_xhkg_session,
+        is_xnze_session,
+        is_xasx_session
+    FROM ohlc_1m
+    WHERE DATE(Timestamp) = '2024-11-10'
+    ORDER BY Timestamp
+    LIMIT 1
+""").df()
+
+if len(first_sunday) > 0:
+    row = first_sunday.iloc[0]
+    ts = row['Timestamp']
+
+    # Convert to various timezones
+    if ts.tz is None:
+        ts_utc = pytz.UTC.localize(ts)
+    else:
+        ts_utc = ts
+
+    tokyo_time = ts_utc.astimezone(pytz.timezone('Asia/Tokyo'))
+    nz_time = ts_utc.astimezone(pytz.timezone('Pacific/Auckland'))
+    aus_time = ts_utc.astimezone(pytz.timezone('Australia/Sydney'))
+
+    print("=" * 80)
+    print("First Sunday Bar Analysis")
+    print("=" * 80)
+    print(f"Timestamp (UTC): {ts_utc}")
+    print(f"Tokyo time: {tokyo_time.strftime('%A %H:%M %Z')}")
+    print(f"NZ time: {nz_time.strftime('%A %H:%M %Z')}")
+    print(f"Australia time: {aus_time.strftime('%A %H:%M %Z')}")
+    print()
+    print(f"Session flags:")
+    print(f"  Tokyo: {row['is_xtks_session']}")
+    print(f"  Hong Kong: {row['is_xhkg_session']}")
+    print(f"  New Zealand: {row['is_xnze_session']}")
+    print(f"  Australia: {row['is_xasx_session']}")
+
+conn.close()
+print()

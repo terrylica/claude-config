@@ -1,0 +1,145 @@
+"""
+Check actual UTC times in database to resolve timezone confusion.
+"""
+
+from pathlib import Path
+import duckdb
+import pandas as pd
+
+DB_PATH = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/e2e_validation_nov2024_2_29t9ur/eurusd.duckdb")
+
+conn = duckdb.connect(str(DB_PATH))
+
+print("=" * 80)
+print("Weekend Gap Analysis - UTC Times")
+print("=" * 80)
+print()
+
+# Query for Saturday-Sunday in UTC
+print("Saturday November 9, 2024 (UTC):")
+print("-" * 80)
+saturday = conn.execute("""
+    SELECT
+        Timestamp AT TIME ZONE 'UTC' as utc_time,
+        Timestamp as local_time,
+        is_nyse_session + is_lse_session + is_xtks_session +
+        is_xhkg_session + is_xses_session + is_xnze_session +
+        is_xasx_session as total_flags
+    FROM ohlc_1m
+    WHERE Timestamp AT TIME ZONE 'UTC' >= '2024-11-09 00:00:00'::TIMESTAMP
+      AND Timestamp AT TIME ZONE 'UTC' < '2024-11-10 00:00:00'::TIMESTAMP
+    ORDER BY Timestamp
+    LIMIT 5
+""").df()
+
+if len(saturday) > 0:
+    print(f"Found {len(saturday)} bars on Saturday")
+    print(saturday.head())
+else:
+    print("✅ No bars on Saturday (expected)")
+
+print()
+print("Sunday November 10, 2024 (UTC):")
+print("-" * 80)
+sunday = conn.execute("""
+    SELECT
+        Timestamp AT TIME ZONE 'UTC' as utc_time,
+        Timestamp as local_time,
+        is_nyse_session,
+        is_lse_session,
+        is_xtks_session,
+        is_xhkg_session,
+        is_xses_session,
+        is_xnze_session,
+        is_xasx_session
+    FROM ohlc_1m
+    WHERE Timestamp AT TIME ZONE 'UTC' >= '2024-11-10 00:00:00'::TIMESTAMP
+      AND Timestamp AT TIME ZONE 'UTC' < '2024-11-11 00:00:00'::TIMESTAMP
+    ORDER BY Timestamp
+""").df()
+
+if len(sunday) > 0:
+    print(f"Found {len(sunday)} bars on Sunday")
+    print()
+    print(f"First Sunday bar:")
+    first = sunday.iloc[0]
+    print(f"  UTC: {first['utc_time']}")
+    print(f"  Local: {first['local_time']}")
+    print(f"  NYSE: {first['is_nyse_session']}")
+    print(f"  LSE: {first['is_lse_session']}")
+    print(f"  Tokyo: {first['is_xtks_session']}")
+    print(f"  Hong Kong: {first['is_xhkg_session']}")
+    print(f"  Singapore: {first['is_xses_session']}")
+    print(f"  New Zealand: {first['is_xnze_session']}")
+    print(f"  Australia: {first['is_xasx_session']}")
+
+    print()
+    print(f"Last Sunday bar:")
+    last = sunday.iloc[-1]
+    print(f"  UTC: {last['utc_time']}")
+    print(f"  Local: {last['local_time']}")
+    print(f"  NYSE: {last['is_nyse_session']}")
+    print(f"  LSE: {last['is_lse_session']}")
+    print(f"  Tokyo: {last['is_xtks_session']}")
+    print(f"  Hong Kong: {last['is_xhkg_session']}")
+    print(f"  Singapore: {last['is_xses_session']}")
+    print(f"  New Zealand: {last['is_xnze_session']}")
+    print(f"  Australia: {last['is_xasx_session']}")
+
+    # Check for any Western exchange flags on Sunday
+    western_flags = sunday[
+        (sunday['is_nyse_session'] == 1) |
+        (sunday['is_lse_session'] == 1)
+    ]
+
+    print()
+    if len(western_flags) > 0:
+        print(f"❌ FAIL: Found {len(western_flags)} bars with NYSE/LSE flags on Sunday")
+    else:
+        print(f"✅ PASS: No NYSE/LSE flags on Sunday (expected)")
+
+    # Check for Asian exchange flags on Sunday
+    asian_flags = sunday[
+        (sunday['is_xtks_session'] == 1) |
+        (sunday['is_xhkg_session'] == 1) |
+        (sunday['is_xses_session'] == 1) |
+        (sunday['is_xnze_session'] == 1) |
+        (sunday['is_xasx_session'] == 1)
+    ]
+
+    if len(asian_flags) > 0:
+        print(f"✅ Asian exchanges open on Sunday evening UTC (Monday in Asia): {len(asian_flags)} bars")
+        print(f"  → This is CORRECT: Sunday 22:00+ UTC = Monday morning in Asia")
+    else:
+        print(f"❌ No Asian exchange flags on Sunday")
+else:
+    print("No bars on Sunday - checking if data gap exists...")
+
+print()
+print("=" * 80)
+print("Friday Close Analysis")
+print("=" * 80)
+
+# Find last Friday bar
+last_friday = conn.execute("""
+    SELECT
+        Timestamp AT TIME ZONE 'UTC' as utc_time,
+        Timestamp as local_time,
+        is_nyse_session,
+        is_lse_session
+    FROM ohlc_1m
+    WHERE EXTRACT(DOW FROM (Timestamp AT TIME ZONE 'UTC')) = 5  -- Friday
+      AND Timestamp AT TIME ZONE 'UTC' >= '2024-11-08 00:00:00'::TIMESTAMP
+      AND Timestamp AT TIME ZONE 'UTC' < '2024-11-09 00:00:00'::TIMESTAMP
+    ORDER BY Timestamp DESC
+    LIMIT 1
+""").df()
+
+if len(last_friday) > 0:
+    row = last_friday.iloc[0]
+    print(f"Last Friday bar: {row['utc_time']}")
+    print(f"NYSE flag: {row['is_nyse_session']}")
+    print(f"LSE flag: {row['is_lse_session']}")
+
+conn.close()
+print()

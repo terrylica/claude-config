@@ -156,7 +156,7 @@ Claude Code Event → settings.json hooks →
 - Clipboard: `pbcopy` / `xclip` / `xsel`  
 - Text-to-Speech: `say` / `espeak` / `festival`
 
-**Repository**: https://github.com/Eon-Labs/claude-config
+**Repository**: https://github.com/terrylica/claude-config
 
 ### CNS Processing Chain
 **Current (Async Architecture)**:

@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""
+Automated username/password authentication for Manulife Par.
+
+This script:
+1. Navigates to Manulife signin page
+2. Fills username and password from Doppler
+3. Submits form
+4. Waits for authentication to complete
+5. Saves authenticated session to storage-state.json
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.setup.password_auth
+
+Prerequisites:
+    - MANULIFE_PAR_USERNAME in Doppler
+    - MANULIFE_PAR_PASSWORD in Doppler
+    - Playwright 1.55.0+ installed
+"""
+
+import os
+import sys
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+
+def main() -> int:
+    """Execute automated password authentication."""
+    print("Manulife Par Password Authentication")
+    print("=" * 50)
+
+    # Configuration from environment
+    project_root = Path(__file__).parent.parent.parent
+    storage_state_path = project_root / "storage-state.json"
+
+    username = os.getenv("MANULIFE_PAR_USERNAME")
+    password = os.getenv("MANULIFE_PAR_PASSWORD")
+
+    # Validate credentials present
+    if not username or not password:
+        print("ERROR: Missing Doppler credentials", file=sys.stderr)
+        print()
+        print("Required environment variables:")
+        print("  - MANULIFE_PAR_USERNAME")
+        print("  - MANULIFE_PAR_PASSWORD")
+        print()
+        print("Run with Doppler:")
+        print("  doppler run --project insurance --config prd -- \\")
+        print("    uv run --active python -m scripts.setup.password_auth")
+        return 1
+
+    print(f"Username: {username}")
+    print(f"Output: {storage_state_path}")
+    print()
+
+    try:
+        with sync_playwright() as p:
+            print("Launching browser...")
+            browser = p.chromium.launch(headless=False)  # Non-headless for visibility
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 720}
+            )
+            page = context.new_page()
+
+            # Navigate to signin page
+            print("Navigating to Manulife signin...")
+            signin_url = "https://id.manulife.ca/advisor/signin"
+            page.goto(signin_url, wait_until="networkidle", timeout=30000)
+
+            current_url = page.url
+            print(f"Current URL: {current_url}")
+            print()
+
+            # Wait for form to load
+            print("Waiting for signin form...")
+            page.wait_for_selector("#username", timeout=10000)
+
+            # Fill username
+            print(f"Entering username: {username}")
+            page.locator("#username").fill(username)
+
+            # Fill password
+            print("Entering password...")
+            page.locator("#password").fill(password)
+
+            # Optional: Check "Remember username"
+            # page.locator("#remember-me").check()
+
+            # Submit form
+            print("Submitting signin form...")
+
+            # Take screenshot before submit
+            page.screenshot(path=str(project_root / "artifacts" / "before_submit.png"))
+
+            page.locator("#button-id-react-aria-16").click()  # "Sign in" button
+
+            # Wait for navigation after submit
+            print("Waiting for authentication...")
+            try:
+                page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception as e:
+                print(f"WARNING: Timeout waiting for page load: {e}")
+
+            # Take screenshot after submit
+            page.screenshot(path=str(project_root / "artifacts" / "after_submit.png"))
+
+            # Check if authentication succeeded
+            current_url = page.url
+            print(f"Post-auth URL: {current_url}")
+            print()
+
+            # Verify we're not still on signin page
+            if "signin" in current_url.lower() or "login" in current_url.lower():
+                print("WARNING: Still on signin page - authentication may have failed")
+                print()
+
+                # Check for error messages
+                try:
+                    error = page.locator("[role='alert']").first
+                    if error.is_visible(timeout=2000):
+                        error_text = error.inner_text()
+                        print(f"ERROR MESSAGE: {error_text}", file=sys.stderr)
+                        return 1
+                except Exception:
+                    pass
+
+                print("Saving session anyway for manual verification...")
+            else:
+                print("✓ Authentication successful!")
+
+            # Save storage state
+            print()
+            print("Saving storage state...")
+            context.storage_state(path=str(storage_state_path))
+
+            print(f"✓ Session saved to: {storage_state_path}")
+            print()
+            print("Next steps:")
+            print("1. Verify file exists: ls -la storage-state.json")
+            print("2. Run reconnaissance: doppler run --project insurance --config prd -- \\")
+            print("                        uv run --active python -m scripts.playwright.reconnaissance")
+
+            browser.close()
+            return 0
+
+    except Exception as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

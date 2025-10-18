@@ -1,0 +1,196 @@
+# Fix SSH Key Registration for Multi-Account GitHub Authentication
+
+## Current Problem
+
+All 3 SSH keys authenticate as `terrylica` because all 3 public keys are registered to terrylica's GitHub account.
+
+**Test results**:
+```bash
+$ ssh -i ~/.ssh/id_ed25519_tainora -T git@github.com
+Hi terrylica!  # ← Should be "Hi tainora!"
+
+$ ssh -i ~/.ssh/id_ed25519_459ecs -T git@github.com
+Hi terrylica!  # ← Should be "Hi 459ecs!"
+```
+
+## Solution: Register Each Public Key to Correct GitHub Account
+
+### Step 1: View Your Public Keys
+
+```bash
+# Tainora's public key (for tainora GitHub account)
+echo "=== TAINORA PUBLIC KEY ==="
+cat ~/.ssh/id_ed25519_tainora.pub
+echo ""
+
+# Terrylica's public key (for terrylica GitHub account)
+echo "=== TERRYLICA PUBLIC KEY ==="
+cat ~/.ssh/id_ed25519_eonlabs.pub
+echo ""
+
+# 459ecs's public key (for 459ecs GitHub account)
+echo "=== 459ECS PUBLIC KEY ==="
+cat ~/.ssh/id_ed25519_459ecs.pub
+```
+
+Run this command and keep the output open - you'll need to copy these keys.
+
+---
+
+### Step 2: Register Tainora's Public Key
+
+1. **Remove from terrylica account** (if already there):
+   - Go to: https://github.com/settings/keys
+   - Find the key with fingerprint matching `id_ed25519_tainora.pub`
+   - Click "Delete"
+
+2. **Add to tainora account**:
+   - **Log out** from terrylica
+   - **Log in** as tainora (usalchemist@gmail.com)
+   - Go to: https://github.com/settings/keys
+   - Click "New SSH key"
+   - Title: `MacBook Pro - tainora (2025)`
+   - Key: Paste the **TAINORA PUBLIC KEY** from Step 1
+   - Click "Add SSH key"
+
+3. **Test**:
+   ```bash
+   ssh -i ~/.ssh/id_ed25519_tainora -T git@github.com
+   # Should now say: "Hi tainora!"
+   ```
+
+---
+
+### Step 3: Register 459ecs's Public Key
+
+1. **Remove from terrylica account** (if already there):
+   - Go to: https://github.com/settings/keys (as terrylica)
+   - Find the key with fingerprint matching `id_ed25519_459ecs.pub`
+   - Click "Delete"
+
+2. **Add to 459ecs account**:
+   - **Log out** from terrylica
+   - **Log in** as 459ecs
+   - Go to: https://github.com/settings/keys
+   - Click "New SSH key"
+   - Title: `MacBook Pro - 459ecs (2025)`
+   - Key: Paste the **459ECS PUBLIC KEY** from Step 1
+   - Click "Add SSH key"
+
+3. **Test**:
+   ```bash
+   ssh -i ~/.ssh/id_ed25519_459ecs -T git@github.com
+   # Should now say: "Hi 459ecs!"
+   ```
+
+---
+
+### Step 4: Keep Terrylica's Public Key (Already Correct)
+
+The `id_ed25519_eonlabs` key should already be on terrylica's account. Verify:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_eonlabs -T git@github.com
+# Should say: "Hi terrylica!" (this is correct)
+```
+
+If it says something else, add it to terrylica:
+- Log in as terrylica
+- Go to: https://github.com/settings/keys
+- Add the **TERRYLICA PUBLIC KEY** from Step 1
+
+---
+
+## Step 5: Test Directory-Based Authentication
+
+After registering all keys, test that each directory uses the correct account:
+
+```bash
+# Test 1: Scripts directory (should use tainora)
+cd ~/scripts
+ssh -T git@github.com
+# Expected: "Hi tainora!"
+
+# Test 2: ML/Eon directory (should use terrylica)
+cd ~/ml-experiments  # or any directory with /eon/ or ml- in path
+ssh -T git@github.com
+# Expected: "Hi terrylica!"
+
+# Test 3: 459ecs directory (should use 459ecs)
+cd ~/459ecs
+ssh -T git@github.com
+# Expected: "Hi 459ecs!"
+```
+
+---
+
+## Step 6: Test Git Operations
+
+Try actual git operations to verify everything works:
+
+```bash
+# Test tainora account
+cd ~/scripts
+git clone git@github.com:tainora/test-repo.git  # Or any tainora repo
+
+# Test terrylica account
+cd ~/ml-experiments
+git clone git@github.com:terrylica/test-repo.git  # Or any terrylica repo
+
+# Test 459ecs account
+cd ~/459ecs
+git clone git@github.com:459ecs/test-repo.git  # Or any 459ecs repo
+```
+
+---
+
+## Troubleshooting
+
+### "Permission denied (publickey)"
+
+**Cause**: Public key not registered to the account yet
+
+**Fix**: Go back to Step 2/3 and register the public key to the correct GitHub account
+
+---
+
+### "Hi terrylica!" when expecting different account
+
+**Cause**: The public key is still registered to terrylica's account
+
+**Fix**:
+1. Remove the key from terrylica's account
+2. Add it to the correct account
+
+---
+
+### How to find which key is which on GitHub
+
+When logged into any GitHub account, go to: https://github.com/settings/keys
+
+Each key shows a fingerprint. Compare with:
+
+```bash
+ssh-keygen -lf ~/.ssh/id_ed25519_tainora.pub
+ssh-keygen -lf ~/.ssh/id_ed25519_eonlabs.pub
+ssh-keygen -lf ~/.ssh/id_ed25519_459ecs.pub
+```
+
+Match the SHA256 fingerprints to identify which key is which.
+
+---
+
+## Summary
+
+**What you need to do**:
+1. Copy all 3 public keys (Step 1)
+2. Log into each GitHub account (tainora, terrylica, 459ecs)
+3. Register the correct public key to each account
+4. Remove duplicate keys from terrylica account
+5. Test with `ssh -T git@github.com` from different directories
+
+**After this fix**:
+- ✅ `~/scripts` → automatically uses tainora account
+- ✅ `~/eon/` or `~/ml-*` → automatically uses terrylica account
+- ✅ `~/459ecs` → automatically uses 459ecs account
+- ✅ No manual switching needed!

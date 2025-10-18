@@ -1,0 +1,137 @@
+# Doppler Secret Note Schema
+# Purpose: Machine-readable documentation for SSH key secrets following AOD/IOI principles
+
+## Schema Structure
+
+```yaml
+---
+schema_version: "1.0.0"
+secret_type: ssh_private_key
+metadata:
+  created: "YYYY-MM-DD"
+  last_reviewed: "YYYY-MM-DD"
+  evolution_stage: "stable|evolving|deprecated"
+
+# Intent Over Implementation (IOI)
+intent:
+  problem: |
+    Multi-line description of the problem being solved.
+    Focus on WHAT needs to be achieved, not HOW.
+
+  constraints: |
+    Technical or organizational constraints that shaped the decision.
+
+  decision_rationale: |
+    Why this approach was chosen over alternatives.
+    Reference to decision analysis document if available.
+
+# Abstractions Over Details (AOD)
+architecture:
+  pattern: "SSH + Doppler Shared Keys (Option 1b)"
+  alternative_patterns_considered:
+    - "SSH + Unique Keys Per Machine (Option 1a)"
+    - "SSH + Doppler Ephemeral Mounting (Option 1c)"
+    - "HTTPS + gh CLI Auto-Switch (Option 2)"
+
+  key_invariants:
+    - "Directory-based automatic account selection via SSH config Match directives"
+    - "Single Source of Truth for key storage in Doppler"
+    - "Passphrase protection maintained across all machines"
+
+# Version Tracking
+evolution:
+  v1_0_0:
+    date: "YYYY-MM-DD"
+    change: "Initial implementation following Option 1b analysis"
+    decision_doc: "/tmp/option-1b-vs-1c-complexity-analysis.md"
+    complexity_tradeoff: "Rejected Option 1c due to 6-7hr overhead for marginal security gain"
+
+  # Future versions append here
+  # v1_1_0:
+  #   date: "YYYY-MM-DD"
+  #   change: "Migration to Option 1c after security policy change"
+  #   trigger: "Compliance requirement: zero persistent disk secrets"
+
+# Cross-Machine Context
+deployment:
+  sync_mechanism: "~/.local/bin/sync-ssh-keys"
+  target_locations:
+    - "~/.ssh/id_ed25519_tainora"
+    - "~/.ssh/id_ed25519_terrylica"
+    - "~/.ssh/id_ed25519_459ecs"
+
+  integration_points:
+    - "~/.ssh/config Match directives (directory-based selection)"
+    - "~/.gitconfig includeIf (per-directory git identity)"
+
+# Usage Context (machine-parseable)
+usage:
+  primary_purpose: "Multi-account GitHub authentication via SSH"
+  accounts:
+    tainora:
+      directory_pattern: "/scripts"
+      repositories: ["CustomScripts", "personal projects"]
+    terrylica:
+      directory_pattern: "/eon/|ml-"
+      repositories: ["ml-feature-experiments", "EonLabs projects"]
+    459ecs:
+      directory_pattern: "/459ecs"
+      repositories: ["client projects"]
+
+# Security Properties
+security:
+  passphrase_protected: true
+  algorithm: "ed25519"
+  threat_model: "Personal machine compromise - passphrase provides last-line defense"
+  risk_acceptance: |
+    Doppler token compromise exposes all secrets, not just SSH keys.
+    Accepted because: alternative (Option 1c) has equivalent exposure with higher complexity.
+
+# Maintenance
+maintenance:
+  rotation_policy: "On-demand (e.g., suspected compromise, account security upgrade)"
+  test_procedure: "git clone test after sync-ssh-keys on new machine"
+  monitoring: "Manual verification via git operations"
+```
+
+## Implementation Notes
+
+### Note Field Limitations
+- Doppler notes support multiline text
+- Notes are project-level (visible across all configs)
+- No explicit character limit documented (test with ~4KB as safe limit)
+- No markdown/formatting support (plain text only)
+
+### Applied Principles
+
+**AOD (Abstractions Over Details)**
+- Documents pattern choice ("Option 1b") rather than implementation steps
+- Focuses on invariants that must hold across changes
+- Abstracts deployment as "sync mechanism" rather than specific commands
+
+**IOI (Intent Over Implementation)**
+- `intent.problem` describes WHAT, not HOW
+- `decision_rationale` explains WHY this approach
+- `constraints` capture environmental factors
+
+**Machine-Readable Evolution**
+- Semantic versioning for schema changes
+- Structured YAML for parsing by tools
+- Decision traceability via references to analysis docs
+
+**No Promotional Language**
+- Technical descriptors only ("SSH + Doppler Shared Keys")
+- Neutral problem framing ("Multi-account authentication")
+- Factual constraint documentation
+
+### Usage Pattern
+
+```bash
+# Set note from file (recommended for multiline)
+cat ssh_key_note.yaml | doppler secrets notes set SSH_KEY_TAINORA --project claude-config
+
+# Set note inline (for short updates)
+doppler secrets notes set SSH_KEY_TAINORA "v1.1.0: Rotated after security audit" --project claude-config
+
+# Read note via API/dashboard (CLI doesn't support reading notes yet)
+```

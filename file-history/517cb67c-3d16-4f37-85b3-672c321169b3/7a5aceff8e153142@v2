@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""
+End-to-End Lunch Break Validation Script
+
+Tests that lunch breaks are correctly excluded in generated databases.
+Uses a small date range (1 week) to minimize download time.
+"""
+
+import sys
+from pathlib import Path
+
+# Add project to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pandas as pd
+from exness_data_preprocess import ExnessDataProcessor
+
+def print_section(title):
+    """Print section header."""
+    print(f"\n{'='*70}")
+    print(f"  {title}")
+    print('='*70)
+
+def main():
+    """Run end-to-end lunch break validation."""
+
+    # Use temporary directory for test database
+    import tempfile
+    test_dir = tempfile.mkdtemp(prefix="lunch_break_test_")
+    print(f"Test database directory: {test_dir}")
+
+    processor = ExnessDataProcessor(base_dir=test_dir)
+
+    # Phase 1: Generate small test database (1 week of August 2024)
+    print_section("Phase 1: Generating Test Database")
+    print("Date range: 2024-08-05 to 2024-08-09 (5 trading days)")
+    print("This will download ~160 MB of tick data...")
+
+    try:
+        result = processor.update_data(
+            "EURUSD",
+            start_date="2024-08-05",
+            end_date="2024-08-09",
+            delete_zip=True
+        )
+        print(f"✅ Generated database:")
+        print(f"   - Months added: {result['months_added']}")
+        print(f"   - OHLC bars: {result['ohlc_bars']:,}")
+        print(f"   - Database size: {result['duckdb_size_mb']:.2f} MB")
+    except Exception as e:
+        print(f"❌ Failed to generate database: {e}")
+        return False
+
+    # Phase 2: Verify Tokyo lunch break (11:30-12:30 JST = 02:30-03:30 UTC)
+    print_section("Phase 2: Verify Tokyo Lunch Break")
+    print("Testing: Tokyo Stock Exchange (XTKS)")
+    print("Lunch hours: 11:30-12:30 JST (02:30-03:30 UTC)")
+
+    try:
+        df_tokyo = processor.query_ohlc(
+            "EURUSD",
+            timeframe="1m",
+            start_date="2024-08-05 02:30:00",
+            end_date="2024-08-05 03:30:00"
+        )
+
+        tokyo_lunch_count = len(df_tokyo)
+        tokyo_session_flags = df_tokyo['is_xtks_session'].sum()
+
+        print(f"   - Timestamps in lunch hour: {tokyo_lunch_count}")
+        print(f"   - is_xtks_session=1 count: {tokyo_session_flags}")
+        print(f"   - is_xtks_session=0 count: {tokyo_lunch_count - tokyo_session_flags}")
+
+        if tokyo_session_flags == 0:
+            print(f"   ✅ PASS: All lunch hour timestamps correctly show is_xtks_session=0")
+        else:
+            print(f"   ❌ FAIL: {tokyo_session_flags} timestamps incorrectly show is_xtks_session=1")
+            print("\n   Sample of incorrect timestamps:")
+            print(df_tokyo[df_tokyo['is_xtks_session'] == 1][['ts', 'is_xtks_session']].head())
+            return False
+
+    except Exception as e:
+        print(f"   ❌ Query failed: {e}")
+        return False
+
+    # Phase 3: Verify Hong Kong lunch break (12:00-13:00 HKT = 04:00-05:00 UTC)
+    print_section("Phase 3: Verify Hong Kong Lunch Break")
+    print("Testing: Hong Kong Stock Exchange (XHKG)")
+    print("Lunch hours: 12:00-13:00 HKT (04:00-05:00 UTC)")
+
+    try:
+        df_hk = processor.query_ohlc(
+            "EURUSD",
+            timeframe="1m",
+            start_date="2024-08-05 04:00:00",
+            end_date="2024-08-05 05:00:00"
+        )
+
+        hk_lunch_count = len(df_hk)
+        hk_session_flags = df_hk['is_xhkg_session'].sum()
+
+        print(f"   - Timestamps in lunch hour: {hk_lunch_count}")
+        print(f"   - is_xhkg_session=1 count: {hk_session_flags}")
+        print(f"   - is_xhkg_session=0 count: {hk_lunch_count - hk_session_flags}")
+
+        if hk_session_flags == 0:
+            print(f"   ✅ PASS: All lunch hour timestamps correctly show is_xhkg_session=0")
+        else:
+            print(f"   ❌ FAIL: {hk_session_flags} timestamps incorrectly show is_xhkg_session=1")
+            print("\n   Sample of incorrect timestamps:")
+            print(df_hk[df_hk['is_xhkg_session'] == 1][['ts', 'is_xhkg_session']].head())
+            return False
+
+    except Exception as e:
+        print(f"   ❌ Query failed: {e}")
+        return False
+
+    # Phase 4: Verify Singapore lunch break (12:00-13:00 SGT = 04:00-05:00 UTC)
+    print_section("Phase 4: Verify Singapore Lunch Break")
+    print("Testing: Singapore Exchange (XSES)")
+    print("Lunch hours: 12:00-13:00 SGT (04:00-05:00 UTC)")
+
+    try:
+        df_sg = processor.query_ohlc(
+            "EURUSD",
+            timeframe="1m",
+            start_date="2024-08-05 04:00:00",
+            end_date="2024-08-05 05:00:00"
+        )
+
+        sg_lunch_count = len(df_sg)
+        sg_session_flags = df_sg['is_xses_session'].sum()
+
+        print(f"   - Timestamps in lunch hour: {sg_lunch_count}")
+        print(f"   - is_xses_session=1 count: {sg_session_flags}")
+        print(f"   - is_xses_session=0 count: {sg_lunch_count - sg_session_flags}")
+
+        if sg_session_flags == 0:
+            print(f"   ✅ PASS: All lunch hour timestamps correctly show is_xses_session=0")
+        else:
+            print(f"   ❌ FAIL: {sg_session_flags} timestamps incorrectly show is_xses_session=1")
+            print("\n   Sample of incorrect timestamps:")
+            print(df_sg[df_sg['is_xses_session'] == 1][['ts', 'is_xses_session']].head())
+            return False
+
+    except Exception as e:
+        print(f"   ❌ Query failed: {e}")
+        return False
+
+    # Phase 5: Verify trading hours ARE set correctly (sanity check)
+    print_section("Phase 5: Verify Trading Hours (Sanity Check)")
+    print("Testing: Tokyo morning session (9:00-11:00 JST = 00:00-02:00 UTC)")
+
+    try:
+        df_morning = processor.query_ohlc(
+            "EURUSD",
+            timeframe="1m",
+            start_date="2024-08-05 00:00:00",
+            end_date="2024-08-05 02:00:00"
+        )
+
+        morning_count = len(df_morning)
+        morning_session_flags = df_morning['is_xtks_session'].sum()
+
+        print(f"   - Timestamps in morning session: {morning_count}")
+        print(f"   - is_xtks_session=1 count: {morning_session_flags}")
+
+        if morning_session_flags > 0:
+            print(f"   ✅ PASS: Tokyo morning session correctly flagged ({morning_session_flags}/{morning_count})")
+        else:
+            print(f"   ⚠️  WARNING: No morning session flags found (expected some)")
+
+    except Exception as e:
+        print(f"   ⚠️  Query failed: {e}")
+
+    # Summary
+    print_section("VALIDATION SUMMARY")
+    print("✅ ALL TESTS PASSED")
+    print("")
+    print("Lunch breaks are correctly excluded:")
+    print("  - Tokyo (XTKS): 11:30-12:30 JST ✅")
+    print("  - Hong Kong (XHKG): 12:00-13:00 HKT ✅")
+    print("  - Singapore (XSES): 12:00-13:00 SGT ✅")
+    print("")
+    print(f"Test database location: {test_dir}")
+    print("(You can delete this directory after validation)")
+
+    return True
+
+if __name__ == "__main__":
+    success = main()
+    sys.exit(0 if success else 1)

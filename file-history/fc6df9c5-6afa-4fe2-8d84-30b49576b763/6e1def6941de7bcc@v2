@@ -1,0 +1,177 @@
+# Universal Validation Architecture - Implementation Plan
+
+**Version**: 1.1.0
+**Created**: 2025-10-16
+**Updated**: 2025-10-16 (Spike 1 failure - architecture revised)
+**Status**: In Progress
+**SLO Target**: Availability 100%, Correctness 100%, Observability 100%, Maintainability 100%
+
+---
+
+## Objective
+
+Replace indicator-specific validation scripts with universal registry-driven architecture using DuckDB for validation history.
+
+**Success Criteria**:
+- Laguerre RSI validation: MQL5 vs Python correlation ≥ 0.999
+- Existing export_aligned.py usage unchanged (backward compatibility)
+- Single source of truth: registry.yaml for all indicators
+
+---
+
+## Architecture
+
+**UPDATED**: MT5 Python API does not support `create_indicator()` (Spike 1 discovery)
+
+### Components
+
+1. **Configuration**: `indicators/registry.yaml` - Indicator metadata + parameter mappings
+2. **MQL5 Export**: `LaguerreRSIModule.mqh` + extend `ExportAligned.mq5` - Export indicator buffers to CSV
+3. **Validation**: `validate_indicator.py` - Universal validation script
+4. **Storage**: `validation.ddb` - DuckDB database for validation history
+
+### Data Flow
+
+```
+MT5 Terminal → iCustom() → MQL5 buffer values → CSV export
+                                                      ↓
+                                                  Load CSV
+                                                      ↓
+                                                  Compare
+                                                      ↓
+DataFrame → Python indicator ← Python values
+                ↓
+            DuckDB ← Validation metrics
+```
+
+---
+
+## Service Level Objectives
+
+| SLO | Target | Measurement |
+|-----|--------|-------------|
+| **Availability** | 100% | All 20 workspace files accessible |
+| **Correctness** | 100% | Correlation ≥ 0.999 between MQL5 and Python |
+| **Observability** | 100% | All validation runs tracked in DuckDB |
+| **Maintainability** | 100% | Single registry.yaml, no indicator-specific scripts |
+
+---
+
+## Implementation Phases
+
+### Phase 0: Spike Validation (Status: ❌ Spike 1 FAILED - Architecture Revised)
+
+**Spike 1 Result**: ❌ FAILED
+- **Assumption**: MT5 Python API supports `mt5.create_indicator()` + `mt5.copy_buffer()`
+- **Finding**: MetaTrader5 module has NO such methods
+- **Available methods**: Only trading ops, OHLC/tick data (copy_rates, copy_ticks), account management
+- **Impact**: Must use MQL5 CSV export approach instead of Python API buffer access
+- **Action**: Revised architecture to use `LaguerreRSIModule.mqh` + extend `ExportAligned.mq5`
+
+**Remaining Spikes**: Registry YAML (Spike 2), DuckDB performance (Spike 3), Backward compat (Spike 4)
+- Status: Deferred (not critical for MQL5 export approach)
+
+---
+
+### Phase 1: Core Infrastructure (Status: ⏳ Pending)
+
+**Files to Create**:
+- `indicators/registry.yaml`
+- `validation_schema.sql`
+- `validate_indicator.py`
+
+**SLO Impact**: Maintainability +100% (eliminates indicator-specific scripts)
+
+---
+
+### Phase 2: Integration (Status: ⏳ Pending)
+
+**Files to Modify**:
+- `export_aligned.py` (add `--validate` flag)
+- `indicators/__init__.py` (add registry helpers)
+
+**SLO Impact**: Availability 100% (no breaking changes)
+
+---
+
+### Phase 3: Validation Testing (Status: ⏳ Pending)
+
+**Scenarios**:
+- Baseline: EURUSD M1, 5000 bars
+- Parameters: SMMA, LWMA variations
+- Symbols: XAUUSD H1, GBPUSD H4
+
+**SLO Impact**: Correctness 100% (correlation ≥ 0.999)
+
+---
+
+### Phase 4: Documentation (Status: ⏳ Pending)
+
+**Files to Create**:
+- `docs/guides/VALIDATION_WORKFLOW.md`
+- `validation_report.py`
+
+**SLO Impact**: Observability 100% (all runs queryable)
+
+---
+
+## Dependencies
+
+**Python Packages** (OSS):
+- `duckdb` - Analytical database (columnar storage, SQL analytics)
+- `pyyaml` - YAML parsing (configuration)
+- `MetaTrader5` - MT5 Python API (already installed)
+- `pandas` - DataFrame operations (already installed)
+- `numpy` - Numerical computing (already installed)
+
+**Installation**:
+```bash
+CX_BOTTLE="MetaTrader 5" \
+WINEPREFIX="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5" \
+wine "C:\\Program Files\\Python312\\python.exe" -m pip install duckdb pyyaml
+```
+
+---
+
+## Risks & Mitigations
+
+### CRITICAL: MT5 Python API Compatibility
+
+**Risk**: `mt5.create_indicator()` may fail with custom indicators
+**Detection**: Spike 1 test result
+**Mitigation**: Error propagates, implementation halts if spike fails
+**Fallback**: None (requirement violation)
+
+### HIGH: Python/MQL5 Value Mismatch
+
+**Risk**: Correlation < 0.999
+**Detection**: Phase 3 validation tests
+**Mitigation**: Error propagates, debug bar-by-bar in DuckDB
+**Fallback**: None (correctness SLO violation)
+
+---
+
+## Version History
+
+| Version | Date | Changes | Author |
+|---------|------|---------|--------|
+| 1.0.0 | 2025-10-16 | Initial plan | AI Agent |
+
+---
+
+## References
+
+- Laguerre RSI Implementation: `indicators/laguerre_rsi.py`
+- MQL5 Source: `PythonInterop/ATR_Adaptive_Laguerre_RSI.mq5`
+- Existing Validation: `validate_export.py` (RSI-only, to be superseded)
+- DuckDB Spike: `duckdb_validation_spike.py` (proof of concept)
+
+---
+
+## Next Actions
+
+1. ⏳ Execute Spike 1: MT5 Python API custom indicator access
+2. ⏳ Execute Spike 2: Registry YAML pattern
+3. ⏳ Execute Spike 3: DuckDB performance
+4. ⏳ Execute Spike 4: Backward compatibility
+5. 🚦 GO/NO-GO decision based on spike results

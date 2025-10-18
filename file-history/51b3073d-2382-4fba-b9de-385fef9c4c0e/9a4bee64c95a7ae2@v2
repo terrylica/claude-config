@@ -1,0 +1,272 @@
+# Playwright API Audit Report (CORRECTED)
+
+**Date**: 2025-10-16T07:15:00Z
+**Method**: Accelerated API probe via uvx + functional testing
+**Playwright Version**: 1.55.0
+**Python Version**: 3.13.6
+**Platform**: darwin_arm64
+**Correction**: Restored ARIA snapshot support after initial probe error
+
+---
+
+## Executive Summary
+
+Playwright 1.55.0 API surface re-verified. **All documented features available including ARIA snapshots.** Initial probe error caused by checking wrong API (`Page.aria_snapshot` instead of `Locator.aria_snapshot()`).
+
+**SLO Compliance**: Availability 100%, Correctness pending implementation, Observability pending implementation, Maintainability 100%
+
+---
+
+## Probe Correction
+
+### Initial Error
+
+**Probed**: `Page.aria_snapshot()` → ❌ Not found
+**Conclusion**: Feature unavailable, removed from specifications
+
+### Corrected Probe
+
+**Probed**:
+1. `Locator.aria_snapshot()` → ✅ Available (returns YAML string)
+2. `Page.accessibility.snapshot()` → ✅ Available (returns JSON dict)
+
+**Result**: ARIA snapshot fully functional, restored in all specifications
+
+---
+
+## API Probe Results
+
+### Available APIs (11/11 - 100%)
+
+| Feature | Status | API Signature | Output Format |
+|---------|--------|---------------|---------------|
+| Screenshot masking | ✅ Available | `Page.screenshot(mask=[...])` | PNG (masked) |
+| Tracing | ✅ Available | `BrowserContext.tracing.start/stop()` | trace.zip |
+| HAR recording | ✅ Available | `Browser.new_context(record_har=...)` | session.har |
+| HAR replay | ✅ Available | `Page.route_from_har(not_found=...)` | N/A |
+| ARIA selectors | ✅ Available | `Page.get_by_label/role/placeholder/test_id/text()` | N/A |
+| ARIA snapshots | ✅ Available | `Locator.aria_snapshot()` | YAML string |
+| Accessibility tree | ✅ Available | `Page.accessibility.snapshot()` | JSON dict |
+| Frame locator | ✅ Available | `Page.frame_locator()` | N/A |
+| Event system | ✅ Available | `Page.on/once(event_name)` | N/A |
+| File upload | ✅ Available | `Page.set_input_files()` | N/A |
+| Storage state | ✅ Available | `Browser.new_context(storage_state=...)` | N/A |
+
+### Functional Test Results
+
+**Test script**:
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page()
+    page.set_content('''
+        <form>
+            <label for="name">Name:</label>
+            <input id="name" type="text" />
+            <button aria-label="Submit">Submit</button>
+        </form>
+    ''')
+
+    # ARIA snapshot via Locator
+    form = page.locator('form')
+    snapshot = form.aria_snapshot()
+    # Output:
+    # - text: "Name:"
+    # - textbox "Name:"
+    # - button "Submit"
+
+    # Accessibility tree via Page
+    acc_snapshot = page.accessibility.snapshot()
+    # Output: {"role": "WebArea", "children": [...]}
+```
+
+**Result**: Both APIs functional, output formats confirmed
+
+---
+
+## Specification Updates
+
+### Files Modified (6)
+
+1. **`/specifications/playwright-automation.yaml`**
+   - ✅ Restored `aria_snapshots` in ArtifactManifest schema
+   - ✅ Added `x-implementation-requirements.aria_snapshots` section
+   - ✅ Updated API description to include ARIA snapshots
+   - ✅ Documented correct API: `Locator.aria_snapshot()`
+
+2. **`/docs/automation/manulife-par.md`**
+   - ✅ Restored ARIA snapshot artifacts in manifest example
+   - ✅ Files: `aria_002.yaml`, `aria_003.yaml`
+
+3. **`/CLAUDE.md`**
+   - ✅ Restored ARIA snapshots in enhancement checklist
+   - ✅ Specified correct API method
+
+4. **`/docs/INDEX.md`**
+   - ✅ Updated audit link to corrected report
+
+5. **`/specifications/slo.yaml`**
+   - ✅ Added ARIA snapshot SLO measurements
+   - ✅ Updated audit results
+
+6. **`/docs/AUDIT-CORRECTED.md`** (NEW)
+   - ✅ Created corrected audit report
+
+---
+
+## ARIA Snapshot Implementation Details
+
+### API Usage
+
+**Recommended approach**: `Locator.aria_snapshot()`
+
+```python
+# After field fill
+form_locator = page.locator('form')
+aria_after_fill = form_locator.aria_snapshot()
+Path('artifacts/aria_002.yaml').write_text(aria_after_fill)
+
+# After submit
+body_locator = page.locator('body')
+aria_after_submit = body_locator.aria_snapshot()
+Path('artifacts/aria_003.yaml').write_text(aria_after_submit)
+```
+
+**Alternative**: `Page.accessibility.snapshot()`
+
+```python
+# Returns JSON dict instead of YAML
+import json
+acc_tree = page.accessibility.snapshot()
+Path('artifacts/accessibility_002.json').write_text(
+    json.dumps(acc_tree, indent=2)
+)
+```
+
+### Output Format
+
+**`Locator.aria_snapshot()` output** (YAML):
+```yaml
+- text: "Name:"
+- textbox "Name:"
+- button "Submit"
+```
+
+**`Page.accessibility.snapshot()` output** (JSON):
+```json
+{
+  "role": "WebArea",
+  "name": "",
+  "children": [
+    {"role": "text", "name": "Name:"},
+    {"role": "textbox", "name": "Name:"},
+    {"role": "button", "name": "Submit"}
+  ]
+}
+```
+
+### Use Cases
+
+1. **Form structure verification**: Ensure all labels/inputs present
+2. **Accessibility validation**: Check semantic structure
+3. **Change detection**: Compare snapshots before/after actions
+4. **AI model input**: Provide semantic understanding of page structure
+
+---
+
+## SLO Updates
+
+### New ARIA Snapshot SLOs
+
+**Availability**:
+- ARIA snapshot API availability: 100% (confirmed)
+
+**Correctness**:
+- ARIA snapshot completeness: All form elements present in YAML
+- ARIA snapshot parsability: Valid YAML output
+
+**Observability**:
+- ARIA snapshot generation: 100% of checkpoints (after_fill, after_submit)
+- ARIA snapshot storage: Artifacts cataloged in index.json
+
+---
+
+## Lessons Learned
+
+### Probe Methodology Improvements
+
+1. **API surface inspection insufficient**: Presence of method in `dir()` or `hasattr()` check not enough
+2. **Functional testing required**: Must test actual API calls with real browser
+3. **Check multiple API variants**: ARIA accessible via both `Locator` and `Page.accessibility`
+4. **Document output formats**: Critical for implementation (YAML vs JSON)
+
+### Corrected Probe Workflow
+
+```bash
+# 1. Check API availability
+hasattr(Locator, 'aria_snapshot')  # ✅ True
+
+# 2. Install browsers
+playwright install chromium
+
+# 3. Functional test
+# Launch browser, create page, test API with real content
+
+# 4. Verify output format
+# Confirm YAML/JSON structure matches expectations
+```
+
+---
+
+## Recommendations
+
+### Immediate Actions
+
+1. ✅ Restore ARIA snapshot references (COMPLETED)
+2. ✅ Update specifications with correct API (COMPLETED)
+3. ✅ Document output formats (COMPLETED)
+4. 📝 Implement fill_par_form.py with ARIA snapshots
+5. 📝 Add version constraint: `playwright>=1.55.0,<2.0.0`
+
+### Future Considerations
+
+1. **Prefer** `Locator.aria_snapshot()` over `Page.accessibility.snapshot()` for simplicity
+2. **Monitor** playwright releases for API changes
+3. **Include** ARIA snapshots in artifact analysis pipeline
+4. **Test** ARIA snapshot parsing for AI model integration
+
+---
+
+## Final Structure
+
+```
+/Users/terryli/own/insurance/
+├── CLAUDE.md                           # Updated with ARIA snapshots
+├── docs/
+│   ├── INDEX.md                       # Updated audit link
+│   ├── AUDIT.md                       # Original (incorrect) audit
+│   ├── AUDIT-CORRECTED.md             # This file (correct audit)
+│   └── automation/
+│       └── manulife-par.md           # Restored ARIA artifacts
+├── specifications/
+│   ├── playwright-automation.yaml    # Restored ARIA snapshots
+│   ├── manulife-par-form.yaml
+│   └── slo.yaml                      # Updated with ARIA SLOs
+└── scripts/
+    └── playwright/                   # [TODO] Implement with ARIA support
+```
+
+---
+
+## References
+
+**Corrected Specifications**:
+- [`/specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml) - Complete spec with ARIA
+- [`/specifications/slo.yaml`](/Users/terryli/own/insurance/specifications/slo.yaml) - Updated SLOs
+
+**Playwright Documentation**:
+- [ARIA Snapshots](https://playwright.dev/docs/aria-snapshots) - Official docs
+- [Accessibility Testing](https://playwright.dev/docs/accessibility-testing) - Accessibility API guide
+- [Locator API](https://playwright.dev/docs/api/class-locator#locator-aria-snapshot) - aria_snapshot() method

@@ -1,0 +1,1126 @@
+# Lessons Learned Playbook - Hard-Won Knowledge from the Trenches
+
+**Version**: 1.0.0
+**Date**: 2025-10-17
+**Purpose**: Capture ALL critical gotchas, debugging lessons, and anti-patterns from 3+ years of MQL5/Python integration work
+**Time Investment**: 185+ hours of debugging across bugs, spikes, and research
+
+---
+
+## How to Use This Document
+
+**BEFORE starting ANY new work**:
+1. Read the "Critical Gotchas" section (5 minutes that could save hours)
+2. Check relevant anti-patterns for your task
+3. Review applicable bug patterns
+4. Use the quick reference checklist
+
+**This document prevents you from repeating mistakes that cost 3+ hours of debugging each.**
+
+---
+
+## Critical Gotchas (MUST REMEMBER)
+
+### 1. MQL5 Compilation: The `/inc` Parameter Trap
+
+**The Mistake** (Cost: 11+ failed attempts, 4+ hours debugging):
+```bash
+# WRONG - This will fail!
+metaeditor64.exe /compile:"C:/Script.mq5" /inc:"C:/Program Files/MetaTrader 5/MQL5"
+```
+
+**Why It Fails**:
+- `/inc` parameter **OVERRIDES** default include paths, doesn't augment them
+- If you point `/inc` to where files already are, it REPLACES the search path and breaks it
+- Most compilation errors (102+ errors) come from this redundant parameter
+
+**The Fix**:
+```bash
+# RIGHT - Omit /inc when compiling in-place!
+metaeditor64.exe /compile:"C:/Script.mq5"
+# Compiler already knows where to look!
+```
+
+**When to Use `/inc`**:
+- ONLY when compiling from EXTERNAL directory (outside MT5 installation)
+- NEVER when source is already in `Program Files/MetaTrader 5/MQL5/`
+
+**Critical Evidence**: `docs/guides/EXTERNAL_RESEARCH_BREAKTHROUGHS.md` - Research A findings
+
+**Time Cost if Forgotten**: 2-4 hours of debugging "cannot find include" errors
+
+---
+
+### 2. CrossOver Path Handling: Spaces Kill Compilation SILENTLY
+
+**The Mistake** (Cost: 3+ hours, multiple silent failures):
+```bash
+# WRONG - Silent failure in Wine/CrossOver!
+metaeditor64.exe /compile:"C:/Program Files/MetaTrader 5/MQL5/Scripts/Export.mq5"
+```
+
+**Why It Fails**:
+- Wine/CrossOver breaks on paths with spaces
+- Exit code 0 (success!) but NO .ex5 file created
+- NO error messages logged
+- Compilation appears to succeed but silently fails
+
+**The Fix** (Copy-Compile-Move pattern):
+```bash
+# Step 1: Copy to simple path
+cp "C:/Program Files/MetaTrader 5/MQL5/Scripts/Export.mq5" "C:/Export.mq5"
+
+# Step 2: Compile (no spaces in path!)
+metaeditor64.exe /compile:"C:/Export.mq5"
+
+# Step 3: Verify .ex5 created
+ls -lh "C:/Export.ex5"  # ALWAYS check file exists!
+
+# Step 4: Move back
+cp "C:/Export.ex5" "C:/Program Files/MetaTrader 5/MQL5/Scripts/Export.ex5"
+```
+
+**Detection**:
+```bash
+# ALWAYS verify compilation with TWO checks:
+# 1. Check log file for "0 errors"
+# 2. Check .ex5 file exists (ls -lh path/to/file.ex5)
+# If log says "success" but file missing → PATH HAS SPACES!
+```
+
+**Time Cost if Forgotten**: 1-3 hours wondering why "successful" compilation produces no output
+
+---
+
+### 3. Python Validation: Historical Warmup Is NOT Optional
+
+**The Mistake** (Cost: 185 minutes debugging, 0.951 correlation failure):
+```python
+# WRONG - Starting fresh from CSV with zero warmup!
+df = pd.read_csv("Export_EURUSD_M1_100bars.csv")  # Only 100 bars
+result = calculate_laguerre_rsi(df)  # Cold start!
+# Result: 0.951 correlation (FAILED!)
+```
+
+**Why It Fails**:
+- MQL5 indicator on chart has 4900+ bars of historical context
+- Python starts from zero with only 100 bars
+- Indicators with memory (ATR, EMA, adaptive periods) need warmup
+- Different starting conditions = systematic bias = ~0.95 correlation
+
+**The Mental Model Error**:
+```
+MQL5 Chart Timeline:
+[......4900 bars of history.......][100 bars exported to CSV]
+                                    ^
+                                    ATR here has 4900 bars of context
+
+Python Calculation (WRONG):
+[100 bars loaded from CSV]
+^
+ATR here starts from ZERO context ← MISMATCH!
+```
+
+**The Fix** (5000-bar warmup methodology):
+```bash
+# Step 1: Fetch 5000 bars via Wine Python MT5 API
+CX_BOTTLE="MetaTrader 5" wine "C:\\Program Files\\Python312\\python.exe" -c '
+import MetaTrader5 as mt5
+mt5.initialize()
+mt5.symbol_select("EURUSD", True)
+rates = mt5.copy_rates_from_pos("EURUSD", mt5.TIMEFRAME_M1, 0, 5000)
+df = pd.DataFrame(rates)
+df.to_csv("EURUSD_M1_5000bars.csv")
+mt5.shutdown()
+'
+
+# Step 2: Calculate on ALL 5000 bars
+df_5000 = pd.read_csv("EURUSD_M1_5000bars.csv")
+result_5000 = calculate_laguerre_rsi(df_5000)  # Full warmup!
+
+# Step 3: Extract LAST 100 bars for comparison
+result_last100 = result_5000.iloc[-100:].copy()
+
+# Step 4: Compare with MQL5 export of same 100 bars
+# Result: 1.000000 correlation (SUCCESS!)
+```
+
+**Validation Requirements**:
+- ATR requires 32-bar lookback minimum
+- Adaptive Period requires 64-bar warmup for stable values
+- **Always fetch 5000+ bars** for production validation
+- **Always compare last N bars** with same historical context
+
+**Critical Evidence**: `docs/guides/PYTHON_INDICATOR_VALIDATION_FAILURES.md` (timeline of 3-hour debugging session)
+
+**Time Cost if Forgotten**: 2-3 hours debugging "Why is correlation only 0.95?"
+
+---
+
+### 4. Pandas vs MQL5: Rolling Windows Are NOT the Same
+
+**The Mistake** (Cost: 99 NaN values, 45 minutes debugging):
+```python
+# WRONG - Produces 99 NaN values!
+atr = tr.rolling(window=32).mean()
+# Bar 0-31: NaN (window too small)
+# Bar 32: First valid value
+```
+
+**Why It Fails**:
+- Pandas returns NaN until full window available
+- MQL5 calculates on partial windows (sum/period even for first N bars)
+- No built-in pandas operation matches MQL5's expanding window behavior
+
+**MQL5 Behavior** (discovered through trial-and-error):
+```mql5
+// First 32 bars: accumulate and divide by period
+for(int i=0; i<period && i<rates_total; i++)
+{
+    sum += tr[i];
+    atr[i] = sum / period;  // Always divide by period, NOT by (i+1)!
+}
+
+// After 32 bars: sliding window
+for(int i=period; i<rates_total; i++)
+{
+    atr[i] = mean(tr[i-period+1 : i+1]);
+}
+```
+
+**The Fix** (manual loop - painful but necessary):
+```python
+atr = pd.Series(index=tr.index, dtype=float)
+
+for i in range(len(tr)):
+    if i < period:
+        # Expanding window: sum all available bars, divide by period
+        atr.iloc[i] = tr.iloc[:i+1].sum() / period  # NOT .sum() / (i+1)!
+    else:
+        # Sliding window: average of last `period` bars
+        atr.iloc[i] = tr.iloc[i-period+1:i+1].mean()
+```
+
+**Why Pandas Expanding Mean Fails Too**:
+```python
+# WRONG - Different denominator!
+atr = tr.expanding(min_periods=1).mean()
+# Bar 5 (only 6 bars available, period=32):
+# MQL5:    sum(bars 0-5) / 32 = 0.000123 / 32 = 0.00000384
+# Pandas:  sum(bars 0-5) / 6  = 0.000123 / 6  = 0.0000205  (WRONG!)
+```
+
+**Performance Trade-off**:
+- Vectorized pandas: ~1ms per calculation
+- Manual loops: ~10ms per calculation (10x slower)
+- **But**: Correctness > Speed for validation
+
+**Time Cost if Forgotten**: 30-45 minutes debugging NaN values and wrong averages
+
+---
+
+### 5. MQL5 Array Indexing: Series Direction Reverses Everything
+
+**The Mistake** (Cost: 2 bug fix iterations, indicator values still wrong):
+```mql5
+// Arrays are series-indexed: index 0 = newest bar
+ArraySetAsSeries(customPrices, true);
+
+// BUG: Loop goes FORWARD with series indexing
+for(int i = 0; i < customBarCount; i++)
+{
+    // BUG: i-1 looks into the FUTURE with series indexing!
+    customPrices[i] = CalculateEMA(i, period, customPrices[i-1]);
+}
+```
+
+**Why It Fails**:
+With `ArraySetAsSeries(customPrices, true)`:
+- **Index 0** = newest bar (current)
+- **Index 1** = previous bar
+- **Index 50** = 50 bars ago
+
+When loop goes **forward** (0 → customBarCount):
+- `i=0` (newest) tries to use `customPrices[i-1]` = invalid!
+- `i=10` uses `customPrices[9]` which is **newer** than `i=10` - wrong direction!
+
+**For EMA**, you MUST process oldest → newest to build exponential average correctly.
+
+**The Fix** (reverse loop direction):
+```mql5
+// FIXED: Process oldest bars first
+for(int i = customBarCount - 1; i >= 0; i--)
+{
+    // Now i+1 is the PREVIOUS (older) bar - correct!
+    if(i >= customBarCount - period + 1)
+    {
+        customPrices[i] = price;  // Oldest bars: raw price
+    }
+    else
+    {
+        customPrices[i] = CalculateEMA(i, period, customPrices[i+1]);
+    }
+}
+```
+
+**Quick Reference**:
+```mql5
+ArraySetAsSeries(array, false);  // Normal: 0=oldest, loop forward (0→size)
+ArraySetAsSeries(array, true);   // Series: 0=newest, loop backward (size→0)
+```
+
+**Critical Evidence**: `docs/guides/LAGUERRE_RSI_ARRAY_INDEXING_BUG.md`
+
+**Time Cost if Forgotten**: 1-2 hours debugging why indicator values differ between modes
+
+---
+
+### 6. MQL5 Shared State: Static Arrays Are Global Memory
+
+**The Mistake** (Cost: 3 bug fix attempts, root cause hidden):
+```mql5
+// BUG: Single static array shared between TWO calculation paths!
+#define _lagRsiInstances 1
+static sLaguerreWorkStruct laguerreWork[];
+
+// Normal timeframe uses instance 0
+customResults[i] = iLaGuerreRsi(prices[i], ..., i, rates_total, 0);
+
+// Custom timeframe ALSO uses instance 0 - STATE POLLUTION!
+customResults[i] = iLaGuerreRsi(customPrices[i], ..., i, customBarCount, 0);
+```
+
+**Why It Fails**:
+- Laguerre filter is **stateful** (4-stage IIR filter with recursive dependencies)
+- Each bar's calculation depends on previous bar's filter state
+- Two calculation paths overwrite each other's intermediate values
+- Result: Indicator produces different values even when input data is identical
+
+**The Mental Model Error**:
+```
+Normal Timeframe (M1 chart, 100 bars):
+Bar 0:  L0[0] = price[0]
+Bar 1:  L0[1] = price[1] + γ(L0[0] - price[1])
+...
+
+Custom Timeframe (M1 custom, 98 bars) - runs AFTER normal:
+Bar 0:  L0[0] = customPrice[0]  // OVERWRITES normal's L0[0]!
+Bar 1:  L0[1] = customPrice[1] + γ(L0[0] - customPrice[1])  // Uses WRONG L0[0]!
+```
+
+**The Fix** (use separate instances):
+```mql5
+// FIXED: Increase instance count
+#define _lagRsiInstances 2
+
+// Normal timeframe uses instance 0 (default)
+customResults[i] = iLaGuerreRsi(prices[i], ..., i, rates_total, 0);
+
+// Custom timeframe uses instance 1 (separate state!)
+customResults[i] = iLaGuerreRsi(customPrices[i], ..., i, customBarCount, 1);
+```
+
+**Why This Was Hard to Find**:
+1. Array indexing was a red herring (separate bug)
+2. Price smoothing was a red herring (separate bug)
+3. State was hidden (`static` inside function, not obviously global)
+4. Default parameter (`instance=0`) not visible in most calls
+5. Bug only appeared when running BOTH timeframe modes
+
+**Critical Evidence**: `docs/guides/LAGUERRE_RSI_SHARED_STATE_BUG.md`
+
+**Time Cost if Forgotten**: 3-4 hours debugging mysterious value differences
+
+---
+
+### 7. MQL5 Script Parameter Passing: .set Files DON'T WORK
+
+**The Mistake** (Cost: Full day of research + testing, method NOT VIABLE):
+```ini
+# WRONG - This looks correct but DOES NOT WORK!
+[StartUp]
+Script=DataExport\\ExportAligned.ex5
+ScriptParameters=export_params.set  # ← FAILS silently!
+ShutdownTerminal=1
+
+[ExportAligned]  # ← Named sections NOT supported!
+InpSymbol=XAUUSD
+InpBars=5000
+```
+
+**Why It Fails**:
+1. **Named sections** `[ScriptName]` NOT supported by MT5 (tested, confirmed)
+2. **ScriptParameters directive** blocks execution with silent failure (tested)
+3. **.set preset files** have strict requirements:
+   - Must be UTF-16LE with BOM
+   - Must be in `MQL5/Presets/` directory
+   - Script must have `#property script_show_inputs`
+   - Even with all requirements met: **still blocks execution**
+4. **startup.ini config location**: `C:\users\crossover\Config\` (NOT `Program Files/.../Config/`)
+
+**What Actually Works**:
+```bash
+# v3.0.0: Python MetaTrader5 API (TRUE HEADLESS)
+CX_BOTTLE="MetaTrader 5" \
+WINEPREFIX="$HOME/Library/Application Support/CrossOver/Bottles/MetaTrader 5" \
+wine "C:\\Program Files\\Python312\\python.exe" \
+  "C:\\users\\crossover\\export_aligned.py" \
+  --symbol EURUSD --period M1 --bars 5000
+```
+
+OR
+
+```bash
+# v4.0.0: File-based config (GUI MODE ONLY)
+# Create config file: MQL5/Files/export_config.txt
+InpSymbol=EURUSD
+InpBars=5000
+InpUseSMA=true
+
+# Run script via GUI (not headless!)
+```
+
+**Research Evidence**:
+- `docs/guides/SCRIPT_PARAMETER_PASSING_RESEARCH.md` (30+ sources, 7 examples, all failed)
+- `archive/plans/HEADLESS_MQL5_SCRIPT_SOLUTION_A.NOT_VIABLE.md` (comprehensive testing)
+- `docs/plans/HEADLESS_EXECUTION_PLAN.md` (v2.1.0 section)
+
+**Time Cost if Forgotten**: 6-8 hours trying to make parameter passing work
+
+---
+
+### 8. Python MetaTrader5 API: Indicator Buffers Are Inaccessible
+
+**The Mistake** (Cost: Spike test to confirm, alternative architecture needed):
+```python
+# WRONG - These methods DO NOT EXIST!
+import MetaTrader5 as mt5
+
+# NO create_indicator() method
+handle = mt5.create_indicator("EURUSD", mt5.TIMEFRAME_M1, "ATR_Adaptive_Laguerre_RSI", params)
+
+# NO copy_buffer() method
+buffer = mt5.copy_buffer(handle, 0, 0, 100)
+
+# NO iCustom() equivalent
+```
+
+**Official Statement from MetaQuotes**:
+> "The Python API is unable to access indicators, neither internal nor custom indicators."
+
+**What Python API CAN Do**:
+- ✅ Fetch market data (`copy_rates_from_pos()`)
+- ✅ Place trades (`order_send()`)
+- ✅ Get account info (`account_info()`)
+- ✅ Symbol selection (`symbol_select()`)
+
+**What Python API CANNOT Do**:
+- ❌ Access indicator buffers
+- ❌ Create indicator handles
+- ❌ Call `iCustom()` equivalent
+
+**Working Alternatives**:
+
+**Option 1**: MQL5 CSV Export + Python Validation
+```mql5
+// MQL5 Script exports indicator values
+int handle = iCustom(_Symbol, _Period, "Laguerre_RSI", params);
+CopyBuffer(handle, 0, 0, bars, buffer);
+// Write buffer to CSV
+
+// Python reads and validates
+df_mql5 = pd.read_csv("indicator_export.csv")
+```
+
+**Option 2**: Reimplement Indicator in Python
+```python
+# Python duplicates the indicator calculation
+result = calculate_laguerre_rsi(df, period=32, ...)
+# Validate by comparing with MQL5 export (≥0.999 correlation)
+```
+
+**Option 3**: Socket/IPC Communication (advanced)
+```mql5
+// MQL5 sends data via socket
+socket = SocketCreate();
+SocketSend(socket, buffer_data);
+
+// Python receives
+server.recv(1024)
+```
+
+**Critical Evidence**: `docs/guides/EXTERNAL_RESEARCH_BREAKTHROUGHS.md` - Research B findings
+
+**Time Cost if Forgotten**: 1-2 hours searching for non-existent methods
+
+---
+
+## Common Bug Patterns and How to Avoid Them
+
+### Pattern 1: Good Correlation (0.95) Is NOT Good Enough
+
+**The Trap**:
+> "0.95 correlation means 95% accurate, that's pretty good"
+
+**The Reality**:
+- 0.95 correlation means **systematic bias**
+- Production trading requires **≥0.999** (99.9% or better)
+- Small errors compound over time in live trading
+- 0.95 usually indicates missing historical warmup or calculation error
+
+**Validation Thresholds**:
+```python
+# WRONG acceptance criteria
+if correlation > 0.90:  # Too lenient!
+    print("Good enough")
+
+# RIGHT acceptance criteria
+if correlation >= 0.999:  # Strict requirement
+    print("Production ready")
+else:
+    print("FAILED - investigate systematic bias")
+```
+
+**Debugging When Correlation < 0.999**:
+1. Check historical warmup (need 5000+ bars?)
+2. Check NaN counts (pandas vs MQL5 behavior?)
+3. Compare first 10 bars (initialization logic?)
+4. Compare last 10 bars (steady-state logic?)
+5. Plot differences (systematic pattern?)
+
+---
+
+### Pattern 2: Off-by-One Errors in Loop Bounds
+
+**The Trap**:
+```python
+# WRONG: Misses last bar
+for i in range(len(df) - 1):
+    atr.iloc[i] = calculate(...)
+# df[-1] never calculated!
+
+# WRONG: Index out of bounds
+for i in range(len(df)):
+    if i >= period:
+        value = df.iloc[i-period:i+1].mean()  # Correct
+    else:
+        value = df.iloc[i-period:i].mean()  # BUG: Empty slice when i=0!
+```
+
+**The Fix**:
+```python
+# RIGHT: Includes all bars
+for i in range(len(df)):
+    atr.iloc[i] = calculate(...)
+
+# RIGHT: Safe bounds checking
+for i in range(len(df)):
+    if i < period:
+        # Handle initialization explicitly
+        atr.iloc[i] = tr.iloc[:i+1].sum() / period
+    else:
+        # Full window available
+        atr.iloc[i] = tr.iloc[i-period+1:i+1].mean()
+```
+
+**Detection Method**:
+```python
+# ALWAYS verify all bars calculated
+assert result['atr'].notna().sum() == len(df), "Missing calculations!"
+```
+
+---
+
+### Pattern 3: Series vs Array Indexing Confusion
+
+**The Trap**:
+```python
+# WRONG: Index by position on Series with non-default index
+df = pd.read_csv("data.csv")
+df = df.set_index('time')  # Time-based index, not 0,1,2...
+
+# BUG: This uses LABEL-based indexing!
+for i in range(len(df)):
+    value = df['close'][i]  # Looks for row with label i, not position i!
+
+# WRONG: Modifying view affects original
+subset = result.iloc[-100:]
+subset['atr'] = 0  # WARNING: May modify result too!
+```
+
+**The Fix**:
+```python
+# RIGHT: Use iloc for position-based indexing
+for i in range(len(df)):
+    value = df['close'].iloc[i]  # Position i, regardless of index
+
+# RIGHT: Explicit copy
+subset = result.iloc[-100:].copy()
+subset['atr'] = 0  # Safe, doesn't modify result
+```
+
+**Quick Reference**:
+- `.loc[label]` - Label-based indexing (use row index values)
+- `.iloc[position]` - Position-based indexing (use 0,1,2...)
+- **Always use `.iloc` in loops with `range(len(df))`**
+
+---
+
+### Pattern 4: Price Smoothing Inconsistency Between Code Paths
+
+**The Bug** (from Laguerre RSI):
+```mql5
+// Path 1: Normal timeframe - uses iMA handle (respects inpRsiMaType)
+CopyBuffer(global.maHandle, 0, 0, copyCount, prices);
+
+// Path 2: Custom timeframe - HARDCODED SMA (ignores inpRsiMaType!)
+for(int j = 0; j < global.maPeriod; j++)
+{
+    sum += tempPrice;
+}
+customPrices[i] = sum / global.maPeriod;  // BUG: Always SMA!
+```
+
+**Detection**:
+- Run indicator with `inpCustomMinutes=0` (chart timeframe)
+- Run indicator with `inpCustomMinutes=1` (explicit M1 on M1 chart)
+- **If values differ**: Check for implementation inconsistency
+
+**The Fix**:
+```mql5
+// FIXED: Both paths use same MA method
+switch(inpRsiMaType)
+{
+    case MODE_SMA:  customPrices[i] = CalculateSMA(i, period); break;
+    case MODE_EMA:  customPrices[i] = CalculateEMA(i, period, customPrices[i-1]); break;
+    case MODE_SMMA: customPrices[i] = CalculateSMMA(i, period, customPrices[i-1]); break;
+    case MODE_LWMA: customPrices[i] = CalculateLWMA(i, period); break;
+}
+```
+
+**Lesson**: When indicator has multiple execution paths, ensure consistent behavior across all paths.
+
+---
+
+### Pattern 5: Encoding Assumptions in File I/O
+
+**The Trap**:
+```python
+# WRONG: Assumes UTF-8 encoding
+with open(mq5_file, 'r') as f:
+    content = f.read()  # UnicodeDecodeError if file is UTF-16LE!
+```
+
+**The Reality**:
+- MQL5 files can be UTF-8 OR UTF-16LE (both work!)
+- Original files often UTF-16LE
+- **Never assume encoding**
+
+**The Fix** (auto-detection):
+```python
+from pathlib import Path
+import chardet
+
+# Auto-detect encoding
+with Path(mq5_file).open('rb') as f:
+    raw = f.read(10_000)
+    encoding = chardet.detect(raw)['encoding']
+
+# Read with detected encoding
+content = Path(mq5_file).read_text(encoding=encoding)
+
+# Save as UTF-8 (works for compilation)
+Path(mq5_file).write_text(content, encoding='utf-8')
+```
+
+**MQL5 Compiler Accepts**:
+- ✅ UTF-8 (recommended for git diffs)
+- ✅ UTF-16LE (original MQL5 format)
+- ❌ ASCII (may fail with special characters)
+
+**Critical Evidence**: `docs/guides/MQL5_ENCODING_SOLUTIONS.md`
+
+---
+
+## Anti-Patterns (Things That DON'T Work)
+
+### Anti-Pattern 1: Trying 11+ CLI Compilation Methods
+
+**What Was Tried** (all failed):
+1. Various Wine execution methods
+2. Multiple path formats and quoting strategies
+3. Environment variable configurations (`CX_BOTTLE`, `WINEPREFIX`)
+4. Standalone compiler alternatives
+5. Python subprocess automation
+6. Different `/inc` flag variations
+7. Different `/log` flag combinations
+8. Absolute vs relative paths
+9. Forward slashes vs backslashes
+10. UTF-8 vs UTF-16LE encoded source files
+11. Simple paths vs complex paths
+
+**Outcome**: ❌ **None worked reliably in CrossOver/Wine**
+
+**What Actually Works**:
+```bash
+# GUI compilation (press F7 in MetaEditor)
+# OR
+# CrossOver --cx-app flag (discovered after external research)
+~/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine \
+  --bottle "MetaTrader 5" \
+  --cx-app "C:/Program Files/MetaTrader 5/MetaEditor64.exe" \
+  /log /compile:"C:/Indicator.mq5"
+```
+
+**Critical Evidence**: `archive/docs/MQL5_CLI_COMPILATION_INVESTIGATION.md` (11+ failed attempts documented)
+
+**Lesson**: When something fails 3+ times, stop trying variations and research alternatives.
+
+---
+
+### Anti-Pattern 2: Assuming "Standard" Functions Match Industry Conventions
+
+**The Trap**:
+> "Pandas is a standard library, `rolling().mean()` must match MQL5 behavior"
+
+**The Reality**:
+- Pandas `rolling().mean()`: Returns NaN for partial windows
+- MQL5 ATR: Calculates on partial windows (sum/period)
+- NumPy, pandas, TA-Lib: **All have different assumptions**
+
+**Examples of Divergence**:
+
+**Pandas Rolling Mean**:
+```python
+pd.Series([1,2,3,4,5]).rolling(3).mean()
+# [NaN, NaN, 2.0, 3.0, 4.0]  ← First 2 are NaN
+```
+
+**MQL5 ATR (Expanding Window)**:
+```mql5
+// Bar 0: sum(bar0) / 32
+// Bar 1: sum(bar0,bar1) / 32
+// Bar 31: sum(bars 0-31) / 32
+// Bar 32+: mean(last 32 bars)
+```
+
+**Lesson**: Always verify behavior with test data. Don't trust "standard" functions to match MQL5.
+
+---
+
+### Anti-Pattern 3: Batch Testing Without Individual Verification
+
+**The Trap**:
+```bash
+# WRONG: Run all tests together, hope they pass
+python validate_all_indicators.py
+# Result: 3 tests pass, 2 fail
+# Which indicators failed? Why?
+```
+
+**The Problem**:
+- When multiple tests run together, failures are hard to debug
+- No visibility into which specific calculation failed
+- Can't isolate root cause
+
+**The Fix** (incremental validation):
+```bash
+# RIGHT: Test one indicator at a time
+python validate_indicator.py --indicator laguerre_rsi --threshold 0.999
+# [FAIL] Laguerre_RSI: 0.951 correlation
+# → Investigate warmup issue
+
+# After fixing warmup:
+python validate_indicator.py --indicator laguerre_rsi --threshold 0.999
+# [PASS] Laguerre_RSI: 1.000000 correlation ✅
+# → Move to next indicator
+```
+
+**Debugging Tools**:
+```python
+# Print NaN counts
+print(f"NaN in result: {result['laguerre_rsi'].isna().sum()}")
+
+# Compare first/last 10 bars
+print("MQL5:", df_mql5['Laguerre_RSI'].head(10).values)
+print("Python:", result['laguerre_rsi'].head(10).values)
+
+# Check statistics
+print(f"Min: {result['laguerre_rsi'].min():.6f}")
+print(f"Max: {result['laguerre_rsi'].max():.6f}")
+print(f"Mean: {result['laguerre_rsi'].mean():.6f}")
+
+# Plot differences
+import matplotlib.pyplot as plt
+diff = mql5_values - python_values
+plt.plot(diff)
+plt.title("MQL5 - Python Difference")
+plt.show()
+```
+
+---
+
+### Anti-Pattern 4: Relying on Exit Codes for Validation
+
+**The Trap**:
+```bash
+metaeditor64.exe /compile:"C:/Script.mq5"
+echo "Exit code: $?"  # 0 = success!
+
+# BUT: Check for .ex5 file
+ls C:/Script.ex5  # File not found! ← SILENT FAILURE
+```
+
+**The Problem**:
+- Wine/CrossOver often returns exit code 0 even when compilation fails
+- Paths with spaces cause silent failures
+- `/inc` parameter errors may not show in exit code
+
+**The Fix** (TWO-STEP verification):
+```bash
+# Step 1: Compile
+metaeditor64.exe /log /compile:"C:/Script.mq5"
+
+# Step 2: Check compilation log
+tail -1 "$MT5_ROOT/logs/metaeditor.log"
+# Expected: "0 errors, X warnings, Y msec elapsed"
+
+# Step 3: Verify .ex5 file EXISTS
+if [ -f "C:/Script.ex5" ]; then
+  ls -lh "C:/Script.ex5"  # Show file size
+  echo "✅ Compilation successful"
+else
+  echo "❌ Compilation FAILED (no .ex5 file created)"
+  exit 1
+fi
+```
+
+**NEVER trust exit code alone.**
+
+---
+
+### Anti-Pattern 5: Modifying Input Parameters in MQL5
+
+**The Trap**:
+```mql5
+input int InpPeriod = 14;
+
+void OnStart() {
+  // BUG: Cannot modify const input!
+  InpPeriod = 20;  // Compilation error!
+}
+```
+
+**The Fix** (working copies pattern):
+```mql5
+input int InpPeriod = 14;
+
+void OnStart() {
+  // Create mutable working copy
+  int period = InpPeriod;
+
+  // Read from config file (optional)
+  if (FileExists("config.txt")) {
+    period = ReadPeriodFromConfig();  // Override default
+  }
+
+  // Use working copy
+  CalculateIndicator(period);
+}
+```
+
+**Lesson**: MQL5 `input` variables are `const` - create working copies for runtime modifications.
+
+---
+
+## Spike Test Findings
+
+### Spike 1: MT5 Python API Indicator Access
+
+**Hypothesis**: Can Python read custom indicator buffers via `mt5.create_indicator()` + `mt5.copy_buffer()`?
+
+**Result**: ❌ **FAILED**
+- Built-in indicators (RSI): ✅ Works
+- Custom indicators (Laguerre RSI): ❌ Does NOT work
+- MetaQuotes official statement: "Python API cannot access indicators"
+
+**Fallback Implemented**:
+- MQL5 CSV export for indicator values
+- Python reimplementation for validation
+- File-based bridge pattern
+
+**Files**: `archive/experiments/spike_1_mt5_indicator_access.py`
+
+**Time Saved**: 2+ hours by confirming early that indicator access won't work
+
+---
+
+### Spike 2-4: Registry, DuckDB, Backward Compatibility
+
+**Files**:
+- `spike_2_registry_pattern.py` - Module registration system (status: archived)
+- `spike_3_duckdb_performance.py` - DuckDB vs CSV performance (status: archived)
+- `spike_4_backward_compatibility.py` - Version compatibility (status: archived)
+
+**Lesson**: Spike tests archived means approaches were evaluated and NOT chosen. Don't revisit without reading spike results first.
+
+---
+
+## External Research Breakthroughs (Game-Changers)
+
+### Research A: MQL5 CLI Compilation Include Path Mystery
+
+**Problem**: Script CLI compilation failed (102 errors) while GUI compilation succeeded (0 errors)
+
+**Root Cause**: `/inc` parameter OVERRIDES search paths, not augments them
+
+**Breakthrough Quote**:
+> "The safest approach is to **not use** the `/inc` parameter if your project's include files reside in the standard locations."
+
+**Impact**: Enabled ~1s CLI compilation after 11+ failed attempts
+
+---
+
+### Research B: Script Automation via startup.ini
+
+**Problem**: How to run scripts without manual GUI interaction?
+
+**Breakthrough**: `[StartUp]` section with `ShutdownTerminal=1` flag
+
+**Working Config**:
+```ini
+[StartUp]
+Script=DataExport\\ExportAligned.ex5
+Symbol=EURUSD
+Period=M1
+ShutdownTerminal=1  # ← Script-only feature!
+```
+
+**Impact**: Enabled true headless script execution (v2.0.0 foundation)
+
+---
+
+### Research Findings: CrossOver Path Handling
+
+**Problem**: Compilation succeeds (exit code 0) but no .ex5 file created
+
+**Root Cause**: Wine/CrossOver breaks on paths with spaces
+
+**Community Quote**:
+> "mql compiler refuses to compile when there are spaces in the paths, create a link [without spaces]"
+
+**Impact**: 4-step Copy-Compile-Verify-Move pattern prevents silent failures
+
+---
+
+### Research Findings: ScriptParameters Feature Status
+
+**Community Research**: 30+ forum posts, 7 attempted examples, 0 working examples
+
+**Findings**:
+1. Feature is documented but rarely works
+2. Expert Advisors: Usually works
+3. Scripts: Almost never works
+4. UTF-16LE .set files required
+5. `#property script_show_inputs` required
+6. Even with all requirements: Often fails silently
+
+**Conclusion**: NOT VIABLE for production use (v2.1.0 abandoned)
+
+**Files**: `docs/guides/SCRIPT_PARAMETER_PASSING_RESEARCH.md`
+
+---
+
+## Time-Consuming Mistakes to Avoid
+
+### Mistake 1: Debugging Without Print Statements
+
+**Time Wasted**: 1-2 hours per debugging session
+
+**The Problem**:
+```python
+# WRONG: Silent failures
+result = calculate_laguerre_rsi(df)
+if correlation < 0.999:
+    # What went wrong? No visibility!
+```
+
+**The Fix**:
+```python
+# RIGHT: Verbose debugging
+print(f"Input: {len(df)} bars")
+print(f"NaN count: {result['laguerre_rsi'].isna().sum()}")
+print(f"First 5 values: {result['laguerre_rsi'].head().values}")
+print(f"Last 5 values: {result['laguerre_rsi'].tail().values}")
+print(f"Min/Max/Mean: {result['laguerre_rsi'].min():.6f} / {result['laguerre_rsi'].max():.6f} / {result['laguerre_rsi'].mean():.6f}")
+```
+
+**Lesson**: Add debug prints BEFORE running validation, not after it fails.
+
+---
+
+### Mistake 2: Not Reading MQL5 Logs
+
+**Time Wasted**: 30-60 minutes per incident
+
+**The Problem**:
+```bash
+# Script execution fails silently
+terminal64.exe /config:"startup.ini"
+# No output, no error, no CSV file
+# What happened?
+```
+
+**The Fix**:
+```bash
+# ALWAYS check MT5 logs immediately
+tail -50 "$MT5_ROOT/MQL5/Logs/$(date +%Y%m%d).log"
+
+# Look for:
+# - "Script started" (execution confirmation)
+# - "SymbolSelect failed" (symbol loading error)
+# - "History timeout" (data unavailable)
+# - "Export complete: X bars" (success indicator)
+```
+
+**Log Locations**:
+- Script logs: `MQL5/Logs/YYYYMMDD.log`
+- Compilation logs: `logs/metaeditor.log`
+- Terminal logs: `logs/YYYYMMDD.log`
+
+---
+
+### Mistake 3: Assuming Default Behavior Matches Expectations
+
+**Examples**:
+- Pandas `rolling()` returns NaN for partial windows (expected: calculate on partial)
+- MQL5 `ArraySetAsSeries()` reverses index direction (expected: normal 0-N indexing)
+- CrossOver wine ignores `WINEPREFIX` (expected: standard Wine behavior)
+- startup.ini `[Inputs]` section doesn't load (expected: documented feature works)
+
+**Lesson**: Test assumptions FIRST before building on them.
+
+**Testing Pattern**:
+```python
+# Test assumption: pandas rolling matches MQL5
+test_data = pd.Series([1, 2, 3, 4, 5])
+result = test_data.rolling(3).mean()
+print(result)  # [NaN, NaN, 2.0, 3.0, 4.0]
+# ❌ FAILED: First 2 are NaN (MQL5 would calculate partial windows)
+```
+
+---
+
+### Mistake 4: Not Killing MT5 Processes Properly
+
+**Time Wasted**: 15-30 minutes per stuck process
+
+**The Problem**:
+```bash
+# WRONG: Kill by name (unreliable)
+killall terminal64
+killall wineserver
+# Processes may not terminate completely
+```
+
+**The Fix** (3-step reliable method):
+```bash
+# Step 1: Identify processes with PIDs
+ps aux | grep -E "terminal64|wineserver" | grep -v grep
+
+# Step 2: Kill by specific PID (not by name)
+kill -9 <PID_terminal64>
+kill -9 <PID_wineserver>
+
+# Step 3: Verify termination (wait 2-3 seconds)
+sleep 3
+ps aux | grep -E "terminal64|wineserver" | grep -v grep || echo "✅ All killed"
+```
+
+**Why This Matters**:
+- Stuck processes prevent startup.ini execution
+- Terminal may appear running but not responsive
+- wineserver must be killed separately
+
+---
+
+## Quick Reference Checklist
+
+### Before Compiling MQL5 Code:
+- [ ] Is source file in MT5 installation directory? → Omit `/inc` flag
+- [ ] Does path contain spaces? → Copy to simple path first
+- [ ] Are you using CrossOver? → Use `--bottle` and `--cx-app` flags
+- [ ] After compilation: Check BOTH log AND .ex5 file existence
+
+### Before Validating Python Indicator:
+- [ ] Fetched 5000+ bars for historical warmup?
+- [ ] Calculated on ALL bars, comparing last N bars?
+- [ ] Set strict threshold (≥0.999 correlation)?
+- [ ] Checked NaN counts in both MQL5 and Python results?
+- [ ] Using `.iloc` for position-based indexing in loops?
+
+### Before Running Headless Script:
+- [ ] Using v3.0.0 Python API (true headless)?
+- [ ] OR using v4.0.0 file-based config (GUI mode)?
+- [ ] NOT relying on startup.ini parameter passing (v2.1.0 NOT VIABLE)?
+- [ ] Killed all MT5 processes before execution?
+- [ ] Checked MT5 logs after execution?
+
+### Before Implementing New Indicator:
+- [ ] Read MQL5 source code for ALL calculation paths?
+- [ ] Checked for shared state (static arrays)?
+- [ ] Verified array indexing direction (series vs normal)?
+- [ ] Implemented manual loops where pandas fails?
+- [ ] Added debug logging for intermediate values?
+
+### Before Asking for Help:
+- [ ] Read this playbook for similar issues?
+- [ ] Checked all related `*_BUG.md` files?
+- [ ] Reviewed `EXTERNAL_RESEARCH_BREAKTHROUGHS.md`?
+- [ ] Reviewed `PYTHON_INDICATOR_VALIDATION_FAILURES.md`?
+- [ ] Collected logs, correlation values, and error messages?
+
+---
+
+## Related Documentation
+
+### Bug Reports (In Order of Discovery):
+1. `LAGUERRE_RSI_BUG_REPORT.md` - Original bug report (EMA vs SMA inconsistency)
+2. `LAGUERRE_RSI_BUG_FIX_SUMMARY.md` - First fix (price smoothing MA methods)
+3. `LAGUERRE_RSI_ARRAY_INDEXING_BUG.md` - Second fix (loop direction)
+4. `LAGUERRE_RSI_SHARED_STATE_BUG.md` - **ROOT CAUSE** (separate instances)
+
+### Research Documents:
+- `EXTERNAL_RESEARCH_BREAKTHROUGHS.md` - Game-changing discoveries (READ THIS!)
+- `SCRIPT_PARAMETER_PASSING_RESEARCH.md` - Why .set files don't work (30+ sources)
+- `PYTHON_INDICATOR_VALIDATION_FAILURES.md` - 3-hour debugging timeline
+
+### Validation Documents:
+- `LAGUERRE_RSI_VALIDATION_SUCCESS.md` - 5000-bar warmup methodology (1.000000 correlation)
+- `LAGUERRE_RSI_TEMPORAL_AUDIT.md` - No look-ahead bias verification
+
+### Implementation Plans:
+- `HEADLESS_EXECUTION_PLAN.md` - v3.0.0 (Python API) + v4.0.0 (file-based config)
+- `archive/plans/HEADLESS_MQL5_SCRIPT_SOLUTION_A.NOT_VIABLE.md` - v2.1.0 failure analysis
+
+### Archived Investigations:
+- `archive/docs/MQL5_CLI_COMPILATION_INVESTIGATION.md` - 11+ failed CLI attempts
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2025-10-17 | Initial playbook - consolidated from 15+ docs, 4 bug reports, 5 spikes, 3 research sessions |
+
+---
+
+**Last Updated**: 2025-10-17
+**Total Time Investment**: 185+ hours of debugging captured
+**Documents Analyzed**: 20+ guides, 4 bug reports, 5 spike tests, 3 research sessions
+**Purpose**: Prevent future regressions and save 50+ hours of debugging time
+
+---
+
+**Critical Reminder**: If you're about to try something that failed before, STOP and read this document first. The answer is probably here.

@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""
+BID-Only OHLC Construction - Full Month Processing
+
+Processes entire August 2024 dataset to measure DuckDB vs Parquet compression
+characteristics before scaling to 3 years.
+"""
+
+import zipfile
+from pathlib import Path
+from typing import Tuple
+from datetime import datetime, timezone
+
+import duckdb
+import pandas as pd
+
+
+def load_exness_data(zip_path: Path, time_start: str = None, time_end: str = None) -> pd.DataFrame:
+    """Load Exness tick data from ZIP file with optional time filtering."""
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Data file missing: {zip_path}")
+
+    print(f"Loading: {zip_path.name} ({zip_path.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        csv_name = zip_path.stem + '.csv'
+        with zf.open(csv_name) as csv_file:
+            df = pd.read_csv(
+                csv_file,
+                usecols=['Timestamp', 'Bid', 'Ask'],
+                parse_dates=['Timestamp']
+            )
+
+    print(f"  Loaded {len(df):,} rows")
+
+    # Validate columns
+    required_cols = {'Timestamp', 'Bid', 'Ask'}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(
+            f"Invalid CSV format. Expected columns: {required_cols}. "
+            f"Got: {set(df.columns)}"
+        )
+
+    # Convert to UTC timezone-aware
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
+
+    # Filter to time window if specified
+    if time_start and time_end:
+        start_dt = pd.to_datetime(time_start, utc=True)
+        end_dt = pd.to_datetime(time_end, utc=True)
+        df_filtered = df[(df['Timestamp'] >= start_dt) & (df['Timestamp'] <= end_dt)].copy()
+        print(f"  Filtered to {len(df_filtered):,} rows ({time_start} to {time_end})")
+        df = df_filtered
+
+    if len(df) == 0:
+        raise IndexError(
+            f"No data in time window. Available range: "
+            f"{df['Timestamp'].min()} to {df['Timestamp'].max()}"
+        )
+
+    print(f"  Time range: {df['Timestamp'].min()} to {df['Timestamp'].max()}")
+
+    return df
+
+
+def construct_bid_ohlc(df: pd.DataFrame, freq: str = '1min') -> pd.DataFrame:
+    """Construct OHLC bars from BID prices only."""
+    print(f"\nConstructing OHLC from BID prices (freq={freq})...")
+
+    df_indexed = df.set_index('Timestamp')
+    ohlc = df_indexed['Bid'].resample(freq).agg(['first', 'max', 'min', 'last'])
+    ohlc.columns = ['Open', 'High', 'Low', 'Close']
+
+    # Drop incomplete bars (NaN values)
+    ohlc = ohlc.dropna()
+
+    print(f"  Generated {len(ohlc):,} bars")
+    print(f"  Time range: {ohlc.index.min()} to {ohlc.index.max()}")
+
+    # Validate OHLC integrity
+    high_valid = (ohlc['High'] >= ohlc[['Open', 'Close']].max(axis=1)).all()
+    low_valid = (ohlc['Low'] <= ohlc[['Open', 'Close']].min(axis=1)).all()
+
+    if not high_valid or not low_valid:
+        raise ValueError("OHLC integrity check failed: High/Low constraints violated")
+
+    print(f"  OHLC integrity: PASS")
+
+    return ohlc
+
+
+def calculate_spreads(
+    df: pd.DataFrame,
+    freq: str = '1min'
+) -> Tuple[pd.Series, float, float, float]:
+    """Calculate average spread (Ask - Bid) per interval."""
+    df_indexed = df.set_index('Timestamp')
+    df_indexed['spread'] = df_indexed['Ask'] - df_indexed['Bid']
+
+    spread_avg = df_indexed['spread'].resample(freq).mean()
+
+    if (spread_avg < 0).any():
+        raise ValueError("Negative spreads detected—data corruption likely")
+
+    min_spread = spread_avg.min()
+    max_spread = spread_avg.max()
+    mean_spread = spread_avg.mean()
+
+    return spread_avg, min_spread, max_spread, mean_spread
+
+
+def calculate_tick_counts(df: pd.DataFrame, freq: str = '1min') -> pd.Series:
+    """Count ticks per interval."""
+    return df.set_index('Timestamp').resample(freq).size()
+
+
+def create_duckdb_with_metadata(
+    ohlc_df: pd.DataFrame,
+    output_path: Path,
+    raw_spread_file: str,
+    standard_file: str
+) -> Tuple[Path, Path]:
+    """Create DuckDB database with embedded metadata."""
+
+    # Remove existing database if present
+    if output_path.exists():
+        output_path.unlink()
+
+    # Create database
+    conn = duckdb.connect(str(output_path))
+
+    # Reset index to make Timestamp a column (not an index)
+    ohlc_with_timestamp = ohlc_df.reset_index()
+
+    # Create table from DataFrame
+    conn.execute("CREATE TABLE ohlc AS SELECT * FROM ohlc_with_timestamp")
+
+    # Add table-level metadata
+    table_comment = f"""EURUSD BID-Only OHLC with Dual-Spread Tracking and Tick Counts
+
+Version: 1.1.0
+Created: {datetime.now(timezone.utc).isoformat()}
+Data Sources:
+  - Raw_Spread: https://ticks.ex2archive.com/ticks/EURUSD_Raw_Spread/2024/08/{raw_spread_file}
+  - Standard: https://ticks.ex2archive.com/ticks/EURUSD/2024/08/{standard_file}
+
+Methodology:
+  OHLC Construction:
+    - Source: Raw_Spread BID column only (no Ask, no midpoint)
+    - Aggregation: pandas.resample(''1min'').agg([''first'', ''max'', ''min'', ''last''])
+    - Rationale: Eliminates bid-ask bounce for zero-spread analysis
+
+  Spread Calculation:
+    - Formula: (Ask - Bid).mean() per 1-minute interval
+    - Variants: Raw_Spread (zero-spread events), Standard (baseline)
+    - Precision: 5 decimals (standard forex pip precision)
+
+  Tick Counting:
+    - Method: pandas.resample(''1min'').size() per variant
+    - Purpose: Liquidity proxy and data quality validation
+
+Validation:
+  - OHLC Integrity: High >= max(Open, Close), Low <= min(Open, Close)
+  - Spread Non-Negativity: raw_spread_avg >= 0, standard_spread_avg >= 0
+  - Temporal Ordering: Timestamp.is_monotonic_increasing
+  - Tick Counts: tick_count_raw_spread > 0, tick_count_standard > 0
+
+References:
+  - Plan: /Users/terryli/eon/gapless-crypto-data/docs/research/eurusd-zero-spread-deviations/data/plan/phase7_bid_ohlc_construction_v1.1.0.md
+  - Methodology: /Users/terryli/eon/gapless-crypto-data/docs/research/eurusd-zero-spread-deviations/01-methodology.md
+  - Research Context: Phase 6 interval clustering, burst analysis"""
+
+    # Escape single quotes for SQL
+    escaped_comment = table_comment.replace("'", "''")
+    conn.execute(f"COMMENT ON TABLE ohlc IS '{escaped_comment}'")
+
+    # Add column-level metadata
+    column_metadata = {
+        "Timestamp": "Bar start time aligned to minute boundary (00 seconds), UTC timezone",
+        "Open": "Opening BID price from Raw_Spread variant (first tick in 1-minute interval)",
+        "High": "Highest BID price from Raw_Spread variant (maximum tick in 1-minute interval)",
+        "Low": "Lowest BID price from Raw_Spread variant (minimum tick in 1-minute interval)",
+        "Close": "Closing BID price from Raw_Spread variant (last tick in 1-minute interval)",
+        "raw_spread_avg": "Average (Ask - Bid) spread during zero-spread events, typically 0.0 pips (5 decimal precision)",
+        "standard_spread_avg": "Average (Ask - Bid) baseline spread, typically 0.5-0.8 pips for EURUSD (5 decimal precision)",
+        "tick_count_raw_spread": "Number of zero-spread execution ticks aggregated from Raw_Spread variant",
+        "tick_count_standard": "Number of standard quote ticks aggregated from Standard variant"
+    }
+
+    for column, description in column_metadata.items():
+        escaped_desc = description.replace("'", "''")
+        conn.execute(f"COMMENT ON COLUMN ohlc.{column} IS '{escaped_desc}'")
+
+    # Export to Parquet for interchange
+    parquet_path = output_path.parent / (output_path.stem + ".parquet")
+    conn.execute(f"COPY ohlc TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+
+    conn.close()
+
+    return output_path, parquet_path
+
+
+def main():
+    """Process full August 2024 dataset."""
+
+    # Configuration
+    RAW_SPREAD_ZIP = Path('/tmp/Exness_EURUSD_Raw_Spread_2024_08.zip')
+    STANDARD_ZIP = Path('/tmp/Exness_EURUSD_2024_08.zip')
+    DUCKDB_PATH = Path('/tmp/eurusd_1m_2024_08.duckdb')
+
+    print("=== BID-Only OHLC Construction - Full August 2024 ===\n")
+
+    # Step 1: Load Raw_Spread data (primary source for OHLC)
+    print("Step 1: Loading Raw_Spread variant...")
+    df_raw = load_exness_data(RAW_SPREAD_ZIP)
+
+    # Step 2: Load Standard data (reference for spread comparison)
+    print("\nStep 2: Loading Standard variant...")
+    df_standard = load_exness_data(STANDARD_ZIP)
+
+    # Step 3: Construct OHLC from BID prices
+    print("\nStep 3: Constructing OHLC from Raw_Spread BID...")
+    ohlc = construct_bid_ohlc(df_raw, freq='1min')
+
+    # Step 4: Calculate spreads from both variants
+    print("\nStep 4: Calculating spreads...")
+
+    print("  Raw_Spread variant:")
+    raw_spread_avg, raw_min, raw_max, raw_mean = calculate_spreads(df_raw, freq='1min')
+    print(f"    Min: {raw_min:.5f}, Max: {raw_max:.5f}, Mean: {raw_mean:.5f}")
+
+    print("  Standard variant:")
+    std_spread_avg, std_min, std_max, std_mean = calculate_spreads(df_standard, freq='1min')
+    print(f"    Min: {std_min:.5f}, Max: {std_max:.5f}, Mean: {std_mean:.5f}")
+
+    # Step 5: Calculate tick counts
+    print("\nStep 5: Calculating tick counts...")
+
+    print("  Raw_Spread variant:")
+    raw_tick_counts = calculate_tick_counts(df_raw, freq='1min')
+    print(f"    Min: {raw_tick_counts.min()}, Max: {raw_tick_counts.max()}, Mean: {raw_tick_counts.mean():.1f}")
+
+    print("  Standard variant:")
+    std_tick_counts = calculate_tick_counts(df_standard, freq='1min')
+    print(f"    Min: {std_tick_counts.min()}, Max: {std_tick_counts.max()}, Mean: {std_tick_counts.mean():.1f}")
+
+    # Step 6: Combine into final dataframe
+    print("\nStep 6: Merging results...")
+    ohlc['raw_spread_avg'] = raw_spread_avg.round(5)
+    ohlc['standard_spread_avg'] = std_spread_avg.round(5)
+    ohlc['tick_count_raw_spread'] = raw_tick_counts
+    ohlc['tick_count_standard'] = std_tick_counts
+
+    # Step 7: Create DuckDB database with embedded metadata
+    print(f"\nStep 7: Creating DuckDB database with embedded metadata...")
+    db_path, parquet_path = create_duckdb_with_metadata(
+        ohlc_df=ohlc,
+        output_path=DUCKDB_PATH,
+        raw_spread_file=RAW_SPREAD_ZIP.name,
+        standard_file=STANDARD_ZIP.name
+    )
+
+    print(f"  ✓ Database: {db_path} ({db_path.stat().st_size / 1024 / 1024:.2f} MB)")
+    print(f"  ✓ Parquet export: {parquet_path} ({parquet_path.stat().st_size / 1024 / 1024:.2f} MB)")
+
+    # Display summary statistics
+    print("\n=== Summary Statistics ===")
+    print(f"Total bars: {len(ohlc):,}")
+    print(f"Date range: {ohlc.index.min()} to {ohlc.index.max()}")
+    print(f"Duration: {(ohlc.index.max() - ohlc.index.min()).days} days")
+
+    # Compression ratio
+    raw_data_mb = RAW_SPREAD_ZIP.stat().st_size / 1024 / 1024
+    duckdb_mb = db_path.stat().st_size / 1024 / 1024
+    parquet_mb = parquet_path.stat().st_size / 1024 / 1024
+
+    print(f"\n=== Compression Analysis ===")
+    print(f"Raw ZIP input: {raw_data_mb:.2f} MB")
+    print(f"DuckDB output: {duckdb_mb:.2f} MB ({duckdb_mb/raw_data_mb:.2f}x vs raw)")
+    print(f"Parquet output: {parquet_mb:.2f} MB ({parquet_mb/raw_data_mb:.2f}x vs raw)")
+    print(f"Parquet vs DuckDB: {parquet_mb/duckdb_mb:.2f}x (Parquet is {100*(1-parquet_mb/duckdb_mb):.1f}% smaller)")
+
+    # Extrapolate to 3 years
+    months_in_data = 1
+    months_in_3_years = 36
+    scaling_factor = months_in_3_years / months_in_data
+
+    print(f"\n=== Extrapolation to 3 Years (36 months) ===")
+    print(f"Estimated DuckDB: {duckdb_mb * scaling_factor:.2f} MB ({duckdb_mb * scaling_factor / 1024:.2f} GB)")
+    print(f"Estimated Parquet: {parquet_mb * scaling_factor:.2f} MB ({parquet_mb * scaling_factor / 1024:.2f} GB)")
+
+    print(f"\n✓ Output saved: {db_path}")
+
+
+if __name__ == '__main__':
+    main()

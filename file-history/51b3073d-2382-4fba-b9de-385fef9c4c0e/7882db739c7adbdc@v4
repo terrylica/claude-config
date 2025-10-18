@@ -1,0 +1,267 @@
+openapi: 3.1.0
+info:
+  title: Insurance Form Automation Specification
+  version: 1.0.0
+  description: |
+    Playwright-based automation for insurance form workflows with comprehensive artifact capture.
+    No video recording. PII-safe screenshots. Full observability via HAR, traces, and telemetry.
+
+components:
+  schemas:
+    AutomationConfig:
+      type: object
+      required:
+        - start_url
+        - form_description
+        - success_criteria
+      properties:
+        start_url:
+          type: string
+          format: uri
+          description: Starting URL for the automation workflow
+        form_description:
+          type: string
+          description: Human-readable description of the target form
+        success_criteria:
+          type: object
+          properties:
+            success_indicators:
+              type: array
+              items:
+                type: string
+              description: Text patterns indicating successful submission
+            success_url_pattern:
+              type: string
+              description: Regex pattern for success page URL
+        storage_state_path:
+          type: string
+          default: storage-state.json
+          description: Path to Playwright auth state file
+        headless:
+          type: boolean
+          default: true
+
+    FormPayload:
+      type: object
+      description: Input data for form fields
+      additionalProperties: true
+      example:
+        first_name: Ada
+        last_name: Lovelace
+        email: ada@analytical.engine
+        advisor_id: A123456
+        policy: PAR-00112233
+        phone: 555-555-0100
+        address: 10 Downing St
+        city: Toronto
+        province: ON
+        postal: M5V 2T6
+
+    FieldMapping:
+      type: object
+      description: Heuristic field targeting with aliases
+      properties:
+        field_key:
+          type: string
+          description: JSON payload key
+        aliases:
+          type: array
+          items:
+            type: string
+          description: Common label/attribute variations
+      example:
+        field_key: first_name
+        aliases:
+          - first name
+          - given name
+          - fname
+
+    ArtifactManifest:
+      type: object
+      required:
+        - start_url
+        - screens
+        - dom
+        - har
+        - trace
+      properties:
+        start_url:
+          type: string
+        screens:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              desc:
+                type: string
+        dom:
+          type: object
+          properties:
+            after_fill:
+              type: string
+            after_submit:
+              type: string
+        har:
+          type: string
+        trace:
+          type: string
+        aria_snapshots:
+          type: object
+          description: ARIA/accessibility tree snapshots (YAML via Locator.aria_snapshot())
+          properties:
+            after_fill:
+              type: string
+              description: YAML snapshot after fields filled
+            after_submit:
+              type: string
+              description: YAML snapshot after submission
+        telemetry:
+          type: string
+          description: NDJSON file with request/response/console events
+        notes:
+          type: string
+          description: Run notes or failure reasons
+
+paths:
+  /automation/run:
+    post:
+      summary: Execute form automation workflow
+      description: |
+        Comprehensive Playwright automation with:
+        - Tracing (screenshots + DOM snapshots)
+        - HAR recording
+        - PII-masked screenshots
+        - ARIA-first selectors
+        - ARIA snapshots (YAML accessibility tree)
+        - Iframe detection
+        - Network/console telemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - config
+                - payload
+              properties:
+                config:
+                  $ref: '#/components/schemas/AutomationConfig'
+                payload:
+                  $ref: '#/components/schemas/FormPayload'
+      responses:
+        '200':
+          description: Automation completed (check manifest for success/failure)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artifacts_dir:
+                    type: string
+                    description: Absolute path to timestamped artifacts directory
+                  manifest:
+                    $ref: '#/components/schemas/ArtifactManifest'
+
+x-implementation-requirements:
+  tracing:
+    enabled: true
+    screenshots: true
+    snapshots: true
+    output: artifacts/trace.zip
+  har:
+    enabled: true
+    output: artifacts/session.har
+  screenshots:
+    checkpoints:
+      - name: initial
+        timing: after_page_load
+        mask_pii: true
+      - name: filled
+        timing: after_field_fill
+        mask_pii: true
+      - name: submitted
+        timing: after_submit
+        mask_pii: true
+    full_page: true
+  dom_dumps:
+    - timing: after_field_fill
+      output: 002_filled.dom.html
+    - timing: after_submit
+      output: 003_submitted.dom.html
+  aria_snapshots:
+    enabled: true
+    api: Locator.aria_snapshot()
+    targets:
+      - timing: after_field_fill
+        locator: form
+        output: aria_002.yaml
+      - timing: after_submit
+        locator: body
+        output: aria_003.yaml
+  selectors:
+    priority:
+      - getByLabel
+      - getByRole
+      - getByPlaceholder
+      - getByTestId
+      - css_fallback
+  iframe_handling:
+    auto_detect: true
+    use_frame_locator: true
+  telemetry:
+    events:
+      - request
+      - response
+      - requestfailed
+      - console
+      - pageerror
+    output: telemetry.ndjson
+    log_keys_only: true
+  offline_replay:
+    enabled: true
+    description: Use routeFromHAR for second-pass analysis
+  no_video: true
+
+x-field-aliases:
+  first_name:
+    - first name
+    - given name
+    - fname
+  last_name:
+    - last name
+    - surname
+    - lname
+    - family name
+  email:
+    - email
+    - e-mail
+  advisor_id:
+    - advisor id
+    - advisor number
+    - rep id
+    - rep number
+  policy:
+    - policy
+    - policy number
+    - contract number
+  phone:
+    - phone
+    - telephone
+    - mobile
+  address:
+    - address
+    - street address
+  city:
+    - city
+    - town
+  province:
+    - province
+    - state
+    - region
+  postal:
+    - postal
+    - postal code
+    - zip

@@ -1,0 +1,459 @@
+# Multi-Account GitHub Authentication
+
+**Version**: 1.0.0 (2025-10-16)
+**Architecture**: Option 1b (SSH + Doppler Shared Keys)
+**Status**: Production, fully functional
+
+---
+
+## Overview
+
+Directory-based automatic GitHub account selection for multi-account workflows. SSH Match directives select correct keys based on working directory, eliminating manual account switching.
+
+**Accounts supported**:
+- `tainora` - Personal projects (`/scripts`)
+- `terrylica` - EonLabs ML projects (`/eon/`, `ml-*`)
+- `459ecs` - Client projects (`/459ecs`)
+
+**Key features**:
+- Zero manual intervention for git operations
+- Cross-machine sync via Doppler
+- < 2 minute setup on new machines
+- 20 LOC implementation (vs 150+ for ephemeral mounting alternative)
+
+---
+
+## Architecture
+
+### Pattern: SSH + Doppler Shared Keys (Option 1b)
+
+```
+Directory Pattern → SSH Match Directive → Identity File → GitHub Account
+     /scripts     →   Match exec         → id_ed25519_tainora → tainora
+    /eon/, ml-*   →   Match exec         → id_ed25519_eonlabs → terrylica
+     /459ecs      →   Match exec         → id_ed25519_459ecs  → 459ecs
+```
+
+### Components
+
+**1. SSH Keys** (stored in Doppler `claude-config/dev`):
+- `SSH_KEY_TAINORA` - tainora account key
+- `SSH_KEY_EONLABS` - terrylica account key
+- `SSH_KEY_459ECS` - 459ecs account key
+
+**2. SSH Config** (`~/.ssh/config`):
+```ssh
+# Directory-based GitHub account selection
+Match host github.com exec "echo $PWD | grep -q -E '(/eon/|ml-)'"
+    User git
+    IdentityFile ~/.ssh/id_ed25519_eonlabs
+    IdentitiesOnly yes
+
+Match host github.com exec "echo $PWD | grep -q '/scripts'"
+    User git
+    IdentityFile ~/.ssh/id_ed25519_tainora
+    IdentitiesOnly yes
+
+Match host github.com exec "echo $PWD | grep -q '/459ecs'"
+    User git
+    IdentityFile ~/.ssh/id_ed25519_459ecs
+    IdentitiesOnly yes
+```
+
+**3. Git Config** (`~/.gitconfig`):
+```ini
+[includeIf "gitdir:/Users/terryli/scripts/"]
+    path = /Users/terryli/.gitconfig-tainora
+```
+
+**4. Sync Script** (`~/.local/bin/sync-ssh-keys`):
+- Fetches keys from Doppler
+- Sets permissions (600)
+- Validates file sizes
+- 20 lines, zero dependencies beyond Doppler CLI
+
+---
+
+## Usage
+
+### Standard Workflow
+
+```bash
+# Scenario 1: Personal project
+cd ~/scripts/CustomScripts
+git clone git@github.com:tainora/new-repo.git
+git push origin main
+# ✓ Automatically uses tainora account
+
+# Scenario 2: EonLabs ML project
+cd ~/eon/ml-feature-experiments
+git commit -m "Update"
+git push
+# ✓ Automatically uses terrylica account
+
+# Scenario 3: Client project
+cd ~/459ecs/client-work
+git push origin main
+# ✓ Automatically uses 459ecs account
+```
+
+**Zero manual intervention required** - account selection is automatic based on directory.
+
+### New Machine Setup
+
+```bash
+# 1. Install Doppler CLI
+brew install dopplerhq/cli/doppler
+
+# 2. Authenticate (one-time)
+doppler login
+
+# 3. Sync SSH keys
+sync-ssh-keys
+
+# 4. Verify
+cd ~/scripts && ssh -T git@github.com  # Should say "Hi tainora!"
+```
+
+**Total time**: < 2 minutes
+
+---
+
+## Implementation Details
+
+### SSH Config Match Directive Behavior
+
+**Critical**: Match directives override command-line `-o IdentityFile` options.
+
+**Test from different directories**:
+```bash
+# From /tmp (no pattern match) - command-line option works
+cd /tmp
+ssh -o IdentityFile=~/.ssh/id_ed25519_tainora -T git@github.com
+# → "Hi tainora!"
+
+# From ~/scripts (pattern match) - Match directive overrides
+cd ~/scripts
+ssh -o IdentityFile=~/.ssh/id_ed25519_eonlabs -T git@github.com
+# → "Hi tainora!" (Match directive forces tainora key)
+```
+
+This is expected behavior and enables automatic account selection.
+
+### SSH Control Master Caching
+
+SSH config enables connection multiplexing:
+```ssh
+ControlMaster auto
+ControlPath ~/.ssh/control-%r@%h:%p
+ControlPersist 600
+```
+
+**Benefit**: Faster git operations via connection reuse
+
+**Testing consideration**: Disable for direct key verification:
+```bash
+ssh -o ControlMaster=no -T git@github.com
+```
+
+---
+
+## Architecture Decision: Option 1b vs 1c
+
+### Evaluated Alternatives
+
+**Option 1a: SSH + Unique Keys Per Machine**
+- Rejected: Manual SCP/rsync sync burden across machines
+
+**Option 1c: SSH + Doppler Ephemeral Mounting**
+- Rejected: 150+ LOC, 3-4hr setup, 200-500ms per git operation
+- Security equivalence: Doppler token compromise exposes all secrets regardless
+
+**Option 2: HTTPS + gh CLI Auto-Switch**
+- Rejected: Manual `gh auth switch` required per directory transition
+
+### Decision Rationale: Option 1b
+
+| Factor | Option 1b | Option 1c (Rejected) |
+|--------|-----------|---------------------|
+| Lines of code | 20 | 150+ |
+| Setup time | 15 min | 3-4 hours |
+| Per-machine setup | 2 min | 10 min |
+| Maintenance | None | 2-4 hours/year |
+| Workflow friction | Zero | 200-500ms per git op |
+| SSH config changes | None | Significant |
+| Security | Passphrase-protected keys on disk | Doppler token exposes all secrets |
+
+**Analysis document**: Created 2025-10-16, archived in session notes
+
+**Key insight**: Option 1c ephemeral mounting doesn't eliminate credential exposure - it shifts it from encrypted SSH keys (need passphrase) to Doppler token (exposes ALL secrets including SSH, Pushover, PyPI, AWS).
+
+---
+
+## Security Properties
+
+### Threat Model
+
+**Primary threat**: Personal machine compromise
+
+**Defense layers**:
+1. Passphrase protection on private keys (offline brute-force resistance)
+2. Doppler token in `~/.doppler/` (requires file system access)
+3. File permissions 600 (process isolation)
+
+### Risk Acceptance
+
+**Known risk**: Doppler token compromise exposes all secrets in `claude-config/dev`
+
+**Mitigation**: None beyond Doppler's authentication mechanisms
+
+**Rationale**: Alternative (Option 1c ephemeral mounting) has equivalent token exposure with 6-7hr complexity overhead, zero additional security for personal machine threat model
+
+### Key Rotation
+
+```bash
+# 1. Generate new key
+ssh-keygen -t ed25519 -C "email@example.com" -f ~/.ssh/id_ed25519_tainora_new
+
+# 2. Add to GitHub
+gh auth switch --user tainora
+gh ssh-key add ~/.ssh/id_ed25519_tainora_new.pub --title "MacBook Pro - tainora (2026)"
+
+# 3. Update Doppler
+doppler secrets set SSH_KEY_TAINORA \
+  --project claude-config \
+  --config dev \
+  --silent < ~/.ssh/id_ed25519_tainora_new
+
+# 4. Replace local key
+mv ~/.ssh/id_ed25519_tainora ~/.ssh/id_ed25519_tainora_old
+mv ~/.ssh/id_ed25519_tainora_new ~/.ssh/id_ed25519_tainora
+
+# 5. Sync on all machines
+sync-ssh-keys
+
+# 6. Delete old key from GitHub
+gh ssh-key delete <old-key-id> --yes
+```
+
+---
+
+## Troubleshooting
+
+### Verification Tests
+
+```bash
+# Test 1: Verify SSH config selects correct key per directory
+cd ~/scripts && ssh -G git@github.com | grep identityfile
+# Expected: identityfile ~/.ssh/id_ed25519_tainora
+
+cd ~/ml-experiments && ssh -G git@github.com | grep identityfile
+# Expected: identityfile ~/.ssh/id_ed25519_eonlabs
+
+# Test 2: Verify authentication
+cd ~/scripts && ssh -T git@github.com
+# Expected: "Hi tainora! You've successfully authenticated..."
+
+# Test 3: Verify keys on GitHub match local keys
+ssh-keygen -lf ~/.ssh/id_ed25519_tainora.pub
+# Compare fingerprint with GitHub: https://github.com/settings/keys
+```
+
+### Common Issues
+
+#### Git prompts for password
+
+**Cause**: Remote URL is HTTPS, not SSH
+
+**Fix**:
+```bash
+git remote -v  # Check current URL
+git remote set-url origin git@github.com:username/repo.git
+```
+
+#### Wrong account used
+
+**Cause**: Directory doesn't match any pattern
+
+**Diagnosis**:
+```bash
+# Check if current directory matches pattern
+echo $PWD | grep -E '(/eon/|ml-)' && echo "Matches eonlabs" || echo "No match"
+echo $PWD | grep '/scripts' && echo "Matches tainora" || echo "No match"
+echo $PWD | grep '/459ecs' && echo "Matches 459ecs" || echo "No match"
+```
+
+**Fix**: Ensure working directory matches expected pattern
+
+#### Keys not syncing from Doppler
+
+**Diagnosis**:
+```bash
+# Verify Doppler authentication
+doppler whoami
+
+# Check secrets exist
+doppler secrets get SSH_KEY_TAINORA --project claude-config --config dev
+```
+
+**Fix**: Re-authenticate if needed:
+```bash
+doppler login
+sync-ssh-keys
+```
+
+---
+
+## GitHub CLI Integration
+
+### Setup
+
+Grant `admin:public_key` scope to manage SSH keys via CLI:
+
+```bash
+# For each account
+gh auth switch --user tainora
+gh auth refresh -h github.com -s admin:public_key
+# (Complete browser authentication)
+
+gh auth switch --user terrylica
+gh auth refresh -h github.com -s admin:public_key
+
+gh auth switch --user 459ecs
+gh auth refresh -h github.com -s admin:public_key
+```
+
+### Managing Keys
+
+```bash
+# List keys for current account
+gh ssh-key list
+
+# Add key
+gh ssh-key add ~/.ssh/id_ed25519_tainora.pub --title "MacBook Pro - tainora"
+
+# Delete key
+gh ssh-key delete <key-id> --yes
+
+# Switch accounts
+gh auth switch --user tainora
+```
+
+---
+
+## Doppler Integration
+
+**See**: [DOPPLER_SSH_INTEGRATION.md](DOPPLER_SSH_INTEGRATION.md) for:
+- AOD/IOI compliant documentation in Doppler notes
+- Schema specification
+- Version tracking methodology
+- Cross-machine sync procedures
+
+**Quick reference**:
+```bash
+# View stored keys (masked)
+doppler secrets get SSH_KEY_TAINORA --project claude-config --config dev
+
+# Update key
+doppler secrets set SSH_KEY_TAINORA \
+  --project claude-config \
+  --config dev \
+  --silent < ~/.ssh/id_ed25519_tainora
+
+# Sync to local machine
+sync-ssh-keys
+```
+
+---
+
+## sync-ssh-keys Script
+
+**Location**: `~/.local/bin/sync-ssh-keys`
+**Version**: 1.0.0
+**Size**: 20 lines
+
+```bash
+#!/bin/bash
+# SSH Key Sync from Doppler
+# Architecture: Option 1b (SSH + Doppler Shared Keys)
+
+set -euo pipefail
+
+readonly KEY_DIR="$HOME/.ssh"
+readonly PROJECT="claude-config"
+readonly CONFIG="dev"
+
+mkdir -p "$KEY_DIR"
+
+# Fetch keys from Doppler
+doppler secrets get SSH_KEY_TAINORA --project "$PROJECT" --config "$CONFIG" --plain > "$KEY_DIR/id_ed25519_tainora"
+doppler secrets get SSH_KEY_EONLABS --project "$PROJECT" --config "$CONFIG" --plain > "$KEY_DIR/id_ed25519_eonlabs"
+doppler secrets get SSH_KEY_459ECS --project "$PROJECT" --config "$CONFIG" --plain > "$KEY_DIR/id_ed25519_459ecs"
+
+# Fix permissions
+chmod 600 "$KEY_DIR"/id_ed25519_{tainora,eonlabs,459ecs}
+
+# Sanity check
+for key in tainora eonlabs 459ecs; do
+  size=$(stat -f%z "$KEY_DIR/id_ed25519_$key" 2>/dev/null || stat -c%s "$KEY_DIR/id_ed25519_$key")
+  [[ $size -lt 100 ]] && { echo "Error: $KEY_DIR/id_ed25519_$key too small ($size bytes)"; exit 1; }
+done
+
+echo "✅ SSH keys synced successfully"
+```
+
+**Idempotent**: Safe to run multiple times
+
+---
+
+## Version History
+
+### 1.0.0 (2025-10-16)
+
+**Initial implementation**:
+- SSH + Doppler Shared Keys (Option 1b)
+- Directory-based automatic account selection
+- sync-ssh-keys utility
+- GitHub CLI integration
+- Doppler secret notes with AOD/IOI compliance
+
+**Accounts**:
+- tainora (usalchemist@gmail.com)
+- terrylica (terry@eonlabs.com)
+- 459ecs (dmd0876@gmail.com)
+
+**Decision**: Rejected Option 1c (ephemeral mounting) due to 6-7hr complexity overhead with zero security gain
+
+**Testing**: All three accounts verified functional on 2025-10-16
+
+---
+
+## For Claude Code Assistant
+
+**Primary file**: Start here for multi-account GitHub authentication
+
+**Related documentation**:
+- Doppler integration: [DOPPLER_SSH_INTEGRATION.md](DOPPLER_SSH_INTEGRATION.md)
+- SSH infrastructure: [SSH_INFRASTRUCTURE_OVERVIEW.md](SSH_INFRASTRUCTURE_OVERVIEW.md)
+- Troubleshooting: [TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md)
+
+**Key commands**:
+```bash
+# Verify setup
+cd ~/scripts && ssh -T git@github.com  # Should say "Hi tainora!"
+
+# Sync keys
+sync-ssh-keys
+
+# Test pattern matching
+ssh -G git@github.com | grep identityfile  # From different directories
+```
+
+**Architecture**: Match directive in SSH config selects identity file based on `$PWD` pattern matching, eliminating manual account switching
+
+---
+
+*Multi-Account GitHub Authentication*
+*Version: 1.0.0*
+*Location: `/Users/terryli/scripts/ssh-infrastructure/docs/MULTI_ACCOUNT_GITHUB_AUTH.md`*
+*Architecture: SSH + Doppler Shared Keys (Option 1b)*

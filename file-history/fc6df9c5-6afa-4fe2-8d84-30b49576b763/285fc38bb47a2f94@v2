@@ -1,0 +1,754 @@
+# Universal Validation Architecture - Risk Analysis & Mitigation
+
+**Date**: 2025-10-16
+**Project**: Universal indicator validation framework with DuckDB backend
+**Phase**: Pre-implementation risk assessment
+
+---
+
+## Executive Summary
+
+**Overall Risk Level**: MEDIUM
+**Primary Risk Factor**: MT5 Python API compatibility with custom indicators
+**Mitigation Readiness**: HIGH (fallback plans in place for all critical risks)
+**Estimated Success Probability**: 85% (assuming spike tests pass)
+
+**Recommendation**: PROCEED with phased approach, validate spikes first
+
+---
+
+## Risk Classification Framework
+
+**CRITICAL**: Project cannot proceed without resolution
+**HIGH**: Significant impact on timeline or architecture
+**MEDIUM**: Moderate impact, workarounds available
+**LOW**: Minor impact, easily mitigated
+
+---
+
+## Technical Risks
+
+### RISK-T1: MT5 Python API Custom Indicator Access Failure
+
+**Category**: CRITICAL
+**Probability**: MEDIUM (30%)
+**Impact**: HIGH (requires fallback implementation)
+
+**Description**:
+The `mt5.create_indicator()` function may not work with custom indicators (only built-in indicators). This is the foundation of the universal validation architecture.
+
+**Symptoms**:
+- `mt5.create_indicator()` returns `INVALID_HANDLE` (-1)
+- Error code indicates "indicator not found"
+- Works with built-in indicators (RSI) but fails with custom indicators
+
+**Root Cause**:
+MT5 Python API documentation is sparse regarding custom indicator support. Community reports suggest mixed results.
+
+**Detection**:
+- Spike Test 1: `/tmp/spike_1_mt5_indicator_access.py`
+- Test with both built-in (RSI) and custom (Laguerre RSI) indicators
+- Expected failure mode: Handle creation fails with error code
+
+**Mitigation Strategy**:
+
+**Option A: Path Format Variations** (Try First)
+```python
+indicator_paths = [
+    "PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+    "Custom\\PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+    "..\\..\\Program Files\\MetaTrader 5\\MQL5\\Indicators\\PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+    "Indicators\\PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+]
+```
+
+**Option B: iCustom Alternative** (Fallback 1)
+```python
+# Use iCustom syntax instead of create_indicator
+handle = mt5.icustom(
+    symbol=symbol,
+    timeframe=timeframe,
+    name="PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+    *parameters
+)
+```
+
+**Option C: MQL5 Export Module** (Fallback 2)
+- Create `LaguerreRSIModule.mqh` (pattern from RSIModule.mqh)
+- Extend `ExportAligned.mq5` to include Laguerre RSI
+- Use MQL5 CSV export instead of Python API buffer access
+- Parse CSV in Python validation script
+
+**Fallback C Implementation**:
+```mql5
+// File: Include/DataExport/modules/LaguerreRSIModule.mqh
+bool LaguerreRSIModule_Load(
+    const string symbol,
+    const ENUM_TIMEFRAMES timeframe,
+    const int bars,
+    const string instanceID,
+    const int atrPeriod,
+    const int smoothPeriod,
+    const ENUM_MA_METHOD smoothMethod,
+    IndicatorColumn &laguerreColumn,
+    IndicatorColumn &signalColumn,
+    string &errorMessage
+)
+{
+    // Create indicator handle
+    int handle = iCustom(
+        symbol,
+        timeframe,
+        "PythonInterop\\ATR_Adaptive_Laguerre_RSI",
+        instanceID, atrPeriod, PRICE_CLOSE, smoothPeriod, smoothMethod, 0.85, 0.15
+    );
+
+    if(handle == INVALID_HANDLE)
+    {
+        errorMessage = "Laguerre RSI handle creation failed";
+        return false;
+    }
+
+    // Read buffer 0 (Laguerre RSI values)
+    laguerreColumn.header = StringFormat("Laguerre_RSI_%d", atrPeriod);
+    laguerreColumn.digits = 6;
+    ArrayResize(laguerreColumn.values, bars);
+    ArraySetAsSeries(laguerreColumn.values, true);
+
+    int copied = CopyBuffer(handle, 0, 0, bars, laguerreColumn.values);
+
+    if(copied != bars)
+    {
+        IndicatorRelease(handle);
+        errorMessage = StringFormat("Laguerre RSI CopyBuffer expected %d, got %d", bars, copied);
+        return false;
+    }
+
+    // Read buffer 1 (Signal)
+    signalColumn.header = "Laguerre_Signal";
+    signalColumn.digits = 0;
+    ArrayResize(signalColumn.values, bars);
+    ArraySetAsSeries(signalColumn.values, true);
+
+    copied = CopyBuffer(handle, 1, 0, bars, signalColumn.values);
+
+    IndicatorRelease(handle);
+
+    if(copied != bars)
+    {
+        errorMessage = StringFormat("Laguerre Signal CopyBuffer expected %d, got %d", bars, copied);
+        return false;
+    }
+
+    return true;
+}
+```
+
+**Timeline Impact**:
+- Option A/B: No impact (+0 hours)
+- Option C: +4 hours (MQL5 module creation + testing)
+
+**Status**: ⏳ PENDING (awaiting Spike 1 results)
+
+---
+
+### RISK-T2: Registry Parameter Mapping Complexity
+
+**Category**: MEDIUM
+**Probability**: LOW (20%)
+**Impact**: MEDIUM (requires registry redesign)
+
+**Description**:
+The YAML registry pattern may not correctly handle all MQL5 parameter types (enums, strings, doubles, ints), especially edge cases like nested enums or custom types.
+
+**Symptoms**:
+- Enum mapping fails (PRICE_CLOSE → "close")
+- Type conversion errors (int → double)
+- Parameter ordering issues (MQL5 expects specific order)
+
+**Detection**:
+- Spike Test 2: `/tmp/spike_2_registry_pattern.py`
+- Test all parameter types with known values
+- Verify enum mappings work bidirectionally
+
+**Mitigation Strategy**:
+
+**Option A: Enhanced Enum Mapping** (Try First)
+```yaml
+parameters:
+  - name: "inpRsiPrice"
+    type: "enum"
+    default: "PRICE_CLOSE"
+    enum_values:
+      PRICE_CLOSE: 0
+      PRICE_OPEN: 1
+      PRICE_HIGH: 2
+      PRICE_LOW: 3
+    mapping:
+      PRICE_CLOSE: "close"
+      PRICE_OPEN: "open"
+      PRICE_HIGH: "high"
+      PRICE_LOW: "low"
+```
+
+**Option B: Hard-Coded Config** (Fallback)
+```python
+# File: indicators/configs/laguerre_rsi_config.py
+LAGUERRE_RSI_CONFIG = {
+    'name': 'ATR Adaptive Laguerre RSI',
+    'mql5_file': 'PythonInterop/ATR_Adaptive_Laguerre_RSI',
+    'mql5_params': ['A', 32, 0, 5, 1, 0.85, 0.15],
+    'python_module': 'indicators.laguerre_rsi',
+    'python_function': 'calculate_laguerre_rsi_indicator',
+    'python_kwargs': {
+        'atr_period': 32,
+        'price_type': 'close',
+        'price_smooth_period': 5,
+        'price_smooth_method': 'ema',
+        'level_up': 0.85,
+        'level_down': 0.15
+    },
+    'buffers': [
+        {'index': 0, 'name': 'laguerre_rsi'},
+        {'index': 1, 'name': 'signal'}
+    ]
+}
+```
+
+**Timeline Impact**:
+- Option A: +1 hour (enhanced mapping)
+- Option B: No impact (simpler, less extensible)
+
+**Status**: ⏳ PENDING (awaiting Spike 2 results)
+
+---
+
+### RISK-T3: DuckDB Performance Degradation
+
+**Category**: MEDIUM
+**Probability**: LOW (15%)
+**Impact**: LOW (acceptable for offline validation)
+
+**Description**:
+DuckDB may not perform adequately with large datasets (5000+ bars × 15 columns), causing validation runs to exceed acceptable time limits (> 1 second).
+
+**Symptoms**:
+- INSERT queries take > 1 second
+- Validation SQL queries (correlation, RMSE) take > 1 second
+- Database file size > 10 MB
+
+**Detection**:
+- Spike Test 3: `/tmp/spike_3_duckdb_performance.py`
+- Benchmark with 5000 bars × 15 columns
+- Measure INSERT, SELECT, and aggregate query times
+
+**Mitigation Strategy**:
+
+**Option A: Index Optimization** (Try First)
+```sql
+-- Add missing indexes
+CREATE INDEX IF NOT EXISTS idx_timeseries_composite ON indicator_timeseries(run_id, is_warmup, bar_index);
+CREATE INDEX IF NOT EXISTS idx_timeseries_time ON indicator_timeseries(time);
+
+-- Analyze tables for query planner
+ANALYZE;
+```
+
+**Option B: Columnar Compression** (Fallback 1)
+```python
+# Enable zstd compression
+conn.execute("SET compression = 'zstd'")
+conn.execute("SET compression_level = 9")
+```
+
+**Option C: SQLite Fallback** (Fallback 2)
+```python
+# Replace DuckDB with SQLite
+import sqlite3
+conn = sqlite3.connect('validation.db')
+# Use same SQL schema (mostly compatible)
+```
+
+**Option D: PostgreSQL Fallback** (Fallback 3 - Heavy)
+```python
+# Use PostgreSQL for production-scale validation
+import psycopg2
+conn = psycopg2.connect(...)
+# Requires PostgreSQL server setup
+```
+
+**Timeline Impact**:
+- Option A/B: No impact (+0 hours)
+- Option C: +1 hour (migration)
+- Option D: +4 hours (setup + migration)
+
+**Status**: ⏳ PENDING (awaiting Spike 3 results)
+
+---
+
+### RISK-T4: Python/MQL5 Indicator Value Mismatch
+
+**Category**: HIGH
+**Probability**: MEDIUM (40%)
+**Impact**: HIGH (requires Python implementation fixes)
+
+**Description**:
+Python indicator implementation may not match MQL5 indicator exactly (correlation < 0.999), requiring debugging and fixes to Python code.
+
+**Symptoms**:
+- Pearson correlation < 0.999
+- RMSE > 0.0001
+- Systematic offset in values
+- Different adaptive periods
+
+**Root Causes**:
+- Rounding differences (Python float64 vs MQL5 double)
+- Loop direction errors (series indexing)
+- MA calculation differences (EMA alpha vs span)
+- Edge case handling (first bar, warmup period)
+
+**Detection**:
+- Phase 3 testing: End-to-end validation with real data
+- Compare bar-by-bar values in DuckDB
+- Plot residuals to identify systematic errors
+
+**Mitigation Strategy**:
+
+**Step 1: Identify Divergence Point**
+```sql
+-- Find bar where values start diverging
+SELECT
+    bar_index,
+    time,
+    mql5_buffer_0,
+    python_buffer_0,
+    ABS(mql5_buffer_0 - python_buffer_0) as error
+FROM indicator_timeseries
+WHERE run_id = 1 AND NOT is_warmup
+ORDER BY error DESC
+LIMIT 10;
+```
+
+**Step 2: Debug Specific Calculations**
+```python
+# Compare intermediate values
+# Add debug logging to indicators/laguerre_rsi.py
+def calculate_laguerre_rsi_indicator(...):
+    # Log ATR values
+    print(f"ATR at bar 100: {atr[100]}")
+
+    # Log adaptive coefficients
+    print(f"Coeff at bar 100: {coeff[100]}")
+
+    # Log Laguerre filter values
+    print(f"L0 at bar 100: {laguerre_df['L0'][100]}")
+```
+
+**Step 3: Review Known Issues**
+- Laguerre RSI shared state bug (FIXED in LAGUERRE_RSI_SHARED_STATE_BUG.md)
+- Array indexing bug (FIXED in LAGUERRE_RSI_ARRAY_INDEXING_BUG.md)
+- Price smoothing bug (FIXED in LAGUERRE_RSI_BUG_FIX_SUMMARY.md)
+- Temporal violations (FIXED in LAGUERRE_RSI_TEMPORAL_AUDIT.md)
+
+**Timeline Impact**:
+- Simple fix (rounding, offset): +1-2 hours
+- Complex fix (algorithm error): +4-8 hours
+- Requires MQL5 code review: +2-4 hours
+
+**Status**: ⏳ PENDING (awaiting Phase 3 results)
+
+---
+
+### RISK-T5: Backward Compatibility Breaking
+
+**Category**: HIGH
+**Probability**: LOW (10%)
+**Impact**: CRITICAL (breaks existing workflows)
+
+**Description**:
+Changes to `export_aligned.py` accidentally break existing usage patterns, causing failures in production scripts or workflows.
+
+**Symptoms**:
+- Existing command line fails: `python export_aligned.py --symbol EURUSD --period M1 --bars 5000`
+- CSV output format changed
+- Function signature incompatible
+- Missing required imports
+
+**Detection**:
+- Spike Test 4: `/tmp/spike_4_backward_compatibility.py`
+- Test existing usage without --validate flag
+- Verify CSV output format unchanged
+- Test API signature with positional and keyword args
+
+**Mitigation Strategy**:
+
+**Prevention**:
+- Make validation opt-in (--validate flag, default=False)
+- Don't modify existing function signatures
+- Add new parameters as optional with default values
+- Test existing usage in CI/CD
+
+**Validation Checklist**:
+```bash
+# Must all pass
+python export_aligned.py --symbol EURUSD --period M1 --bars 5000
+python export_aligned.py --symbol EURUSD --period M1 --bars 5000 --output custom_dir
+python export_aligned.py --symbol EURUSD --period M1  # default bars=5000
+```
+
+**Rollback Plan**:
+```bash
+git checkout users/crossover/export_aligned.py
+```
+
+**Timeline Impact**:
+- Rollback: Immediate (< 5 minutes)
+- Fix and retest: +1-2 hours
+
+**Status**: ⏳ PENDING (awaiting Spike 4 results)
+
+---
+
+## Operational Risks
+
+### RISK-O1: Wine Python Dependency Management
+
+**Category**: MEDIUM
+**Probability**: MEDIUM (30%)
+**Impact**: MEDIUM (installation issues)
+
+**Description**:
+Installing DuckDB and PyYAML in Wine Python environment may fail due to compilation requirements or missing dependencies.
+
+**Symptoms**:
+- `pip install duckdb` fails with compilation error
+- Missing system libraries (gcc, python-dev)
+- Version incompatibilities
+
+**Mitigation Strategy**:
+
+**Step 1: Check Prerequisites**
+```bash
+# Verify Wine Python has pip
+wine python -m pip --version
+
+# Check Python version (need 3.8+)
+wine python --version
+```
+
+**Step 2: Install from wheels** (Avoid compilation)
+```bash
+# Download pre-built wheels
+wine python -m pip install --only-binary=:all: duckdb pyyaml
+```
+
+**Step 3: Fallback to Pure Python**
+```python
+# If DuckDB install fails, use SQLite (pure Python)
+import sqlite3
+
+# If PyYAML install fails, use json instead
+import json
+```
+
+**Timeline Impact**:
+- Wheel install: No impact
+- Fallback to SQLite/JSON: +1 hour
+
+**Status**: Can be tested immediately
+
+---
+
+### RISK-O2: Database File Corruption
+
+**Category**: MEDIUM
+**Probability**: LOW (10%)
+**Impact**: MEDIUM (validation history lost)
+
+**Description**:
+DuckDB database file (validation.ddb) becomes corrupted due to concurrent writes, crashes, or disk errors.
+
+**Symptoms**:
+- "Database malformed" error
+- Cannot open validation.ddb
+- Data inconsistencies
+
+**Mitigation Strategy**:
+
+**Prevention**:
+```python
+# Use write-ahead logging (WAL)
+conn = duckdb.connect('validation.ddb')
+conn.execute("PRAGMA enable_wal")
+
+# Always close connections properly
+try:
+    # ... database operations ...
+finally:
+    conn.close()
+```
+
+**Recovery**:
+```bash
+# Export to SQL
+duckdb validation.ddb -cmd ".dump" > validation_backup.sql
+
+# Recreate database
+rm validation.ddb
+duckdb validation.ddb < validation_backup.sql
+```
+
+**Backup Strategy**:
+```python
+# Automatic daily backup
+import shutil
+from datetime import datetime
+
+backup_path = f"validation_backup_{datetime.now().strftime('%Y%m%d')}.ddb"
+shutil.copy('validation.ddb', backup_path)
+```
+
+**Timeline Impact**:
+- Recovery from backup: +30 minutes
+- Recreate from scratch: +0 hours (validation history lost)
+
+**Status**: Can be implemented immediately
+
+---
+
+### RISK-O3: Documentation Drift
+
+**Category**: LOW
+**Probability**: HIGH (60%)
+**Impact**: LOW (confusion, reduced productivity)
+
+**Description**:
+Documentation (CLAUDE.md, guides) becomes outdated as code evolves, leading to confusion and errors.
+
+**Symptoms**:
+- Instructions don't match current code
+- Missing new features in docs
+- Broken links in guides
+
+**Mitigation Strategy**:
+
+**Prevention**:
+- Update docs in same commit as code changes
+- Use hub-and-spoke pattern (single source of truth per topic)
+- Add doc validation to CI/CD
+
+**Validation**:
+```bash
+# Check for broken links
+/gfm-check docs/ --fix
+
+# Verify code examples work
+python -m doctest docs/guides/VALIDATION_WORKFLOW.md
+```
+
+**Timeline Impact**:
+- Fix documentation: +1-2 hours
+- No functional impact
+
+**Status**: Ongoing maintenance task
+
+---
+
+## Project Management Risks
+
+### RISK-P1: Scope Creep
+
+**Category**: MEDIUM
+**Probability**: MEDIUM (40%)
+**Impact**: MEDIUM (timeline overrun)
+
+**Description**:
+Project scope expands to include additional features (more indicators, advanced analytics, visualization), delaying core delivery.
+
+**Symptoms**:
+- "While we're at it, let's add..."
+- Feature requests during implementation
+- Timeline extends beyond 2-3 days
+
+**Mitigation Strategy**:
+
+**Phase Discipline**:
+- ✅ Phase 1-4: MUST DO (core validation)
+- ⏳ Phase 5: OPTIONAL (future expansion)
+
+**Feature Freeze**:
+- Laguerre RSI validation ONLY in Phase 1-4
+- Additional indicators in Phase 5 (after core proven)
+
+**Definition of Done**:
+```
+Phase 4 complete when:
+✅ Laguerre RSI validation working end-to-end
+✅ Correlation ≥ 0.999
+✅ Documentation complete
+✅ All spike tests passed
+
+NOT required:
+❌ Other indicators
+❌ Visualization dashboard
+❌ Advanced analytics
+```
+
+**Timeline Impact**:
+- Scope creep: +1-4 days per feature
+- Strict scope: 2-3 days as planned
+
+**Status**: Requires discipline during implementation
+
+---
+
+### RISK-P2: Dependency on External Factors
+
+**Category**: MEDIUM
+**Probability**: LOW (20%)
+**Impact**: MEDIUM (project blocked)
+
+**Description**:
+Project depends on external factors (MT5 terminal running, broker connection, symbol availability) that may fail.
+
+**Symptoms**:
+- MT5 terminal not running
+- Broker login expired
+- Symbol EURUSD not available
+- Market closed (no recent data)
+
+**Mitigation Strategy**:
+
+**Pre-flight Checks**:
+```python
+def validate_environment():
+    """Check all dependencies before validation."""
+    # Check MT5 terminal
+    if not mt5.initialize():
+        raise RuntimeError("MT5 terminal not running")
+
+    # Check broker login
+    account_info = mt5.account_info()
+    if account_info is None:
+        raise RuntimeError("MT5 not logged in")
+
+    # Check symbol available
+    if not mt5.symbol_select("EURUSD", True):
+        raise RuntimeError("EURUSD not available")
+
+    print("✅ Environment ready")
+```
+
+**Fallback Data**:
+```python
+# Use historical CSV data if MT5 unavailable
+if not mt5.initialize():
+    df = pd.read_csv('fallback_EURUSD_M1.csv')
+    print("⚠️  Using fallback data (MT5 unavailable)")
+```
+
+**Timeline Impact**:
+- Environment issues: +30 minutes to resolve
+- No impact if pre-flight checks pass
+
+**Status**: Can be implemented immediately
+
+---
+
+## Risk Matrix
+
+| Risk ID | Category | Probability | Impact | Mitigation | Status |
+|---------|----------|-------------|--------|------------|--------|
+| RISK-T1 | CRITICAL | MEDIUM (30%) | HIGH | 3 fallback options | ⏳ Pending Spike 1 |
+| RISK-T2 | MEDIUM | LOW (20%) | MEDIUM | 2 fallback options | ⏳ Pending Spike 2 |
+| RISK-T3 | MEDIUM | LOW (15%) | LOW | 4 fallback options | ⏳ Pending Spike 3 |
+| RISK-T4 | HIGH | MEDIUM (40%) | HIGH | Debug workflow | ⏳ Pending Phase 3 |
+| RISK-T5 | HIGH | LOW (10%) | CRITICAL | Strict testing | ⏳ Pending Spike 4 |
+| RISK-O1 | MEDIUM | MEDIUM (30%) | MEDIUM | Wheel install | ✅ Ready |
+| RISK-O2 | MEDIUM | LOW (10%) | MEDIUM | Backup strategy | ✅ Ready |
+| RISK-O3 | LOW | HIGH (60%) | LOW | Doc discipline | ✅ Ready |
+| RISK-P1 | MEDIUM | MEDIUM (40%) | MEDIUM | Phase discipline | ⏳ Ongoing |
+| RISK-P2 | MEDIUM | LOW (20%) | MEDIUM | Pre-flight checks | ✅ Ready |
+
+---
+
+## Risk Mitigation Timeline
+
+### Before Implementation (Day 0)
+1. ✅ Run all 4 spike tests
+2. ✅ Document spike results
+3. 🚦 GO/NO-GO decision
+
+### During Implementation (Day 1-2)
+1. Monitor for RISK-T4 (value mismatch)
+2. Monitor for RISK-T5 (breaking changes)
+3. Monitor for RISK-P1 (scope creep)
+
+### After Implementation (Day 3+)
+1. Monitor for RISK-O2 (database corruption)
+2. Monitor for RISK-O3 (documentation drift)
+3. Monitor for RISK-P2 (environment dependencies)
+
+---
+
+## Contingency Plan
+
+### If RISK-T1 fails (MT5 Python API doesn't work)
+**Action**: Implement Fallback C (MQL5 export module)
+**Timeline**: +4 hours
+**Success Probability**: 95%
+
+### If RISK-T4 fails (correlation < 0.999)
+**Action**: Debug Python implementation bar-by-bar
+**Timeline**: +4-8 hours
+**Success Probability**: 80%
+
+### If multiple risks fail
+**Action**: Rollback to existing workflow, defer validation
+**Timeline**: +1 hour (rollback)
+**Success Probability**: 100%
+
+---
+
+## Success Criteria (Risk-Adjusted)
+
+### Minimum Viable Product (MVP)
+- ✅ Validation workflow works end-to-end
+- ✅ Correlation ≥ 0.999 for Laguerre RSI
+- ✅ Existing export_aligned.py usage unchanged
+- ✅ Documentation complete
+
+### Nice to Have (Optional)
+- ⏳ DuckDB performance < 1 second
+- ⏳ MT5 Python API custom indicator access
+- ⏳ Universal registry pattern for all indicators
+
+### Acceptable Compromises
+- ✅ Use MQL5 export module if Python API fails
+- ✅ Use SQLite if DuckDB has issues
+- ✅ Hard-code config if registry too complex
+
+---
+
+## Conclusion
+
+**Overall Assessment**: Project is READY to proceed with phased approach
+
+**Key Strengths**:
+- Comprehensive spike tests cover all critical assumptions
+- Multiple fallback options for each risk
+- Backward compatibility preserved
+- Clear rollback plan
+
+**Key Weaknesses**:
+- Dependency on MT5 Python API capabilities (unknown)
+- Potential for Python/MQL5 value mismatch requiring debugging
+- Multiple external dependencies (MT5 terminal, broker, symbol)
+
+**Recommendation**:
+1. ✅ Run all 4 spike tests FIRST
+2. 📋 Document results and adjust plan if needed
+3. 🚦 GO/NO-GO decision based on spike results
+4. 🏗️ Proceed with phased implementation if spikes pass
+
+**Expected Outcome**: 85% probability of success (2-3 day timeline)

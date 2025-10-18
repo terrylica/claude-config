@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""
+Diagnostic: Which timestamp is incorrectly flagged during Tokyo lunch?
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pandas as pd
+from exness_data_preprocess import ExnessDataProcessor
+
+# Use the test database we just created
+test_dir = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/lunch_final_verify_g_b_bc4g")
+
+processor = ExnessDataProcessor(base_dir=test_dir)
+
+# Query Tokyo lunch period (11:30-12:30 JST = 02:30-03:30 UTC)
+start = pd.Timestamp("2024-08-05 02:30:00", tz="UTC")
+end = pd.Timestamp("2024-08-05 03:30:00", tz="UTC")
+df = processor.query_ohlc("EURUSD", "1m", start, end)
+
+# Find all incorrectly flagged timestamps
+incorrect = df[df["is_xtks_session"] == 1]
+
+print(f"Total timestamps in query: {len(df)}")
+print(f"Incorrectly flagged: {len(incorrect)}")
+
+if len(incorrect) > 0:
+    print("\nIncorrectly flagged timestamps (UTC and JST):")
+    for _, row in incorrect.iterrows():
+        ts_utc = row["Timestamp"]
+        ts_jst = ts_utc.tz_convert("Asia/Tokyo")
+        print(f"  UTC: {ts_utc} | JST: {ts_jst}")
+
+    # Show first and last timestamp in query
+    print(f"\nQuery range:")
+    print(f"  First timestamp: {df['Timestamp'].iloc[0]} (UTC)")
+    print(f"  Last timestamp:  {df['Timestamp'].iloc[-1]} (UTC)")
+    print(f"  First JST: {df['Timestamp'].iloc[0].tz_convert('Asia/Tokyo')}")
+    print(f"  Last JST:  {df['Timestamp'].iloc[-1].tz_convert('Asia/Tokyo')}")

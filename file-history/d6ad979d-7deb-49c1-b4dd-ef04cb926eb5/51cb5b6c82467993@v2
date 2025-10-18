@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""
+Complete multi-step authentication for Manulife Par.
+
+Authentication Flow:
+1. Navigate to signin page
+2. Fill username + password → submit
+3. Wait for 2FA page
+4. Setup virtual authenticator with passkey credential
+5. Click passkey button on 2FA page
+6. Virtual authenticator responds to WebAuthn challenge
+7. Save authenticated session to storage-state.json
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.setup.complete_auth
+
+Prerequisites:
+    - MANULIFE_PAR_USERNAME in Doppler
+    - MANULIFE_PAR_PASSWORD in Doppler
+    - MANULIFE_PAR_PASSKEY_* credentials in Doppler
+    - Playwright 1.55.0+ and jwcrypto installed
+"""
+
+import base64
+import json
+import os
+import sys
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+from jwcrypto import jwk
+
+
+def add_base64_padding(s: str) -> str:
+    """Add base64 padding if needed."""
+    missing_padding = len(s) % 4
+    if missing_padding:
+        return s + '=' * (4 - missing_padding)
+    return s
+
+
+def jwk_to_pkcs8_base64(jwk_base64: str) -> str:
+    """Convert JWK format private key to PKCS#8 format (base64-encoded)."""
+    # Fix base64 padding
+    jwk_base64 = add_base64_padding(jwk_base64)
+
+    # Decode and load JWK
+    jwk_json = base64.b64decode(jwk_base64).decode('utf-8')
+    jwk_dict = json.loads(jwk_json)
+    key = jwk.JWK(**jwk_dict)
+
+    # Export to PKCS#8 PEM format
+    pkcs8_pem = key.export_to_pem(private_key=True, password=None)
+
+    # Extract base64 content (remove PEM headers)
+    pem_lines = pkcs8_pem.decode('utf-8').strip().split('\n')
+    pkcs8_base64 = ''.join(line for line in pem_lines
+                           if not line.startswith('-----'))
+
+    return pkcs8_base64
+
+
+def main() -> int:
+    """Execute complete multi-step authentication."""
+    print("Manulife Par Complete Multi-Step Authentication")
+    print("=" * 50)
+
+    # Configuration
+    project_root = Path(__file__).parent.parent.parent
+    storage_state_path = project_root / "storage-state.json"
+    artifacts_dir = project_root / "artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
+
+    # Get credentials from Doppler
+    username = os.getenv("MANULIFE_PAR_USERNAME")
+    password = os.getenv("MANULIFE_PAR_PASSWORD")
+
+    passkey_credential_id_raw = os.getenv("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID")
+    passkey_rp_id = os.getenv("MANULIFE_PAR_PASSKEY_RP_ID")
+    passkey_user_handle_raw = os.getenv("MANULIFE_PAR_PASSKEY_USER_HANDLE")
+    passkey_private_key_jwk = os.getenv("MANULIFE_PAR_PASSKEY_PRIVATE_KEY")
+
+    # Validate credentials
+    missing = []
+    if not username:
+        missing.append("MANULIFE_PAR_USERNAME")
+    if not password:
+        missing.append("MANULIFE_PAR_PASSWORD")
+    if not passkey_credential_id_raw:
+        missing.append("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID")
+    if not passkey_rp_id:
+        missing.append("MANULIFE_PAR_PASSKEY_RP_ID")
+    if not passkey_user_handle_raw:
+        missing.append("MANULIFE_PAR_PASSKEY_USER_HANDLE")
+    if not passkey_private_key_jwk:
+        missing.append("MANULIFE_PAR_PASSKEY_PRIVATE_KEY")
+
+    if missing:
+        print(f"ERROR: Missing Doppler secrets: {', '.join(missing)}", file=sys.stderr)
+        return 1
+
+    # Fix base64 padding for passkey fields
+    passkey_credential_id = add_base64_padding(passkey_credential_id_raw)
+    passkey_user_handle = add_base64_padding(passkey_user_handle_raw)
+
+    print(f"Username: {username}")
+    print(f"RP ID: {passkey_rp_id}")
+    print(f"Output: {storage_state_path}")
+    print()
+
+    try:
+        # Convert JWK private key to PKCS#8
+        print("Converting JWK private key to PKCS#8 format...")
+        pkcs8_private_key = jwk_to_pkcs8_base64(passkey_private_key_jwk)
+        print("✓ Key conversion complete")
+        print()
+
+        with sync_playwright() as p:
+            print("Launching browser...")
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 720}
+            )
+            page = context.new_page()
+
+            # Setup virtual authenticator BEFORE navigation
+            print("Creating virtual authenticator...")
+            cdp = context.new_cdp_session(page)
+            cdp.send("WebAuthn.enable")
+
+            result = cdp.send("WebAuthn.addVirtualAuthenticator", {
+                "options": {
+                    "protocol": "ctap2",
+                    "ctap2Version": "ctap2_1",
+                    "transport": "internal",
+                    "hasResidentKey": True,
+                    "hasUserVerification": True,
+                    "automaticPresenceSimulation": True,
+                    "isUserVerified": True
+                }
+            })
+            authenticator_id = result["authenticatorId"]
+            print(f"✓ Virtual authenticator created: {authenticator_id}")
+
+            # Inject passkey credential
+            print("Adding passkey credential...")
+            cdp.send("WebAuthn.addCredential", {
+                "authenticatorId": authenticator_id,
+                "credential": {
+                    "credentialId": passkey_credential_id,
+                    "privateKey": pkcs8_private_key,
+                    "rpId": passkey_rp_id,
+                    "userHandle": passkey_user_handle,
+                    "signCount": 0,
+                    "isResidentCredential": True
+                }
+            })
+            print("✓ Passkey credential injected")
+            print()
+
+            # STEP 1: Navigate to signin page
+            print("=" * 50)
+            print("STEP 1: Username + Password Authentication")
+            print("=" * 50)
+            signin_url = "https://id.manulife.ca/advisor/signin"
+            page.goto(signin_url, wait_until="networkidle", timeout=30000)
+            print(f"Current URL: {page.url}")
+
+            # Fill username + password
+            print("Waiting for signin form...")
+            page.wait_for_selector("#username", timeout=10000)
+
+            print(f"Entering username: {username}")
+            page.locator("#username").fill(username)
+
+            print("Entering password...")
+            page.locator("#password").fill(password)
+
+            # Screenshot before submit
+            page.screenshot(path=str(artifacts_dir / "01_before_password_submit.png"))
+
+            # Submit form
+            print("Submitting signin form...")
+            page.locator("#button-id-react-aria-16").click()
+
+            # Wait for 2FA page
+            print("Waiting for 2FA page to load...")
+            page.wait_for_load_state("networkidle", timeout=30000)
+
+            current_url = page.url
+            print(f"✓ Post-password URL: {current_url}")
+
+            # Screenshot after password submit (should show 2FA page)
+            page.screenshot(path=str(artifacts_dir / "02_2fa_page.png"))
+            print()
+
+            # STEP 2: Look for passkey button on 2FA page
+            print("=" * 50)
+            print("STEP 2: Passkey Authentication on 2FA Page")
+            print("=" * 50)
+
+            # Wait a moment for 2FA page to fully render
+            page.wait_for_timeout(2000)
+
+            # Try multiple possible passkey button selectors
+            passkey_selectors = [
+                "button:has-text('Passkey')",
+                "button:has-text('passkey')",
+                "button:has-text('Use passkey')",
+                "button:has-text('Use a passkey')",
+                "button:has-text('Sign in with passkey')",
+                "a:has-text('Passkey')",
+                "a:has-text('passkey')",
+                "[data-testid*='passkey']",
+                "[aria-label*='passkey' i]",
+                "button:has-text('Security key')",
+                "button:has-text('Authenticator')",
+            ]
+
+            passkey_button_found = False
+            for selector in passkey_selectors:
+                try:
+                    element = page.locator(selector).first
+                    if element.is_visible(timeout=1000):
+                        print(f"✓ Found passkey button: {selector}")
+                        print(f"  Button text: {element.inner_text()}")
+
+                        # Click passkey button
+                        print("Clicking passkey button...")
+                        element.click()
+                        passkey_button_found = True
+                        break
+                except Exception:
+                    continue
+
+            if not passkey_button_found:
+                print("WARNING: No passkey button found with common selectors")
+                print("Taking screenshot for manual inspection...")
+                page.screenshot(path=str(artifacts_dir / "03_no_passkey_button.png"))
+
+                # Capture page content for analysis
+                dom_path = artifacts_dir / "2fa_page.html"
+                dom_path.write_text(page.content())
+                print(f"Saved DOM to: {dom_path}")
+                print()
+                print("Please manually inspect the screenshot and DOM to find passkey button selector")
+                return 1
+
+            # Wait for WebAuthn challenge and authentication
+            print("Waiting for WebAuthn authentication...")
+            print("(Virtual authenticator will respond automatically)")
+            page.wait_for_load_state("networkidle", timeout=15000)
+
+            current_url = page.url
+            print(f"✓ Post-passkey URL: {current_url}")
+
+            # Screenshot after passkey auth
+            page.screenshot(path=str(artifacts_dir / "04_after_passkey_auth.png"))
+            print()
+
+            # STEP 3: Verify successful authentication
+            print("=" * 50)
+            print("STEP 3: Verify Authentication")
+            print("=" * 50)
+
+            # Check if we're authenticated (not on signin page)
+            if "signin" in current_url.lower() or "login" in current_url.lower():
+                print("WARNING: Still on signin page - authentication may have failed")
+
+                # Check for error messages
+                try:
+                    error = page.locator("[role='alert']").first
+                    if error.is_visible(timeout=2000):
+                        error_text = error.inner_text()
+                        print(f"ERROR MESSAGE: {error_text}", file=sys.stderr)
+                        return 1
+                except Exception:
+                    pass
+
+                print("Saving session anyway for manual verification...")
+            else:
+                print("✓ Authentication successful!")
+                print(f"  Authenticated URL: {current_url}")
+
+            # Save storage state
+            print()
+            print("Saving storage state...")
+            context.storage_state(path=str(storage_state_path))
+
+            print(f"✓ Session saved to: {storage_state_path}")
+            print()
+            print("Artifacts saved:")
+            print(f"  - {artifacts_dir / '01_before_password_submit.png'}")
+            print(f"  - {artifacts_dir / '02_2fa_page.png'}")
+            print(f"  - {artifacts_dir / '04_after_passkey_auth.png'}")
+            print()
+            print("Next steps:")
+            print("1. Verify file exists: ls -la storage-state.json")
+            print("2. Run reconnaissance: doppler run --project insurance --config prd -- \\")
+            print("                        uv run --active python -m scripts.playwright.reconnaissance")
+
+            browser.close()
+            return 0
+
+    except Exception as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

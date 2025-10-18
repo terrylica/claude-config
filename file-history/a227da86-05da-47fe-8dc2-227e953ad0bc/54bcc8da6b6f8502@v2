@@ -1,0 +1,182 @@
+"""
+VALIDATION-4: Weekend Gaps Testing with Real EURUSD Data
+
+Test that weekend periods correctly show no trading activity:
+- All exchange session flags = 0 during weekends
+- Forex market closed from Friday 22:00 UTC to Sunday 22:00 UTC
+- Verify no OHLC bars exist during weekend gap
+"""
+
+from pathlib import Path
+import duckdb
+from datetime import datetime
+
+# Test database path
+DB_PATH = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/e2e_validation_nov2024_2_29t9ur/eurusd.duckdb")
+
+print("=" * 80)
+print("VALIDATION-4: Weekend Gaps Testing")
+print("=" * 80)
+print(f"Database: {DB_PATH}")
+print()
+
+conn = duckdb.connect(str(DB_PATH))
+
+# Test 1: Weekend Gap (November 9-10, 2024 - Saturday-Sunday)
+print("Test 1: Weekend Gap (November 9-10, 2024)")
+print("-" * 80)
+
+# Query for Saturday-Sunday period
+df_weekend = conn.execute("""
+    SELECT
+        Timestamp,
+        ny_hour,
+        london_hour,
+        is_nyse_session,
+        is_lse_session,
+        is_xswx_session,
+        is_xfra_session,
+        is_xtse_session,
+        is_xnze_session,
+        is_xtks_session,
+        is_xasx_session,
+        is_xhkg_session,
+        is_xses_session,
+        tick_count_raw_spread
+    FROM ohlc_1m
+    WHERE DATE(Timestamp) IN ('2024-11-09', '2024-11-10')
+    ORDER BY Timestamp
+""").df()
+
+print(f"Weekend period bars: {len(df_weekend)}")
+
+if len(df_weekend) == 0:
+    print("✅ PASS: No OHLC bars during weekend (expected for 24/5 forex market)")
+    print("  → Forex market closed from Friday 22:00 UTC to Sunday 22:00 UTC")
+else:
+    print(f"⚠️  Found {len(df_weekend)} bars during weekend:")
+    print(f"  Timestamp range: {df_weekend['Timestamp'].min()} → {df_weekend['Timestamp'].max()}")
+
+    # Check session flags
+    session_cols = [
+        'is_nyse_session', 'is_lse_session', 'is_xswx_session', 'is_xfra_session',
+        'is_xtse_session', 'is_xnze_session', 'is_xtks_session', 'is_xasx_session',
+        'is_xhkg_session', 'is_xses_session'
+    ]
+
+    total_flags = sum(df_weekend[col].sum() for col in session_cols)
+
+    if total_flags == 0:
+        print("✅ PASS: All session flags = 0 during weekend")
+    else:
+        print(f"❌ FAIL: Found {total_flags} session flags during weekend (expected 0)")
+        for col in session_cols:
+            flag_count = df_weekend[col].sum()
+            if flag_count > 0:
+                print(f"  {col}: {flag_count} flags")
+
+print()
+
+# Test 2: Friday Close to Sunday Open (Weekend Boundary)
+print("Test 2: Friday Close → Sunday Open (November 8-10, 2024)")
+print("-" * 80)
+
+# Query for Friday evening, Saturday, Sunday
+df_boundary = conn.execute("""
+    SELECT
+        Timestamp,
+        EXTRACT(DOW FROM Timestamp) as day_of_week,  -- 0=Sunday, 5=Friday, 6=Saturday
+        ny_hour,
+        london_hour,
+        is_nyse_session,
+        is_lse_session,
+        is_xtks_session,
+        tick_count_raw_spread
+    FROM ohlc_1m
+    WHERE Timestamp >= '2024-11-08 20:00:00'::TIMESTAMP
+      AND Timestamp <= '2024-11-10 23:59:59'::TIMESTAMP
+    ORDER BY Timestamp
+""").df()
+
+print(f"Total bars in Friday-Sunday period: {len(df_boundary)}")
+
+# Analyze by day of week
+for dow in [5, 6, 0]:  # Friday, Saturday, Sunday
+    dow_name = {5: 'Friday', 6: 'Saturday', 0: 'Sunday'}[dow]
+    df_day = df_boundary[df_boundary['day_of_week'] == dow]
+
+    if len(df_day) > 0:
+        nyse_flags = df_day['is_nyse_session'].sum()
+        lse_flags = df_day['is_lse_session'].sum()
+        xtks_flags = df_day['is_xtks_session'].sum()
+
+        print(f"\n{dow_name} (DOW={dow}):")
+        print(f"  Bars: {len(df_day)}")
+        print(f"  Timestamp range: {df_day['Timestamp'].min()} → {df_day['Timestamp'].max()}")
+        print(f"  NYSE flags: {nyse_flags}")
+        print(f"  LSE flags: {lse_flags}")
+        print(f"  Tokyo flags: {xtks_flags}")
+
+        if dow in [6, 0] and (nyse_flags > 0 or lse_flags > 0 or xtks_flags > 0):
+            print(f"  ❌ FAIL: Found session flags on weekend")
+        elif dow in [6, 0] and nyse_flags == 0 and lse_flags == 0 and xtks_flags == 0:
+            print(f"  ✅ PASS: No session flags on weekend")
+    else:
+        print(f"\n{dow_name} (DOW={dow}): No bars (expected for weekend gap)")
+        if dow in [6, 0]:
+            print(f"  ✅ PASS: No trading activity on {dow_name}")
+
+print()
+
+# Test 3: Verify Weekend Gap Exists
+print("Test 3: Weekend Gap Detection")
+print("-" * 80)
+
+# Find a Friday close and Sunday open
+df_friday_late = conn.execute("""
+    SELECT Timestamp, tick_count_raw_spread
+    FROM ohlc_1m
+    WHERE DATE(Timestamp) = '2024-11-08'
+      AND EXTRACT(HOUR FROM Timestamp) >= 20
+    ORDER BY Timestamp DESC
+    LIMIT 10
+""").df()
+
+df_sunday_early = conn.execute("""
+    SELECT Timestamp, tick_count_raw_spread
+    FROM ohlc_1m
+    WHERE DATE(Timestamp) = '2024-11-10'
+      AND EXTRACT(HOUR FROM Timestamp) <= 23
+    ORDER BY Timestamp
+    LIMIT 10
+""").df()
+
+if len(df_friday_late) > 0:
+    last_friday = df_friday_late['Timestamp'].max()
+    print(f"Last Friday bar: {last_friday}")
+
+if len(df_sunday_early) > 0:
+    first_sunday = df_sunday_early['Timestamp'].min()
+    print(f"First Sunday bar: {first_sunday}")
+
+    if len(df_friday_late) > 0:
+        gap_hours = (first_sunday - last_friday).total_seconds() / 3600
+        print(f"Weekend gap: {gap_hours:.1f} hours")
+
+        # Forex market closes Friday 22:00 UTC, opens Sunday 22:00 UTC (48 hours)
+        if gap_hours >= 47 and gap_hours <= 49:
+            print(f"✅ PASS: Weekend gap ~48 hours (expected for forex market)")
+        else:
+            print(f"⚠️  Unexpected gap duration: {gap_hours:.1f} hours (expected ~48h)")
+
+print()
+print("=" * 80)
+print("VALIDATION-4 Summary")
+print("=" * 80)
+print("Expected Behavior:")
+print("- No OHLC bars during Saturday-Sunday (forex market closed)")
+print("- All session flags = 0 if any weekend bars exist")
+print("- Weekend gap: Friday 22:00 UTC → Sunday 22:00 UTC (~48 hours)")
+print()
+
+conn.close()

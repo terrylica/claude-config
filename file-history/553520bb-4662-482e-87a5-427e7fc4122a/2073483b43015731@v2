@@ -1,0 +1,29 @@
+#!/bin/bash
+# Homebrew + pipx daily auto-update
+# Runs at 5 AM daily via launchd
+# Pipeline: Homebrew upgrades pipx → pipx upgrades Python tools
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+LOG_DIR="$HOME/scripts/homebrew-autoupdate/logs"
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+mkdir -p "$LOG_DIR"
+
+# Step 1: Homebrew updates
+echo "[$TIMESTAMP] Starting Homebrew auto-update" | tee -a "$LOG_DIR/output.txt"
+brew update 2>&1 | tee -a "$LOG_DIR/output.txt" || { echo "[$TIMESTAMP] Error: brew update failed" | tee -a "$LOG_DIR/error.txt"; exit 1; }
+brew upgrade 2>&1 | tee -a "$LOG_DIR/output.txt" || { echo "[$TIMESTAMP] Error: brew upgrade failed" | tee -a "$LOG_DIR/error.txt"; exit 1; }
+brew cleanup 2>&1 | tee -a "$LOG_DIR/output.txt" || { echo "[$TIMESTAMP] Error: brew cleanup failed" | tee -a "$LOG_DIR/error.txt"; exit 1; }
+echo "[$TIMESTAMP] Homebrew auto-update completed successfully" | tee -a "$LOG_DIR/output.txt"
+
+# Step 2: uv tool updates (if installed)
+# uv is a fast Python package manager (Rust-based, 10-100x faster than pip)
+# Already installed via Homebrew, manages tools like pre-commit
+if command -v uv &> /dev/null; then
+    echo "[$TIMESTAMP] Starting uv tool auto-upgrade (all tools)" | tee -a "$LOG_DIR/output.txt"
+    uv tool upgrade --all 2>&1 | tee -a "$LOG_DIR/output.txt" || { echo "[$TIMESTAMP] Warning: uv tool upgrade had errors (non-fatal)" | tee -a "$LOG_DIR/error.txt"; }
+    echo "[$TIMESTAMP] uv tool auto-upgrade completed" | tee -a "$LOG_DIR/output.txt"
+else
+    echo "[$TIMESTAMP] uv not installed, skipping Python tool updates" | tee -a "$LOG_DIR/output.txt"
+fi
+
+echo "[$TIMESTAMP] All updates completed successfully" | tee -a "$LOG_DIR/output.txt"

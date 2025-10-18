@@ -1,0 +1,187 @@
+"""
+VALIDATION-6: Multi-Exchange Overlaps
+
+Test that multiple exchanges can have concurrent session flags = 1 during overlapping hours.
+
+Key Overlaps to Test:
+1. London-NY Overlap: 13:30-16:30 UTC (8:30 AM - 11:30 AM EST, 1:30 PM - 4:30 PM GMT)
+2. Tokyo-Hong Kong-Singapore Overlap: Asian morning hours
+3. Australia-Tokyo Overlap: Early Asian trading hours
+"""
+
+from pathlib import Path
+import duckdb
+
+# Test database path
+DB_PATH = Path("/var/folders/f4/yr36gs0j7gb46m_lcdc6tr2h0000gn/T/e2e_validation_nov2024_2_29t9ur/eurusd.duckdb")
+
+print("=" * 80)
+print("VALIDATION-6: Multi-Exchange Overlaps")
+print("=" * 80)
+print(f"Database: {DB_PATH}")
+print()
+
+conn = duckdb.connect(str(DB_PATH))
+
+# Test 1: London-NY Overlap (most liquid trading hours)
+print("Test 1: London-NY Overlap")
+print("-" * 80)
+print("Expected: Both LSE and NYSE flags = 1 during 13:30-16:30 UTC")
+print()
+
+df_london_ny = conn.execute("""
+    SELECT
+        Timestamp AT TIME ZONE 'UTC' as utc_time,
+        EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'UTC')) as utc_hour,
+        is_nyse_session,
+        is_lse_session,
+        is_nyse_session + is_lse_session as overlap_count
+    FROM ohlc_1m
+    WHERE DATE(Timestamp AT TIME ZONE 'UTC') = '2024-11-06'  -- Regular trading day (Wednesday)
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'UTC')) >= 13
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'UTC')) <= 16
+    ORDER BY Timestamp
+""").df()
+
+if len(df_london_ny) > 0:
+    # Find periods with both flags
+    both_open = df_london_ny[df_london_ny['overlap_count'] == 2]
+    nyse_only = df_london_ny[(df_london_ny['is_nyse_session'] == 1) & (df_london_ny['is_lse_session'] == 0)]
+    lse_only = df_london_ny[(df_london_ny['is_nyse_session'] == 0) & (df_london_ny['is_lse_session'] == 1)]
+
+    print(f"Total bars 13:00-16:59 UTC: {len(df_london_ny)}")
+    print(f"Both NYSE + LSE open: {len(both_open)} bars")
+    print(f"NYSE only: {len(nyse_only)} bars")
+    print(f"LSE only: {len(lse_only)} bars")
+    print()
+
+    if len(both_open) > 0:
+        first_overlap = both_open.iloc[0]
+        last_overlap = both_open.iloc[-1]
+        print(f"First overlap bar: {first_overlap['utc_time']} ({first_overlap['utc_hour']:02.0f}:XX UTC)")
+        print(f"Last overlap bar: {last_overlap['utc_time']} ({last_overlap['utc_hour']:02.0f}:XX UTC)")
+        print()
+
+        # Check if overlap is in expected range (13:30-16:30 UTC during EST)
+        # Note: During EDT (summer), it would be 12:30-15:30 UTC
+        # November 6 is after DST ends (EST), so expect 14:30-21:00 NYC hours = NYSE open
+        # LSE is 8:00-16:30 UTC, so overlap should be 14:30-16:30 during EST
+        if len(both_open) >= 100:  # Expect ~120 minutes (2 hours)
+            print(f"✅ PASS: Found significant overlap period ({len(both_open)} minutes)")
+        else:
+            print(f"⚠️  Found only {len(both_open)} minutes of overlap (expected ~120)")
+    else:
+        print("❌ FAIL: No overlapping bars found")
+else:
+    print("No data for November 6, 2024")
+
+print()
+
+# Test 2: Asian Exchanges Overlap (Tokyo, Hong Kong, Singapore)
+print("Test 2: Asian Exchanges Overlap")
+print("-" * 80)
+print("Expected: Tokyo, Hong Kong, Singapore all open during mid-morning hours")
+print()
+
+df_asian = conn.execute("""
+    SELECT
+        Timestamp AT TIME ZONE 'UTC' as utc_time,
+        Timestamp AT TIME ZONE 'Asia/Tokyo' as tokyo_time,
+        EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) as tokyo_hour,
+        is_xtks_session,
+        is_xhkg_session,
+        is_xses_session,
+        is_xtks_session + is_xhkg_session + is_xses_session as overlap_count
+    FROM ohlc_1m
+    WHERE DATE(Timestamp AT TIME ZONE 'UTC') = '2024-11-06'  -- Regular trading day
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) >= 10
+      AND EXTRACT(HOUR FROM (Timestamp AT TIME ZONE 'Asia/Tokyo')) <= 14
+    ORDER BY Timestamp
+""").df()
+
+if len(df_asian) > 0:
+    # Find periods with all three open (excluding lunch breaks)
+    all_three = df_asian[df_asian['overlap_count'] == 3]
+
+    print(f"Total bars 10:00-14:59 JST: {len(df_asian)}")
+    print(f"All three (Tokyo + HK + Singapore): {len(all_three)} bars")
+    print()
+
+    if len(all_three) > 0:
+        first = all_three.iloc[0]
+        last = all_three.iloc[-1]
+        print(f"First triple overlap: {first['tokyo_time']} JST")
+        print(f"Last triple overlap: {last['tokyo_time']} JST")
+        print()
+
+        # Note: Tokyo has lunch 11:30-12:30, HK has lunch 12:00-13:00, Singapore has lunch 12:00-13:00
+        # So we expect gaps during lunch periods
+        if len(all_three) >= 60:  # At least 1 hour of overlap
+            print(f"✅ PASS: Found significant overlap ({len(all_three)} minutes)")
+        else:
+            print(f"⚠️  Found only {len(all_three)} minutes of triple overlap")
+
+        # Break down by hour to see lunch break impact
+        print("\nBreakdown by Tokyo hour:")
+        for hour in range(10, 15):
+            hour_data = df_asian[df_asian['tokyo_hour'] == hour]
+            hour_overlap = hour_data[hour_data['overlap_count'] == 3]
+            print(f"  {hour:02d}:00 JST: {len(hour_overlap)}/{len(hour_data)} minutes with all three open")
+    else:
+        print("⚠️  No bars with all three exchanges open simultaneously")
+        print("\nBreakdown by count:")
+        for count in range(4):
+            count_data = df_asian[df_asian['overlap_count'] == count]
+            if len(count_data) > 0:
+                print(f"  {count} exchanges: {len(count_data)} bars")
+else:
+    print("No data for November 6, 2024")
+
+print()
+
+# Test 3: Verify concurrent flags don't exclude each other
+print("Test 3: Concurrent Flag Independence")
+print("-" * 80)
+print("Expected: Multiple exchange flags can be 1 simultaneously (not mutually exclusive)")
+print()
+
+df_all = conn.execute("""
+    SELECT
+        is_nyse_session + is_lse_session + is_xswx_session + is_xfra_session +
+        is_xtse_session + is_xnze_session + is_xtks_session + is_xasx_session +
+        is_xhkg_session + is_xses_session as total_flags,
+        COUNT(*) as bar_count
+    FROM ohlc_1m
+    WHERE DATE(Timestamp AT TIME ZONE 'UTC') = '2024-11-06'
+    GROUP BY total_flags
+    ORDER BY total_flags DESC
+""").df()
+
+if len(df_all) > 0:
+    print("Distribution of concurrent exchange flags:")
+    for _, row in df_all.iterrows():
+        flags = int(row['total_flags'])
+        count = int(row['bar_count'])
+        pct = (count / df_all['bar_count'].sum()) * 100
+        print(f"  {flags} exchanges open: {count:4d} bars ({pct:5.1f}%)")
+    print()
+
+    max_concurrent = df_all['total_flags'].max()
+    if max_concurrent >= 3:
+        print(f"✅ PASS: Maximum {int(max_concurrent)} exchanges open simultaneously")
+    else:
+        print(f"❌ FAIL: Maximum only {int(max_concurrent)} exchanges open simultaneously")
+else:
+    print("No data available")
+
+print()
+print("=" * 80)
+print("VALIDATION-6 Summary")
+print("=" * 80)
+print("Expected Behavior:")
+print("- London-NY overlap: Both flags = 1 during afternoon UTC")
+print("- Asian overlap: Tokyo + HK + Singapore flags = 1 during mid-morning JST")
+print("- Concurrent flags are independent (not mutually exclusive)")
+print()
+
+conn.close()

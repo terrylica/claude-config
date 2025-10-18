@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tools-
+
+      - name: Install cargo tools
+        run: |
+          command -v cargo-audit || cargo install cargo-audit --locked
+          command -v cargo-deny || cargo install cargo-deny --locked
+          command -v cargo-machete || cargo install cargo-machete --locked
+          command -v cargo-nextest || cargo install cargo-nextest --locked
+
+      - name: Security audit
+        run: cargo audit --ignore unmaintained
+
+      - name: License and policy check
+        run: cargo deny check
+
+      - name: Check unused dependencies
+        run: cargo machete --with-metadata || true
+
+      - name: Run tests
+        run: cargo nextest run
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Build binaries
+        run: cargo build --release
+
+  # benchmark:
+  #   name: Performance Benchmarks
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: Free disk space
+  #       run: |
+  #         echo "=== Before cleanup ==="
+  #         df -h
+  #         echo "=== Removing unnecessary packages ==="
+  #         sudo rm -rf /usr/share/dotnet
+  #         sudo rm -rf /opt/ghc
+  #         sudo rm -rf "/usr/local/share/boost"
+  #         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+  #         sudo apt-get remove -y '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' '^mysql-.*' azure-cli google-cloud-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri
+  #         sudo apt-get autoremove -y
+  #         sudo apt-get autoclean
+  #         echo "=== After cleanup ==="
+  #         df -h
+
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@master
+
+  #     - name: Cache dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/bin/
+  #           ~/.cargo/registry/index/
+  #           ~/.cargo/registry/cache/
+  #           ~/.cargo/git/db/
+  #           target/
+  #         key: ${{ runner.os }}-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+  #     - name: Run benchmarks
+  #       run: cargo bench --bench rangebar_bench
+
+  #     - name: Upload benchmark results
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: benchmark-results
+  #         path: target/criterion/
