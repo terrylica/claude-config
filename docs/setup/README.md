@@ -9,6 +9,7 @@ Installation and configuration guides for the workspace.
 - [AWS Credentials with Doppler](aws-credentials-doppler.md)
 - [AWS Credential Elimination Plan](aws-credentials-elimination.md)
 - [Terminal Setup](terminal-setup.md)
+- [SSH Clipboard via OSC52](ssh-clipboard-osc52.md) - Complete setup guide for Claude Code /export over SSH
 - [LaTeX Workflow](latex-workflow.md)
 - [OSC52 SSH Clipboard: Deep Dive](osc52-deep-dive.md)
 - [OSC52 Implementation Summary](osc52-implementation-summary.md)
