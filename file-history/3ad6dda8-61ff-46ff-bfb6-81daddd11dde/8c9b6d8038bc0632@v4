@@ -1,0 +1,165 @@
+"""
+Extended Wait Test - Wait much longer for navigation to complete
+
+The button was going gray with a progress bar - navigation IS happening!
+But we weren't waiting long enough for it to finish.
+"""
+
+import pytest
+from playwright.sync_api import Page
+import time
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_extended_wait_for_navigation(page: Page, artifact_manager):
+    """
+    Wait longer for navigation - don't interrupt while processing
+    """
+
+    print("\n" + "=" * 70)
+    print("EXTENDED WAIT TEST - Waiting longer for navigation to complete")
+    print("=" * 70)
+
+    manulife_page = ManulifeParPage(page)
+
+    # Setup
+    print("\nSetting up form...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Select product and upload option
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+
+    # First click to reveal form
+    print("\nClicking 'Start a new application' (first time - reveal form)...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.click()
+    page.wait_for_timeout(1500)
+
+    # Fill form completely
+    print("Filling form with all details...")
+    print("  - Insured person details...")
+    manulife_page.fill_insured_name("Alex", "Letterman")
+    manulife_page.select_sex("Male")
+    manulife_page.fill_date_of_birth("5", "June", "1986")
+    manulife_page.select_smoking_status("Non-Smoker")
+
+    print("  - Coverage details...")
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+
+    print("  - Riders (selecting NO to avoid empty required fields)...")
+    manulife_page.select_riders("No")
+    page.wait_for_timeout(500)
+
+    print("  - Remaining fields...")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "01_form_complete")
+    print("✓ Form filled")
+
+    # Final click - WAIT MUCH LONGER
+    print("\n" + "=" * 70)
+    print("FINAL CLICK - Waiting EXTENDED TIME for navigation")
+    print("=" * 70)
+
+    url_before = page.url
+    print(f"\nURL before: {url_before}")
+
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    page.wait_for_timeout(500)
+
+    print("\n" + "=" * 70)
+    print("ABOUT TO CLICK THE BUTTON - WATCH THE SCREEN!")
+    print("=" * 70)
+    print("\nClicking button in 3 seconds...")
+    print("(You should see it go gray with progress bar)")
+    time.sleep(3)
+
+    artifact_manager.capture_screenshot(page, "02_before_click")
+    print("\n>>> CLICKING NOW <<<")
+
+    button.click()
+    print(">>> CLICK EXECUTED <<<")
+
+    # Immediately capture to see the gray button
+    time.sleep(0.5)
+    artifact_manager.capture_screenshot(page, "03_just_after_click")
+
+    # WAIT FOR NAVIGATION - Try multiple strategies
+    print("\nWaiting for navigation to complete...")
+    print("Strategy 1: Wait for page to load completely (networkidle)")
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+        print("✓ Network idle reached")
+    except Exception as e:
+        print(f"⚠️  Network idle timeout: {e}")
+
+    print("\nStrategy 2: Wait for URL to change")
+    start_time = time.time()
+    max_wait = 20  # Wait up to 20 seconds
+    url_changed = False
+
+    while time.time() - start_time < max_wait:
+        url_current = page.url
+        if url_current != url_before:
+            url_changed = True
+            print(f"✓ URL changed! New URL: {url_current}")
+            break
+        time.sleep(0.5)
+
+    if not url_changed:
+        print(f"⚠️  URL did not change after {max_wait} seconds")
+
+    url_after = page.url
+    print(f"\nFinal URL: {url_after}")
+
+    # Capture final state
+    artifact_manager.capture_screenshot(page, "04_final_state")
+
+    # Check for errors
+    print("\nChecking for validation errors...")
+    errors = manulife_page.check_for_validation_errors()
+    if errors:
+        print(f"Validation Errors ({len(errors)}):")
+        for i, error in enumerate(errors, 1):
+            print(f"   {i}. {error}")
+    else:
+        print("✓ No validation errors detected")
+
+    # Results
+    print("\n" + "=" * 70)
+    print("RESULTS:")
+    print("=" * 70)
+
+    if url_before != url_after:
+        print(f"\n✅ SUCCESS! Navigation occurred!")
+        print(f"   From: {url_before}")
+        print(f"   To:   {url_after}")
+
+        if "PolicyInformation" in url_after:
+            print("\n🎉 REACHED PolicyInformation PAGE!")
+        else:
+            print(f"\n⚠️  Navigated to different page: {url_after}")
+    else:
+        print(f"\n❌ No navigation occurred after extended wait")
+        print(f"   Still on: {url_after}")
+
+    print(f"\nArtifacts: {artifact_manager.session_dir}")

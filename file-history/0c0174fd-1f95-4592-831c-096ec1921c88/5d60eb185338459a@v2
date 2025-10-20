@@ -1,0 +1,166 @@
+# Authentication Setup for Manulife Par
+
+**Purpose**: Generate `storage-state.json` for passkey-authenticated sessions
+
+**Requirement**: Manual one-time setup before reconnaissance can run
+
+---
+
+## Prerequisites
+
+- [ ] Playwright installed: `uvx --from playwright playwright install chromium`
+- [ ] Doppler access configured: `doppler secrets --project insurance --config prd`
+- [ ] Manulife Par account with passkey enrolled
+
+---
+
+## Procedure
+
+### Step 1: Run Setup Script
+
+```bash
+cd /Users/terryli/own/insurance
+
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.generate_auth_state
+```
+
+### Step 2: Complete Authentication
+
+1. Browser window will launch automatically
+2. Navigate through Manulife passkey authentication flow
+3. Complete biometric authentication (Touch ID/Face ID)
+4. Verify you're logged into the Par application portal
+5. Return to terminal and press ENTER
+
+### Step 3: Verify Storage State
+
+```bash
+# Check file was created
+ls -la storage-state.json
+
+# File should be ~2-20KB JSON containing:
+# - cookies
+# - localStorage
+# - sessionStorage
+```
+
+---
+
+## Expected Output
+
+### storage-state.json Structure
+
+```json
+{
+  "cookies": [
+    {
+      "name": "...",
+      "value": "...",
+      "domain": ".insurance.manulife.ca",
+      "path": "/",
+      "expires": ...,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://www.insurance.manulife.ca",
+      "localStorage": [
+        {"name": "...", "value": "..."}
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Troubleshooting
+
+### Issue: Still on login page after authentication
+
+**Symptom**: Script warns "Still appears to be on login page"
+
+**Causes**:
+- Passkey authentication incomplete
+- Session not established
+- Wrong URL navigated to
+
+**Resolution**:
+1. Manually verify you can see the Par application dashboard
+2. Check URL contains `/dda` and NOT `/login` or `/signin`
+3. If uncertain, cancel and re-run setup script
+
+### Issue: File not created
+
+**Symptom**: `storage-state.json` missing after script completion
+
+**Causes**:
+- Script exited with error
+- Permission issues in project directory
+
+**Resolution**:
+1. Check terminal output for error messages
+2. Verify write permissions: `touch storage-state.json && rm storage-state.json`
+3. Re-run setup script with verbose output
+
+### Issue: Authentication expires
+
+**Symptom**: Reconnaissance fails with redirect to login
+
+**Causes**:
+- Session cookies expired
+- Passkey authentication revoked
+- `storage-state.json` outdated
+
+**Resolution**:
+1. Delete old storage state: `rm storage-state.json`
+2. Re-run setup script to regenerate
+3. Consider session duration settings in Manulife account
+
+---
+
+## Security Notes
+
+- `storage-state.json` contains **active session credentials**
+- File is **gitignored** - never commit to repository
+- Treat as sensitive as passwords/API keys
+- Regenerate if compromised
+
+---
+
+## Doppler Secrets Usage
+
+**Question**: What role do `MANULIFE_PAR_USERNAME` and `MANULIFE_PAR_PASSWORD` play?
+
+**Current Understanding**:
+- Specification contradiction detected (see Task 2 findings)
+- Passkey authentication typically doesn't use username/password
+- Possible scenarios:
+  - A) Obsolete after passkey enrollment
+  - B) Used for initial pre-passkey login
+  - C) Fallback if passkey unavailable
+
+**Resolution**: Will be determined during reconnaissance (Task 14)
+
+---
+
+## Next Steps
+
+After successful generation:
+
+```bash
+# Verify reconnaissance can use storage state
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.playwright.reconnaissance
+```
+
+---
+
+## References
+
+**Playwright Documentation**: [Browser contexts and authentication](https://playwright.dev/docs/auth)
+**Project Spec**: [`/specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml) `x-authentication` section

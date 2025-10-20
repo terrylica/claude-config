@@ -1,0 +1,106 @@
+# Complete Form Journey Test - Reconnaissance Report
+
+**Test**: `test_explore_complete_form_journey`
+**Date**: 2025-10-17
+**Status**: ✅ Passed
+
+---
+
+## Objective
+
+Navigate through the complete Manulife Par application form journey to understand:
+1. Multi-page structure and navigation flow
+2. Required vs. optional fields
+3. Form validation behavior
+4. Dynamic field dependencies
+
+## Key Findings
+
+### 1. Single-Page React SPA Architecture
+
+**Evidence**: Comparing `011_page_1_all_filled.png` with `014_page_2_initial.png`
+
+After filling all required fields and clicking "Start a new application", the form **does not navigate** to a different page:
+- URL remains: `https://www.insurance.manulife.ca/dda/welcomeInformation`
+- Content remains identical (confirmed via ARIA tree comparison)
+- **Conclusion**: This is a single-page form with client-side validation, not a multi-page wizard
+
+### 2. Critical Selector Bug Discovered via Visual Inspection
+
+**Evidence**: `008_page_1_insured_filled.png`
+
+Visual examination revealed that the product selection accidentally changed from "Manulife Par" to "Family Term":
+- **Root Cause**: Overly broad selector `page.locator("select, [role='combobox']").filter(has_text="Select").first`
+- **Impact**: Matched the PRODUCT dropdown instead of smoking status dropdown
+- **Result**: Form reset with completely different field set
+- **Detection Method**: PNG screenshot examination (ARIA tree showed no difference)
+
+**This validates the Visual Inspection Mandate** - the bug was invisible in accessibility trees but immediately obvious in screenshots.
+
+### 3. Required Fields Inventory
+
+From `011_page_1_all_filled.png`, the following fields are required:
+
+**Insured Person**:
+- First name
+- Last name
+- Sex (Male/Female radio)
+- Date of birth (Day/Month/Year)
+- Illustrated smoking status
+
+**Coverage**:
+- Coverage type
+- Premium Duration
+- Amount of insurance
+- Dividend option
+
+**Policy Questions** (all required):
+- "Will the policy be issued in Quebec?" (Yes/No)
+- "Are you applying for additional products?" (Yes/No)
+- "Would all the people to be insured like to provide their medical information on this application or through a telephone interview?" (Electronic application / Tele-interview)
+- "Would you like to add riders or benefits to this policy?" (Yes/No)
+
+### 4. Form Enablement Behavior
+
+The "Start a new application" button:
+- Disabled until ALL required fields are filled
+- Enabled when validation passes (see `011_page_1_all_filled.png`)
+- Does NOT navigate to a new page when clicked (React SPA behavior)
+
+---
+
+## Screenshots
+
+1. `001_welcome_page.png` - Initial landing page
+2. `002_cookies_dismissed.png` - After accepting cookies
+3. `003_product_dropdown.png` - Product selection dropdown
+4. `004_product_selected.png` - Manulife Par selected
+5. `005_page_1_initial.png` - Initial form view
+6. `006_page_1_upload_later.png` - After selecting "Upload Later"
+7. `007_page_1_basic_filled.png` - After filling name/sex
+8. `008_page_1_insured_filled.png` - **BUG**: Product changed to Family Term
+9. `009_page_1_insured_filled.png` - Corrected insured section
+10. `010_page_1_coverage_filled.png` - Coverage section filled
+11. `011_page_1_all_filled.png` - All required fields complete
+12. `012_start_button_enabled.png` - Button enabled
+13. `013_clicked_start.png` - After clicking Start
+14. `014_page_2_initial.png` - Form state after click (identical to Page 1)
+
+---
+
+## Recommendations
+
+1. **Selector Strategy**: Always use `get_by_role()` with explicit accessible names
+2. **Visual Inspection**: Examine every screenshot - critical bugs may be invisible in accessibility trees
+3. **Specification Updates**: Model as single-page form, not multi-step wizard
+4. **Field Catalog**: Create comprehensive inventory from artifacts for Phase 1.2
+
+---
+
+## Artifacts
+
+- Screenshots: 16 PNG files
+- ARIA trees: 16 YAML files
+- Manifest: `index.json`
+- Trace: `trace.zip`
+- HAR: `network.har`

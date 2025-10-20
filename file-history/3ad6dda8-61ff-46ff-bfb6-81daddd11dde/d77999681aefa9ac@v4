@@ -1,0 +1,370 @@
+"""Enhanced reconnaissance for complete PAR form exploration.
+
+Purpose:
+    - Navigate through welcome page entry flow
+    - Explore all pages of the multi-page form
+    - Capture comprehensive artifacts at each transition
+    - Document complete form journey for automation planning
+
+Outputs to: artifacts/explore_full_form/
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active pytest -v -m reconnaissance tests/reconnaissance/explore_full_form.py
+
+Design Constraints:
+    - No actual form submission (reconnaissance only)
+    - Capture artifacts at each page transition
+    - Document all fields, validation rules, conditional logic
+    - Map navigation flow and state transitions
+"""
+
+import pytest
+from playwright.sync_api import Page
+
+from utils.artifact_manager import ArtifactManager
+
+
+WELCOME_PAGE_URL = "https://www.insurance.manulife.ca/dda/welcomeInformation"
+
+
+@pytest.mark.reconnaissance
+def test_explore_complete_form_journey(
+    page: Page,
+    artifact_manager: ArtifactManager
+):
+    """Explore complete multi-page PAR form journey.
+
+    This test navigates through the entire form flow, capturing artifacts
+    at each page transition to document the complete form structure.
+
+    Args:
+        page: Playwright page instance (from conftest.py fixture)
+        artifact_manager: Artifact manager (from conftest.py fixture)
+    """
+    print("\nManulife Par Complete Form Exploration")
+    print("=" * 50)
+    print(f"Artifacts: {artifact_manager.session_path}")
+    print()
+
+    # Step 1: Navigate to welcome page
+    print("Step 1: Loading welcome page...")
+    page.goto(WELCOME_PAGE_URL, wait_until="networkidle", timeout=30000)
+
+    current_url = page.url
+    if "login" in current_url.lower() or "signin" in current_url.lower():
+        pytest.fail(
+            f"Redirected to login page: {current_url}\n"
+            f"storage-state.json may be expired"
+        )
+
+    print(f"✓ Welcome page loaded: {current_url}")
+
+    artifact_manager.capture_state_snapshot(page, "welcome_page")
+
+    # Step 2: Accept cookies (important for form to work properly)
+    print("\nStep 2: Accepting cookies...")
+    try:
+        cookie_button = page.get_by_role("button", name="Accept all cookies")
+        cookie_button.wait_for(state="visible", timeout=5000)
+        cookie_button.click()
+        print("✓ Cookies accepted")
+        # Wait a moment for cookie acceptance to register
+        page.wait_for_timeout(1000)
+    except Exception as e:
+        print(f"⚠️  Cookie banner handling failed: {e}")
+        # Continue anyway - might already be accepted
+
+    # Step 3: Select "Manulife Par" product
+    print("\nStep 3: Selecting Manulife Par product...")
+    product_dropdown = page.locator("select, [role='combobox']").first
+    product_dropdown.wait_for(state="visible", timeout=10000)
+
+    # Check if it's a standard select or custom combobox
+    if product_dropdown.evaluate("el => el.tagName") == "SELECT":
+        product_dropdown.select_option("Manulife Par")
+    else:
+        # Custom combobox - click and select
+        product_dropdown.click()
+        page.locator("text='Manulife Par'").click()
+
+    print("✓ Manulife Par selected")
+    artifact_manager.capture_screenshot(page, "product_selected")
+
+    # Step 3.5: Select "Upload Later" for illustration (required field)
+    print("\nStep 3.5: Selecting 'Upload Later' for illustration...")
+    upload_later_radio = page.get_by_role("radio", name="Upload Later")
+    upload_later_radio.click()
+    print("✓ Upload Later selected")
+
+    # Step 4: Click "Start a new application"
+    print("\nStep 4: Starting application...")
+    start_button = page.get_by_text("Start a new application")
+    start_button.wait_for(state="visible", timeout=5000)
+
+    # Wait for button to be enabled (check is_enabled)
+    for _ in range(50):  # 5 seconds max
+        if start_button.is_enabled():
+            break
+        page.wait_for_timeout(100)
+
+    start_button.click()
+
+    # Wait for navigation to first form page
+    print("Waiting for first form page to load...")
+    page.wait_for_load_state("networkidle", timeout=15000)
+
+    first_page_url = page.url
+    print(f"✓ First form page loaded: {first_page_url}")
+
+    # Capture first form page
+    artifact_manager.capture_state_snapshot(page, "page_1_initial")
+
+    # Verify the form loaded (React SPA - same URL but content changed)
+    coverage_heading = page.get_by_role("heading", name="Coverage selection")
+    try:
+        coverage_heading.wait_for(state="visible", timeout=5000)
+        print("✓ Form content loaded successfully (React SPA - same URL)")
+    except Exception:
+        pytest.fail(
+            f"Form did not load - still showing welcome page content. "
+            f"URL: {first_page_url}"
+        )
+
+    # Step 5: Fill minimal required fields on Page 1
+    print("\nStep 5: Filling minimal required fields on Page 1...")
+    print("  → Insured person 1 details...")
+
+    # Verify product is still Manulife Par
+    product_dropdown = page.get_by_role("combobox", name="Product")
+    selected_product = product_dropdown.input_value()
+    print(f"  Current product: {selected_product}")
+
+    # Fill name fields
+    page.get_by_role("textbox", name="First name").fill("John")
+    page.get_by_role("textbox", name="Last name").fill("Doe")
+
+    # Select sex (use .first since there might be multiple Male radios on the page)
+    page.get_by_role("radio", name="Male").first.click()
+
+    # Fill date of birth
+    page.get_by_role("textbox", name="Day (dd)").fill("15")
+    page.get_by_role("combobox", name="Month").select_option("January")
+    page.get_by_role("textbox", name="Year (yyyy)").fill("1980")
+
+    # Capture after basic fields
+    artifact_manager.capture_screenshot(page, "page_1_basic_filled")
+
+    # Select illustrated smoking status (be VERY specific to avoid selecting product dropdown)
+    print("  → Selecting smoking status...")
+    smoking_dropdown = page.get_by_role("combobox", name="Illustrated smoking status")
+    smoking_dropdown.select_option("Non-Smoker")
+    print("  ✓ Smoking status selected")
+
+    # Capture after filling insured person details
+    artifact_manager.capture_screenshot(page, "page_1_insured_filled")
+
+    print("  → Coverage details...")
+    # Fill Manulife Par specific coverage fields
+    # Coverage type
+    coverage_type_dropdown = page.get_by_role("combobox", name="Coverage type")
+    # Select first available option (skip "Select")
+    coverage_type_dropdown.select_option(index=1)
+
+    # Premium Duration
+    premium_duration_dropdown = page.get_by_role("combobox", name="Premium Duration")
+    premium_duration_dropdown.select_option(index=1)
+
+    # Amount of insurance
+    amount_input = page.get_by_role("textbox", name="Amount of insurance, dollar")
+    amount_input.fill("100000")
+
+    # Dividend option
+    dividend_dropdown = page.get_by_role("combobox", name="Dividend option")
+    dividend_dropdown.select_option(index=1)
+
+    artifact_manager.capture_screenshot(page, "page_1_coverage_filled")
+
+    print("  → Riders and other questions...")
+    # Strategy: Find each question by its unique text, then click the associated radio
+
+    # Riders question - custom React button component, trigger via JavaScript
+    print("  → Attempting Riders selection...")
+    try:
+        # These are custom button-based radios with IDs: RIDER_STATUS_ID-0 (Yes), RIDER_STATUS_ID-1 (No)
+        # Standard Playwright clicks don't trigger React handlers, use JS dispatch
+        riders_no_button = page.locator("#RIDER_STATUS_ID-1")
+        riders_no_button.scroll_into_view_if_needed()
+
+        # Dispatch click event via JavaScript to trigger React handlers
+        page.evaluate("""
+            const btn = document.querySelector('#RIDER_STATUS_ID-1');
+            btn.click();
+            btn.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
+        page.wait_for_timeout(500)
+        print("  ✓ Riders: No (via JS dispatch)")
+    except Exception as e:
+        print(f"  ⚠️  Riders selection failed: {e}")
+        # Continue anyway to see validation
+
+    # Quebec question - custom React button component, trigger via JavaScript
+    print("  → Attempting Quebec selection...")
+    try:
+        # These are custom button-based radios with IDs: wel-pol-quebec-0 (Yes), wel-pol-quebec-1 (No)
+        quebec_no_button = page.locator("#wel-pol-quebec-1")
+        quebec_no_button.scroll_into_view_if_needed()
+
+        # Dispatch click event via JavaScript to trigger React handlers
+        page.evaluate("""
+            const btn = document.querySelector('#wel-pol-quebec-1');
+            btn.click();
+            btn.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
+        page.wait_for_timeout(500)
+        print("  ✓ Quebec: No (via JS dispatch)")
+    except Exception as e:
+        print(f"  ⚠️  Quebec selection failed: {e}")
+        # Continue anyway to see validation
+
+    # Additional products - custom React button component, trigger via JavaScript
+    print("  → Attempting Additional Products selection...")
+    try:
+        # These are custom button-based radios with IDs: wel-multiple-prod-0 (Yes), wel-multiple-prod-1 (No)
+        products_no_button = page.locator("#wel-multiple-prod-1")
+        products_no_button.scroll_into_view_if_needed()
+
+        # Dispatch click event via JavaScript to trigger React handlers
+        page.evaluate("""
+            const btn = document.querySelector('#wel-multiple-prod-1');
+            btn.click();
+            btn.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
+        page.wait_for_timeout(500)
+        print("  ✓ Additional Products: No (via JS dispatch)")
+    except Exception as e:
+        print(f"  ⚠️  Additional Products selection failed: {e}")
+        # Continue anyway to see validation
+
+    # Medical information - custom React button component, trigger via JavaScript
+    print("  → Attempting Medical Information selection...")
+    try:
+        # These are custom button-based radios with IDs: wel-electronic-app-0 (On this electronic application), wel-electronic-app-1 (A tele-interview)
+        medical_electronic_button = page.locator("#wel-electronic-app-0")
+        medical_electronic_button.scroll_into_view_if_needed()
+
+        # Dispatch click event via JavaScript to trigger React handlers
+        page.evaluate("""
+            const btn = document.querySelector('#wel-electronic-app-0');
+            btn.click();
+            btn.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
+        page.wait_for_timeout(500)
+        print("  ✓ Medical Information: On this electronic application (via JS dispatch)")
+    except Exception as e:
+        print(f"  ⚠️  Medical Information selection failed: {e}")
+        # Continue anyway to see validation
+
+    # Capture after filling all fields
+    artifact_manager.capture_state_snapshot(page, "page_1_all_filled")
+
+    # Step 6: Try to navigate to next page
+    print("\nStep 6: Attempting to navigate to Page 2...")
+    next_button = page.get_by_role("button", name="Start a new application")
+
+    # Check if button is enabled
+    if next_button.is_enabled():
+        print("  ✓ 'Start' button is enabled")
+    else:
+        print("  ⚠️  'Start' button is disabled - missing required fields")
+        # Capture screenshot to see validation errors
+        artifact_manager.capture_screenshot(page, "page_1_validation_errors")
+        pytest.fail("Cannot proceed - required fields still missing")
+
+    next_button.click()
+    page.wait_for_load_state("networkidle", timeout=15000)
+
+    # Capture Page 2
+    page_2_url = page.url
+    print(f"  ✓ Page 2 URL: {page_2_url}")
+
+    # Wait for any loading indicators to disappear
+    page.wait_for_timeout(2000)
+
+    artifact_manager.capture_state_snapshot(page, "page_2_initial")
+
+    # Step 7: Analyze what content is now visible
+    print("\nStep 7: Analyzing Page 2 content...")
+
+    # Check if URL changed (unlikely for React SPA, but worth checking)
+    if page_2_url != WELCOME_PAGE_URL:
+        print(f"  ✓ URL changed to: {page_2_url}")
+    else:
+        print("  → URL unchanged (React SPA behavior)")
+
+    # Look for main headings to understand page structure
+    try:
+        all_headings = page.locator("h1, h2, h3").all_text_contents()
+        print(f"  Headings found: {all_headings}")
+    except Exception as e:
+        print(f"  ⚠️  Could not get headings: {e}")
+
+    # Check for navigation buttons
+    try:
+        buttons = page.locator("button").all_text_contents()
+        print(f"  Buttons found: {buttons[:10]}")  # First 10 buttons
+    except Exception as e:
+        print(f"  ⚠️  Could not get buttons: {e}")
+
+    # Check if there's a "Save" or "Continue" or "Next" button
+    possible_next_buttons = [
+        "Continue", "Next", "Save and continue",
+        "Save", "Proceed", "Submit"
+    ]
+
+    next_action_button = None
+    for button_text in possible_next_buttons:
+        try:
+            btn = page.get_by_role("button", name=button_text)
+            if btn.is_visible():
+                print(f"  ✓ Found navigation button: '{button_text}'")
+                next_action_button = (button_text, btn)
+                break
+        except:
+            pass
+
+    if next_action_button:
+        button_name, button = next_action_button
+        print(f"\n  → Clicking '{button_name}' to continue...")
+        button.click()
+        page.wait_for_load_state("networkidle", timeout=15000)
+        page.wait_for_timeout(2000)
+
+        page_3_url = page.url
+        print(f"  ✓ Page 3 loaded: {page_3_url}")
+        artifact_manager.capture_state_snapshot(page, "page_3_initial")
+
+        # Continue exploring if more buttons found
+        print("\n  → Looking for additional navigation...")
+        for button_text in possible_next_buttons:
+            try:
+                btn = page.get_by_role("button", name=button_text)
+                if btn.is_visible():
+                    print(f"  ✓ Found: '{button_text}'")
+            except:
+                pass
+    else:
+        print("\n  ⚠️  No obvious navigation button found on Page 2")
+        print("  This might be the final screen, or navigation is not button-based")
+
+    print("\n" + "=" * 50)
+    print("✓ Spike Complete - Review Artifacts for Next Steps")
+    print("=" * 50)
+
+    print("\n✓ Form exploration spike completed")
+    print()
+    print("Next steps:")
+    print(f"1. Review trace: npx playwright show-trace {artifact_manager.get_trace_path()}")
+    print(f"2. Inspect artifacts: ls {artifact_manager.session_path}")
+    print(f"3. Examine screenshots to understand form flow")
+    print(f"4. Update field catalog with newly discovered fields")

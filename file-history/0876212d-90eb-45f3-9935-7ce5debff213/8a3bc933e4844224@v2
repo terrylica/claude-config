@@ -1,0 +1,281 @@
+# Manulife Par Authentication Implementation
+
+**Purpose**: Automated authentication with passkey support via CDP WebAuthn
+**Status**: Production (v1.0.0, 2025-10-17)
+**Script**: `/Users/terryli/own/insurance/scripts/setup/final_auth.py`
+
+---
+
+## Authentication Flow
+
+Manulife uses ForgeRock OpenAM with conditional 2FA:
+
+```
+1. Username + Password (React form)
+   ↓
+2. [CONDITIONAL] Passkey button appears if 2FA triggered
+   ↓ (click if present)
+3. [CONDITIONAL] MFA options page (passkey/SMS/email)
+   ↓ (click passkey if present)
+4. Authenticated portal
+```
+
+**Key Finding**: Passkey 2FA is **conditional** and **multi-phase** - may appear immediately after password submit OR on separate MFA page. Session state affects when it triggers.
+
+---
+
+## Critical Implementation Details
+
+### React Form Handling
+
+**Issue**: React forms don't respond to Playwright's `.fill()` method.
+
+**Root Cause**: `.fill()` sets the value directly without triggering React's `onChange` event handlers, causing validation to fail with "You need to fill in your username".
+
+**Solution**: Use `.type()` with delay to simulate human input:
+
+```python
+# ❌ Fails silently - form thinks field is empty
+page.locator("#username").fill(username)
+
+# ✅ Triggers React onChange properly
+username_field = page.locator("#username")
+username_field.click()               # Focus field
+username_field.fill("")              # Clear any existing value
+username_field.type(username, delay=50)  # Type with 50ms/char delay
+```
+
+**Applies to**:
+- `#username` (text input)
+- `#password` (password input)
+- Any React-controlled input field
+
+---
+
+### Passkey Authentication
+
+**Method**: CDP (Chrome DevTools Protocol) virtual authenticator
+
+**Setup Sequence**:
+```python
+# 1. Create CDP session
+cdp = context.new_cdp_session(page)
+cdp.send("WebAuthn.enable")
+
+# 2. Create virtual authenticator
+result = cdp.send("WebAuthn.addVirtualAuthenticator", {
+    "options": {
+        "protocol": "ctap2",
+        "ctap2Version": "ctap2_1",
+        "transport": "internal",
+        "hasResidentKey": True,
+        "hasUserVerification": True,
+        "automaticPresenceSimulation": True,
+        "isUserVerified": True
+    }
+})
+authenticator_id = result["authenticatorId"]
+
+# 3. Inject passkey credential (requires base64 padding + PKCS#8 format)
+cdp.send("WebAuthn.addCredential", {
+    "authenticatorId": authenticator_id,
+    "credential": {
+        "credentialId": passkey_credential_id,  # Base64 with padding
+        "privateKey": pkcs8_private_key,         # Converted from JWK
+        "rpId": passkey_rp_id,
+        "userHandle": passkey_user_handle,       # Base64 with padding
+        "signCount": 0,
+        "isResidentCredential": True
+    }
+})
+```
+
+**Key Format Requirements**:
+- **Base64 Padding**: Add `=` padding if missing (`len(s) % 4 != 0`)
+- **Private Key Format**: Convert JWK → PKCS#8 PEM → base64 (strip headers)
+- **Credential ID**: Must match enrolled passkey exactly
+
+---
+
+### Robust Passkey Detection
+
+**Challenge**: Passkey button may appear at multiple points or not at all.
+
+**Strategy**: Conditional detection loop after each authentication step:
+
+```python
+# After password submit, wait for page to settle
+time.sleep(3)  # React app needs time to render dynamic UI
+
+# Loop up to N times looking for passkey button
+max_passkey_clicks = 5
+passkey_clicks = 0
+
+while passkey_clicks < max_passkey_clicks:
+    current_url = page.url.lower()
+
+    # Exit if no longer on auth pages
+    if "signin" not in current_url and "mfa" not in current_url and "login" not in current_url:
+        break
+
+    # Try to find and click passkey button
+    if try_click_passkey_button(page, artifacts_dir, step_name):
+        passkey_clicks += 1
+        time.sleep(1)  # Brief pause between clicks
+    else:
+        break  # No button found, exit loop
+```
+
+**Passkey Button Selectors** (in priority order):
+```python
+[
+    ("button:has-text('Passkey')", "Button with 'Passkey'"),
+    ("button:has-text('passkey')", "Button with 'passkey' (lowercase)"),
+    ("button[id='passkey']", "Button with id=passkey"),
+    ("button:has-text('Use passkey')", "Button with 'Use passkey'"),
+    ("button:has-text('Sign in with passkey')", "Button with 'Sign in with passkey'"),
+]
+```
+
+**Timeout per selector**: 1000ms (fail fast if not visible)
+
+---
+
+## Usage
+
+### Generate Authenticated Session
+
+```bash
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.final_auth
+```
+
+**Output**: `/Users/terryli/own/insurance/storage-state.json` (authenticated session cookies)
+
+**Artifacts**: `/Users/terryli/own/insurance/artifacts/final_auth_YYYYMMDD_HHMMSS/`
+- Screenshots at each step
+- Final HTML for debugging
+- Authentication state verification
+
+### Required Doppler Secrets
+
+```bash
+MANULIFE_PAR_USERNAME           # Email address
+MANULIFE_PAR_PASSWORD           # Account password
+MANULIFE_PAR_PASSKEY_CREDENTIAL_ID    # Base64 credential ID
+MANULIFE_PAR_PASSKEY_RP_ID            # "id.manulife.ca"
+MANULIFE_PAR_PASSKEY_USER_HANDLE      # Base64 user handle
+MANULIFE_PAR_PASSKEY_PRIVATE_KEY      # Base64 JWK private key
+```
+
+**Retrieve from 1Password**: See [`credential-sync.md`](/Users/terryli/own/insurance/docs/workflows/credential-sync.md)
+
+---
+
+## Success Criteria
+
+**Authenticated URL patterns**:
+- ✓ `https://id.manulife.ca/products/advisor/auth?...`
+- ✓ `https://www.insurance.manulife.ca/dda/dda`
+- ✗ `https://id.manulife.ca/advisor/signin` (still on login)
+- ✗ `https://id.manulife.ca/advisor/mfa` (stuck on MFA)
+
+**Final title**: `"Manulife Online Access"` (not "Sign in with your Advisor Manulife ID")
+
+**Exit code**: `0` (success) or `1` (failure)
+
+---
+
+## Troubleshooting
+
+### Issue: "You need to fill in your username"
+
+**Symptom**: Form validation error despite code executing `.fill()`.
+
+**Cause**: React form doesn't recognize `.fill()` as user input.
+
+**Fix**: Replace `.fill()` with `.click()` + `.type(delay=50)`.
+
+### Issue: Passkey button not found
+
+**Symptom**: Script reports no passkey button, exits without clicking.
+
+**Causes**:
+1. **Session already has valid 2FA** - Passkey not required this time
+2. **Timing issue** - Page not fully rendered yet
+3. **Different flow path** - 2FA triggered on different page
+
+**Diagnosis**:
+1. Check final URL - if authenticated (`/products/advisor/auth`), 2FA wasn't needed
+2. Check screenshot artifacts - see what page actually loaded
+3. Increase settle time: `time.sleep(5)` instead of `3`
+
+**Resolution**: Script is defensive - if no passkey button found but authenticated successfully, that's valid.
+
+### Issue: Passkey authentication fails
+
+**Symptom**: Passkey button clicked but remains on MFA page.
+
+**Causes**:
+1. **Credential ID mismatch** - Passkey not recognized by server
+2. **RP ID mismatch** - Must be `"id.manulife.ca"` exactly
+3. **Key format error** - JWK not converted to PKCS#8 properly
+
+**Diagnosis**:
+```python
+# Verify credentials injected
+credentials = cdp.send("WebAuthn.getCredentials", {
+    "authenticatorId": authenticator_id
+})
+print(f"Stored credentials: {len(credentials['credentials'])}")
+```
+
+**Resolution**: Re-export passkey from 1Password, verify all base64 fields have proper padding.
+
+---
+
+## Session Duration
+
+**Observed**: Sessions last 10-30 minutes after authentication.
+
+**Expiration Behavior**: Reconnaissance redirects to `/advisor/signin` with OAuth parameters.
+
+**Regeneration**: Delete `storage-state.json` and re-run `final_auth.py`.
+
+---
+
+## Security Notes
+
+- `storage-state.json` contains active session tokens
+- File is gitignored - never commit
+- Treat as sensitive as passwords
+- Virtual authenticator credentials never persist to disk
+- CDP session is browser-process only
+
+---
+
+## Key Learnings
+
+1. **React Forms**: Always use `.type()` for React-controlled inputs
+2. **Passkey Timing**: Wait 3+ seconds after form submit for SPA to render
+3. **Conditional 2FA**: Passkey button may appear 0, 1, or 2+ times
+4. **Defensive Loop**: Keep trying passkey button until authenticated or no button found
+5. **URL Checking**: Use URL patterns to detect authentication success
+6. **Fail-Fast Selectors**: Use 1s timeout per selector to avoid long waits
+
+---
+
+## References
+
+**CDP WebAuthn**: [`docs/research/cdp-webauthn-reference.md`](/Users/terryli/own/insurance/docs/research/cdp-webauthn-reference.md)
+**Signin Analysis**: [`docs/analysis/manulife-signin-flow.md`](/Users/terryli/own/insurance/docs/analysis/manulife-signin-flow.md)
+**ForgeRock OpenAM**: Multi-stage callback authentication
+**Playwright Auth**: [Browser contexts and authentication](https://playwright.dev/docs/auth)
+
+---
+
+## Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2025-10-17 | Initial implementation with React form fix |

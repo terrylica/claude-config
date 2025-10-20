@@ -1,0 +1,884 @@
+# Visual Inspection Enforcement: Implementation Proposal
+
+**Version**: 1.0.0
+**Date**: 2025-10-17
+**Purpose**: Canonicalize visual inspection as mandatory practice for all exploratory/spike work
+
+---
+
+## Executive Summary
+
+This proposal outlines a **multi-layered enforcement strategy** to ensure AI coding agents and human developers consistently perform visual inspection (PNG screenshot examination) during reconnaissance, spike, and exploratory work.
+
+### Problem Statement
+
+Visual inspection via PNG screenshots is **critical** for discovering issues that ARIA trees and DOM dumps miss:
+- Form state changes (product selection accidentally changed)
+- Visual layout issues
+- Dynamic field visibility
+- Validation error states
+- Loading spinners and timing issues
+
+However, without enforcement mechanisms, agents may skip screenshot capture or examination, leading to bugs that could have been caught early.
+
+### Solution: 4-Layer Enforcement Architecture
+
+```
+Layer 1: Project Memory (CLAUDE.md)
+         ↓ Embedded instructions + checklists
+Layer 2: Pre-Commit Hooks
+         ↓ Validate artifacts before commit
+Layer 3: CI/CD Gates
+         ↓ Block merge if screenshots missing
+Layer 4: Agent Reflection Patterns
+         ↓ Self-validation before proceeding
+```
+
+---
+
+## Layer 1: Updated CLAUDE.md (Highest Priority)
+
+### Proposed Changes to `/Users/terryli/own/insurance/CLAUDE.md`
+
+Add new section after "Playwright Automation":
+
+```markdown
+## Visual Inspection Mandate (NON-NEGOTIABLE)
+
+**CRITICAL REQUIREMENT**: All reconnaissance, spike, and exploratory work MUST include PNG screenshot capture AND visual examination.
+
+### Why This Matters
+
+Visual inspection catches issues invisible in ARIA trees:
+- **Evidence**: 2025-10-17 reconnaissance discovered accidental product change (Manulife Par → Family Term) only visible in PNG screenshot
+- DOM/ARIA showed no difference, but visual showed wrong form fields loaded
+- Without PNG examination, hours of debugging would have occurred later
+
+### Mandatory Workflow for All Exploratory Work
+
+#### BEFORE Implementing Any Automation:
+
+```python
+# 1. CAPTURE: Screenshot at every significant step
+artifact_manager.capture_screenshot(page, "step_name")
+
+# 2. EXAMINE: Visually inspect EACH screenshot
+# Ask yourself:
+# - Does this match what I expected?
+# - Are the right fields visible?
+# - Is any PII exposed (needs masking)?
+# - Do validation errors make sense?
+# - Are there unexpected state changes?
+
+# 3. DOCUMENT: Note findings in report.md
+# Include screenshot references: see artifacts/XXX/step_name.png
+```
+
+#### Reconnaissance Checklist (MUST complete before marking done):
+
+- [ ] **Initial page screenshot captured** (`page_initial.png`)
+- [ ] **Screenshot after each form interaction** (product select, field fill, etc.)
+- [ ] **Final state screenshot** (`page_final.png`)
+- [ ] **All screenshots visually examined** (not just generated)
+- [ ] **Findings documented with PNG references** in report
+- [ ] **Any visual discrepancies investigated** (e.g., wrong product selected)
+- [ ] **PII masking verified visually** in all screenshots
+
+#### Artifact Validation (Self-Check)
+
+Before proceeding to implementation phase:
+
+```python
+def validate_visual_inspection() -> bool:
+    """AI agent MUST call this mentally before continuing."""
+
+    checklist = {
+        "screenshots_exist": Path("artifacts/*/0*.png").exists(),
+        "screenshots_examined": input("Did you LOOK AT each screenshot? (yes/no): "),
+        "visual_issues_noted": input("Any visual discrepancies? (describe or 'none'): "),
+        "pii_masked": input("PII fields masked in screenshots? (yes/no): "),
+        "findings_documented": Path("artifacts/*/report.md").exists(),
+    }
+
+    if not all(checklist.values()):
+        raise ValueError("Visual inspection incomplete - cannot proceed")
+
+    return True
+```
+
+### For AI Coding Agents: Reflection Pattern
+
+**STOP AFTER EACH STEP AND ASK**:
+
+1. **"Have I captured a screenshot?"**
+   If no → Capture now before proceeding
+
+2. **"Have I EXAMINED the screenshot?"**
+   If no → Open/view the PNG file and describe what you see
+
+3. **"Does the visual match my expectations?"**
+   If no → Investigate discrepancy before continuing
+
+4. **"Should this be documented in the report?"**
+   If yes → Add finding with screenshot reference
+
+**Example Reflection**:
+
+```markdown
+## Step 3: Selected "Manulife Par" product
+
+### Screenshot: `artifacts/recon_20251017/003_product_selected.png`
+
+### Visual Examination:
+- ✅ Product dropdown shows "Manulife Par"
+- ✅ "Upload Later" radio button selected
+- ✅ Form fields match expected Par structure
+- ⚠️ Blue information banner visible (can be dismissed)
+
+### Discrepancies: None
+### Action: Proceed to next step
+```
+
+### Visual Inspection Failure Examples
+
+#### Example 1: Selector Bug Caught by Visual Inspection
+
+**Code**:
+```python
+# BUG: Overly broad selector
+page.locator("select, [role='combobox']").filter(has_text="Select").first.select_option(index=1)
+```
+
+**What Happened**:
+- Code selected first dropdown matching "Select" text
+- This was the Product dropdown, not Smoking Status dropdown
+- Product changed from "Manulife Par" to "Family Term"
+- Form reset with different fields
+
+**How Visual Inspection Caught It**:
+- Screenshot showed "Family Term" in product dropdown
+- Form fields didn't match expected Par structure
+- ARIA tree showed same elements (no visible diff)
+
+**Fix**:
+```python
+# CORRECT: Specific selector
+smoking_dropdown = page.get_by_role("combobox", name="Illustrated smoking status")
+smoking_dropdown.select_option("Non-Smoker")
+```
+
+**Lesson**: Always examine screenshots to verify expected state.
+
+---
+
+## Enforcement Mechanisms
+
+### 1. Project Memory Reminders
+
+In EVERY relevant section of CLAUDE.md, include this reminder:
+
+```markdown
+> 📸 **VISUAL INSPECTION REQUIRED**: Capture and examine PNG screenshots at each step.
+> See "Visual Inspection Mandate" section for checklist.
+```
+
+### 2. Pre-Flight Checklist in Agent Prompts
+
+Update agent instructions to include pre-flight validation:
+
+```markdown
+Before starting ANY reconnaissance or spike work, confirm:
+
+1. [ ] Artifact directory created with timestamp
+2. [ ] Screenshot capture configured (with PII masking)
+3. [ ] Committed to examining EVERY screenshot before proceeding
+4. [ ] Report template prepared for findings documentation
+
+IMPORTANT: If you cannot confirm all 4 items, STOP and set up properly first.
+```
+
+### 3. Post-Flight Validation Checklist
+
+After completing reconnaissance:
+
+```markdown
+## Reconnaissance Complete Checklist
+
+- [ ] Minimum 3 screenshots captured (initial, interaction, final)
+- [ ] All screenshots visually examined (describe what you saw)
+- [ ] Any visual discrepancies documented in report
+- [ ] PII masking verified by visual inspection
+- [ ] Screenshots referenced in findings (e.g., "see 003_*.png")
+- [ ] Manifest (index.json) includes screenshot inventory
+
+**CANNOT PROCEED TO IMPLEMENTATION UNTIL ALL ITEMS CHECKED**
+```
+
+---
+
+## Layer 2: Pre-Commit Hook (Medium Priority)
+
+### Implementation
+
+Create `.git/hooks/pre-commit`:
+
+```bash
+#!/bin/bash
+# Pre-commit hook: Validate screenshot artifacts
+
+echo "Validating screenshot artifacts..."
+
+# Find all artifact directories modified in this commit
+ARTIFACT_DIRS=$(git diff --cached --name-only | grep "^artifacts/" | cut -d'/' -f1-2 | sort -u)
+
+if [ -z "$ARTIFACT_DIRS" ]; then
+    echo "No artifact changes detected, skipping validation"
+    exit 0
+fi
+
+for DIR in $ARTIFACT_DIRS; do
+    echo "Checking $DIR..."
+
+    # Validate screenshots exist
+    PNG_COUNT=$(find "$DIR" -name "*.png" 2>/dev/null | wc -l)
+    if [ "$PNG_COUNT" -lt 3 ]; then
+        echo "❌ ERROR: $DIR has only $PNG_COUNT screenshots (minimum 3 required)"
+        echo "   Expected: initial, interaction, final screenshots"
+        exit 1
+    fi
+
+    # Validate manifest exists
+    if [ ! -f "$DIR/index.json" ]; then
+        echo "❌ ERROR: $DIR missing index.json manifest"
+        exit 1
+    fi
+
+    # Validate report references screenshots
+    if [ -f "$DIR/report.md" ]; then
+        if ! grep -q "\.png" "$DIR/report.md"; then
+            echo "⚠️  WARNING: $DIR/report.md doesn't reference any screenshots"
+            echo "   Did you examine the screenshots and document findings?"
+            read -p "Continue anyway? (yes/no): " CONTINUE
+            if [ "$CONTINUE" != "yes" ]; then
+                exit 1
+            fi
+        fi
+    fi
+
+    echo "✅ $DIR passed validation ($PNG_COUNT screenshots)"
+done
+
+echo "✅ All artifact validations passed"
+exit 0
+```
+
+Make executable:
+```bash
+chmod +x .git/hooks/pre-commit
+```
+
+---
+
+## Layer 3: CI/CD Gate (High Priority for Compliance)
+
+### GitHub Actions Workflow
+
+Create `.github/workflows/validate-reconnaissance.yml`:
+
+```yaml
+name: Validate Reconnaissance Artifacts
+
+on:
+  pull_request:
+    paths:
+      - 'artifacts/**'
+      - 'tests/reconnaissance/**'
+
+jobs:
+  validate-artifacts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Find artifact directories
+        id: find-artifacts
+        run: |
+          DIRS=$(find artifacts -maxdepth 1 -type d -name "*_*" | paste -sd "," -)
+          echo "artifact_dirs=$DIRS" >> $GITHUB_OUTPUT
+
+      - name: Validate screenshots
+        run: |
+          python << 'EOF'
+          import sys
+          from pathlib import Path
+          import json
+
+          artifact_dirs = "${{ steps.find-artifacts.outputs.artifact_dirs }}".split(",")
+          failures = []
+
+          for dir_path in artifact_dirs:
+              if not dir_path:
+                  continue
+
+              dir = Path(dir_path)
+              print(f"Validating {dir}...")
+
+              # Check screenshot count
+              screenshots = list(dir.glob("**/*.png"))
+              if len(screenshots) < 3:
+                  failures.append(f"{dir}: Only {len(screenshots)} screenshots (minimum 3)")
+                  continue
+
+              # Check manifest
+              manifest = dir / "index.json"
+              if not manifest.exists():
+                  failures.append(f"{dir}: Missing index.json")
+                  continue
+
+              # Check manifest references screenshots
+              with open(manifest) as f:
+                  data = json.load(f)
+                  if "artifacts" not in data or "screenshots" not in data["artifacts"]:
+                      failures.append(f"{dir}: Manifest missing screenshot inventory")
+
+              # Check report
+              report = dir / "report.md"
+              if report.exists():
+                  content = report.read_text()
+                  if ".png" not in content:
+                      print(f"⚠️  {dir}/report.md doesn't reference screenshots")
+
+              print(f"✅ {dir} validated ({len(screenshots)} screenshots)")
+
+          if failures:
+              print("\n❌ VALIDATION FAILED:")
+              for failure in failures:
+                  print(f"  - {failure}")
+              sys.exit(1)
+
+          print("\n✅ All artifacts validated")
+          EOF
+
+      - name: Comment on PR
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🚨 Screenshot Validation Failed
+
+              Your reconnaissance artifacts are missing required screenshots or documentation.
+
+              **Requirements**:
+              - Minimum 3 screenshots per reconnaissance session
+              - \`index.json\` manifest with screenshot inventory
+              - Screenshots referenced in \`report.md\` with findings
+
+              **Action Required**:
+              Review the "Visual Inspection Mandate" in CLAUDE.md and ensure all steps completed.
+              `
+            });
+```
+
+---
+
+## Layer 4: Agent Reflection Patterns (Embedded in Prompts)
+
+### Pattern 1: Mandatory Screenshot Examination Prompt
+
+Add to CLAUDE.md for use in reconnaissance scripts:
+
+```markdown
+## AI Agent Reconnaissance Prompt Template
+
+When performing reconnaissance, you MUST follow this pattern:
+
+```python
+# After EVERY page interaction or state change:
+
+# 1. CAPTURE
+screenshot_path = artifact_manager.capture_screenshot(page, "step_name")
+
+# 2. EXAMINE (Agent reflection)
+print(f"\n{'='*60}")
+print(f"VISUAL INSPECTION: {screenshot_path}")
+print(f"{'='*60}")
+
+# YOU MUST ANSWER THESE QUESTIONS:
+print("1. What do I see in this screenshot?")
+print("   [Describe visible elements, state, layout]")
+print()
+print("2. Does this match my expectations?")
+print("   [Yes/No + explanation]")
+print()
+print("3. Are there any unexpected changes?")
+print("   [List any discrepancies]")
+print()
+print("4. Is PII properly masked?")
+print("   [Verify no sensitive data visible]")
+print()
+print("5. Should this be documented?")
+print("   [Yes/No + what finding]")
+print(f"{'='*60}\n")
+
+# 3. DOCUMENT (if findings)
+if "unexpected change detected":
+    findings.append({
+        "step": "step_name",
+        "screenshot": screenshot_path,
+        "issue": "Description of what was unexpected",
+        "action_taken": "How you addressed it"
+    })
+```
+
+This pattern **forces** the agent to:
+- Capture screenshots (technical)
+- Examine screenshots (cognitive)
+- Document findings (knowledge capture)
+
+### Pattern 2: Pre-Commit Self-Validation
+
+Before committing reconnaissance work:
+
+```markdown
+## Pre-Commit Validation (AI Agent Self-Check)
+
+Before proceeding to commit, I MUST verify:
+
+**Screenshot Capture**:
+- [ ] How many screenshots did I capture? [Count]
+- [ ] List each screenshot and what it shows:
+  - `001_*.png`: [Description]
+  - `002_*.png`: [Description]
+  - `003_*.png`: [Description]
+
+**Visual Examination**:
+- [ ] Did I LOOK AT each screenshot? [Yes/No]
+- [ ] What did I learn from visual inspection that I couldn't learn from ARIA/DOM?
+  - [Specific insight 1]
+  - [Specific insight 2]
+
+**Findings Documentation**:
+- [ ] Are all visual findings documented in report.md? [Yes/No]
+- [ ] Does report reference screenshots as evidence? [Yes/No]
+
+**Quality Check**:
+- [ ] Would another developer understand my findings from the screenshots + report? [Yes/No]
+- [ ] If I had to redo this reconnaissance tomorrow, would my artifacts be sufficient? [Yes/No]
+
+**CRITICAL**: If any answer is "No" or concerning, STOP and fix before committing.
+```
+
+---
+
+## Layer 5: Specification-Driven Enforcement
+
+### OpenAPI Extension: Visual Validation Requirements
+
+Update `/Users/terryli/own/insurance/specifications/playwright-automation.yaml`:
+
+```yaml
+x-visual-inspection-policy:
+  description: "Mandatory visual inspection requirements for all reconnaissance work"
+
+  requirements:
+    - id: REQ-VISUAL-001
+      requirement: "MUST capture PNG screenshot at every significant state change"
+      validation_method: "Count .png files in artifacts directory (minimum 3)"
+      severity: "BLOCKER"
+
+    - id: REQ-VISUAL-002
+      requirement: "MUST visually examine each screenshot (not just generate)"
+      validation_method: "Report must reference screenshots with findings"
+      severity: "BLOCKER"
+
+    - id: REQ-VISUAL-003
+      requirement: "MUST document visual discrepancies in report"
+      validation_method: "Report contains 'Visual Examination' sections"
+      severity: "CRITICAL"
+
+    - id: REQ-VISUAL-004
+      requirement: "MUST verify PII masking by visual inspection"
+      validation_method: "Report includes PII masking verification statement"
+      severity: "CRITICAL"
+
+    - id: REQ-VISUAL-005
+      requirement: "MUST capture before/after screenshots for critical actions"
+      validation_method: "Paired screenshots exist (e.g., 01_before.png, 02_after.png)"
+      severity: "IMPORTANT"
+
+  enforcement:
+    - layer: "Project Memory (CLAUDE.md)"
+      mechanism: "Embedded checklists and reflection patterns"
+
+    - layer: "Pre-commit Hook"
+      mechanism: "Validate screenshot count and manifest"
+
+    - layer: "CI/CD Pipeline"
+      mechanism: "Block PR merge if requirements not met"
+
+    - layer: "Agent Prompts"
+      mechanism: "Self-validation before proceeding to next phase"
+
+  examples:
+    good:
+      - description: "Reconnaissance with comprehensive visual inspection"
+        artifacts:
+          - "001_initial_page.png (with description: 'Welcome page loaded, Manulife Par selected')"
+          - "002_product_selected.png (with description: 'Verified product dropdown shows Manulife Par')"
+          - "003_form_loaded.png (with description: 'Coverage selection page with all expected fields visible')"
+        report_excerpt: |
+          ## Visual Examination Findings
+
+          **Step 2: Product Selection** (`002_product_selected.png`)
+          - Verified product dropdown displays "Manulife Par" as expected
+          - "Upload Later" radio button correctly selected
+          - No unexpected form state changes
+
+          **Step 3: Form Load** (`003_form_loaded.png`)
+          - All expected fields visible: First name, Last name, Sex, DOB, Smoking status
+          - Coverage section shows: Coverage type, Premium Duration, Amount, Dividend option
+          - No validation errors present
+          - PII masking not yet applied (no sensitive data entered)
+
+    bad:
+      - description: "Screenshots captured but not examined"
+        issue: "Report has no visual examination sections"
+        violation: "REQ-VISUAL-002"
+
+      - description: "Only 1 screenshot for entire reconnaissance"
+        issue: "Insufficient visual documentation"
+        violation: "REQ-VISUAL-001"
+
+      - description: "Report doesn't reference screenshots"
+        issue: "No evidence linking findings to visual inspection"
+        violation: "REQ-VISUAL-003"
+```
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Project Memory Updates (IMMEDIATE - Day 1)
+
+**Time**: 1 hour
+
+- [ ] Update `/Users/terryli/own/insurance/CLAUDE.md` with "Visual Inspection Mandate" section
+- [ ] Add checklists to reconnaissance section
+- [ ] Update agent prompt templates with reflection patterns
+- [ ] Add visual inspection examples (good/bad)
+
+**Deliverable**: Updated CLAUDE.md with enforcement language
+
+### Phase 2: Pre-Commit Hook (HIGH PRIORITY - Day 1-2)
+
+**Time**: 2 hours
+
+- [ ] Create `.git/hooks/pre-commit` script
+- [ ] Test with sample artifact directory
+- [ ] Document hook behavior in project README
+- [ ] Share hook with team (or commit template to `.github/hooks/`)
+
+**Deliverable**: Working pre-commit validation
+
+### Phase 3: CI/CD Gate (HIGH PRIORITY - Day 2-3)
+
+**Time**: 3 hours
+
+- [ ] Create `.github/workflows/validate-reconnaissance.yml`
+- [ ] Test workflow with sample PR
+- [ ] Configure branch protection rules
+- [ ] Document CI/CD requirements in CONTRIBUTING.md
+
+**Deliverable**: Automated PR validation
+
+### Phase 4: Specification Updates (MEDIUM PRIORITY - Week 1)
+
+**Time**: 2 hours
+
+- [ ] Update `playwright-automation.yaml` with visual inspection policy
+- [ ] Create compliance checklist template
+- [ ] Generate validation script from spec
+
+**Deliverable**: Machine-readable requirements
+
+### Phase 5: Agent Behavior Testing (ONGOING)
+
+**Time**: Ongoing during next reconnaissance sessions
+
+- [ ] Test updated CLAUDE.md with actual reconnaissance work
+- [ ] Verify agents self-validate before committing
+- [ ] Collect feedback on enforcement mechanisms
+- [ ] Refine based on real-world usage
+
+**Deliverable**: Validated enforcement system
+
+---
+
+## Success Metrics
+
+### How We Know It's Working
+
+**Qualitative Indicators**:
+- [ ] Every reconnaissance session has 3+ screenshots
+- [ ] Reports consistently reference PNG files with findings
+- [ ] Visual discrepancies caught early (before implementation)
+- [ ] No more "selector bugs" like the Manulife Par incident
+
+**Quantitative Metrics**:
+- **Screenshot Coverage**: Avg screenshots per reconnaissance session (target: ≥5)
+- **Visual Examination Rate**: % of reports with visual findings sections (target: 100%)
+- **Bug Prevention**: Issues caught in recon vs. implementation phase (target: 80% in recon)
+- **Compliance Rate**: % of PRs passing artifact validation on first try (target: >90%)
+
+### Enforcement Effectiveness Matrix
+
+| Mechanism | Bypass Difficulty | Automation Support | Maintenance Effort |
+|-----------|-------------------|--------------------|--------------------|
+| CLAUDE.md reminders | Easy (ignore instructions) | High (agents read it) | Low (version controlled) |
+| Pre-commit hook | Medium (can skip with --no-verify) | High (automatic) | Low (script maintenance) |
+| CI/CD gate | Hard (requires approval to bypass) | High (automatic) | Medium (workflow updates) |
+| Agent reflection | Medium (agent can short-circuit) | High (built into prompt) | Low (embedded in CLAUDE.md) |
+| Specification | Hard (formal requirement) | Medium (needs tooling) | Medium (spec maintenance) |
+
+**Combined System**: Very Hard to bypass (requires intentionally circumventing multiple layers)
+
+---
+
+## Appendix: Example CLAUDE.md Section
+
+### Proposed Addition to `/Users/terryli/own/insurance/CLAUDE.md`
+
+```markdown
+---
+
+## 📸 Visual Inspection Mandate (CRITICAL)
+
+**STATUS**: NON-NEGOTIABLE REQUIREMENT
+**APPLIES TO**: All reconnaissance, spike, and exploratory work
+**RATIONALE**: Visual inspection catches issues invisible in ARIA/DOM analysis
+
+### Historical Context
+
+**2025-10-17**: Reconnaissance on Manulife Par form discovered critical selector bug ONLY through PNG examination:
+- Overly broad CSS selector accidentally changed product from "Manulife Par" to "Family Term"
+- ARIA tree comparison showed NO difference (same structure, different content)
+- PNG screenshot clearly showed wrong product selected
+- **Impact**: Would have caused hours of debugging during implementation phase
+
+**Lesson**: Screenshots are NOT optional — they are MANDATORY evidence.
+
+---
+
+### Mandatory Workflow
+
+**FOR EVERY RECONNAISSANCE OR SPIKE TASK:**
+
+#### 1. Pre-Flight Setup (5 min)
+
+```python
+# Configure screenshot capture with PII masking
+from utils.artifact_manager import ArtifactManager
+
+artifact_manager = ArtifactManager(session_name="recon_{timestamp}")
+artifact_manager.configure_masking(pii_selectors=[
+    "[data-testid*='ssn']",
+    "[data-testid*='email']",
+    "[type='password']",
+])
+```
+
+- [ ] Artifact directory created
+- [ ] PII masking configured
+- [ ] Screenshot capture tested (trial screenshot)
+
+#### 2. During Work: Capture + Examine Loop
+
+**AFTER EVERY SIGNIFICANT ACTION**:
+
+```python
+# 1. Perform action
+page.get_by_role("combobox", name="Product").select_option("Manulife Par")
+
+# 2. IMMEDIATE screenshot
+screenshot_path = artifact_manager.capture_screenshot(page, "product_selected")
+
+# 3. MANDATORY EXAMINATION (AI Agent: STOP and THINK)
+print("\n" + "="*70)
+print(f"VISUAL INSPECTION CHECKPOINT: {screenshot_path}")
+print("="*70)
+print("Q1: What do I see in this screenshot?")
+print("    [Describe key visible elements]")
+print()
+print("Q2: Does the product dropdown show 'Manulife Par'?")
+print("    [Verify expected state]")
+print()
+print("Q3: Are there any unexpected changes to the page?")
+print("    [Check for side effects]")
+print()
+print("Q4: Is any PII visible that should be masked?")
+print("    [Verify masking effectiveness]")
+print("="*70 + "\n")
+
+# 4. Document if findings
+if "unexpected behavior":
+    findings_log.append({
+        "screenshot": screenshot_path,
+        "finding": "Description",
+        "action": "How addressed"
+    })
+```
+
+#### 3. Post-Work: Validation Checklist
+
+Before committing or moving to implementation:
+
+```markdown
+## Visual Inspection Completion Checklist
+
+### Screenshot Inventory
+- [ ] **Minimum 3 screenshots captured**:
+  - [ ] Initial state (`001_initial.png`)
+  - [ ] Mid-workflow (`002_*.png`, `003_*.png`, ...)
+  - [ ] Final state (`00N_final.png`)
+
+### Visual Examination Proof
+- [ ] **Examined ALL screenshots** (not just generated)
+- [ ] **Documented visual findings** in `report.md`:
+  - [ ] What each screenshot shows
+  - [ ] Any visual discrepancies noted
+  - [ ] Verification of expected state
+  - [ ] PII masking confirmation
+
+### Quality Gates
+- [ ] **Report references screenshots** (e.g., "see 003_*.png")
+- [ ] **Visual findings inform next steps** (spec updates, bug fixes, etc.)
+- [ ] **Another person could understand findings from screenshots + report**
+
+### Artifact Completeness
+- [ ] `index.json` manifest includes screenshot inventory
+- [ ] All screenshots referenced in manifest
+- [ ] Metadata documents examination timestamps
+
+**CANNOT PROCEED TO IMPLEMENTATION UNTIL ALL ITEMS CHECKED ✅**
+```
+
+---
+
+### Enforcement Mechanisms
+
+#### Layer 1: Project Memory (This File)
+- **Mechanism**: Embedded checklists, examples, reflection patterns
+- **Strength**: Always available, version-controlled, AI agents read on every session
+- **Weakness**: Can be ignored (no technical enforcement)
+
+#### Layer 2: Pre-Commit Hook
+- **Mechanism**: `.git/hooks/pre-commit` validates screenshot count and references
+- **Strength**: Blocks commits with insufficient screenshots
+- **Weakness**: Can be bypassed with `--no-verify`
+
+#### Layer 3: CI/CD Pipeline
+- **Mechanism**: GitHub Actions validates artifacts on PR
+- **Strength**: Cannot be bypassed without approval
+- **Weakness**: Requires pipeline setup
+
+#### Layer 4: Specification
+- **Mechanism**: `playwright-automation.yaml` defines formal requirements
+- **Strength**: Machine-readable, enforceable via tooling
+- **Weakness**: Requires custom validation scripts
+
+---
+
+### Examples
+
+#### ✅ GOOD: Comprehensive Visual Inspection
+
+```markdown
+## Reconnaissance Report: Manulife Par Form
+
+### Step 2: Product Selection (`002_product_selected.png`)
+
+**Visual Examination**:
+- Product dropdown displays "Manulife Par" as expected ✅
+- "Upload Later" radio button correctly selected ✅
+- Blue information banner visible (dismissible)
+- No validation errors present
+- Form structure matches expected Manulife Par fields
+
+**Conclusion**: Product selection successful, proceeding to form fill.
+```
+
+#### ❌ BAD: Screenshots Without Examination
+
+```markdown
+## Reconnaissance Report: Manulife Par Form
+
+### Artifacts
+- 001_initial.png
+- 002_selected.png
+- 003_final.png
+
+### Next Steps
+Implement automation based on ARIA tree analysis.
+```
+
+**Problems**:
+- No description of what screenshots show
+- No evidence of visual examination
+- No verification of expected state
+- Cannot reproduce findings from this report
+
+---
+
+### FAQ
+
+**Q: Why can't I just use ARIA snapshots?**
+A: ARIA shows structure, not state. Screenshot on 2025-10-17 showed "Family Term" selected when ARIA tree looked identical to "Manulife Par" version. Visual inspection is the ONLY way to catch these issues.
+
+**Q: This adds significant time. Is it worth it?**
+A: 2 minutes per screenshot examination saves hours of debugging. The 2025-10-17 incident would have required 4+ hours to diagnose during implementation vs. 30 seconds to catch visually.
+
+**Q: What if I'm confident the selectors are correct?**
+A: Confidence doesn't prevent bugs. The selector that caused the product change issue seemed correct in code review. Visual verification is non-negotiable.
+
+**Q: Can I skip screenshots for trivial changes?**
+A: No. "Trivial" changes have caused production incidents. Screenshot every significant state transition.
+
+---
+
+### Violation Consequences
+
+**If screenshot requirements not met**:
+1. Pre-commit hook BLOCKS commit
+2. CI/CD pipeline FAILS PR validation
+3. PR cannot merge without approval override
+4. Incident log updated with compliance violation
+
+**Exception Process**:
+Only project lead can approve exceptions via PR comment:
+```
+@terryli override: Screenshot validation bypassed
+Reason: [Justification]
+Risk accepted: [Yes/No]
+```
+
+---
+```
+
+---
+
+## Conclusion
+
+This proposal creates a **multi-layered enforcement system** that makes visual inspection effectively **mandatory** without being tyrannical. Key features:
+
+1. **CLAUDE.md becomes the source of truth** - all agents read it
+2. **Technical enforcement** prevents accidental violations
+3. **Reflection patterns** make agents self-validate
+4. **Clear examples** show what good/bad looks like
+5. **Escape hatches exist** for legitimate exceptions
+
+By implementing these layers, visual inspection becomes as automatic as running tests — a practice so deeply embedded it's harder to skip than to follow.

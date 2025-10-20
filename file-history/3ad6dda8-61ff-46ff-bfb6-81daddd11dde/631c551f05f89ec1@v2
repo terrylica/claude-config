@@ -1,0 +1,267 @@
+"""Artifact uploader for GitHub Issues human-in-the-loop review workflow.
+
+Uploads test artifacts (screenshots, logs, traces) to the artifacts branch
+and returns GitHub raw URLs for embedding in review issues.
+
+**Branch Strategy**:
+- Uses orphan `artifacts` branch (separate from main codebase)
+- Commits artifacts with unique directory names
+- Returns permanent URLs using commit SHA
+
+**URL Format**:
+https://raw.githubusercontent.com/{owner}/{repo}/{commit_sha}/{path}
+
+Usage:
+    from utils.artifact_uploader import upload_artifacts
+
+    # Upload directory of artifacts
+    urls = upload_artifacts(
+        artifacts_dir=Path("./artifacts/test_2025-10-18"),
+        repo_owner="tainora",
+        repo_name="insurance"
+    )
+
+    # urls = {
+    #     "screenshot1.png": "https://raw.githubusercontent.com/...",
+    #     "findings.json": "https://raw.githubusercontent.com/...",
+    # }
+"""
+
+import subprocess
+from pathlib import Path
+from typing import Dict
+import shutil
+import os
+
+
+class ArtifactUploadError(Exception):
+    """Raised when artifact upload fails."""
+    pass
+
+
+def upload_artifacts(
+    artifacts_dir: Path,
+    repo_owner: str,
+    repo_name: str,
+    artifacts_branch: str = "artifacts"
+) -> Dict[str, str]:
+    """Upload artifacts to artifacts branch and return GitHub URLs.
+
+    Args:
+        artifacts_dir: Path to directory containing artifacts to upload
+        repo_owner: GitHub repository owner (e.g., "tainora")
+        repo_name: GitHub repository name (e.g., "insurance")
+        artifacts_branch: Name of artifacts branch (default: "artifacts")
+
+    Returns:
+        Dict mapping artifact filename to GitHub raw URL
+
+    Raises:
+        ArtifactUploadError: If upload fails
+        FileNotFoundError: If artifacts_dir doesn't exist
+
+    Example:
+        >>> urls = upload_artifacts(
+        ...     artifacts_dir=Path("./artifacts/test_001"),
+        ...     repo_owner="tainora",
+        ...     repo_name="insurance"
+        ... )
+        >>> urls["screenshot.png"]
+        'https://raw.githubusercontent.com/tainora/insurance/abc123/test_001/screenshot.png'
+    """
+
+    if not artifacts_dir.exists():
+        raise FileNotFoundError(f"Artifacts directory not found: {artifacts_dir}")
+
+    if not artifacts_dir.is_dir():
+        raise ValueError(f"Path is not a directory: {artifacts_dir}")
+
+    # Save current branch and working directory
+    original_dir = Path.cwd()
+    try:
+        current_branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=original_dir
+        ).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        raise ArtifactUploadError(f"Failed to get current branch: {e}")
+
+    print(f"📤 Uploading artifacts from: {artifacts_dir}")
+    print(f"   Current branch: {current_branch}")
+
+    try:
+        # Switch to artifacts branch
+        print(f"   Switching to {artifacts_branch} branch...")
+        subprocess.run(
+            ["git", "checkout", artifacts_branch],
+            capture_output=True,
+            check=True,
+            cwd=original_dir
+        )
+
+        # Create directory for this upload (use same name as artifacts_dir)
+        upload_dir_name = artifacts_dir.name
+        upload_dir = original_dir / upload_dir_name
+
+        # Copy artifacts to upload directory
+        print(f"   Copying artifacts to {upload_dir_name}/...")
+        if upload_dir.exists():
+            shutil.rmtree(upload_dir)
+        shutil.copytree(artifacts_dir, upload_dir)
+
+        # Stage all files
+        subprocess.run(
+            ["git", "add", str(upload_dir)],
+            check=True,
+            cwd=original_dir
+        )
+
+        # Commit with descriptive message
+        commit_message = f"Add artifacts: {upload_dir_name}"
+        subprocess.run(
+            ["git", "commit", "-m", commit_message],
+            capture_output=True,
+            check=True,
+            cwd=original_dir
+        )
+
+        # Get commit SHA for permanent URLs
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=original_dir
+        ).stdout.strip()
+
+        print(f"   Committed: {commit_sha[:8]}")
+
+        # Push to remote
+        print(f"   Pushing to origin/{artifacts_branch}...")
+        subprocess.run(
+            ["git", "push", "origin", artifacts_branch],
+            capture_output=True,
+            check=True,
+            cwd=original_dir
+        )
+
+        # Generate URLs for each artifact file
+        base_url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{commit_sha}/{upload_dir_name}"
+
+        urls = {}
+        for file_path in upload_dir.rglob("*"):
+            if file_path.is_file():
+                relative_path = file_path.relative_to(upload_dir)
+                url = f"{base_url}/{relative_path}"
+                urls[str(relative_path)] = url
+
+        print(f"   ✅ Uploaded {len(urls)} artifacts")
+
+        return urls
+
+    except subprocess.CalledProcessError as e:
+        raise ArtifactUploadError(f"Git operation failed: {e}") from e
+
+    except Exception as e:
+        raise ArtifactUploadError(f"Upload failed: {e}") from e
+
+    finally:
+        # Always return to original branch
+        try:
+            subprocess.run(
+                ["git", "checkout", current_branch],
+                capture_output=True,
+                check=True,
+                cwd=original_dir
+            )
+            print(f"   Returned to {current_branch} branch")
+        except subprocess.CalledProcessError:
+            print(f"   ⚠️  Failed to return to {current_branch} branch")
+
+
+def generate_markdown_image_links(urls: Dict[str, str], title_prefix: str = "Artifact") -> str:
+    """Generate markdown for embedding images in GitHub Issues.
+
+    Args:
+        urls: Dict of artifact URLs from upload_artifacts()
+        title_prefix: Prefix for image titles (default: "Artifact")
+
+    Returns:
+        Markdown string with image links
+
+    Example:
+        >>> urls = {
+        ...     "01_before.png": "https://...",
+        ...     "02_after.png": "https://..."
+        ... }
+        >>> markdown = generate_markdown_image_links(urls)
+        >>> print(markdown)
+        ## Screenshots
+        ![Artifact: 01_before.png](https://...)
+        ![Artifact: 02_after.png](https://...)
+    """
+
+    # Separate images from other files
+    image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    images = {k: v for k, v in urls.items() if Path(k).suffix.lower() in image_extensions}
+    other_files = {k: v for k, v in urls.items() if k not in images}
+
+    markdown_parts = []
+
+    # Add images
+    if images:
+        markdown_parts.append("## Screenshots\n")
+        for filename, url in sorted(images.items()):
+            markdown_parts.append(f"![{title_prefix}: {filename}]({url})\n")
+
+    # Add other files as links
+    if other_files:
+        markdown_parts.append("\n## Other Artifacts\n")
+        for filename, url in sorted(other_files.items()):
+            markdown_parts.append(f"- [{filename}]({url})\n")
+
+    return "".join(markdown_parts)
+
+
+# For backward compatibility with existing code
+def upload_artifact_directory(artifacts_dir: Path) -> Dict[str, str]:
+    """Upload artifacts directory (auto-detects repo from git config).
+
+    **Deprecated**: Use upload_artifacts() with explicit repo parameters instead.
+
+    Args:
+        artifacts_dir: Path to artifacts directory
+
+    Returns:
+        Dict mapping filename to GitHub URL
+
+    Raises:
+        ArtifactUploadError: If upload fails or repo detection fails
+    """
+
+    # Try to detect repo from git remote
+    try:
+        remote_url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            check=True
+        ).stdout.strip()
+
+        # Parse owner and repo from URL
+        # Example: https://github.com/tainora/insurance.git
+        if "github.com" in remote_url:
+            parts = remote_url.split("github.com")[-1].strip("/").replace(".git", "").split("/")
+            if len(parts) >= 2:
+                repo_owner = parts[0]
+                repo_name = parts[1]
+
+                return upload_artifacts(artifacts_dir, repo_owner, repo_name)
+
+        raise ArtifactUploadError("Could not parse GitHub repo from remote URL")
+
+    except subprocess.CalledProcessError:
+        raise ArtifactUploadError("No git remote found - use upload_artifacts() with explicit repo params")

@@ -1,0 +1,275 @@
+# Manulife PAR Welcome Page Automation
+
+**Purpose**: Document automation approach for PAR form entry flow
+**Status**: Entry flow documented - multi-page form exploration pending
+**Version**: 1.0.0
+**Date**: 2025-10-17
+
+---
+
+## Overview
+
+The PAR application form requires navigating through a welcome/entry page before accessing the actual multi-page form. This document describes the automation approach for the entry flow.
+
+---
+
+## Welcome Page URL
+
+`https://www.insurance.manulife.ca/dda/welcomeInformation`
+
+**Prerequisites**:
+- Valid `storage-state.json` (authenticated session)
+- Session not expired (~30-35 minute duration)
+
+---
+
+## Entry Flow Steps
+
+### 1. Accept Cookies (Recommended)
+
+**Element**: Button with text "Accept all cookies"
+**Selector**: `button:has-text("Accept all cookies")`
+**Required**: No (but recommended to avoid cookie banner interference)
+**Wait Strategy**: Element visible
+
+```python
+# Optional: Accept cookies if banner present
+try:
+    cookie_button = page.locator("button:has-text('Accept all cookies')")
+    if cookie_button.is_visible(timeout=2000):
+        cookie_button.click()
+except:
+    pass  # Cookie banner may not appear if already accepted
+```
+
+### 2. Dismiss Info Banner (Optional)
+
+**Element**: Button with accessible name "Dismiss message"
+**Selector**: `button[aria-label*="Dismiss"]` or similar
+**Required**: No (banner doesn't block form interaction)
+**Wait Strategy**: Element visible
+
+```python
+# Optional: Dismiss blue info banner
+try:
+    dismiss_button = page.locator("button:has-text('Dismiss')")
+    if dismiss_button.is_visible(timeout=1000):
+        dismiss_button.click()
+except:
+    pass  # Banner is dismissible but non-blocking
+```
+
+### 3. Select Product (Required)
+
+**Element**: Combobox (dropdown) labeled "Product"
+**Selector**: `select` or combobox with accessible name "Product"
+**Options**:
+- "Select" (disabled, default)
+- "Family Term"
+- "Lifecheque"
+- "Manulife Guaranteed Issue Life"
+- **"Manulife Par"** ← target
+- "Manulife UL"
+
+**Wait Strategy**: Element visible + enabled
+**Validation**: Verify selection successful
+
+```python
+# Select "Manulife Par" from product dropdown
+product_selector = page.locator("select, [role='combobox']").filter(has_text="Product")
+product_selector.wait_for(state="visible", timeout=10000)
+product_selector.select_option("Manulife Par")
+
+# Alternative if not a standard <select>:
+product_selector.click()
+page.locator("text='Manulife Par'").click()
+```
+
+### 4. Start Application (Required)
+
+**Element**: Button with text "Start a new application"
+**Selector**: `button:has-text("Start a new application")`
+**State**: May be disabled until product selected
+**Wait Strategy**: Element visible + enabled
+
+```python
+# Click "Start a new application"
+start_button = page.locator("button:has-text('Start a new application')")
+start_button.wait_for(state="visible", timeout=5000)
+
+# Wait for button to be enabled (may be disabled until product selected)
+start_button.wait_for(state="enabled", timeout=5000)
+
+start_button.click()
+
+# Wait for navigation to first form page
+page.wait_for_load_state("networkidle", timeout=15000)
+```
+
+---
+
+## Expected Outcome
+
+**URL Change**: React SPA client-side routing to first form page
+- Expected pattern: `/dda/<form-step-path>`
+- No full page reload
+
+**Page Transition**: First form page loads dynamically
+- Multi-page form structure (pages unknown - requires exploration)
+- Form fields appear
+- Progress indicator may be visible
+
+---
+
+## Automation Constraints
+
+### No Retry Logic
+
+**Design Principle**: Explicit waits only, no selector fallbacks or retry loops
+
+**Rationale**:
+- Deterministic execution
+- Fast failure with clear error messages
+- Comprehensive artifact capture on failure
+
+### Wait Strategies
+
+**Element Visibility**:
+```python
+element.wait_for(state="visible", timeout=10000)
+```
+
+**Element Enabled**:
+```python
+element.wait_for(state="enabled", timeout=5000)
+```
+
+**Network Idle** (after clicking Start):
+```python
+page.wait_for_load_state("networkidle", timeout=15000)
+```
+
+### Error Handling
+
+**On Failure**:
+1. Capture screenshot
+2. Capture DOM snapshot
+3. Capture ARIA snapshot
+4. Save to artifacts directory
+5. Exit with error code 1
+
+**Do NOT**:
+- Retry with alternative selectors
+- Continue execution after failure
+- Silently catch exceptions
+
+---
+
+## Selector Strategy
+
+### Priority Order
+
+1. **ARIA-first**: Use accessible names/roles
+   ```python
+   page.get_by_label("Product")
+   page.get_by_role("button", name="Start a new application")
+   ```
+
+2. **Text matching**: Use visible text
+   ```python
+   page.locator("button:has-text('Accept all cookies')")
+   ```
+
+3. **Semantic HTML**: Use native elements
+   ```python
+   page.locator("select")  # for dropdown
+   ```
+
+4. **Last resort**: CSS/XPath (avoid if possible)
+
+### Selector Stability
+
+**Stable** (prefer):
+- Accessible names (ARIA labels)
+- Visible text content
+- Semantic HTML elements
+
+**Unstable** (avoid):
+- Generated class names (e.g., `css-abc123`)
+- Index-based selection (e.g., `nth-child(2)`)
+- Brittle XPath expressions
+
+---
+
+## Artifact Capture
+
+**On Welcome Page Load**:
+- Screenshot: `001_welcome_page.png`
+- DOM: `001_welcome_page.dom.html`
+- ARIA: `aria_001.yaml`
+
+**After Product Selection**:
+- Screenshot: `002_product_selected.png`
+
+**After Clicking Start**:
+- Screenshot: `003_first_form_page.png`
+- DOM: `003_first_form_page.dom.html`
+- ARIA: `aria_003.yaml`
+
+**Trace/HAR**:
+- Continuous recording throughout session
+- Finalized on browser close
+
+---
+
+## Integration with Reconnaissance
+
+**Current**: Welcome page captured statically (no interaction)
+
+**Next**: Enhanced reconnaissance script that:
+1. Navigates to welcome page
+2. Executes entry flow (accept cookies → select Par → click Start)
+3. Captures each form page as it appears
+4. Documents complete form journey
+
+---
+
+## Known Limitations
+
+### Multi-Page Form Structure Unknown
+
+**Current State**: Only welcome page documented
+
+**Blockers for Full Automation**:
+- Number of form pages unknown
+- Field names/types unknown
+- Validation rules unknown
+- Conditional fields unknown
+- Navigation flow between pages unknown
+- Submit button behavior unknown
+
+**Required Next**: Explore multi-page form to discover structure
+
+---
+
+## Success Criteria
+
+**Welcome Page Navigation**:
+- ✓ Cookies accepted (if banner present)
+- ✓ Product "Manulife Par" selected
+- ✓ "Start a new application" clicked
+- ✓ First form page loads (no errors)
+
+**Evidence of Success**:
+- URL changes to form page (not `/welcomeInformation`)
+- Form fields visible in DOM
+- No error messages
+- Artifacts captured successfully
+
+---
+
+## Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2025-10-17 | Initial welcome page automation documentation |

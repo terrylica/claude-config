@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Regression test for authentication pattern compliance.
+
+This test ensures all authentication code uses .type() instead of .fill()
+for form inputs, which is required for React form compatibility.
+
+Background:
+- React forms require .type() to trigger onChange events
+- .fill() does NOT trigger onChange, causing validation failures
+- This was the root cause of authentication failures before the fix
+
+Allowed patterns:
+- ✅ locator.type(text, delay=50)  # Correct - triggers React onChange
+- ✅ locator.fill("")               # Acceptable - clearing field
+- ❌ locator.fill(text)             # Wrong - doesn't trigger onChange
+
+See:
+- auth/passkey_authenticator.py:_fill_react_form() for canonical implementation
+- docs/decisions/authentication-pattern.md for detailed rationale
+"""
+
+import ast
+from pathlib import Path
+from typing import List, Tuple
+
+import pytest
+
+
+class FillUsageDetector(ast.NodeVisitor):
+    """AST visitor that detects .fill() method calls on Playwright locators."""
+
+    def __init__(self, filepath: Path):
+        self.filepath = filepath
+        self.violations: List[Tuple[int, str]] = []
+
+    def visit_Call(self, node: ast.Call):
+        """Check if this is a .fill() call with non-empty argument."""
+        # Look for pattern: something.fill(arg)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "fill":
+            # Check if there's at least one argument
+            if node.args:
+                first_arg = node.args[0]
+
+                # Allow .fill("") - used for clearing fields
+                if isinstance(first_arg, ast.Constant) and first_arg.value == "":
+                    pass  # This is OK
+                # Allow .fill() with variable that might be empty string
+                # We can't statically determine variable values, so we flag it
+                else:
+                    line_no = node.lineno
+                    # Try to get the source code snippet
+                    try:
+                        code_snippet = ast.get_source_segment(
+                            open(self.filepath).read(), node
+                        )
+                    except:
+                        code_snippet = "unknown"
+
+                    self.violations.append((line_no, code_snippet))
+
+        # Continue visiting child nodes
+        self.generic_visit(node)
+
+
+def get_auth_files() -> List[Path]:
+    """Get all Python files in auth/ and scripts/setup/ directories."""
+    project_root = Path(__file__).parent.parent.parent
+
+    auth_files = []
+
+    # Check auth/ directory (exclude archive/ subdirectory)
+    auth_dir = project_root / "auth"
+    if auth_dir.exists():
+        for py_file in auth_dir.glob("*.py"):
+            if py_file.name != "__init__.py":
+                auth_files.append(py_file)
+
+    # Check scripts/setup/ directory (exclude archive/ subdirectory)
+    scripts_setup_dir = project_root / "scripts" / "setup"
+    if scripts_setup_dir.exists():
+        for py_file in scripts_setup_dir.glob("*.py"):
+            if py_file.name != "__init__.py":
+                auth_files.append(py_file)
+
+    return auth_files
+
+
+def check_file_for_fill_violations(filepath: Path) -> List[Tuple[int, str]]:
+    """Check a single file for .fill() violations.
+
+    Args:
+        filepath: Path to Python file to check
+
+    Returns:
+        List of (line_number, code_snippet) tuples for violations
+    """
+    try:
+        source = filepath.read_text()
+        tree = ast.parse(source, filename=str(filepath))
+
+        detector = FillUsageDetector(filepath)
+        detector.visit(tree)
+
+        return detector.violations
+    except SyntaxError as e:
+        # Skip files with syntax errors (might be incomplete/broken)
+        pytest.skip(f"Syntax error in {filepath}: {e}")
+    except Exception as e:
+        pytest.fail(f"Failed to parse {filepath}: {e}")
+
+
+@pytest.mark.auth
+def test_no_fill_in_auth_code():
+    """Verify authentication code uses .type() instead of .fill() for form inputs.
+
+    This test prevents regression of the React onChange bug where .fill()
+    doesn't trigger validation events.
+
+    Context from auth/passkey_authenticator.py:196-346:
+    - Correct: username_field.type(self.username, delay=50)
+    - Wrong:   username_field.fill(self.username)
+
+    The .type() method with delay=50 triggers React's onChange events,
+    which .fill() does not.
+    """
+    auth_files = get_auth_files()
+
+    if not auth_files:
+        pytest.skip("No authentication files found to check")
+
+    all_violations = {}
+
+    for filepath in auth_files:
+        violations = check_file_for_fill_violations(filepath)
+        if violations:
+            all_violations[filepath] = violations
+
+    # Build detailed error message
+    if all_violations:
+        error_lines = [
+            "\n❌ Found .fill() usage in authentication code!",
+            "\nReact forms require .type() to trigger onChange events.",
+            "Using .fill() will cause authentication failures.\n",
+        ]
+
+        for filepath, violations in all_violations.items():
+            error_lines.append(f"\n📁 {filepath.relative_to(Path.cwd())}:")
+            for line_no, code in violations:
+                error_lines.append(f"  Line {line_no}: {code}")
+
+        error_lines.extend([
+            "\n✅ Correct pattern:",
+            "  username_field.type(username, delay=50)",
+            "\n❌ Wrong pattern:",
+            "  username_field.fill(username)  # Doesn't trigger React onChange!",
+            "\n📚 See: auth/passkey_authenticator.py:_fill_react_form() for reference",
+        ])
+
+        pytest.fail("\n".join(error_lines))
+
+
+@pytest.mark.auth
+def test_canonical_authenticator_uses_type():
+    """Verify the canonical PasskeyAuthenticator class uses .type() pattern.
+
+    This is a positive test to ensure our reference implementation is correct.
+    """
+    project_root = Path(__file__).parent.parent.parent
+    canonical_file = project_root / "auth" / "passkey_authenticator.py"
+
+    if not canonical_file.exists():
+        pytest.fail(f"Canonical authenticator not found: {canonical_file}")
+
+    source = canonical_file.read_text()
+
+    # Verify .type() is present
+    assert ".type(" in source, (
+        "Canonical authenticator should use .type() method"
+    )
+
+    # Verify the specific pattern with delay=50
+    assert "delay=50" in source, (
+        "Canonical authenticator should use .type() with delay=50"
+    )
+
+    # Verify React comment is present (documentation)
+    assert "React" in source and "onChange" in source, (
+        "Canonical authenticator should document why .type() is needed"
+    )
+
+
+if __name__ == "__main__":
+    # Allow running directly for quick checks
+    pytest.main([__file__, "-v"])

@@ -1,0 +1,413 @@
+# Navigation Investigation Findings
+
+**Date**: 2025-10-17
+**Investigation**: Phase 4.1 - Network Traffic & Artifact Analysis
+**Previous Report**: [`form-navigation-discovery.md`](/Users/terryli/own/insurance/docs/analysis/form-navigation-discovery.md)
+
+---
+
+## Executive Summary
+
+After comprehensive analysis of network traffic, DOM changes, and ARIA snapshots, we can CONFIRM:
+
+**The "Start a new application" button is NOT a submission button, and does NOT navigate to a new page.**
+
+Instead, it triggers **client-side form validation** that:
+- ✅ Validates all required fields
+- ✅ Reformats input values (e.g., `100000` → `100,000`)
+- ✅ Clears validation error alerts
+- ❌ Does NOT make any HTTP requests
+- ❌ Does NOT navigate or load new content
+- ❌ Does NOT submit the application
+
+---
+
+## Evidence Analysis
+
+### 1. Network Traffic Analysis
+
+**Source**: `/Users/terryli/own/insurance/artifacts/test_explore_complete_form_journey/session.har` (11MB)
+
+**Total Network Activity**:
+- Total requests: 244
+- GET requests: 239
+- POST requests: 5 (all authentication-related)
+
+**POST Requests Breakdown**:
+```
+401 - /api/auth/login                    (initial auth attempt)
+201 - /request/v1/consentreceipts       (cookie consent)
+302 - /api/handleLogin                  (auth redirect)
+200 - /api/auth/login                   (successful auth)
+200 - /request/v1/consentreceipts       (cookie consent confirmation)
+```
+
+**Timeline**:
+- Last network request: `2025-10-18T03:12:08.741Z` (font loading)
+- Button clicked: ~`03:12:13` (based on artifact file timestamps)
+- **NO requests after button click** ❌
+
+**Conclusion**: NO form submission or API call occurred when clicking the button.
+
+---
+
+### 2. ARIA Snapshot Comparison
+
+**Source**: Diff between `013_page_1_all_filled.aria.yaml` (before click) and `016_page_2_initial.aria.yaml` (after click)
+
+**Changes Detected**:
+
+```diff
+--- 013_page_1_all_filled.aria.yaml
++++ 016_page_2_initial.aria.yaml
+@@ -113,13 +113,12 @@
+ - text: Amount of insurance
+ - button "tooltip"
+ - text: $
+-- textbox "Amount of insurance, dollar": "100000"
++- textbox "Amount of insurance, dollar": 100,000
+ - text: Dividend option
+ - combobox "Dividend option":
+   - option "Select" [disabled]
+   - option "Paid-up insurance" [selected]
+   - option "Cash"
+-- alert: Required
+ - heading "Riders" [level=2]
+```
+
+**Analysis**:
+
+1. **Alert Removed**: The `- alert: Required` was present before clicking, gone after
+   - This proves validation ran successfully
+   - Alert was likely a "missing required field" warning
+   - After clicking, validation passed and alert cleared
+
+2. **Amount Formatting Changed**: `"100000"` → `100,000`
+   - React re-rendered the field with proper number formatting
+   - Comma thousand separator added
+   - Quotes removed (display formatting vs raw value)
+
+**Conclusion**: The button triggered React-side validation and reformatting, but did NOT navigate.
+
+---
+
+### 3. DOM Structure Comparison
+
+**Source**: Diff between `012_page_1_all_filled.dom.html` (before) and `015_page_2_initial.dom.html` (after)
+
+**Size Comparison**:
+- Before: 191,442 bytes
+- After: 191,232 bytes
+- Difference: **-210 bytes** (likely the removed alert element)
+
+**Structural Changes**:
+- Same headings: "Start Manulife e-application", "Coverage selection", "Insured person 1, John Doe"
+- Same URL: `https://www.insurance.manulife.ca/dda/welcomeInformation`
+- Same form fields: All inputs, selectors, buttons identical
+- Same page structure: No new sections or navigation elements
+
+**Conclusion**: No navigation or page transition occurred. Only minor validation-related changes.
+
+---
+
+### 4. Console & Error Logs
+
+**Source**: `/Users/terryli/own/insurance/artifacts/test_explore_complete_form_journey/telemetry.ndjson` (1.9MB)
+
+**Last 50 Telemetry Events**:
+- All events are authentication and cookie consent related
+- Last event timestamp: `2025-10-17T20:12:09.113942` (before button click)
+- **NO console errors** ❌
+- **NO page errors** ❌
+- **NO network events after form filling** ❌
+
+**Conclusion**: No JavaScript errors or warnings. Clean execution.
+
+---
+
+## Critical Discovery: "Attachments Screen" Reference
+
+**Source**: Blue info message in the form
+
+> "Input your client details and coverage information below. You can come back to edit this information any time. **Before submitting your application, be sure to upload an illustration that matches your coverage details on the Attachments screen.**"
+
+**Key Observations**:
+
+1. The message explicitly mentions an "**Attachments screen**" ✅
+2. This implies a multi-step process:
+   - Current screen: Coverage selection (we're here)
+   - Next screen: Attachments (upload illustration)
+   - Final step: Submission
+
+3. We selected "**Upload Later**" for the illustration
+   - This might be blocking navigation to the next screen
+   - Form might require "Upload Now" to proceed
+   - Or form might require explicit "Next" button we haven't found
+
+---
+
+## Hypothesis Re-evaluation
+
+### ❌ Hypothesis 1: Form is Complete (This IS the submission page)
+**Status**: REJECTED
+
+**Evidence Against**:
+- Blue message mentions "Attachments screen" (implies more screens)
+- Button text says "Start a **new** application" (not "Submit")
+- No confirmation message appeared
+- Form still editable (not in submitted/locked state)
+
+### ⚠️ Hypothesis 2: Illustration Upload Blocking Navigation
+**Status**: HIGHLY LIKELY
+
+**Evidence For**:
+- Blue message says illustration is "required" before submission
+- We selected "Upload Later"
+- Message specifically mentions "Attachments screen"
+- Form might require illustration upload to enable navigation
+
+**Test Required**: Try selecting "Upload Now" and see if navigation becomes possible
+
+### ❌ Hypothesis 3: Button Requires Different Interaction
+**Status**: REJECTED
+
+**Evidence Against**:
+- Standard ARIA `role="button"` detected
+- Click executed without error
+- Validation triggered successfully (alert removed, amount reformatted)
+- Button is working correctly - just not navigating
+
+### ⚠️ Hypothesis 4: Missing "Next" or "Continue" Button
+**Status**: POSSIBLE
+
+**Evidence For**:
+- "Start a new application" might mean "save and start new" (not "continue current")
+- ARIA snapshot shows same button both before and after
+- No additional navigation button appeared after validation
+
+**Test Required**: Scroll through entire page to find hidden "Next" or "Continue" button
+
+---
+
+## Recommended Next Steps
+
+### Immediate Investigation
+
+1. **Check for "Upload Now" Requirement** (Hypothesis 2)
+   ```python
+   # Test: Select "Upload Now" instead of "Upload Later"
+   # Check if new navigation button appears
+   # Or if "Start a new application" behavior changes
+   ```
+
+2. **Scroll Page to Find Hidden Navigation** (Hypothesis 4)
+   ```python
+   # Scroll to bottom of form
+   # Check for "Next", "Continue", or similar button
+   # Look for disabled buttons that might enable after validation
+   ```
+
+3. **Examine Button State After Validation**
+   ```python
+   # Click "Start a new application"
+   # Check if button changes text (e.g., "Continue" or "Next")
+   # Check if new buttons appear dynamically
+   ```
+
+4. **Check for React Router State Changes**
+   ```python
+   # Examine localStorage/sessionStorage for state changes
+   # Check for hidden form step indicators
+   # Look for progress bar or step counter
+   ```
+
+### Test Scenarios
+
+#### Scenario A: Upload Now Path
+```python
+1. Fill form with same data
+2. Select "Upload Now" for illustration
+3. Upload dummy PDF file
+4. Click "Start a new application"
+5. Observe: Does navigation occur now?
+```
+
+#### Scenario B: Button State Investigation
+```python
+1. Fill form with same data
+2. Before clicking button: Screenshot + DOM dump
+3. Click "Start a new application"
+4. Wait 5 seconds (for React updates)
+5. After clicking: Screenshot + DOM dump
+6. Compare: Did button text change? New buttons appear?
+```
+
+#### Scenario C: Full Page Scroll
+```python
+1. Fill form with same data
+2. Scroll to absolute bottom of page
+3. Take screenshot
+4. Look for: "Next", "Continue", "Save and Continue"
+```
+
+---
+
+## Impact on Automation Strategy
+
+### Current Understanding
+
+The form is more complex than initially thought:
+- **NOT a single-page form** (references "Attachments screen")
+- **Multi-step process** exists (Coverage → Attachments → Submission)
+- **Validation-only button** ("Start a new application" validates but doesn't navigate)
+
+### Updated Automation Approach
+
+**Before (Previous Assumption)**:
+```python
+# Fill all fields → Click "Start" → Submit
+fill_all_fields()
+click_submit_button()  # Assumed "Start" was submit
+```
+
+**After (Current Understanding)**:
+```python
+# Fill all fields → Validate → Navigate → Upload → Submit
+fill_coverage_fields()
+validate_form()  # "Start a new application" button
+navigate_to_attachments()  # Missing step - need to find how
+upload_illustration()
+submit_application()  # Actual submission (not yet discovered)
+```
+
+### Required Discoveries
+
+1. ✅ **Coverage page field mapping** (completed)
+2. ✅ **Custom React button workaround** (completed)
+3. ⚠️ **Navigation mechanism** (in progress - current blocker)
+4. ⏳ **Attachments page structure** (not yet explored)
+5. ⏳ **Actual submission button** (not yet discovered)
+
+---
+
+## Technical Notes
+
+### React SPA Behavior
+
+**Observations**:
+- URL remains `welcomeInformation` throughout
+- Page uses client-side routing (no URL changes expected)
+- Form state likely managed in React context/state
+- Navigation might be triggered by:
+  - Different button we haven't found
+  - Button that appears after validation
+  - Illustration upload requirement
+  - Hidden form step logic
+
+### Playwright Wait Strategies
+
+**Current Approach** (not working for navigation):
+```python
+page.wait_for_load_state("networkidle")  # ❌ No network activity
+page.wait_for_url("**/next-page")        # ❌ URL doesn't change
+```
+
+**Recommended Approach** (for React SPAs):
+```python
+# Wait for specific UI changes instead of network/URL
+page.locator("text=Attachments").wait_for(state="visible")
+page.locator("[data-step='2']").wait_for(state="visible")
+page.wait_for_function("() => document.querySelector('h1').textContent === 'Attachments'")
+```
+
+---
+
+## Artifacts Reference
+
+### Network Analysis
+- **HAR file**: `session.har` (11MB)
+- **Telemetry**: `telemetry.ndjson` (1.9MB)
+- **Trace**: `trace.zip` (2.9MB)
+
+### Visual Evidence
+- **Before click**: `011_page_1_all_filled.png` (278KB)
+- **After click**: `014_page_2_initial.png` (276KB)
+- **Diff**: Visually identical (no observable changes)
+
+### DOM & Accessibility
+- **DOM before**: `012_page_1_all_filled.dom.html` (187KB)
+- **DOM after**: `015_page_2_initial.dom.html` (187KB)
+- **ARIA before**: `013_page_1_all_filled.aria.yaml` (6.5KB)
+- **ARIA after**: `016_page_2_initial.aria.yaml` (6.5KB)
+- **Diff**: Alert removed, amount reformatted
+
+---
+
+## Upload Now Path Investigation (Phase 4.2)
+
+**Test**: Selected "Upload Now" instead of "Upload Later"
+
+**Results**:
+- ✅ **Upload interface appeared**: "Upload an Illustration PDF" section with file size limit (15MB)
+- ✅ **Upload button present**: Red "Upload" button for PDF upload
+- ✅ **"Start a new application" button UNCHANGED**: Same button appears in both paths
+- ❌ **No new navigation buttons**: No "Next", "Continue", or similar buttons
+
+**Conclusion**: Illustration upload choice does NOT affect navigation mechanism.
+
+---
+
+## Updated Hypothesis: Progressive Single-Page Form
+
+**New Theory**: This is a SINGLE-PAGE form where sections reveal progressively, not a traditional multi-page form.
+
+**Evidence Supporting This Theory**:
+1. React SPA with client-side routing (URL never changes)
+2. Button labeled "Start a **new** application" (not "Next" or "Continue")
+3. Form mentions "Attachments **screen**" but might mean "section" on same page
+4. Validation triggered successfully (alert removed, formatting applied)
+5. Blue message says "you can come back to edit this information any time" (suggests saving, not navigating)
+
+**Proposed Flow**:
+```
+Step 1: Fill Coverage Section
+   ↓
+Step 2: Click "Start a new application" (validates + saves coverage)
+   ↓
+Step 3: Attachments Section REVEALS on same page (below)
+   ↓
+Step 4: Upload illustration PDF
+   ↓
+Step 5: Submit application (final button)
+```
+
+**Test Required**: After clicking "Start a new application" button:
+- Wait longer for React to render new section
+- Scroll down to see if Attachments section appeared below
+- Check for hidden DOM elements that become visible
+
+---
+
+## Conclusion
+
+**Status**: 🔍 **Investigation 80% Complete**
+
+The "Start a new application" button is a **validation and save button** that likely triggers the next form section to appear on the same page (progressive disclosure pattern).
+
+**Key Findings**:
+- ✅ Button validates form fields successfully
+- ✅ Button clears validation errors and reformats inputs
+- ✅ Button exists in both "Upload Now" and "Upload Later" paths
+- ❌ Button does NOT navigate to different URL
+- ❌ Button does NOT submit the application
+- ⚠️  Button MIGHT reveal next section on same page (untested)
+
+**Next Phase**: Test progressive disclosure hypothesis by:
+1. Clicking "Start a new application"
+2. Waiting 5+ seconds for React render
+3. Scrolling to bottom of page
+4. Checking for new sections (Attachments, Review, etc.)
+
+**Blocker Status**: LIKELY RESOLVED - Form probably uses progressive disclosure, not navigation.
+
+**Recommendation**: Run full page scroll test after button click to find revealed sections.

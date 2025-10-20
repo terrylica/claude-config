@@ -1,0 +1,262 @@
+# Insurance Project Memory
+
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure
+
+**Purpose**: Personal insurance automation and credential management
+
+**Documentation Hub**: [`docs/INDEX.md`](/Users/terryli/own/insurance/docs/INDEX.md)
+
+---
+
+## Quick Links
+
+**Architecture**: [`docs/architecture/`](/Users/terryli/own/insurance/docs/architecture/) - Page Object Model design and test strategy
+**Specifications**: [`specifications/`](/Users/terryli/own/insurance/specifications/) - OpenAPI 3.1.0 specs
+**Tests**: [`tests/`](/Users/terryli/own/insurance/tests/) - Pytest reconnaissance and automation
+**Page Objects**: [`pages/`](/Users/terryli/own/insurance/pages/) - Reusable page classes
+**Workflows**: [`docs/workflows/`](/Users/terryli/own/insurance/docs/workflows/) - Authentication, HITL review, credential sync
+**Audit**: [`docs/AUDIT.md`](/Users/terryli/own/insurance/docs/AUDIT.md) - API verification (v1.1.0)
+**Decisions**: [`docs/decisions/`](/Users/terryli/own/insurance/docs/decisions/) - Technology evaluations
+
+---
+
+## Current Status (2025-10-18)
+
+**Phase**: Phase 1 - Discovery (Phase 6 exploration complete)
+**Version**: Architecture v2.0.0
+
+**Recent Milestones**:
+- ✅ **Phase 6**: Explored 19 form variations (age, amount, product types, smoking status)
+- ✅ **Authentication**: Fixed `.type()` delay requirement for React forms
+- ✅ **POM Foundation**: Base page class with custom React component handling
+- ✅ **HITL Workflow**: GitHub Issues-based review workflow (v1.0.0, 2025-10-18)
+- ✅ **Project Structure**: Validated against Playwright best practices
+
+**Next**: Continue form exploration or begin Phase 2 documentation
+
+**Key Docs**:
+- [`docs/architecture/test-strategy.md`](/Users/terryli/own/insurance/docs/architecture/test-strategy.md) (v1.0.0) - 3-phase strategy
+- [`docs/analysis/phase-6-exploration-analysis.md`](/Users/terryli/own/insurance/docs/analysis/phase-6-exploration-analysis.md) - Phase 6 findings
+- [`docs/workflows/human-in-the-loop-review.md`](/Users/terryli/own/insurance/docs/workflows/human-in-the-loop-review.md) (v1.0.0) - HITL workflow
+
+---
+
+## Credential Management
+
+**Doppler Project**: `insurance` (production config: `prd`)
+
+**Access Pattern**:
+```bash
+doppler run --project insurance --config prd -- <command>
+```
+
+**Current Credentials**:
+- Manulife Par Account (`MANULIFE_PAR_USERNAME`, `MANULIFE_PAR_PASSWORD`)
+- Manulife Passkey (`MANULIFE_PAR_PASSKEY_*`) - For CDP WebAuthn automation
+
+**Workflow**: [`docs/workflows/credential-sync.md`](/Users/terryli/own/insurance/docs/workflows/credential-sync.md)
+
+---
+
+## Playwright Automation
+
+**Framework**: Playwright (Python) with `uv`
+**Authentication**: Passkey via `storage-state.json` (gitignored)
+**Artifacts**: Screenshots, DOM dumps, HAR, trace, telemetry (no video)
+
+**Key Features**:
+- **PII-safe**: Masked screenshots, log keys only
+- **ARIA-first selectors**: Stable, accessibility-driven targeting
+- **Comprehensive capture**: HAR, trace with snapshots, telemetry NDJSON
+- **Iframe-proof**: Automatic frame detection
+- **Offline replay**: `routeFromHAR` for analysis
+
+**Usage**:
+```bash
+# Reconnaissance (discovery only, no submission)
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v -m reconnaissance tests/reconnaissance/
+
+# Automation (fill form, controlled submission) - Phase 3
+export FORM_JSON='{"first_name":"Ada",...}'
+export SUBMIT=true  # Omit or set false for dry-run
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v tests/automation/fill_par_form.py
+```
+
+**Documentation**: [`docs/automation/manulife-par.md`](/Users/terryli/own/insurance/docs/automation/manulife-par.md)
+**Specification**: [`specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml)
+**API Verification**: [`docs/AUDIT.md`](/Users/terryli/own/insurance/docs/AUDIT.md) (v1.1.0)
+
+---
+
+## Key Workflows
+
+### Authentication
+**Method**: Automated passkey via CDP WebAuthn → `storage-state.json`
+**Module**: [`auth/passkey_authenticator.py`](/Users/terryli/own/insurance/auth/passkey_authenticator.py)
+**Critical**: Use `.type(text, delay=50)` for React forms, NOT `.fill()`
+**Docs**: [`docs/workflows/authentication-implementation.md`](/Users/terryli/own/insurance/docs/workflows/authentication-implementation.md) (v1.0.0)
+
+### Visual Inspection Mandate
+**Status**: MANDATORY for all reconnaissance and exploratory work
+**Enforcement**: Pre-commit hook + CI/CD validation
+**Why**: Screenshots catch issues invisible in ARIA/DOM analysis (proven 2025-10-17)
+**Docs**: [`docs/workflows/visual-inspection-mandate.md`](/Users/terryli/own/insurance/docs/workflows/visual-inspection-mandate.md) (v1.0.0)
+
+### Human-in-the-Loop Review Workflow
+**Method**: GitHub Issues with artifacts branch
+**Blocking**: Yes (AI waits for approval via comment polling)
+**Repository**: https://github.com/tainora/insurance
+**Use Cases**: Pre-submission approval, visual anomalies, conditional logic, milestones
+**Docs**: [`docs/workflows/human-in-the-loop-review.md`](/Users/terryli/own/insurance/docs/workflows/human-in-the-loop-review.md) (v1.0.0)
+
+**Quick Example**:
+```python
+from utils.approval_gate import require_approval
+
+@require_approval(
+    test_name="Submit Form",
+    test_type="automation-live",
+    summary="Ready to submit form"
+)
+def submit_form(page):
+    page.click("button[type='submit']")
+
+submit_form(page)  # Blocks until human approves
+```
+
+**Approval Keywords**:
+- Approve: `approved`, `lgtm`, `looks good`, `approve`, ✅
+- Reject: `rejected`, `reject`, `changes requested`, `not approved`, ❌
+
+---
+
+## Implementation Strategy
+
+**Approach**: Systematic 3-phase strategy for complex multi-page forms
+
+**Phase 0 - Structural Foundation** ✅ (COMPLETED 2025-10-17)
+- Restructure project to follow Playwright best practices
+- Page Object Model architecture
+- Shared utilities and pytest fixtures
+
+**Phase 1 - Systematic Discovery** (IN PROGRESS)
+- Explore complete multi-page form structure
+- Capture artifacts at each page transition
+- Document page inventory and field catalog
+
+**Phase 2 - Structured Documentation** (PENDING)
+- Design page object classes for each form page
+- Create comprehensive specifications
+
+**Phase 3 - Modular Implementation** (PENDING)
+- Implement page objects using base class
+- Build form orchestrator
+- Test dry-run and live submission modes
+
+**Rationale**: Multi-page forms require systematic exploration before automation
+
+**Full Strategy**: [`docs/architecture/test-strategy.md`](/Users/terryli/own/insurance/docs/architecture/test-strategy.md) (v1.0.0)
+
+---
+
+## Page Object Model (POM)
+
+**Status**: MANDATORY for all production automation
+**Reference**: [Playwright Official POM Docs](https://playwright.dev/python/docs/pom)
+
+**Key Pattern**:
+- `pages/base_page.py` - Common methods (navigation, custom React components)
+- `pages/manulife_par_page.py` - Form-specific logic
+- Use page objects for all interactions (not raw Playwright calls)
+
+**Critical Discovery**: 4 custom React button components require JavaScript event dispatch
+**Solution**: `BasePage.dispatch_click_event(selector)` method
+
+**Docs**: [`docs/architecture/page-object-design.md`](/Users/terryli/own/insurance/docs/architecture/page-object-design.md) (v1.0.0)
+**Spike Report**: [`docs/analysis/custom-react-components-spike.md`](/Users/terryli/own/insurance/docs/analysis/custom-react-components-spike.md)
+
+---
+
+## Development Standards
+
+**Python**: `uv run --active python -m <module>`
+**Versioning**: SemVer 2.0.0
+**Paths**: Always absolute (`/Users/terryli/...`), space after extension
+**Security**: Doppler injection only, never commit secrets
+**Machine-Readable**: OpenAPI 3.1.0 specs prioritized over human docs
+
+---
+
+## Project Structure
+
+```
+~/own/insurance/
+├── CLAUDE.md                           # Project hub (this file)
+├── .github/ISSUE_TEMPLATE/             # HITL review issue template
+├── pages/                              # Page objects (base_page.py, manulife_par_page.py)
+├── tests/                              # Pytest tests (reconnaissance/, automation/, e2e/)
+├── utils/                              # Utilities (artifact_manager, artifact_uploader,
+│                                       #   github_review, approval_gate)
+├── auth/                               # Authentication (passkey_authenticator.py)
+├── docs/                               # Documentation
+│   ├── INDEX.md                       # Documentation hub
+│   ├── architecture/                  # POM design, test strategy (v1.0.0)
+│   ├── workflows/                     # Authentication, HITL review, visual inspection
+│   ├── analysis/                      # Field catalog, custom components, Phase 6 findings
+│   ├── research/                      # CDP WebAuthn reference
+│   └── decisions/                     # Stagehand evaluation
+├── specifications/                     # OpenAPI 3.1.0 specs
+│   ├── playwright-automation.yaml    # Universal automation spec
+│   ├── manulife-par-form.yaml       # Main form specification
+│   └── pages/welcome-page.yaml      # Welcome page spec (v1.0.0)
+├── scripts/                            # Setup scripts, hooks, utilities
+├── fixtures/                           # Test data
+├── artifacts/                         # Generated artifacts (gitignored)
+└── storage-state.json                 # Playwright auth state (gitignored)
+```
+
+**Full Tree**: See Project Structure section in old CLAUDE.md or run `tree -L 3`
+
+---
+
+## Environment Variables
+
+**FORM_JSON**: JSON payload with form field values
+```bash
+export FORM_JSON='{"first_name":"Ada","last_name":"Lovelace",...}'
+```
+
+**SUBMIT**: Controls form submission (default: `false`)
+```bash
+export SUBMIT=true   # Actually submit form
+export SUBMIT=false  # Dry-run: fill but don't submit
+```
+
+**Doppler Secrets**: Injected via `doppler run --project insurance --config prd`
+
+---
+
+## AI Agent Brief
+
+For any AI coding agent implementing form automation:
+
+> **Environment**: Python + Playwright, auth via `storage-state.json`, secrets via Doppler
+> **Input**: JSON payload in `FORM_JSON` env var
+> **Artifacts**: Screenshots (PII-masked), DOM dumps, HAR, trace, telemetry NDJSON
+> **No video recording**
+> **Implementation**: ARIA-first selectors, explicit waits (no retry logic), fail-fast on errors
+> **Submission**: Environment-controlled via `SUBMIT=true` flag
+> **Output**: `artifacts/YYYY-MM-DD_HH-MM-SS/` with `index.json` manifest
+
+**Full specification**: [`specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml)
+
+---
+
+## Global Resources
+
+**Parent Config**: [`~/.claude/CLAUDE.md`](/Users/terryli/.claude/CLAUDE.md)
+**Doppler Integration**: [`~/.claude/specifications/doppler-integration.yaml`](/Users/terryli/.claude/specifications/doppler-integration.yaml)
+**Toolchain**: [`~/.claude/docs/setup/toolchain.md`](/Users/terryli/.claude/docs/setup/toolchain.md)
+**Credential Management**: [`~/.claude/docs/setup/credential-management.md`](/Users/terryli/.claude/docs/setup/credential-management.md)

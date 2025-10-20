@@ -1,0 +1,137 @@
+# Visual Inspection Mandate
+
+**Status**: MANDATORY for all reconnaissance, spike, and exploratory work
+**Enforcement**: Pre-commit hook + CI/CD validation
+**Version**: 1.0.0
+**Date**: 2025-10-17
+
+---
+
+## Why This Matters
+
+**2025-10-17 Critical Discovery**: Reconnaissance on Manulife Par form found a selector bug ONLY through PNG examination:
+- Overly broad selector `page.locator("select, [role='combobox']").filter(has_text="Select").first`
+- Accidentally changed product from "Manulife Par" to "Family Term"
+- ARIA tree comparison showed **NO DIFFERENCE** (same structure, different content)
+- PNG screenshot clearly showed wrong product selected
+- **Impact**: Would have caused 4+ hours of debugging in implementation phase vs. 30 seconds to catch visually
+
+**Lesson**: Screenshots are NOT optional documentation — they are MANDATORY evidence that catches issues invisible in ARIA/DOM analysis.
+
+---
+
+## Mandatory Workflow
+
+### FOR EVERY RECONNAISSANCE OR SPIKE:
+
+#### 1. Capture Screenshots at Each Step
+
+```python
+# After EVERY significant action
+artifact_manager.capture_screenshot(page, "step_description")
+```
+
+**Minimum Requirements**:
+- [ ] Initial state (`001_initial.png`)
+- [ ] After each interaction (`002_*.png`, `003_*.png`, etc.)
+- [ ] Final state (`00N_final.png`)
+
+#### 2. Examine EACH Screenshot (Not Just Generate)
+
+**Agent Reflection Pattern** - STOP after each screenshot:
+
+```markdown
+## Visual Inspection: [step_name].png
+
+**What I See**:
+- [Describe visible elements, state, layout]
+
+**Expected vs. Actual**:
+- ✅ Product dropdown shows "Manulife Par" [as expected]
+- ✅ Form fields match expected structure [as expected]
+- ⚠️  Blue banner visible [unexpected but harmless]
+
+**PII Check**: ✅ No sensitive data visible / ✅ PII properly masked
+
+**Action**: Proceed / Investigate discrepancy / Document finding
+```
+
+#### 3. Document in Report
+
+**Link screenshots to findings**:
+
+```markdown
+## Step 2: Product Selection
+
+See: `artifacts/recon_20251017/002_product_selected.png`
+
+**Visual Verification**:
+- Product dropdown correctly shows "Manulife Par"
+- "Upload Later" radio selected as expected
+- No unexpected state changes observed
+```
+
+---
+
+## Pre-Commit Checklist
+
+Before committing reconnaissance work:
+
+- [ ] **Minimum 3 screenshots captured**
+- [ ] **ALL screenshots visually examined** (describe what you saw)
+- [ ] **Any visual discrepancies investigated**
+- [ ] **PII masking verified** by visual inspection
+- [ ] **Findings reference screenshots** in report.md
+- [ ] **Manifest includes screenshot inventory** (index.json)
+
+**ENFORCEMENT**: Pre-commit hook validates screenshot count and report references.
+
+---
+
+## Quick Reference: Good vs. Bad
+
+✅ **GOOD**:
+```markdown
+## Step: Fill Product Dropdown
+
+Screenshot: `002_product_selected.png`
+
+Visual Check:
+- ✅ Product shows "Manulife Par"
+- ✅ Upload Later selected
+- ✅ Form fields match Par structure
+
+Conclusion: Proceed to next step.
+```
+
+❌ **BAD**:
+```markdown
+## Artifacts
+- 001.png
+- 002.png
+- 003.png
+
+Next: Implement automation.
+```
+*Problem: No evidence screenshots were examined, no visual verification, no findings.*
+
+---
+
+## Enforcement
+
+**Pre-Commit Hook**: Validates minimum 3 screenshots + report references
+**CI/CD**: Blocks PR if artifacts incomplete
+**See**: [`docs/analysis/visual-inspection-enforcement-proposal.md`](/Users/terryli/own/insurance/docs/analysis/visual-inspection-enforcement-proposal.md)
+
+---
+
+## Related Documentation
+
+- [CLAUDE.md - Visual Inspection Mandate](/Users/terryli/own/insurance/CLAUDE.md#-visual-inspection-mandate) - Quick reference
+- [Human-in-the-Loop Review Workflow](/Users/terryli/own/insurance/docs/workflows/human-in-the-loop-review.md) - Integration with approval workflow
+- [Artifact Manager](/Users/terryli/own/insurance/utils/artifact_manager.py) - Centralized screenshot capture utility
+
+---
+
+**Version History**:
+- v1.0.0 (2025-10-17): Initial documentation of visual inspection mandate

@@ -1,0 +1,102 @@
+"""Reconnaissance test for Manulife Par welcome page structure discovery.
+
+Purpose:
+    - Discover welcome page structure without form submission
+    - Capture comprehensive artifacts for analysis
+    - Document dynamic behaviors, timing, API dependencies
+
+Outputs to: artifacts/explore_welcome_page/
+
+Usage:
+    doppler run --project insurance --config prd -- \\
+      uv run --active pytest -v -m reconnaissance tests/reconnaissance/explore_welcome_page.py
+
+Design Constraints:
+    - No form submission (reconnaissance only)
+    - No selector fallbacks or retry logic
+    - Explicit waits based on network idle
+    - Fail-fast with comprehensive artifact capture
+"""
+
+import pytest
+from playwright.sync_api import Page
+
+from utils.artifact_manager import ArtifactManager
+
+
+WELCOME_PAGE_URL = "https://www.insurance.manulife.ca/dda/welcomeInformation"
+
+
+@pytest.mark.reconnaissance
+def test_explore_welcome_page_structure(
+    page: Page,
+    artifact_manager: ArtifactManager
+):
+    """Explore and document welcome page structure.
+
+    This test captures the welcome page state without any interactions,
+    documenting the initial page structure for automation planning.
+
+    Args:
+        page: Playwright page instance (from conftest.py fixture)
+        artifact_manager: Artifact manager (from conftest.py fixture)
+    """
+    print("\nManulife Par Welcome Page Reconnaissance")
+    print("=" * 50)
+    print(f"Target URL: {WELCOME_PAGE_URL}")
+    print(f"Artifacts: {artifact_manager.session_path}")
+    print()
+
+    # Navigate to welcome page
+    print("Navigating to welcome page...")
+    page.goto(WELCOME_PAGE_URL, wait_until="networkidle", timeout=30000)
+
+    # Check for authentication redirect
+    current_url = page.url
+    if "login" in current_url.lower() or "signin" in current_url.lower():
+        pytest.fail(
+            f"Redirected to login page: {current_url}\n"
+            f"storage-state.json may be expired - regenerate authentication"
+        )
+
+    print(f"✓ Loaded: {current_url}")
+
+    # Capture initial state
+    print("Capturing initial page state...")
+    artifact_manager.capture_state_snapshot(
+        page,
+        name="initial",
+        include_aria=True
+    )
+
+    # Wait for dynamic content to stabilize
+    print("Waiting for dynamic content to settle...")
+    page.wait_for_load_state("networkidle", timeout=15000)
+
+    # Capture settled state
+    print("Capturing settled page state...")
+    artifact_manager.capture_state_snapshot(
+        page,
+        name="settled",
+        include_aria=True
+    )
+
+    print("✓ Reconnaissance complete")
+    print()
+    print("Next steps:")
+    print(f"1. Review trace: npx playwright show-trace {artifact_manager.get_trace_path()}")
+    print(f"2. Analyze HAR: Import {artifact_manager.get_har_path()} into Chrome DevTools")
+    print(f"3. Inspect artifacts: ls {artifact_manager.session_path}")
+
+    # Test assertions
+    assert current_url == WELCOME_PAGE_URL, \
+        f"Expected to land on welcome page, got {current_url}"
+
+    # Verify key elements are present (basic smoke test)
+    product_dropdown = page.locator("select, [role='combobox']").first
+    assert product_dropdown.is_visible(), "Product dropdown should be visible"
+
+    start_button = page.get_by_text("Start a new application")
+    assert start_button.is_visible(), "Start button should be visible"
+
+    print("✓ All assertions passed")

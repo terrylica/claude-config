@@ -1,0 +1,118 @@
+"""
+Reconnaissance Test: Upload Now Attempt
+
+Purpose: Try selecting "Upload Now" instead of "Upload Later" to see
+         if it reveals different validation or bypasses the error.
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_upload_now_attempt(page: Page, artifact_manager):
+    """
+    Test with Upload Now selected (no file upload, just selection)
+    """
+
+    print("\n" + "=" * 70)
+    print("UPLOAD NOW ATTEMPT - See if Upload Now changes validation")
+    print("=" * 70)
+
+    manulife_page = ManulifeParPage(page)
+
+    # Navigate and setup
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Select product
+    print("\nSelecting Manulife Par product...")
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "001_product_selected")
+
+    # Try Upload NOW instead of Upload Later
+    print("\nSelecting Upload NOW...")
+    upload_now = page.get_by_role("radio", name="Upload Now")
+    upload_now.click()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "002_upload_now_selected")
+    print("✓ Upload Now selected")
+
+    # Click button to reveal form
+    print("\nClicking 'Start a new application' to reveal form...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "003_form_revealed")
+
+    # Check for file upload field
+    print("\nChecking for file upload field...")
+    page.evaluate("window.scrollTo(0, 0)")  # Scroll to top
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "004_top_of_page")
+
+    # Try to find file upload input
+    try:
+        file_input = page.locator("input[type='file']")
+        if file_input.is_visible():
+            print("✓ File upload field found!")
+            print("   (Not uploading file - just checking if field exists)")
+        else:
+            print("✗ File upload field exists but not visible")
+    except:
+        print("✗ No file upload field found")
+
+    # Fill form completely
+    print("\nFilling all form fields...")
+    manulife_page.fill_insured_name("Jamie", "Lee")
+    manulife_page.select_sex("Female")
+    manulife_page.fill_date_of_birth("20", "March", "1992")
+    manulife_page.select_smoking_status("Non-Smoker")
+
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+
+    manulife_page.select_riders("No")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+
+    print("✓ Form filled")
+    artifact_manager.capture_screenshot(page, "005_form_filled")
+
+    # Try validation with Upload Now selected (no file uploaded)
+    print("\nClicking 'Start a new application' with Upload Now (no file)...")
+    url_before = page.url
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(2000)
+    url_after = page.url
+    artifact_manager.capture_screenshot(page, "006_after_validation")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"\nValidation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    print(f"\nURL before: {url_before}")
+    print(f"URL after:  {url_after}")
+
+    if url_before != url_after:
+        print(f"\n🎉 SUCCESS! Navigated to: {url_after}")
+        artifact_manager.capture_screenshot(page, "007_success")
+    else:
+        print("\n⚠️  No navigation - checking error messages")
+
+    print(f"\n✓ Test complete - Artifacts: {artifact_manager.session_dir}")

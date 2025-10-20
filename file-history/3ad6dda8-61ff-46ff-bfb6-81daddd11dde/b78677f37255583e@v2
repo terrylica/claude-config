@@ -1,0 +1,277 @@
+# Form Navigation Discovery - Spike Report
+
+**Date**: 2025-10-17
+**Session**: `test_explore_complete_form_journey`
+**Critical Finding**: "Start a new application" button behavior is NOT what we expected
+
+---
+
+## Executive Summary
+
+After successfully filling all required fields with ZERO validation errors, clicking the "Start a new application" button **does not navigate to a new page**. The form remains on the same screen with all data intact.
+
+**Key Question**: Is this the submission button, or are we missing something?
+
+---
+
+## Discovery Process
+
+### Step 6: Attempted Navigation
+
+**Action**: Clicked "Start a new application" button after filling all required fields
+
+**Expected Behavior**:
+- Navigate to next page (e.g., Page 2 with additional fields)
+- Or navigate to submission confirmation
+- Or navigate to review page
+
+**Actual Behavior**:
+- ✅ Button was enabled (all validation passed)
+- ❌ No navigation occurred
+- ❌ URL remained: `https://www.insurance.manulife.ca/dda/welcomeInformation`
+- ❌ Content remained identical (same headings, same form fields)
+- ❌ All filled data still present (John Doe, coverage details, etc.)
+
+**Evidence**:
+- Screenshot: `artifacts/test_explore_complete_form_journey/014_page_2_initial.png`
+- ARIA tree: `artifacts/test_explore_complete_form_journey/016_page_2_initial.aria.yaml`
+- Trace: `artifacts/test_explore_complete_form_journey/trace.zip`
+
+---
+
+## Analysis
+
+### Possible Explanations
+
+#### Hypothesis 1: Form is Complete (This IS the submission page)
+**Evidence**:
+- Button text says "Start a **new** application" (implies creating something new)
+- All required fields filled (no validation errors)
+- No additional pages needed for Par product with "Upload Later" option
+
+**Counter-evidence**:
+- No confirmation message appeared
+- No success/failure indication
+- Form still editable (not locked/submitted state)
+
+#### Hypothesis 2: Missing Required Fields (Silent validation)
+**Evidence**:
+- Some fields might be conditionally required based on our selections
+- React might have client-side validation we haven't triggered
+
+**Counter-evidence**:
+- Button was enabled (`is_enabled()` returned True)
+- No red "Required" errors visible
+- All 4 custom React buttons properly selected (dark blue state)
+
+#### Hypothesis 3: Button Requires Different Interaction
+**Evidence**:
+- We've seen custom React components need special handling (JS dispatch)
+- This might be another custom component
+
+**Counter-evidence**:
+- Button was found via standard ARIA role: `get_by_role("button", name="Start a new application")`
+- Standard `.click()` executed without error
+
+#### Hypothesis 4: React SPA Didn't Update (State Issue)
+**Evidence**:
+- React SPAs can have subtle state issues
+- Maybe clicking again would work
+
+**Counter-evidence**:
+- `wait_for_load_state("networkidle")` completed (React rendered)
+- 2-second timeout given for updates
+- Headings unchanged (React should update view)
+
+---
+
+## What We Know For Certain
+
+### Form State
+✅ **All Required Fields Filled**:
+- Name: John Doe
+- Sex: Male
+- Date of Birth: 15 January 1980
+- Insurance Age: 46
+- Smoking Status: Non-Smoker
+- Coverage Type: Single
+- Premium Duration: Pay for 10 years
+- Amount: $100,000
+- Dividend Option: Paid-up insurance
+- Riders: No
+- Quebec: No
+- Additional Products: No
+- Medical Info: On this electronic application
+
+✅ **All Custom React Buttons Working**:
+- Riders: `#RIDER_STATUS_ID-1` [checked]
+- Quebec: `#wel-pol-quebec-1` [checked]
+- Additional Products: `#wel-multiple-prod-1` [checked]
+- Medical Info: `#wel-electronic-app-0` [checked]
+
+✅ **Button State**:
+- Visible: Yes
+- Enabled: Yes
+- Clickable: Yes
+- Clicked: Yes (no error)
+
+### Navigation Behavior
+❌ **No Page Transition Occurred**:
+- URL unchanged
+- Headings unchanged
+- Form content unchanged
+- Data persisted (not reset)
+
+---
+
+## Next Steps for Investigation
+
+### Option A: Examine Network Traffic
+**Action**: Review HAR file or trace to see if API calls were made
+
+**What to Look For**:
+- POST request to submission endpoint
+- Success/failure response
+- Redirection instructions from server
+
+### Option B: Check for Hidden State Changes
+**Action**: Compare DOM before and after button click
+
+**What to Look For**:
+- Hidden form fields added
+- Application ID generated
+- Session state updated
+
+### Option C: Verify Button Selector
+**Action**: Inspect the actual button element in DOM dump
+
+**What to Look For**:
+- Is this the correct button?
+- Are there multiple buttons with same text?
+- Does button have onclick handler?
+
+### Option D: Try Again with Explicit Waits
+**Action**: Add longer waits and check for subtle changes
+
+**What to Look For**:
+- Loading indicators
+- Toast notifications
+- Modal dialogs
+
+### Option E: Check for Required Illustration Upload
+**Action**: We selected "Upload Later" - maybe we need to upload now?
+
+**What to Look For**:
+- Blue info message mentions uploading illustration
+- Maybe form won't proceed without it?
+
+---
+
+## Recommendations
+
+### Immediate Actions
+
+1. **Review Network Traffic** in trace file
+   ```bash
+   npx playwright show-trace artifacts/test_explore_complete_form_journey/trace.zip
+   ```
+   - Check Network tab for API calls after button click
+   - Look for 200/400/500 responses
+
+2. **Compare DOM Snapshots**
+   - Before click: `012_page_1_all_filled.dom.html`
+   - After click: `015_page_2_initial.dom.html`
+   - Look for differences (hidden fields, state changes)
+
+3. **Check HAR File** for network activity
+   - POST requests
+   - JSON responses
+   - Error messages
+
+4. **Examine Button Element** in DOM
+   - Search for "Start a new application" in DOM dump
+   - Check for onclick handlers
+   - Verify it's a standard button vs custom component
+
+### Hypothesis to Test
+
+**Most Likely**: The button DOES submit the form, but we're missing feedback because:
+- Submission succeeded silently
+- Or submission requires illustration upload first
+- Or there's a success message we didn't wait for
+
+**Test**:
+1. Add explicit wait for potential success message
+2. Check for URL change with longer timeout
+3. Look for modal/dialog with confirmation
+
+---
+
+## Visual Evidence
+
+### Before Click: `011_page_1_all_filled.png`
+- All fields properly filled
+- All custom buttons selected (dark blue)
+- No validation errors
+- "Start a new application" button visible (bottom right)
+
+### After Click: `014_page_2_initial.png`
+- **IDENTICAL** to before click
+- Same form layout
+- Same filled data
+- Same button position
+- No visible change
+
+---
+
+## Impact on Automation Strategy
+
+### If This IS Submission
+**Implication**: Form is simpler than expected
+- Single-page form (not multi-page)
+- "Start application" = Submit button
+- Need to verify submission success via API response
+
+**Next Phase**:
+- Verify submission via network traffic
+- Implement page object for single-page form
+- Add submission verification methods
+
+### If This is NOT Submission
+**Implication**: We're missing something critical
+- Additional interaction required
+- Hidden validation preventing submission
+- Bug in form or our interaction pattern
+
+**Next Phase**:
+- Debug interaction pattern
+- Find missing trigger
+- Document workaround
+
+---
+
+## Artifacts Reference
+
+- **Latest Run**: `artifacts/test_explore_complete_form_journey/`
+- **Screenshot Before**: `011_page_1_all_filled.png`
+- **Screenshot After**: `014_page_2_initial.png`
+- **DOM Before**: `012_page_1_all_filled.dom.html`
+- **DOM After**: `015_page_2_initial.dom.html`
+- **ARIA Before**: `013_page_1_all_filled.aria.yaml`
+- **ARIA After**: `016_page_2_initial.aria.yaml`
+- **Trace**: `trace.zip`
+- **Test Output**: `/tmp/test_output.log`
+
+---
+
+## Conclusion
+
+**Status**: ⚠️ **Investigation Required**
+
+We successfully filled all form fields with custom React component workaround, but the expected navigation after clicking "Start a new application" did not occur. This requires further investigation via network traffic analysis and DOM comparison to determine if:
+
+1. Form was actually submitted (silent success)
+2. Additional interaction is required
+3. There's a bug in form or our approach
+
+**Recommendation**: Analyze trace file network tab BEFORE continuing with automation implementation.

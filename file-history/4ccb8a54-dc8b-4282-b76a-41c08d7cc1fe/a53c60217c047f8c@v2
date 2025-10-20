@@ -1,0 +1,326 @@
+"""Extract actual selectors from riders table DOM."""
+
+import pytest
+from playwright.sync_api import Page
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_extract_riders_table_selectors(page: Page):
+    """Extract actual CSS selectors and element attributes from riders table."""
+
+    # Initialize page object
+    par_page = ManulifeParPage(page)
+
+    # Step 1: Navigate to form
+    par_page.navigate_to(par_page.welcome_url)
+    print("\n✓ Loaded welcome page\n")
+
+    # Step 2: Accept cookies
+    try:
+        accept_btn = page.get_by_role("button", name="Accept All Cookies")
+        if accept_btn.is_visible(timeout=2000):
+            accept_btn.click()
+            page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Step 3: Select product and start
+    page.get_by_label("Product").select_option("1")  # Manulife Par
+    page.wait_for_timeout(500)
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+
+    # Step 4: Reveal form
+    first_start_button = page.get_by_text("Start a new application")
+    first_start_button.wait_for(state="visible", timeout=5000)
+    first_start_button.click()
+    page.wait_for_load_state("networkidle")
+    print("✓ Form revealed\n")
+
+    # Step 5: Fill data
+    par_page.fill_insured_name("Test", "Rider", "")
+    par_page.select_sex("Female")
+    par_page.fill_date_of_birth("15", "June", "1990")
+    par_page.select_smoking_status("Non-Smoker")
+    par_page.fill_coverage_details()
+    print("✓ Data filled\n")
+
+    # Step 6: Select riders
+    par_page.select_riders("Yes")
+    page.wait_for_timeout(500)
+    print("✓ Riders selected\n")
+
+    # Step 7: Wait for Term riders table
+    page.wait_for_selector("text=Term riders", timeout=5000)
+    page.wait_for_timeout(1000)
+    print("✓ Term riders table appeared\n")
+
+    # ===== THE MAGIC PART: Extract actual DOM selectors =====
+    print("="*80)
+    print("🔍 EXTRACTING ACTUAL SELECTORS FROM LIVE DOM")
+    print("="*80 + "\n")
+
+    # Extract all inputs, selects, and buttons in the Term riders section
+    script = """
+    () => {
+        const results = {
+            all_selects: [],
+            all_inputs: [],
+            all_buttons: [],
+            all_links: [],
+            term_riders_section: null,
+            all_elements_info: [],
+            debug_info: {
+                heading_found: false,
+                elements_in_page: 0,
+                body_html_preview: ''
+            }
+        };
+
+        // Strategy 1: Find exact text match with minimal container
+        let termRidersHeading = null;
+        const allElements = document.querySelectorAll('*');
+        results.debug_info.elements_in_page = allElements.length;
+
+        // Find element with EXACT text "Term riders" (most likely to be the heading)
+        for (let el of allElements) {
+            const text = el.textContent.trim();
+            // Check if this element's direct text (not children) is "Term riders"
+            if (text === 'Term riders' || (text.startsWith('Term riders') && text.length < 50)) {
+                if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+                    termRidersHeading = el;
+                    results.debug_info.heading_found = true;
+                    break;
+                }
+            }
+        }
+
+        // Strategy 2: Look for heading elements (h1-h6) containing "Term riders"
+        if (!termRidersHeading) {
+            for (let el of document.querySelectorAll('h1, h2, h3, h4, h5, h6, div[role="heading"]')) {
+                if (el.textContent.includes('Term riders')) {
+                    termRidersHeading = el;
+                    results.debug_info.heading_found = true;
+                    break;
+                }
+            }
+        }
+
+        // Strategy 3: Look for divs with "Term riders" as first immediate child text
+        if (!termRidersHeading) {
+            for (let el of document.querySelectorAll('div')) {
+                const children = Array.from(el.childNodes);
+                for (let child of children) {
+                    if (child.nodeType === Node.TEXT_NODE && child.textContent.includes('Term riders')) {
+                        termRidersHeading = el;
+                        results.debug_info.heading_found = true;
+                        break;
+                    }
+                }
+                if (termRidersHeading) break;
+            }
+        }
+
+        if (termRidersHeading) {
+            console.log('Found Term riders heading:', termRidersHeading.tagName);
+            results.term_riders_section = {
+                tag: termRidersHeading.tagName,
+                text: termRidersHeading.textContent.substring(0, 100),
+                classes: termRidersHeading.className,
+                id: termRidersHeading.id
+            };
+
+            // Find container: first look for siblings/next elements that form the table
+            let container = termRidersHeading.closest('fieldset, section, form, [data-testid], div[class*="riders"], div[class*="table"]');
+
+            // If no container found, traverse up the tree
+            if (!container) {
+                let current = termRidersHeading;
+                for (let i = 0; i < 5; i++) {
+                    current = current.parentElement;
+                    if (!current) break;
+                    // Look for a container that has multiple inputs/selects
+                    const selectsInParent = current.querySelectorAll('select, [role="combobox"]');
+                    const inputsInParent = current.querySelectorAll('input[type="text"]');
+                    if (selectsInParent.length > 0 || inputsInParent.length > 0) {
+                        container = current;
+                        break;
+                    }
+                }
+            }
+
+            // If still no container, use the parent's parent
+            if (!container) {
+                container = termRidersHeading.parentElement?.parentElement;
+            }
+
+            if (container) {
+                console.log('Container found, searching for elements...');
+                results.debug_info.container_tag = container.tagName;
+                results.debug_info.container_class = container.className;
+
+                // Find all selects/comboboxes in container
+                const selects = container.querySelectorAll('select, [role="combobox"], [role="listbox"]');
+                selects.forEach((el, idx) => {
+                    results.all_selects.push({
+                        index: idx,
+                        tag: el.tagName,
+                        id: el.id || 'NO_ID',
+                        name: el.name || 'NO_NAME',
+                        class: el.className,
+                        role: el.getAttribute('role'),
+                        aria_label: el.getAttribute('aria-label'),
+                        aria_labelledby: el.getAttribute('aria-labelledby'),
+                        options: Array.from(el.querySelectorAll('option')).map(o => o.textContent)
+                    });
+                });
+
+                // Find all inputs
+                const inputs = container.querySelectorAll('input[type="text"], input:not([type]), [role="textbox"]');
+                inputs.forEach((el, idx) => {
+                    results.all_inputs.push({
+                        index: idx,
+                        type: el.type || 'NO_TYPE',
+                        id: el.id || 'NO_ID',
+                        name: el.name || 'NO_NAME',
+                        placeholder: el.placeholder,
+                        class: el.className,
+                        aria_label: el.getAttribute('aria-label')
+                    });
+                });
+
+                // Find all buttons
+                const buttons = container.querySelectorAll('button, [role="button"]');
+                buttons.forEach((el, idx) => {
+                    results.all_buttons.push({
+                        index: idx,
+                        tag: el.tagName,
+                        text: el.textContent.substring(0, 50),
+                        id: el.id || 'NO_ID',
+                        class: el.className,
+                        aria_label: el.getAttribute('aria-label')
+                    });
+                });
+
+                // Find all links
+                const links = container.querySelectorAll('a, [role="link"]');
+                links.forEach((el, idx) => {
+                    results.all_links.push({
+                        index: idx,
+                        text: el.textContent.substring(0, 50),
+                        id: el.id || 'NO_ID',
+                        class: el.className,
+                        href: el.href || 'NO_HREF'
+                    });
+                });
+
+                results.debug_info.found_elements = {
+                    selects: selects.length,
+                    inputs: inputs.length,
+                    buttons: buttons.length,
+                    links: links.length
+                };
+            } else {
+                results.debug_info.error = 'Could not find container for Term riders section';
+            }
+        } else {
+            results.debug_info.error = 'Could not find Term riders heading';
+        }
+
+        return results;
+    }
+    """
+
+    dom_info = page.evaluate(script)
+
+    print("📋 DEBUG INFO:\n")
+    debug = dom_info.get('debug_info', {})
+    print(f"  Heading Found: {debug.get('heading_found', False)}")
+    print(f"  Elements in Page: {debug.get('elements_in_page', 0)}")
+    if 'container_tag' in debug:
+        print(f"  Container Tag: {debug.get('container_tag', 'N/A')}")
+        print(f"  Container Class: {debug.get('container_class', 'N/A')}")
+    if 'found_elements' in debug:
+        print(f"  Elements Found: {debug.get('found_elements', {})}")
+    if 'error' in debug:
+        print(f"  ERROR: {debug.get('error', 'Unknown error')}")
+
+    print("\n\n📋 RESULTS:\n")
+
+    print("✓ SELECT/COMBOBOX ELEMENTS FOUND:")
+    if dom_info['all_selects']:
+        for i, select in enumerate(dom_info['all_selects']):
+            print(f"\n  [{i}] {select['tag']}")
+            print(f"      ID: {select['id']}")
+            print(f"      Name: {select['name']}")
+            if select['aria_label']:
+                print(f"      Aria Label: {select['aria_label']}")
+            if select['class']:
+                print(f"      Class: {select['class']}")
+            if select['options']:
+                print(f"      Options: {select['options'][:3]}")
+    else:
+        print("  (No select/combobox elements found)")
+
+    print("\n\n✓ INPUT FIELDS FOUND:")
+    if dom_info['all_inputs']:
+        for i, inp in enumerate(dom_info['all_inputs']):
+            print(f"\n  [{i}] Input Type: {inp['type']}")
+            print(f"      ID: {inp['id']}")
+            if inp['placeholder']:
+                print(f"      Placeholder: {inp['placeholder']}")
+            if inp['aria_label']:
+                print(f"      Aria Label: {inp['aria_label']}")
+    else:
+        print("  (No input fields found)")
+
+    print("\n\n✓ BUTTONS/ACTIONS FOUND:")
+    if dom_info['all_buttons']:
+        for i, btn in enumerate(dom_info['all_buttons']):
+            print(f"\n  [{i}] {btn['tag']}: {btn['text']}")
+            print(f"      ID: {btn['id']}")
+            if btn['aria_label']:
+                print(f"      Aria Label: {btn['aria_label']}")
+    else:
+        print("  (No buttons found)")
+
+    print("\n\n✓ LINKS FOUND:")
+    if dom_info['all_links']:
+        for i, link in enumerate(dom_info['all_links']):
+            print(f"\n  [{i}] {link['text']}")
+            print(f"      ID: {link['id']}")
+    else:
+        print("  (No links found)")
+
+    print("\n" + "="*80)
+    print("🎯 RECOMMENDATION FOR SELECTORS:")
+    print("="*80 + "\n")
+
+    if dom_info['all_selects']:
+        print("For Coverage Type dropdown, try:")
+        print(f"  → page.locator('select').nth(0)")
+        print(f"  → page.get_by_role('combobox').nth(0)")
+        if dom_info['all_selects'][0]['id']:
+            print(f"  → page.locator('#{dom_info['all_selects'][0]['id']}')")
+
+    if dom_info['all_inputs']:
+        print("\nFor Coverage Amount input, try:")
+        print(f"  → page.locator('input[type=\"text\"]').nth(0)")
+        print(f"  → page.get_by_role('textbox').nth(0)")
+        if dom_info['all_inputs'][0]['id']:
+            print(f"  → page.locator('#{dom_info['all_inputs'][0]['id']}')")
+
+    if dom_info['all_links']:
+        print("\nFor 'Add coverage' link, try:")
+        print(f"  → page.get_by_role('link', name='Add coverage')")
+        print(f"  → page.locator('a').filter(has_text='Add coverage')")
+
+    print("\n" + "="*80 + "\n")
+
+    # Save to file
+    import json
+    with open('artifacts/extracted_selectors.json', 'w') as f:
+        json.dump(dom_info, f, indent=2)
+
+    print("✓ Full results saved to: artifacts/extracted_selectors.json\n")

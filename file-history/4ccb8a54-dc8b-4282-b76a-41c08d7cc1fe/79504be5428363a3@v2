@@ -1,0 +1,103 @@
+#!/bin/bash
+# Visual Inspection Pre-Commit Hook
+# Validates that artifact directories contain required screenshots and documentation
+#
+# Installation:
+#   chmod +x scripts/hooks/pre-commit
+#   ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+
+set -e
+
+# Get list of staged files under artifacts/
+staged_artifacts=$(git diff --cached --name-only --diff-filter=ACMR | grep '^artifacts/' || true)
+
+if [ -z "$staged_artifacts" ]; then
+    # No artifacts being committed - skip validation
+    exit 0
+fi
+
+echo "📸 Visual Inspection Validation: Checking artifact directories..."
+
+# Extract unique artifact directories from staged files
+artifact_dirs=$(echo "$staged_artifacts" | cut -d'/' -f1-2 | sort -u)
+
+validation_failed=0
+
+for dir in $artifact_dirs; do
+    if [ ! -d "$dir" ]; then
+        continue
+    fi
+
+    echo "  Validating: $dir"
+
+    # Count PNG files in this directory
+    png_count=$(find "$dir" -maxdepth 1 -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+
+    # Check for required files
+    has_index=false
+    has_report=false
+    report_mentions_png=false
+
+    if [ -f "$dir/index.json" ]; then
+        has_index=true
+    fi
+
+    if [ -f "$dir/report.md" ]; then
+        has_report=true
+        # Check if report.md mentions any .png files
+        if grep -q '\.png' "$dir/report.md" 2>/dev/null; then
+            report_mentions_png=true
+        fi
+    fi
+
+    # Validate requirements
+    errors=()
+
+    if [ "$png_count" -lt 3 ]; then
+        errors+=("    ❌ Found only $png_count PNG screenshots (minimum: 3)")
+    else
+        echo "    ✓ Screenshots: $png_count PNGs"
+    fi
+
+    if [ "$has_index" = false ]; then
+        errors+=("    ❌ Missing index.json manifest")
+    else
+        echo "    ✓ Manifest: index.json exists"
+    fi
+
+    if [ "$has_report" = false ]; then
+        errors+=("    ❌ Missing report.md documentation")
+    elif [ "$report_mentions_png" = false ]; then
+        errors+=("    ❌ report.md exists but doesn't reference any PNG files")
+    else
+        echo "    ✓ Documentation: report.md references screenshots"
+    fi
+
+    # Print errors and mark validation as failed
+    if [ ${#errors[@]} -gt 0 ]; then
+        echo ""
+        echo "  ⚠️  Validation failed for $dir:"
+        printf '%s\n' "${errors[@]}"
+        echo ""
+        validation_failed=1
+    fi
+done
+
+if [ $validation_failed -eq 1 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Visual Inspection Mandate - Commit Blocked"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Each artifact directory must contain:"
+    echo "  • Minimum 3 PNG screenshots (visual evidence)"
+    echo "  • index.json manifest"
+    echo "  • report.md that references at least one screenshot"
+    echo ""
+    echo "See CLAUDE.md section '📸 Visual Inspection Mandate' for details."
+    echo ""
+    exit 1
+fi
+
+echo "✅ Visual inspection validation passed"
+exit 0

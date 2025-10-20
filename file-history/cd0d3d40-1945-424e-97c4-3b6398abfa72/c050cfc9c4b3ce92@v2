@@ -1,0 +1,1019 @@
+# Human-in-the-Loop Review Workflow
+
+**Version**: 1.0.0
+**Status**: Production Ready
+**Last Updated**: 2025-10-18
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Review Triggers](#review-triggers)
+4. [Workflow Steps](#workflow-steps)
+5. [API Reference](#api-reference)
+6. [Usage Patterns](#usage-patterns)
+7. [GitHub Configuration](#github-configuration)
+8. [Security Considerations](#security-considerations)
+9. [Troubleshooting](#troubleshooting)
+10. [Examples](#examples)
+
+---
+
+## Overview
+
+### Purpose
+
+The Human-in-the-Loop (HITL) Review Workflow enables AI coding agents to request human approval before executing critical operations. The AI creates GitHub Issues with embedded screenshots and test results, then **blocks execution** until the human approves or rejects via comment keywords.
+
+### Key Benefits
+
+- **Prevents Accidental Submissions**: AI waits for human approval before submitting live forms
+- **Visual Verification**: Screenshots embedded directly in GitHub Issues for quick review
+- **Audit Trail**: Complete history of all approval requests and decisions
+- **Private Repository Support**: Artifacts stored within private repo, respecting permissions
+- **Zero External Dependencies**: No third-party services required (GitHub Issues only)
+
+### Design Inspiration
+
+Similar to [HumanLayer SDK](https://www.humanlayer.dev/) but using GitHub Issues instead of external service:
+- Function-level approval gates via decorators
+- Blocking execution until human responds
+- Approval/rejection keywords in comments
+- Timeout handling
+
+---
+
+## Architecture
+
+### Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     AI Coding Agent                         │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                ┌───────────▼───────────┐
+                │  Trigger Detection    │
+                │  (Visual anomaly,     │
+                │   conditional logic,  │
+                │   validation error,   │
+                │   milestone)          │
+                └───────────┬───────────┘
+                            │
+        ┌───────────────────▼────────────────────┐
+        │  utils/artifact_uploader.py            │
+        │  - Uploads screenshots to artifacts    │
+        │    branch (orphan, separate history)   │
+        │  - Returns GitHub raw URLs             │
+        │    (commit SHA, permanent)             │
+        └───────────────────┬────────────────────┘
+                            │
+        ┌───────────────────▼────────────────────┐
+        │  utils/github_review.py                │
+        │  - Creates GitHub Issue with embedded  │
+        │    images and test summary             │
+        │  - Polls issue comments every 30s      │
+        │  - Detects approval/rejection keywords │
+        └───────────────────┬────────────────────┘
+                            │
+                    ┌───────▼────────┐
+                    │  GitHub Issue  │
+                    │  (with images) │
+                    └───────┬────────┘
+                            │
+                ┌───────────▼────────────┐
+                │   Human Reviewer       │
+                │   Adds comment:        │
+                │   - "approved" or      │
+                │   - "rejected"         │
+                └───────────┬────────────┘
+                            │
+        ┌───────────────────▼────────────────────┐
+        │  utils/github_review.py                │
+        │  - Detects keyword in comment          │
+        │  - Closes issue with status            │
+        │  - Adds label (approved/rejected)      │
+        │  - Returns status to agent             │
+        └───────────────────┬────────────────────┘
+                            │
+                ┌───────────▼────────────┐
+                │  AI Coding Agent       │
+                │  - Continues (approved)│
+                │  - Halts (rejected)    │
+                │  - Aborts (timeout)    │
+                └────────────────────────┘
+```
+
+### Artifacts Branch
+
+**Pattern**: Orphan branch (no shared history with main)
+
+**Why Orphan Branch?**
+- Isolates binary artifacts from code history
+- Prevents bloating main branch with large binary files
+- Allows independent cleanup/pruning of old artifacts
+- Separate commit history for artifacts vs. code
+
+**URL Format**:
+```
+https://raw.githubusercontent.com/{owner}/{repo}/{commit_sha}/{path}
+```
+
+**Example**:
+```
+https://raw.githubusercontent.com/tainora/insurance/a1b2c3d4/test_2025-10-18/screenshot.png
+```
+
+**Permanence**: URLs use commit SHA (not branch name), so they remain valid even if branch is force-pushed or rebased.
+
+---
+
+## Review Triggers
+
+### 1. Visual Anomalies
+
+**Detection Criteria**:
+- Page height changes unexpectedly
+- Missing elements (expected locators not found)
+- New elements appear (unexpected locators present)
+- Layout shifts or content misalignment
+
+**Example Trigger**:
+```python
+# In reconnaissance test
+page_height_before = page.evaluate("document.body.scrollHeight")
+page.click("#submit-button")
+page_height_after = page.evaluate("document.body.scrollHeight")
+
+if abs(page_height_after - page_height_before) > 500:
+    # Visual anomaly: significant height change
+    create_review_request(
+        test_name="Unexpected Page Height Change",
+        test_type="reconnaissance",
+        summary=f"Page height changed from {page_height_before}px to {page_height_after}px",
+        trigger_reason="Visual Anomaly Detected",
+        blocking=False
+    )
+```
+
+### 2. New Conditional Logic
+
+**Detection Criteria**:
+- Form fields appear/disappear based on user selections
+- New sections/questions revealed by specific choices
+- Multi-step form navigation triggered by field values
+
+**Example Trigger**:
+```python
+# Check for conditional fields
+fields_before = page.locator("input, select, textarea").count()
+page.select_option("#product-type", "Critical Illness")
+page.wait_for_timeout(500)  # Allow React state update
+fields_after = page.locator("input, select, textarea").count()
+
+if fields_after > fields_before:
+    # New fields appeared - conditional logic discovered
+    create_review_request(
+        test_name="Conditional Fields Discovered",
+        test_type="reconnaissance",
+        summary=f"{fields_after - fields_before} new fields appeared when selecting Critical Illness",
+        trigger_reason="New Conditional Logic Discovered",
+        blocking=False
+    )
+```
+
+### 3. Unknown Validation Errors
+
+**Detection Criteria**:
+- "Required" errors on fields not marked as required in specs
+- Ambiguous validation messages
+- Unexpected error states after form submission
+
+**Example Trigger**:
+```python
+# Submit form and check for errors
+page.click("button[type='submit']")
+page.wait_for_timeout(1000)
+
+errors = page.locator(".error-message, [aria-invalid='true']").all_text_contents()
+if errors:
+    create_review_request(
+        test_name="Unknown Validation Errors",
+        test_type="automation-dry-run",
+        summary=f"Validation errors encountered: {errors}",
+        trigger_reason="Unknown Validation Error",
+        blocking=True  # Block automation until resolved
+    )
+```
+
+### 4. Milestone Achievements
+
+**Detection Criteria**:
+- Phase completion (e.g., all form pages explored)
+- Successful form fill without errors
+- Test suite passes for the first time
+
+**Example Trigger**:
+```python
+# After completing form exploration
+if all_pages_explored:
+    create_review_request(
+        test_name="Phase 1 Complete: Full Form Exploration",
+        test_type="reconnaissance",
+        summary="All form pages explored, field catalog complete",
+        trigger_reason="Milestone Achievement",
+        blocking=False  # Informational only
+    )
+```
+
+---
+
+## Workflow Steps
+
+### Step 1: Trigger Detection
+
+AI detects one of the 4 trigger conditions during test execution.
+
+### Step 2: Artifact Upload
+
+AI uploads screenshots and artifacts to the `artifacts` branch:
+
+```python
+from utils.artifact_uploader import upload_artifacts
+
+urls = upload_artifacts(
+    artifacts_dir=Path("./artifacts/test_2025-10-18"),
+    repo_owner="tainora",
+    repo_name="insurance"
+)
+
+# Returns:
+# {
+#     "001_initial.png": "https://raw.githubusercontent.com/tainora/insurance/abc123/test_2025-10-18/001_initial.png",
+#     "002_filled.png": "https://raw.githubusercontent.com/tainora/insurance/abc123/test_2025-10-18/002_filled.png",
+#     "findings.json": "https://raw.githubusercontent.com/tainora/insurance/abc123/test_2025-10-18/findings.json"
+# }
+```
+
+### Step 3: Issue Creation
+
+AI creates GitHub Issue with embedded images:
+
+```python
+from utils.github_review import create_review_request
+
+issue = create_review_request(
+    test_name="Manulife PAR Form Fill - Stage 2",
+    test_type="reconnaissance",
+    summary="Form filled successfully, ready for validation",
+    artifacts_urls=urls,
+    trigger_reason="Milestone Achievement",
+    blocking=True  # AI will wait for approval
+)
+
+# Returns:
+# {
+#     'number': 123,
+#     'url': 'https://github.com/tainora/insurance/issues/123'
+# }
+```
+
+### Step 4: AI Blocks (Blocking Mode Only)
+
+AI polls issue comments every 30 seconds:
+
+```python
+from utils.github_review import wait_for_approval
+
+status = wait_for_approval(issue['number'], timeout=3600)
+
+# Polls every 30s, checking comments for keywords:
+# - Approval: "approved", "lgtm", "looks good", "approve", "✅"
+# - Rejection: "rejected", "reject", "changes requested", "not approved", "❌"
+```
+
+### Step 5: Human Review
+
+Human reviewer:
+1. Receives GitHub notification (email or mobile)
+2. Opens issue in browser
+3. Reviews embedded screenshots
+4. Checks test summary and findings
+5. Adds comment with approval/rejection keyword
+
+### Step 6: Keyword Detection
+
+AI detects keyword in comment and:
+- **Approved**: Closes issue with "Approved" comment, adds `approved` label, removes `needs-human-review`, returns `"approved"`
+- **Rejected**: Closes issue with "Rejected" comment, adds `rejected` label, returns `"rejected"`
+- **Timeout**: After 3600s (default), closes issue with "Timeout" comment, returns `"timeout"`
+
+### Step 7: AI Continues or Halts
+
+Based on status:
+```python
+if status == "approved":
+    print("Proceeding with automation")
+    submit_form()
+elif status == "rejected":
+    print("Halting automation")
+    raise Exception("Human reviewer rejected")
+else:  # timeout
+    print("Aborting due to timeout")
+    raise TimeoutError("No response from reviewer")
+```
+
+---
+
+## API Reference
+
+### `utils/artifact_uploader.py`
+
+#### `upload_artifacts(artifacts_dir, repo_owner, repo_name, artifacts_branch="artifacts")`
+
+Upload artifacts directory to artifacts branch and return GitHub URLs.
+
+**Parameters**:
+- `artifacts_dir` (Path): Directory containing artifacts to upload
+- `repo_owner` (str): GitHub repository owner (e.g., "tainora")
+- `repo_name` (str): GitHub repository name (e.g., "insurance")
+- `artifacts_branch` (str): Name of artifacts branch (default: "artifacts")
+
+**Returns**:
+- `Dict[str, str]`: Mapping of artifact filename to GitHub raw URL
+
+**Raises**:
+- `FileNotFoundError`: If artifacts_dir doesn't exist
+- `ArtifactUploadError`: If upload fails
+
+**Example**:
+```python
+urls = upload_artifacts(
+    artifacts_dir=Path("./artifacts/test_001"),
+    repo_owner="tainora",
+    repo_name="insurance"
+)
+```
+
+#### `generate_markdown_image_links(urls, title_prefix="Artifact")`
+
+Generate markdown for embedding images in GitHub Issues.
+
+**Parameters**:
+- `urls` (Dict[str, str]): Artifact URLs from `upload_artifacts()`
+- `title_prefix` (str): Prefix for image titles (default: "Artifact")
+
+**Returns**:
+- `str`: Markdown string with image links
+
+**Example**:
+```python
+markdown = generate_markdown_image_links({
+    "screenshot.png": "https://raw.githubusercontent.com/..."
+})
+
+# Returns:
+# ## Screenshots
+# ![Artifact: screenshot.png](https://raw.githubusercontent.com/...)
+```
+
+---
+
+### `utils/github_review.py`
+
+#### `create_review_request(test_name, test_type, summary, artifacts_urls=None, trigger_reason="Manual Review Request", blocking=True, repo=None)`
+
+Create GitHub Issue for human review.
+
+**Parameters**:
+- `test_name` (str): Display name for test (e.g., "Manulife PAR Form Fill")
+- `test_type` (Literal): "reconnaissance", "automation-dry-run", or "automation-live"
+- `summary` (str): Brief summary of test results
+- `artifacts_urls` (Dict[str, str], optional): Artifact URLs from `upload_artifacts()`
+- `trigger_reason` (str): Why review was requested (default: "Manual Review Request")
+- `blocking` (bool): Whether this blocks automation (default: True)
+- `repo` (str, optional): GitHub repo in "owner/name" format (auto-detected if None)
+
+**Returns**:
+- `Dict[str, any]`: `{'number': int, 'url': str}` for the created issue
+
+**Raises**:
+- `subprocess.CalledProcessError`: If gh CLI command fails
+
+**Example**:
+```python
+issue = create_review_request(
+    test_name="Form Fill Test",
+    test_type="reconnaissance",
+    summary="Test completed successfully",
+    artifacts_urls=urls,
+    blocking=False
+)
+```
+
+#### `wait_for_approval(issue_number, poll_interval=30, timeout=3600, repo=None)`
+
+Block until issue is approved or rejected via comment.
+
+**Parameters**:
+- `issue_number` (int): GitHub issue number to monitor
+- `poll_interval` (int): Seconds between polls (default: 30)
+- `timeout` (int): Maximum seconds to wait (default: 3600)
+- `repo` (str, optional): GitHub repo in "owner/name" format (auto-detected if None)
+
+**Returns**:
+- `Literal["approved", "rejected", "timeout"]`: Approval status
+
+**Raises**:
+- `subprocess.CalledProcessError`: If gh CLI command fails
+
+**Example**:
+```python
+status = wait_for_approval(123, timeout=1800)  # 30 minute timeout
+```
+
+#### `list_pending_reviews(repo=None)`
+
+List all open review issues awaiting human approval.
+
+**Parameters**:
+- `repo` (str, optional): GitHub repo in "owner/name" format (auto-detected if None)
+
+**Returns**:
+- `List[Dict]`: List of dicts with issue metadata
+
+**Example**:
+```python
+pending = list_pending_reviews()
+for issue in pending:
+    print(f"#{issue['number']}: {issue['title']}")
+```
+
+---
+
+### `utils/approval_gate.py`
+
+#### `@require_approval(test_name, test_type="automation-live", summary=None, trigger_reason="Pre-Execution Approval Gate", artifacts_dir=None, timeout=3600)`
+
+Decorator to require human approval before function execution.
+
+**Parameters**:
+- `test_name` (str): Display name for the approval request
+- `test_type` (str): "reconnaissance", "automation-dry-run", or "automation-live" (default: "automation-live")
+- `summary` (str, optional): Summary of what the function will do (auto-generated if None)
+- `trigger_reason` (str): Why approval is needed (default: "Pre-Execution Approval Gate")
+- `artifacts_dir` (Path, optional): Artifacts directory to upload before requesting approval
+- `timeout` (int): Maximum seconds to wait for approval (default: 3600)
+
+**Raises**:
+- `ReviewRejectedError`: If human rejects the approval request
+- `TimeoutError`: If approval times out
+
+**Example**:
+```python
+@require_approval(
+    test_name="Submit Form",
+    test_type="automation-live",
+    summary="About to submit form with live data"
+)
+def submit_form(page):
+    page.click("button[type='submit']")
+
+submit_form(page)  # Blocks until human approves
+```
+
+#### `@require_approval_with_context(test_name, test_type="automation-live", summary_fn=None, trigger_reason="Pre-Execution Approval Gate", artifacts_fn=None, timeout=3600)`
+
+Decorator with access to function arguments for dynamic summary/artifacts.
+
+**Parameters**:
+- `test_name` (str): Display name for the approval request
+- `test_type` (str): Test type (default: "automation-live")
+- `summary_fn` (Callable, optional): Function that takes (*args, **kwargs) and returns summary string
+- `trigger_reason` (str): Why approval is needed
+- `artifacts_fn` (Callable, optional): Function that takes (*args, **kwargs) and returns artifacts_dir Path
+- `timeout` (int): Maximum seconds to wait for approval (default: 3600)
+
+**Raises**:
+- `ReviewRejectedError`: If human rejects
+- `TimeoutError`: If approval times out
+
+**Example**:
+```python
+def get_summary(page, form_data):
+    return f"About to submit form for: {form_data['name']}"
+
+def capture_artifacts(page, form_data):
+    artifacts = Path("./artifacts/pre_submit")
+    artifacts.mkdir(exist_ok=True)
+    page.screenshot(path=artifacts / "form_state.png")
+    return artifacts
+
+@require_approval_with_context(
+    test_name="Submit Form",
+    summary_fn=get_summary,
+    artifacts_fn=capture_artifacts
+)
+def submit_form(page, form_data):
+    page.click("button[type='submit']")
+
+submit_form(page, {"name": "John Doe"})
+```
+
+---
+
+## Usage Patterns
+
+### Pattern 1: Async Review (Non-Blocking)
+
+**Use Case**: Informational review - AI continues without waiting
+
+```python
+from utils.github_review import create_review_request
+
+# After milestone achievement
+issue = create_review_request(
+    test_name="Phase 1 Complete",
+    test_type="reconnaissance",
+    summary="All form pages explored",
+    artifacts_urls=urls,
+    trigger_reason="Milestone Achievement",
+    blocking=False  # AI doesn't wait
+)
+
+print(f"Review requested: {issue['url']}")
+# AI continues immediately
+```
+
+### Pattern 2: Blocking Review (Synchronous)
+
+**Use Case**: Critical decision point - AI waits for human approval
+
+```python
+from utils.github_review import create_review_request, wait_for_approval
+
+# Before live submission
+issue = create_review_request(
+    test_name="Submit Manulife Form",
+    test_type="automation-live",
+    summary="Ready to submit form with live data",
+    artifacts_urls=urls,
+    trigger_reason="Pre-Submission Approval (Live Test)",
+    blocking=True  # Indicates urgency
+)
+
+# Block until approved
+status = wait_for_approval(issue['number'], timeout=3600)
+
+if status == "approved":
+    submit_form()
+elif status == "rejected":
+    raise Exception("Submission cancelled")
+else:
+    raise TimeoutError("No response")
+```
+
+### Pattern 3: Function-Level Approval Gate
+
+**Use Case**: Protect critical functions from accidental execution
+
+```python
+from utils.approval_gate import require_approval
+
+@require_approval(
+    test_name="Submit Form",
+    test_type="automation-live",
+    summary="Ready to submit form",
+    artifacts_dir=Path("./artifacts/pre_submit")
+)
+def submit_form(page):
+    page.click("button[type='submit']")
+    page.wait_for_load_state("networkidle")
+
+# Automatically blocks until approved
+submit_form(page)
+```
+
+### Pattern 4: Dynamic Context-Aware Approval
+
+**Use Case**: Generate approval summary/artifacts from function arguments
+
+```python
+from utils.approval_gate import require_approval_with_context
+
+def get_summary(page, applicant):
+    return f"About to submit application for {applicant['first_name']} {applicant['last_name']}"
+
+def capture_pre_submit_artifacts(page, applicant):
+    artifacts = Path(f"./artifacts/pre_submit_{applicant['last_name']}")
+    artifacts.mkdir(exist_ok=True)
+    page.screenshot(path=artifacts / "form_final.png")
+    return artifacts
+
+@require_approval_with_context(
+    test_name="Submit Application",
+    summary_fn=get_summary,
+    artifacts_fn=capture_pre_submit_artifacts
+)
+def submit_application(page, applicant):
+    page.click("button[type='submit']")
+
+# Summary: "About to submit application for Ada Lovelace"
+# Artifacts: ./artifacts/pre_submit_Lovelace/form_final.png
+submit_application(page, {"first_name": "Ada", "last_name": "Lovelace"})
+```
+
+---
+
+## GitHub Configuration
+
+### Required Setup
+
+#### 1. Artifacts Branch
+
+Created automatically by `upload_artifacts()`, or manually:
+
+```bash
+# Create orphan artifacts branch
+git checkout --orphan artifacts
+
+# Remove all files from staging
+git rm -rf .
+
+# Create README
+echo "# Artifacts Branch" > README.md
+echo "This branch stores test artifacts (screenshots, logs, traces)." >> README.md
+
+# Commit and push
+git add README.md
+git commit -m "Initialize artifacts branch"
+git push -u origin artifacts
+
+# Return to main
+git checkout main
+```
+
+#### 2. GitHub Labels
+
+Created via `gh label create`:
+
+```bash
+gh label create "needs-human-review" \
+    --description "AI agent awaiting human review" \
+    --color "d73a4a"
+
+gh label create "approved" \
+    --description "Human approved" \
+    --color "0e8a16"
+
+gh label create "rejected" \
+    --description "Human rejected" \
+    --color "b60205"
+
+gh label create "reconnaissance" \
+    --description "Exploratory test" \
+    --color "c5def5"
+
+gh label create "automation-dry-run" \
+    --description "Automation dry-run" \
+    --color "1d76db"
+
+gh label create "automation-live" \
+    --description "Live automation test" \
+    --color "0052cc"
+
+gh label create "blocking" \
+    --description "Urgent review needed" \
+    --color "d93f0b"
+```
+
+#### 3. Issue Template
+
+See [`.github/ISSUE_TEMPLATE/ai-review-request.yml`](/Users/terryli/own/insurance/.github/ISSUE_TEMPLATE/ai-review-request.yml)
+
+### GitHub CLI Authentication
+
+Ensure `gh` CLI is authenticated:
+
+```bash
+# Check auth status
+gh auth status
+
+# Login if needed
+gh auth login
+
+# Test issue creation
+gh issue create --title "Test" --body "Test issue" --label "needs-human-review"
+```
+
+---
+
+## Security Considerations
+
+### 1. Private Repository
+
+- Artifacts branch is part of private repo
+- GitHub raw URLs respect repository permissions
+- Only authenticated users can view images
+
+### 2. PII Masking
+
+**CRITICAL**: Screenshots MUST be PII-masked before upload.
+
+See [Visual Inspection Mandate](/Users/terryli/own/insurance/CLAUDE.md#-visual-inspection-mandate) for PII masking requirements.
+
+```python
+# Example: Mask sensitive fields before screenshot
+sensitive_fields = [
+    page.locator("#ssn"),
+    page.locator("#credit-card"),
+    page.locator("#password")
+]
+
+page.screenshot(path="screenshot.png", mask=sensitive_fields)
+```
+
+### 3. Credential Safety
+
+**Never include secrets in**:
+- Issue titles or bodies
+- Artifact filenames
+- Screenshot content
+- Log files
+
+### 4. Branch Isolation
+
+Artifacts branch is orphan (no shared history with main):
+- Prevents accidental merges
+- Allows independent cleanup
+- Isolates binary files from code
+
+---
+
+## Troubleshooting
+
+### Issue: "gh: command not found"
+
+**Cause**: GitHub CLI not installed
+
+**Solution**:
+```bash
+# macOS (Homebrew)
+brew install gh
+
+# Verify installation
+gh --version
+```
+
+### Issue: "gh auth token: authentication token not found"
+
+**Cause**: GitHub CLI not authenticated
+
+**Solution**:
+```bash
+gh auth login
+# Follow prompts to authenticate
+```
+
+### Issue: "Error creating issue: too many arguments"
+
+**Cause**: Incorrect `gh issue create` syntax
+
+**Solution**: Ensure labels are comma-separated (no spaces):
+```python
+# Correct
+"--label", "needs-human-review,reconnaissance"
+
+# Incorrect
+"--label", "needs-human-review, reconnaissance"
+```
+
+### Issue: Images not displaying in GitHub Issue
+
+**Cause**: URL format incorrect or artifact not uploaded
+
+**Solution**:
+1. Verify artifact uploaded: `git log artifacts` shows commit
+2. Check URL format: `https://raw.githubusercontent.com/{owner}/{repo}/{commit_sha}/{path}`
+3. Test URL in browser (should prompt for authentication if private repo)
+
+### Issue: "ArtifactUploadError: Git operation failed"
+
+**Cause**: Git conflict or permission issue
+
+**Solution**:
+1. Check git status: `git status`
+2. Ensure clean working directory
+3. Verify write permissions to repository
+4. Check remote configured: `git remote -v`
+
+### Issue: Approval timeout even though comment added
+
+**Cause**: Comment doesn't contain approval keyword
+
+**Solution**: Ensure comment contains one of:
+- Approval: `approved`, `lgtm`, `looks good`, `approve`, `✅`
+- Rejection: `rejected`, `reject`, `changes requested`, `not approved`, `❌`
+
+**Case-insensitive**: "APPROVED", "Approved", "approved" all work
+
+---
+
+## Examples
+
+### Example 1: Reconnaissance with Milestone Review
+
+```python
+from pathlib import Path
+from utils.artifact_uploader import upload_artifacts
+from utils.github_review import create_review_request
+
+def test_explore_full_form(page, artifact_manager):
+    # Explore all form pages
+    pages_explored = []
+
+    for page_num in range(1, 6):
+        page.goto(f"https://example.com/form?page={page_num}")
+        artifact_manager.capture_screenshot(page, f"page_{page_num}")
+        pages_explored.append(page_num)
+
+    # Milestone: All pages explored
+    if len(pages_explored) == 5:
+        # Upload artifacts
+        urls = upload_artifacts(
+            artifacts_dir=artifact_manager.artifacts_dir,
+            repo_owner="tainora",
+            repo_name="insurance"
+        )
+
+        # Create review issue (non-blocking)
+        issue = create_review_request(
+            test_name="Phase 1 Complete: Full Form Exploration",
+            test_type="reconnaissance",
+            summary=f"All {len(pages_explored)} form pages explored successfully",
+            artifacts_urls=urls,
+            trigger_reason="Milestone Achievement",
+            blocking=False  # Don't block exploration
+        )
+
+        print(f"✅ Milestone review requested: {issue['url']}")
+```
+
+### Example 2: Automation with Pre-Submission Approval
+
+```python
+from pathlib import Path
+from utils.approval_gate import require_approval
+
+@require_approval(
+    test_name="Manulife PAR Form Submission",
+    test_type="automation-live",
+    summary="Ready to submit Manulife PAR form with live applicant data",
+    trigger_reason="Pre-Submission Approval (Live Test)"
+)
+def submit_manulife_form(page, manulife_page):
+    """Submit Manulife PAR form - REQUIRES HUMAN APPROVAL."""
+    # This function will not execute until human approves via GitHub Issue
+
+    manulife_page.click_validate_button()
+
+    # Check for validation errors
+    errors = manulife_page.check_for_validation_errors()
+    if errors:
+        raise ValueError(f"Validation errors: {errors}")
+
+    # Submit form
+    page.click("button[type='submit']")
+    page.wait_for_load_state("networkidle")
+
+    print("✅ Form submitted successfully")
+
+def test_fill_and_submit_par_form(page, manulife_page):
+    # Fill form
+    manulife_page.fill_complete_form(
+        first_name="Ada",
+        last_name="Lovelace",
+        sex="Female",
+        dob_day="10",
+        dob_month="December",
+        dob_year="1990",
+        smoking_status="Non-Smoker"
+    )
+
+    # This will block until human approves
+    submit_manulife_form(page, manulife_page)
+```
+
+### Example 3: Conditional Logic Discovery
+
+```python
+from utils.github_review import create_review_request
+from utils.artifact_uploader import upload_artifacts
+
+def test_discover_conditional_fields(page, artifact_manager):
+    # Count fields before interaction
+    fields_before = page.locator("input, select, textarea").count()
+    artifact_manager.capture_screenshot(page, "before_selection")
+
+    # Select option that might trigger conditional fields
+    page.select_option("#additional-products", "Yes")
+    page.wait_for_timeout(500)
+
+    # Count fields after interaction
+    fields_after = page.locator("input, select, textarea").count()
+    artifact_manager.capture_screenshot(page, "after_selection")
+
+    # Check if new fields appeared
+    if fields_after > fields_before:
+        new_field_count = fields_after - fields_before
+
+        # Upload artifacts
+        urls = upload_artifacts(
+            artifacts_dir=artifact_manager.artifacts_dir,
+            repo_owner="tainora",
+            repo_name="insurance"
+        )
+
+        # Create review issue
+        issue = create_review_request(
+            test_name="Conditional Fields Discovered",
+            test_type="reconnaissance",
+            summary=f"{new_field_count} new fields appeared when selecting 'Additional Products: Yes'",
+            artifacts_urls=urls,
+            trigger_reason="New Conditional Logic Discovered",
+            blocking=False  # Informational
+        )
+
+        print(f"⚠️ New conditional logic discovered: {issue['url']}")
+```
+
+### Example 4: Validation Error Review
+
+```python
+from utils.github_review import create_review_request, wait_for_approval
+from utils.artifact_uploader import upload_artifacts
+
+def test_submit_form_with_error_handling(page, artifact_manager):
+    # Fill form
+    page.fill("#first-name", "Ada")
+    page.fill("#last-name", "Lovelace")
+
+    # Attempt submission
+    page.click("button[type='submit']")
+    page.wait_for_timeout(1000)
+
+    # Check for validation errors
+    error_elements = page.locator(".error-message, [aria-invalid='true']").all()
+
+    if error_elements:
+        # Capture error state
+        artifact_manager.capture_screenshot(page, "validation_errors")
+
+        # Extract error messages
+        error_messages = [el.text_content() for el in error_elements]
+
+        # Upload artifacts
+        urls = upload_artifacts(
+            artifacts_dir=artifact_manager.artifacts_dir,
+            repo_owner="tainora",
+            repo_name="insurance"
+        )
+
+        # Create BLOCKING review issue
+        issue = create_review_request(
+            test_name="Unknown Validation Errors",
+            test_type="automation-dry-run",
+            summary=f"Validation errors encountered:\n" + "\n".join(f"- {msg}" for msg in error_messages),
+            artifacts_urls=urls,
+            trigger_reason="Unknown Validation Error",
+            blocking=True  # Block until human reviews
+        )
+
+        print(f"🚧 Blocking for error review: {issue['url']}")
+
+        # Wait for human to review and provide guidance
+        status = wait_for_approval(issue['number'], timeout=1800)  # 30 min
+
+        if status == "approved":
+            print("✅ Human approved - continuing despite errors")
+        elif status == "rejected":
+            raise Exception("Human rejected - halting automation")
+        else:
+            raise TimeoutError("No response from human reviewer")
+```
+
+---
+
+## Related Documentation
+
+- [CLAUDE.md - Human-in-the-Loop Review Workflow](/Users/terryli/own/insurance/CLAUDE.md#human-in-the-loop-review-workflow) - Quick reference
+- [Visual Inspection Mandate](/Users/terryli/own/insurance/CLAUDE.md#-visual-inspection-mandate) - PII masking requirements
+- [GitHub Issues API](https://docs.github.com/en/rest/issues) - GitHub API reference
+- [GitHub CLI Manual](https://cli.github.com/manual/) - `gh` command reference
+
+---
+
+**Version History**:
+- v1.0.0 (2025-10-18): Initial release - complete HITL workflow implementation

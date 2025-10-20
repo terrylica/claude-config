@@ -1,0 +1,258 @@
+"""Shared pytest fixtures for Playwright automation tests.
+
+Provides browser, context, page, and artifact management fixtures following
+pytest best practices and Playwright patterns.
+"""
+
+import os
+from pathlib import Path
+from typing import Generator
+
+import pytest
+from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
+
+from utils.artifact_manager import ArtifactManager
+
+
+# Project paths
+PROJECT_ROOT = Path(__file__).parent.parent
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+STORAGE_STATE_PATH = PROJECT_ROOT / "storage-state.json"
+
+
+@pytest.fixture(scope="session")
+def playwright() -> Generator[Playwright, None, None]:
+    """Playwright session fixture.
+
+    Yields:
+        Playwright instance for the entire test session
+    """
+    with sync_playwright() as p:
+        yield p
+
+
+@pytest.fixture(scope="session")
+def browser(playwright: Playwright) -> Generator[Browser, None, None]:
+    """Browser session fixture.
+
+    Yields:
+        Chromium browser instance for the entire test session
+    """
+    browser = playwright.chromium.launch(
+        headless=os.getenv("HEADLESS", "false").lower() == "true"
+    )
+    yield browser
+    browser.close()
+
+
+@pytest.fixture
+def artifact_manager(request: pytest.FixtureRequest) -> ArtifactManager:
+    """Artifact manager fixture for test evidence capture.
+
+    Args:
+        request: Pytest request object for test metadata
+
+    Returns:
+        ArtifactManager instance configured for current test
+    """
+    # Generate session name from test name and node ID
+    test_name = request.node.name
+    session_name = test_name.replace("::", "_").replace("[", "_").replace("]", "")
+
+    # PII-safe selectors to mask in screenshots
+    pii_mask_selectors = [
+        "input[type='password']",
+        "input[name*='password']",
+        "input[name*='ssn']",
+        "input[name*='sin']",
+        "[data-sensitive='true']"
+    ]
+
+    manager = ArtifactManager(
+        base_dir=ARTIFACTS_DIR,
+        session_name=session_name,
+        pii_mask_selectors=pii_mask_selectors
+    )
+
+    return manager
+
+
+@pytest.fixture
+def clear_browser_cache() -> None:
+    """Clear browser cache and stored data for clean slate testing.
+
+    Use this fixture to ensure each test starts fresh without leftover state.
+
+    Example:
+        def test_something(page: Page, clear_browser_cache):
+            # Browser is now clean, no cookies/cache/storage
+            ...
+    """
+    # This fixture has no setup - it serves as a marker
+    # The actual clearing happens in the context fixture below
+    yield
+    # No cleanup needed - context cleanup handles it
+
+
+@pytest.fixture
+def context(
+    browser: Browser,
+    artifact_manager: ArtifactManager,
+    request: pytest.FixtureRequest
+) -> Generator[BrowserContext, None, None]:
+    """Browser context fixture with HAR recording and authentication.
+
+    Args:
+        browser: Browser instance
+        artifact_manager: Artifact manager for HAR path
+
+    Yields:
+        Browser context with storage state and HAR recording
+    """
+    context_options = {
+        "viewport": {"width": 1920, "height": 1080},
+        "record_har_path": str(artifact_manager.get_har_path()),
+        "record_har_mode": "minimal",  # Minimal to reduce file size
+    }
+
+    # Check if clear_browser_cache fixture was requested
+    use_clean_slate = "clear_browser_cache" in request.fixturenames
+
+    # Use storage state if available (for authenticated tests)
+    # Skip if clean slate requested
+    if not use_clean_slate and STORAGE_STATE_PATH.exists():
+        context_options["storage_state"] = str(STORAGE_STATE_PATH)
+
+    context = browser.new_context(**context_options)
+
+    yield context
+
+    # Close context (HAR is automatically saved)
+    context.close()
+
+
+@pytest.fixture
+def page(
+    context: BrowserContext,
+    artifact_manager: ArtifactManager
+) -> Generator[Page, None, None]:
+    """Page fixture with tracing and telemetry capture.
+
+    Args:
+        context: Browser context
+        artifact_manager: Artifact manager for trace and telemetry
+
+    Yields:
+        Page with tracing enabled and event listeners
+    """
+    page = context.new_page()
+
+    # Start tracing with screenshots and snapshots
+    context.tracing.start(
+        screenshots=True,
+        snapshots=True,
+        sources=False  # Exclude source code to reduce size
+    )
+
+    # Attach telemetry event listeners
+    _attach_telemetry_listeners(page, artifact_manager)
+
+    yield page
+
+    # Stop tracing and save
+    context.tracing.stop(path=str(artifact_manager.get_trace_path()))
+
+    # Save manifest
+    artifact_manager.save_manifest()
+
+    page.close()
+
+
+def _attach_telemetry_listeners(page: Page, artifact_manager: ArtifactManager) -> None:
+    """Attach telemetry event listeners to page.
+
+    Args:
+        page: Playwright page
+        artifact_manager: Artifact manager for telemetry logging
+    """
+
+    # Network telemetry
+    page.on("request", lambda request: artifact_manager.save_telemetry_event(
+        "request",
+        {
+            "url": request.url,
+            "method": request.method,
+            "resource_type": request.resource_type
+        }
+    ))
+
+    page.on("response", lambda response: artifact_manager.save_telemetry_event(
+        "response",
+        {
+            "url": response.url,
+            "status": response.status,
+            "ok": response.ok
+        }
+    ))
+
+    page.on("requestfailed", lambda request: artifact_manager.save_telemetry_event(
+        "requestfailed",
+        {
+            "url": request.url,
+            "failure": request.failure
+        }
+    ))
+
+    # Console telemetry
+    page.on("console", lambda msg: artifact_manager.save_telemetry_event(
+        "console",
+        {
+            "type": msg.type,
+            "text": msg.text,
+            "location": msg.location
+        }
+    ))
+
+    # Page error telemetry
+    page.on("pageerror", lambda error: artifact_manager.save_telemetry_event(
+        "pageerror",
+        {
+            "message": str(error),
+            "name": error.__class__.__name__
+        }
+    ))
+
+
+# Helper functions for cache management
+def clear_page_storage(page: Page) -> None:
+    """Clear localStorage and sessionStorage from page.
+
+    Use this during test execution to wipe browser storage mid-test.
+
+    Args:
+        page: Playwright page instance
+
+    Example:
+        def test_something(page: Page):
+            # ... do something ...
+            clear_page_storage(page)  # Wipe storage
+            # ... continue test ...
+    """
+    page.evaluate("() => { localStorage.clear(); sessionStorage.clear(); }")
+
+
+# Markers for different test types
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "reconnaissance: Exploratory discovery tests that capture form structure"
+    )
+    config.addinivalue_line(
+        "markers",
+        "automation: Form automation tests that fill and submit forms"
+    )
+    config.addinivalue_line(
+        "markers",
+        "clean_slate: Test that requires fresh browser cache/cookies/storage"
+    )

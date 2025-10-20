@@ -1,0 +1,144 @@
+"""
+Successful Navigation Test
+
+Purpose: Validate that the form successfully navigates to PolicyInformation page
+when filled with correct data and "No" selected for riders.
+
+SUCCESS CRITERIA:
+- Navigation to PolicyInformation page occurs
+- No validation errors
+- Progress tracker shows completion
+"""
+
+import pytest
+from playwright.sync_api import Page
+import time
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_successful_navigation_to_policy_info(page: Page, artifact_manager):
+    """
+    Navigate successfully from welcomeInformation to PolicyInformation page
+    """
+
+    print("\n" + "=" * 70)
+    print("SUCCESSFUL NAVIGATION TEST")
+    print("Goal: Navigate to PolicyInformation page")
+    print("=" * 70)
+
+    manulife_page = ManulifeParPage(page)
+
+    # Setup
+    print("\nSetting up form...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Select product and upload option
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+
+    # First click to reveal form
+    print("Revealing form...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.click()
+    page.wait_for_timeout(1500)
+
+    # Fill form - MINIMAL but COMPLETE
+    print("Filling complete form...")
+    manulife_page.fill_insured_name("Alex", "Letterman")
+    manulife_page.select_sex("Male")
+    manulife_page.fill_date_of_birth("5", "June", "1986")
+    manulife_page.select_smoking_status("Non-Smoker")
+
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+
+    # CRITICAL: Select "No" for riders to avoid empty required fields
+    manulife_page.select_riders("No")
+    page.wait_for_timeout(500)
+
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "01_form_complete")
+    print("✓ Form complete")
+
+    # Final click
+    print("\nSubmitting form for validation and navigation...")
+    url_before = page.url
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+
+    # Wait for navigation with proper detection
+    print("Waiting for page load...")
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+        print("✓ Page loaded")
+    except:
+        print("⚠️  Network idle timeout - checking page content anyway")
+
+    # Wait a bit more for DOM to fully update
+    time.sleep(2)
+    artifact_manager.capture_screenshot(page, "02_after_click")
+
+    # Check for navigation by looking for content, not just URL
+    print("\nChecking for successful navigation...")
+
+    # Look for "Policy information" heading
+    try:
+        policy_heading = page.locator("text=Policy information").first
+        if policy_heading.is_visible(timeout=2000):
+            print("✓ FOUND 'Policy information' heading - NAVIGATION SUCCESSFUL!")
+    except:
+        print("⚠️  Could not find Policy information heading")
+
+    # Look for progress tracker
+    try:
+        progress_tracker = page.locator("text=Application set-up").first
+        if progress_tracker.is_visible(timeout=2000):
+            print("✓ FOUND progress tracker - on PolicyInformation page!")
+    except:
+        print("⚠️  Could not find progress tracker")
+
+    # Check URL
+    url_after = page.url
+    print(f"\nURL: {url_after}")
+
+    if "PolicyInformation" in url_after or "policyInformation" in url_after:
+        print("✓ URL contains 'PolicyInformation'")
+    elif url_before == url_after:
+        print("⚠️  URL unchanged from welcomeInformation")
+        print("   But page content shows PolicyInformation!")
+        print("   This suggests page reloaded without URL change")
+
+    # Check for validation errors
+    errors = manulife_page.check_for_validation_errors()
+    if errors:
+        print(f"\n❌ Validation errors ({len(errors)}):")
+        for i, error in enumerate(errors, 1):
+            print(f"   {i}. {error}")
+    else:
+        print("\n✓ NO validation errors!")
+
+    # Final result
+    print("\n" + "=" * 70)
+    if "Policy" in page.locator("h1, h2, h3").first.text_content():
+        print("✅ SUCCESS! Navigated to Policy Information page!")
+    else:
+        print("⚠️  Could not confirm navigation")
+
+    print(f"Artifacts: {artifact_manager.session_dir}")

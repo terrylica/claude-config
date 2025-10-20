@@ -1,0 +1,245 @@
+"""
+Reconnaissance Test: Upload Now Path Investigation
+
+Purpose: Test if selecting "Upload Now" for illustration upload enables
+         navigation to the next form page.
+
+Hypothesis: The "Upload Later" selection might be blocking navigation.
+            Selecting "Upload Now" might reveal the actual navigation mechanism.
+
+Status: Temporary exploration test
+Cleanup: Archive after investigation complete
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+import time
+
+@pytest.mark.reconnaissance
+def test_upload_now_enables_navigation(page: Page):
+    """
+    Test Scenario: Fill form with 'Upload Now' selected
+
+    Expected: Observe if navigation button appears or behavior changes
+    """
+
+    artifacts_dir = Path("artifacts/test_upload_now_path")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\nUpload Now Path Investigation")
+    print("=" * 50)
+    print(f"Artifacts: {artifacts_dir}")
+    print()
+
+    # Step 1: Navigate to welcome page
+    print("Step 1: Loading welcome page...")
+    page.goto("https://www.insurance.manulife.ca/dda/welcomeInformation", wait_until="networkidle")
+    print(f"✓ Welcome page loaded: {page.url}")
+    print()
+
+    # Step 2: Accept cookies
+    print("Step 2: Accepting cookies...")
+    try:
+        accept_button = page.get_by_role("button", name="Accept all cookies")
+        if accept_button.is_visible(timeout=2000):
+            accept_button.click()
+            page.wait_for_timeout(500)
+            print("✓ Cookies accepted")
+    except:
+        print("ℹ️  No cookie banner (already accepted)")
+    print()
+
+    # Step 3: Select Manulife Par
+    print("Step 3: Selecting Manulife Par product...")
+    product_dropdown = page.get_by_label("Product")
+    product_dropdown.select_option("1")  # Manulife Par
+    page.wait_for_timeout(500)
+    print("✓ Manulife Par selected")
+    print()
+
+    # Step 3.5: SELECT "UPLOAD NOW" (key difference)
+    print("Step 3.5: Selecting 'Upload Now' for illustration...")
+    upload_now_button = page.get_by_role("radio", name="Upload Now")
+    upload_now_button.click()
+    page.wait_for_timeout(1000)  # Wait for React state update
+
+    # Capture state after Upload Now selection
+    page.screenshot(path=str(artifacts_dir / "01_upload_now_selected.png"), full_page=True)
+    with open(artifacts_dir / "01_upload_now_selected.aria.yaml", "w") as f:
+        f.write(page.locator("body").aria_snapshot())
+
+    print("✓ Upload Now selected")
+
+    # Check if file upload UI appeared
+    print("  → Checking for file upload interface...")
+    try:
+        # Look for file input or upload button
+        file_inputs = page.locator("input[type='file']").all()
+        if file_inputs:
+            print(f"  ✓ Found {len(file_inputs)} file input(s)")
+        else:
+            print("  ⚠️  No file inputs found")
+
+        # Look for upload button/area
+        upload_area = page.locator("text=/upload/i").all()
+        if upload_area:
+            print(f"  ✓ Found {len(upload_area)} upload-related elements")
+    except Exception as e:
+        print(f"  ⚠️  Error checking upload UI: {e}")
+    print()
+
+    # Step 4: Start application
+    print("Step 4: Starting application...")
+    start_button = page.get_by_role("button", name="Start an application")
+    start_button.click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
+
+    print(f"✓ First form page loaded: {page.url}")
+    page.screenshot(path=str(artifacts_dir / "02_form_page_initial.png"), full_page=True)
+    print()
+
+    # Step 5: Fill minimal required fields
+    print("Step 5: Filling minimal required fields...")
+
+    # Insured person details
+    page.get_by_label("First name").fill("Ada")
+    page.get_by_label("Last name").fill("Lovelace")
+    page.get_by_role("radio", name="Male").click()
+
+    # Date of birth
+    page.get_by_label("Day (dd)").fill("10")
+    page.get_by_label("Month").select_option("december")
+    page.get_by_label("Year (yyyy)").fill("1815")
+
+    # Smoking status
+    page.get_by_label("Illustrated smoking status").select_option("Non-Smoker")
+
+    # Coverage details
+    page.get_by_label("Coverage type").select_option("Single")
+    page.get_by_label("Premium Duration").select_option("Pay for 10 years")
+    page.get_by_label("Amount of insurance, dollar").fill("250000")
+    page.get_by_label("Dividend option").select_option("Paid-up insurance")
+
+    # Custom React buttons using JS dispatch
+    page.evaluate("""
+        document.querySelector('#RIDER_STATUS_ID-1').click();
+        document.querySelector('#RIDER_STATUS_ID-1').dispatchEvent(new Event('change', { bubbles: true }));
+    """)
+    page.wait_for_timeout(300)
+
+    page.evaluate("""
+        document.querySelector('#wel-pol-quebec-1').click();
+        document.querySelector('#wel-pol-quebec-1').dispatchEvent(new Event('change', { bubbles: true }));
+    """)
+    page.wait_for_timeout(300)
+
+    page.evaluate("""
+        document.querySelector('#wel-multiple-prod-1').click();
+        document.querySelector('#wel-multiple-prod-1').dispatchEvent(new Event('change', { bubbles: true }));
+    """)
+    page.wait_for_timeout(300)
+
+    page.evaluate("""
+        document.querySelector('#wel-electronic-app-0').click();
+        document.querySelector('#wel-electronic-app-0').dispatchEvent(new Event('change', { bubbles: true }));
+    """)
+    page.wait_for_timeout(300)
+
+    print("✓ All required fields filled")
+
+    # Capture before clicking "Start"
+    page.screenshot(path=str(artifacts_dir / "03_before_start_click.png"), full_page=True)
+    with open(artifacts_dir / "03_before_start.aria.yaml", "w") as f:
+        f.write(page.locator("body").aria_snapshot())
+    print()
+
+    # Step 6: Click "Start a new application" and analyze
+    print("Step 6: Clicking 'Start a new application'...")
+
+    start_new_button = page.get_by_role("button", name="Start a new application")
+
+    # Check button state before click
+    print(f"  → Button enabled: {start_new_button.is_enabled()}")
+    print(f"  → Button visible: {start_new_button.is_visible()}")
+
+    # Record current state
+    url_before = page.url
+    headings_before = page.locator("h1, h2").all_text_contents()
+
+    # Click the button
+    start_new_button.click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
+
+    # Check for state changes
+    url_after = page.url
+    headings_after = page.locator("h1, h2").all_text_contents()
+
+    print(f"  → URL before: {url_before}")
+    print(f"  → URL after:  {url_after}")
+    print(f"  → URL changed: {url_before != url_after}")
+    print()
+
+    # Capture after clicking
+    page.screenshot(path=str(artifacts_dir / "04_after_start_click.png"), full_page=True)
+    with open(artifacts_dir / "04_after_start.aria.yaml", "w") as f:
+        f.write(page.locator("body").aria_snapshot())
+
+    # Step 7: Look for upload interface or navigation
+    print("Step 7: Searching for upload interface or navigation...")
+
+    # Check for file upload UI
+    print("  → Checking for file upload fields...")
+    file_inputs = page.locator("input[type='file']").all()
+    print(f"    File inputs found: {len(file_inputs)}")
+
+    # Check for new sections/pages
+    print("  → Checking for page sections...")
+    all_headings = page.locator("h1, h2, h3").all_text_contents()
+    print(f"    Headings found: {all_headings[:10]}")  # First 10
+
+    # Check for "Attachments" section
+    attachments_section = page.locator("text=/attachment/i").all()
+    print(f"    'Attachment' mentions: {len(attachments_section)}")
+
+    # Check for new buttons
+    print("  → Checking for navigation buttons...")
+    all_buttons = page.get_by_role("button").all()
+    button_texts = [btn.text_content() for btn in all_buttons if btn.is_visible()]
+    nav_buttons = [text for text in button_texts if any(word in text.lower() for word in ['next', 'continue', 'proceed', 'upload', 'attach'])]
+    print(f"    Potential navigation buttons: {nav_buttons}")
+    print()
+
+    # Step 8: Scroll to bottom to find hidden elements
+    print("Step 8: Scrolling to bottom to find hidden navigation...")
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(1000)
+
+    page.screenshot(path=str(artifacts_dir / "05_scrolled_to_bottom.png"), full_page=True)
+
+    # Check for newly visible buttons
+    all_visible_buttons = page.get_by_role("button").all()
+    visible_button_texts = [btn.text_content() for btn in all_visible_buttons if btn.is_visible()]
+    print(f"    Visible buttons after scroll: {visible_button_texts[-5:]}")  # Last 5
+    print()
+
+    print("=" * 50)
+    print("✓ Upload Now path exploration complete")
+    print("=" * 50)
+    print()
+    print("Results:")
+    print(f"  - URL changed: {url_before != url_after}")
+    print(f"  - File inputs found: {len(file_inputs)}")
+    print(f"  - Attachment mentions: {len(attachments_section)}")
+    print(f"  - Navigation buttons: {len(nav_buttons)}")
+    print(f"  - Artifacts saved: {artifacts_dir}")
+    print()
+    print("Next steps:")
+    print("  1. Review screenshots to compare Upload Now vs Upload Later behavior")
+    print("  2. Examine ARIA snapshots for structural differences")
+    print("  3. Check if file upload is required before navigation")
+    print()
+
+    assert True, "Exploration test complete - review artifacts"

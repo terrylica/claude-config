@@ -1,0 +1,157 @@
+"""
+Reconnaissance Test: Manual Replication
+
+Purpose: Replicate the manual browser interaction that successfully navigated
+         past the welcome page to reach PolicyInformation page.
+
+Strategy: Try different approaches systematically to bypass illustration requirement
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_manual_replication_attempt(page: Page, artifact_manager):
+    """
+    Attempt to replicate manual success - try different combinations
+    """
+
+    print("\n" + "=" * 70)
+    print("MANUAL REPLICATION - Attempting to bypass illustration requirement")
+    print("=" * 70)
+
+    # Initialize page object
+    manulife_page = ManulifeParPage(page)
+
+    # Navigate to welcome page
+    print("\nStep 1: Navigate to welcome page...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    artifact_manager.capture_screenshot(page, "001_welcome_page")
+    print(f"✓ Welcome page loaded: {page.url}")
+
+    # Accept cookies
+    print("\nStep 2: Accept cookies...")
+    try:
+        accept_button = page.get_by_role("button", name="Accept all cookies")
+        if accept_button.is_visible(timeout=2000):
+            accept_button.click()
+            page.wait_for_timeout(500)
+            print("✓ Cookies accepted")
+    except:
+        print("ℹ️  No cookie banner")
+
+    # Select product
+    print("\nStep 3: Select Manulife Par product...")
+    product_dropdown = page.get_by_label("Product")
+    product_dropdown.select_option("1")  # Manulife Par
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "002_product_selected")
+    print("✓ Manulife Par selected")
+
+    # ATTEMPT 1: Select Upload Later FIRST, THEN click button to reveal form
+    print("\n" + "=" * 70)
+    print("ATTEMPT 1: Upload Later → Click button → Fill form")
+    print("=" * 70)
+
+    print("\nSelecting Upload Later...")
+    upload_later = page.get_by_role("radio", name="Upload Later")
+    upload_later.click()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "003_upload_later_selected")
+    print("✓ Upload Later selected")
+
+    print("\nClicking 'Start a new application' to reveal form...")
+    start_button = page.get_by_role("button", name="Start a new application")
+    start_button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "004_form_revealed")
+    print("✓ Form revealed")
+
+    # Fill form completely
+    print("\nFilling form with valid data...")
+
+    # Insured person details
+    manulife_page.fill_insured_name("Taylor", "Young")
+    manulife_page.select_sex("Female")
+    manulife_page.fill_date_of_birth("15", "June", "2000")  # Age 25
+    manulife_page.select_smoking_status("Non-Smoker")
+
+    # Coverage details
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+
+    # Custom React button fields
+    manulife_page.select_riders("No")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+
+    print("✓ Form filled")
+    artifact_manager.capture_screenshot(page, "005_form_filled")
+
+    # Scroll to bottom to ensure button is visible
+    print("\nScrolling to bottom of page...")
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "006_scrolled_to_bottom")
+
+    # Check URL before validation
+    url_before = page.url
+    print(f"\nURL before validation: {url_before}")
+
+    # Click validation button
+    print("\nClicking 'Start a new application' to validate...")
+    validate_button = page.get_by_role("button", name="Start a new application")
+    validate_button.scroll_into_view_if_needed()
+    validate_button.click()
+    page.wait_for_timeout(2000)  # Wait longer for potential navigation
+
+    url_after = page.url
+    print(f"URL after validation: {url_after}")
+
+    artifact_manager.capture_screenshot(page, "007_after_validation")
+
+    # Check for navigation
+    if url_before != url_after:
+        print(f"\n✅ SUCCESS! Navigated to: {url_after}")
+        artifact_manager.capture_screenshot(page, "008_next_page_success")
+        artifact_manager.capture_aria_tree(page, "008_next_page_aria")
+
+        # Check if it's the PolicyInformation page
+        if "PolicyInformation" in url_after:
+            print("🎉 Successfully reached PolicyInformation page!")
+        else:
+            print(f"⚠️  Navigated but to unexpected page: {url_after}")
+    else:
+        print("\n❌ No navigation occurred")
+
+        # Check for validation errors
+        errors = manulife_page.check_for_validation_errors()
+        if errors:
+            print(f"\nValidation Errors ({len(errors)}):")
+            for i, error in enumerate(errors, 1):
+                print(f"   {i}. {error}")
+        else:
+            print("\nNo validation errors found - unexpected state")
+
+    # Save final state
+    with open(artifact_manager.session_dir / "attempt_results.txt", "w") as f:
+        f.write(f"URL Before: {url_before}\n")
+        f.write(f"URL After: {url_after}\n")
+        f.write(f"Navigation: {url_before != url_after}\n")
+        if url_before != url_after:
+            f.write(f"\nSUCCESS: Navigated to {url_after}\n")
+        else:
+            errors = manulife_page.check_for_validation_errors()
+            f.write(f"\nValidation Errors: {len(errors)}\n")
+            for i, error in enumerate(errors, 1):
+                f.write(f"{i}. {error}\n")
+
+    print(f"\n✓ Test complete - Artifacts: {artifact_manager.session_dir}")

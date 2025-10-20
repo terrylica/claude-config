@@ -1,0 +1,179 @@
+"""
+Test With Network Analysis
+
+Purpose: Capture and analyze all network requests/responses during form submission
+to understand exactly what's happening when we click "Start a new application"
+"""
+
+import pytest
+from playwright.sync_api import Page
+import json
+from pathlib import Path
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_form_submission_with_network_tracking(page: Page, artifact_manager):
+    """
+    Track all network requests during form submission
+    """
+
+    print("\n" + "=" * 70)
+    print("NETWORK ANALYSIS TEST")
+    print("Capturing all requests/responses during form submission")
+    print("=" * 70)
+
+    # Collections for network tracking
+    requests_log = []
+    responses_log = []
+
+    # Listen to requests
+    def handle_request(request):
+        requests_log.append({
+            "url": request.url,
+            "method": request.method,
+            "resource_type": request.resource_type,
+            "timestamp": len(requests_log)
+        })
+        print(f"  Request [{len(requests_log)}]: {request.method} {request.url.split('?')[0]}")
+
+    # Listen to responses
+    def handle_response(response):
+        responses_log.append({
+            "url": response.url,
+            "status": response.status,
+            "status_text": response.status_text,
+            "timestamp": len(responses_log)
+        })
+        print(f"  Response [{len(responses_log)}]: {response.status} {response.url.split('?')[0]}")
+
+    # Attach listeners
+    page.on("request", handle_request)
+    page.on("response", handle_response)
+
+    manulife_page = ManulifeParPage(page)
+
+    # Setup
+    print("\nNavigating to form...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    print(f"Requests so far: {len(requests_log)}, Responses: {len(responses_log)}")
+
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Fill form
+    print("\nFilling form...")
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+
+    button = page.get_by_role("button", name="Start a new application")
+    button.click()
+    page.wait_for_timeout(1500)
+
+    print(f"After form reveal - Requests: {len(requests_log)}, Responses: {len(responses_log)}")
+
+    # Fill in data
+    print("\nFilling form fields...")
+    manulife_page.fill_insured_name("Alex", "Letterman")
+    manulife_page.select_sex("Male")
+    manulife_page.fill_date_of_birth("5", "June", "1986")
+    manulife_page.select_smoking_status("Non-Smoker")
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+    manulife_page.select_riders("No")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+
+    page.wait_for_timeout(1000)
+
+    print(f"\nBefore final submission - Requests: {len(requests_log)}, Responses: {len(responses_log)}")
+
+    # NOW - Monitor network traffic during submission
+    print("\n" + "=" * 70)
+    print("SUBMITTING FORM - Tracking network activity")
+    print("=" * 70)
+
+    requests_before = len(requests_log)
+    responses_before = len(responses_log)
+
+    url_before = page.url
+    print(f"\nClicking 'Start a new application'...")
+
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+
+    # Wait and monitor
+    print("Waiting for network activity...")
+    page.wait_for_load_state("networkidle", timeout=15000)
+
+    requests_after = len(requests_log)
+    responses_after = len(responses_log)
+
+    print(f"\nNetwork activity during submission:")
+    print(f"  New requests: {requests_after - requests_before}")
+    print(f"  New responses: {responses_after - responses_before}")
+
+    # Analyze submission requests
+    print("\n" + "-" * 70)
+    print("SUBMISSION REQUESTS (last 10):")
+    print("-" * 70)
+    for req in requests_log[-10:]:
+        print(f"  {req['method']:6} {req['url'].split('?')[0]}")
+
+    print("\n" + "-" * 70)
+    print("SUBMISSION RESPONSES (last 10):")
+    print("-" * 70)
+    for resp in responses_log[-10:]:
+        status_icon = "✓" if resp['status'] == 200 else "✗"
+        print(f"  {status_icon} {resp['status']:3} {resp['url'].split('?')[0]}")
+
+    # Check for API errors
+    error_responses = [r for r in responses_log[-20:] if r['status'] >= 400]
+    if error_responses:
+        print("\n" + "!" * 70)
+        print("ERROR RESPONSES DETECTED:")
+        print("!" * 70)
+        for resp in error_responses:
+            print(f"  {resp['status']} {resp['url']}")
+
+    # Check final state
+    url_after = page.url
+    print(f"\n" + "=" * 70)
+    print("FINAL STATE:")
+    print("=" * 70)
+    print(f"URL before: {url_before}")
+    print(f"URL after:  {url_after}")
+    print(f"Navigation: {url_before != url_after}")
+
+    # Save network log
+    network_report = {
+        "initial_requests": requests_before,
+        "initial_responses": responses_before,
+        "final_requests": requests_after,
+        "final_responses": responses_after,
+        "submission_requests": requests_after - requests_before,
+        "submission_responses": responses_after - responses_before,
+        "requests": requests_log[-20:],
+        "responses": responses_log[-20:],
+        "url_changed": url_before != url_after
+    }
+
+    report_file = artifact_manager.session_dir / "network_analysis.json"
+    with open(report_file, "w") as f:
+        json.dump(network_report, f, indent=2)
+
+    print(f"\nNetwork analysis saved to: network_analysis.json")
+    artifact_manager.capture_screenshot(page, "final_state")
+
+    print(f"\nArtifacts: {artifact_manager.session_dir}")

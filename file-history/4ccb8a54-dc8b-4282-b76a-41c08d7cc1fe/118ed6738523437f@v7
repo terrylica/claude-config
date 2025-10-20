@@ -1,0 +1,418 @@
+"""Comprehensive Path Exploration - Map ALL Form Variations.
+
+This test systematically explores every possible path through the Manulife Par
+e-application to discover:
+- What fields appear based on different choices
+- What forms/sections are revealed conditionally
+- Complete data requirements for automation
+- How to navigate from start to submission
+
+Test Strategy:
+1. Define exploration matrix (all variations to test)
+2. Execute each variation with fresh browser context
+3. Capture comprehensive artifacts (screenshots, state, findings)
+4. Document new fields/forms discovered
+5. Build complete decision tree
+
+Constraint: Always select "Upload Later" (never "Upload Now")
+
+Reference: Phase 6 exploration plan in todo list
+"""
+
+import json
+from pathlib import Path
+from typing import Dict, Any
+import pytest
+from playwright.sync_api import Page
+from pages.manulife_par_page import ManulifeParPage
+
+
+# =============================================================================
+# EXPLORATION MATRIX - All variations to test
+# =============================================================================
+
+# Base configuration for variations (not used as standalone test)
+BASE_CONFIG = {
+    "first_name": "Alex",
+    "last_name": "Morgan",
+    "middle_initial": "",
+    "sex": "Female",
+    "dob_day": "15",
+    "dob_month": "June",
+    "dob_year": "1990",  # Age 35
+    "smoking_status": "Non-Smoker",
+    "coverage_type": "Single",
+    "premium_duration": "Pay for 10 years",
+    "amount": "250000",
+    "dividend_option": "Paid-up insurance",
+    "riders": "No",
+    "quebec": "No",
+    "additional_products": "No"
+}
+
+# Complex Variations: Only those that invoke additional form sections
+COMPLEX_VARIATIONS = [
+    {
+        **BASE_CONFIG,
+        "variation_name": "riders_yes",
+        "description": "Riders: Invokes policy-level options, child protection, child count",
+        "riders": "Yes"
+    },
+    {
+        **BASE_CONFIG,
+        "variation_name": "additional_products_yes",
+        "description": "Products: Invokes product type selection (Critical Illness, Life)",
+        "additional_products": "Yes"
+    },
+]
+
+# Combination Testing: Complex scenarios only
+COMBINATION_VARIATIONS = [
+    {
+        **BASE_CONFIG,
+        "variation_name": "high_risk",
+        "description": "High-risk: Age 65 + Smoker + $1M + Riders",
+        "first_name": "Senior",
+        "last_name": "Smoker",
+        "dob_year": "1960",  # Age 65
+        "smoking_status": "Smoker",
+        "amount": "1000000",
+        "riders": "Yes"
+    },
+    {
+        **BASE_CONFIG,
+        "variation_name": "multi_variation",
+        "description": "Multi-complexity: Quebec + Additional Products",
+        "quebec": "Yes",
+        "additional_products": "Yes"
+    },
+]
+
+# Complete exploration matrix: Only 4 truly complex variations
+ALL_VARIATIONS = (
+    COMPLEX_VARIATIONS +
+    COMBINATION_VARIATIONS
+)
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def check_authentication_required(page: Page) -> bool:
+    """Check if page was redirected to signin (auth expired).
+
+    Args:
+        page: Playwright page
+
+    Returns:
+        True if authentication is required, False if authenticated
+    """
+    current_url = page.url.lower()
+    return any(keyword in current_url for keyword in ["signin", "login", "authorize", "oauth2"])
+
+
+def save_browser_state(page: Page, artifact_dir: Path) -> Dict[str, Any]:
+    """Capture and save browser state (localStorage, sessionStorage).
+
+    Returns:
+        Dictionary with storage contents
+    """
+    state = {
+        "localStorage": page.evaluate("() => Object.assign({}, window.localStorage)"),
+        "sessionStorage": page.evaluate("() => Object.assign({}, window.sessionStorage)"),
+        "cookies": page.context.cookies()
+    }
+
+    with open(artifact_dir / "browser_state.json", "w") as f:
+        json.dump(state, f, indent=2)
+
+    return state
+
+
+def save_exploration_findings(artifact_dir: Path, config: Dict, findings: Dict) -> None:
+    """Save structured findings from exploration.
+
+    Args:
+        artifact_dir: Where to save findings
+        config: Test configuration used
+        findings: Dictionary with discovered information
+    """
+    report = {
+        "variation_name": config["variation_name"],
+        "description": config["description"],
+        "configuration": config,
+        "findings": findings
+    }
+
+    with open(artifact_dir / "findings.json", "w") as f:
+        json.dump(report, f, indent=2)
+
+    # Also create human-readable markdown
+    md_content = f"""# Exploration Report: {config['variation_name']}
+
+## Description
+{config['description']}
+
+## Configuration
+```json
+{json.dumps(config, indent=2)}
+```
+
+## Findings
+
+### New Fields Discovered
+{findings.get('new_fields', 'None')}
+
+### New Sections Appeared
+{findings.get('new_sections', 'None')}
+
+### Validation Errors
+{findings.get('validation_errors', 'None')}
+
+### Page State Changes
+- URL: {findings.get('url', 'Unknown')}
+- Page Height: {findings.get('page_height', 'Unknown')}
+- Headings Count: {findings.get('headings_count', 'Unknown')}
+
+### Navigation Options Available
+{findings.get('navigation_options', 'Unknown')}
+
+### Browser State
+- localStorage keys: {findings.get('localstorage_keys', [])}
+- sessionStorage keys: {findings.get('sessionstorage_keys', [])}
+
+## Next Steps
+{findings.get('next_steps', 'To be determined')}
+"""
+
+    with open(artifact_dir / "FINDINGS.md", "w") as f:
+        f.write(md_content)
+
+
+# =============================================================================
+# MAIN EXPLORATION TEST
+# =============================================================================
+
+@pytest.mark.reconnaissance
+@pytest.mark.parametrize("config", ALL_VARIATIONS, ids=lambda c: c["variation_name"])
+def test_explore_variation(page: Page, config: Dict[str, Any]):
+    """Explore single variation of form filling.
+
+    This test:
+    1. Fills form with variation configuration
+    2. Captures comprehensive artifacts
+    3. Documents findings in structured format
+    4. Attempts navigation (Dashboard, etc)
+    5. Records browser state
+
+    Args:
+        page: Playwright page fixture with auth
+        config: Variation configuration to test
+    """
+    # Setup artifact directory
+    artifact_dir = Path("artifacts") / f"exploration_{config['variation_name']}"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n{'='*80}")
+    print(f"EXPLORING: {config['variation_name']}")
+    print(f"{'='*80}")
+    print(f"Description: {config['description']}")
+    print(f"Artifact Directory: {artifact_dir}")
+    print(f"{'='*80}\n")
+
+    # Initialize page object
+    par_page = ManulifeParPage(page)
+
+    # Step 1: Navigate to form
+    print("Step 1: Navigate to welcome page")
+    print("-" * 80)
+    par_page.navigate_to(par_page.welcome_url)
+    print(f"✓ Loaded: {page.url}\n")
+
+    # Check if redirected to signin (auth expired)
+    if check_authentication_required(page):
+        print("⚠️  AUTHENTICATION REQUIRED")
+        print("-" * 80)
+        print(f"Current URL: {page.url}")
+        print("\nSession expired. Please refresh authentication:")
+        print("  doppler run --project insurance --config prd -- \\")
+        print("    uv run --active python -m scripts.setup.authenticate")
+        print()
+        pytest.skip("Authentication expired - run authenticate script to refresh session")
+
+    # Step 2: Accept cookies (if needed)
+    print("Step 2: Accept cookies (if needed)")
+    print("-" * 80)
+    try:
+        accept_btn = page.get_by_role("button", name="Accept All Cookies")
+        if accept_btn.is_visible(timeout=2000):
+            accept_btn.click()
+            page.wait_for_timeout(500)
+            print("✓ Cookies accepted\n")
+        else:
+            print("✓ No cookie banner (already accepted)\n")
+    except Exception:
+        print("✓ No cookie banner detected\n")
+
+    # Step 3: Select product + "Upload Later"
+    print("Step 3: Select Manulife Par + Upload Later")
+    print("-" * 80)
+    page.get_by_label("Product").select_option("1")  # Manulife Par
+    page.wait_for_timeout(500)
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+    print("✓ Product selected\n")
+
+    # Step 4: Click first "Start a new application" to reveal form
+    print("Step 4: Click 'Start a new application' (reveal form)")
+    print("-" * 80)
+    first_start_button = page.get_by_text("Start a new application")
+    first_start_button.wait_for(state="visible", timeout=5000)
+    first_start_button.click()
+    page.wait_for_load_state("networkidle")
+    print("✓ Form revealed\n")
+
+    # Step 5: Fill form with variation configuration
+    print(f"Step 5: Fill form with VARIATION: {config['variation_name']}")
+    print("-" * 80)
+    par_page.fill_complete_form(
+        first_name=config["first_name"],
+        last_name=config["last_name"],
+        middle_initial=config.get("middle_initial", ""),
+        sex=config["sex"],
+        dob_day=config["dob_day"],
+        dob_month=config["dob_month"],
+        dob_year=config["dob_year"],
+        smoking_status=config["smoking_status"],
+        coverage_type=config["coverage_type"],
+        premium_duration=config["premium_duration"],
+        amount=config["amount"],
+        dividend_option=config["dividend_option"],
+        riders=config["riders"],
+        quebec=config["quebec"],
+        additional_products=config["additional_products"]
+    )
+
+    insurance_age = par_page.get_insurance_age()
+    print(f"  → Insurance age calculated: {insurance_age}")
+    print("✓ All fields filled\n")
+
+    # Step 6: Capture BEFORE state
+    print("Step 6: Capture BEFORE validation state")
+    print("-" * 80)
+    page.screenshot(path=str(artifact_dir / "01_before_fullpage.png"), full_page=True)
+
+    url_before = page.url
+    dims_before = par_page.get_page_dimensions()
+    headings_before = page.locator("h1, h2, h3").all()
+
+    print(f"  URL: {url_before}")
+    print(f"  Scroll height: {dims_before['scrollHeight']}px")
+    print(f"  Headings: {len(headings_before)}\n")
+
+    # Step 7: Click validation button
+    print("Step 7: Click 'Start a new application' button (validation)")
+    print("-" * 80)
+    par_page.click_validate_button()
+    print("✓ Validation button clicked\n")
+
+    # Step 8: Capture AFTER state
+    print("Step 8: Capture AFTER validation state")
+    print("-" * 80)
+    page.screenshot(path=str(artifact_dir / "02_after_fullpage.png"), full_page=True)
+    page.screenshot(path=str(artifact_dir / "03_after_top.png"))
+
+    # Scroll to bottom to capture any new content
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(500)
+    page.screenshot(path=str(artifact_dir / "04_after_bottom.png"))
+
+    url_after = page.url
+    dims_after = par_page.get_page_dimensions()
+    headings_after = page.locator("h1, h2, h3").all()
+
+    print(f"  URL: {url_after}")
+    print(f"  Scroll height: {dims_after['scrollHeight']}px")
+    print(f"  Headings: {len(headings_after)}\n")
+
+    # Step 9: Check for validation errors
+    print("Step 9: Check for validation errors")
+    print("-" * 80)
+    errors = par_page.check_for_validation_errors()
+    if errors:
+        print(f"⚠️  Found {len(errors)} validation errors:")
+        for error in errors:
+            print(f"    - {error}")
+    else:
+        print("✓ No validation errors")
+    print()
+
+    # Step 10: Check browser state (localStorage, sessionStorage)
+    print("Step 10: Capture browser state")
+    print("-" * 80)
+    browser_state = save_browser_state(page, artifact_dir)
+    print(f"  localStorage keys: {list(browser_state['localStorage'].keys())}")
+    print(f"  sessionStorage keys: {list(browser_state['sessionStorage'].keys())}")
+    print(f"  Cookies: {len(browser_state['cookies'])}\n")
+
+    # Step 11: Save ARIA snapshot for accessibility analysis
+    print("Step 11: Save ARIA snapshot")
+    print("-" * 80)
+    aria_snapshot = page.locator("body").aria_snapshot()
+    with open(artifact_dir / "after_validation.aria.yaml", "w") as f:
+        f.write(aria_snapshot)
+    print("✓ ARIA snapshot saved\n")
+
+    # Step 12: Document findings
+    print("Step 12: Document findings")
+    print("-" * 80)
+    findings = {
+        "variation_name": config["variation_name"],
+        "insurance_age": insurance_age,
+        "validation_errors": errors,
+        "url": url_after,
+        "url_changed": url_before != url_after,
+        "page_height": dims_after["scrollHeight"],
+        "page_height_changed": dims_before["scrollHeight"] != dims_after["scrollHeight"],
+        "page_height_diff": dims_after["scrollHeight"] - dims_before["scrollHeight"],
+        "headings_count": len(headings_after),
+        "headings_changed": len(headings_before) != len(headings_after),
+        "localstorage_keys": list(browser_state["localStorage"].keys()),
+        "sessionstorage_keys": list(browser_state["sessionStorage"].keys()),
+        "navigation_options": "To be explored in 6.4",
+        "new_fields": "To be documented by visual inspection",
+        "new_sections": "To be documented by visual inspection",
+        "next_steps": "Explore Dashboard navigation, look for Continue/Submit buttons"
+    }
+
+    save_exploration_findings(artifact_dir, config, findings)
+    print("✓ Findings documented\n")
+
+    # Step 13: Summary
+    print("=" * 80)
+    print("EXPLORATION COMPLETE")
+    print("=" * 80)
+    print(f"Variation: {config['variation_name']}")
+    print(f"Artifacts: {artifact_dir}")
+    print(f"Validation errors: {len(errors)}")
+    print(f"URL changed: {findings['url_changed']}")
+    print(f"Page height changed: {findings['page_height_changed']} ({findings['page_height_diff']:+d}px)")
+    print("=" * 80)
+    print("\nNext: Review screenshots and findings.json for discoveries\n")
+
+
+# =============================================================================
+# QUICK TEST - Run single variation for debugging
+# =============================================================================
+
+@pytest.mark.reconnaissance
+@pytest.mark.quick
+def test_explore_single_variation_quick(page: Page):
+    """Quick test - explore single variation for debugging.
+
+    Use this to test the framework before running full suite.
+    """
+    # Test with riders_yes variation
+    config = BINARY_VARIATIONS[0]  # riders_yes
+    test_explore_variation(page, config)

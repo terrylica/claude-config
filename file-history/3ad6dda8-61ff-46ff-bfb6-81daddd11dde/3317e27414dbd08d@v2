@@ -1,0 +1,152 @@
+"""
+Reconnaissance Test: Wait for Button Enabled
+
+Purpose: The "Start a new application" button might START DISABLED (gray)
+         and only become CLICKABLE after filling initial required fields.
+
+Strategy:
+1. Select product and Upload Later
+2. WAIT for button to become ENABLED (not grayed out)
+3. THEN fill form and click
+4. Try with "Yes" for riders (like user's successful attempt)
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_wait_for_button_enabled(page: Page, artifact_manager):
+    """
+    Wait for button to become enabled before clicking
+    """
+
+    print("\n" + "=" * 70)
+    print("BUTTON ENABLED WAIT TEST")
+    print("Strategy: Wait for button to be ENABLED before clicking")
+    print("=" * 70)
+
+    manulife_page = ManulifeParPage(page)
+
+    # Navigate
+    print("\nNavigating to welcome page...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    artifact_manager.capture_screenshot(page, "001_welcome")
+
+    # Accept cookies
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Select product
+    print("Selecting Manulife Par...")
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "002_product_selected")
+
+    # Select Upload Later
+    print("Selecting Upload Later...")
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "003_upload_later")
+
+    # NOW - Wait for button to become ENABLED
+    print("\nWaiting for 'Start a new application' button to be ENABLED...")
+    button = page.get_by_role("button", name="Start a new application")
+
+    # Check if button is disabled
+    try:
+        is_disabled = button.get_attribute("disabled") is not None
+        print(f"   Button disabled attribute: {is_disabled}")
+    except:
+        print("   Could not check disabled attribute")
+
+    # Try to wait for button to be enabled (not have aria-disabled="true" or disabled attr)
+    try:
+        button.wait_for(state="enabled", timeout=5000)
+        print("   ✓ Button became ENABLED")
+    except:
+        print("   ⚠️  Button did not become enabled (timeout)")
+
+    artifact_manager.capture_screenshot(page, "004_before_first_click")
+
+    # Click button to reveal form
+    print("\nClicking 'Start a new application' (first click)...")
+    button.click()
+    page.wait_for_timeout(1500)
+    artifact_manager.capture_screenshot(page, "005_after_first_click")
+
+    # Fill insured person info
+    print("\nFilling insured person information...")
+    manulife_page.fill_insured_name("Alex", "Letterman")
+    manulife_page.select_sex("Male")
+    manulife_page.fill_date_of_birth("5", "June", "1986")
+    manulife_page.select_smoking_status("Non-Smoker")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "006_insured_filled")
+
+    # Fill coverage
+    print("Filling coverage information...")
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "007_coverage_filled")
+
+    # THIS TIME: Select "Yes" for riders (like user's successful attempt)
+    print("Selecting YES for riders...")
+    manulife_page.select_riders("Yes")
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "008_riders_yes")
+
+    # Fill remaining fields
+    print("Filling remaining fields...")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "009_all_fields_filled")
+
+    # Now check button state again before final click
+    print("\nChecking button state before final validation click...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "010_before_final_click")
+
+    # FINAL CLICK - attempt navigation
+    print("Clicking 'Start a new application' (FINAL - should navigate)...")
+    url_before = page.url
+    button.click()
+    page.wait_for_timeout(3000)  # Wait longer for potential navigation
+    url_after = page.url
+    artifact_manager.capture_screenshot(page, "011_after_final_click")
+
+    print(f"\nURL before: {url_before}")
+    print(f"URL after:  {url_after}")
+
+    # Check errors
+    errors = manulife_page.check_for_validation_errors()
+    if errors:
+        print(f"\nValidation Errors ({len(errors)}):")
+        for i, error in enumerate(errors, 1):
+            print(f"   {i}. {error}")
+    else:
+        print("\n✓ No validation errors")
+
+    if url_before != url_after:
+        print(f"\n🎉 SUCCESS! Navigated to: {url_after}")
+        if "PolicyInformation" in url_after:
+            print("✅ REACHED PolicyInformation PAGE!")
+        artifact_manager.capture_screenshot(page, "012_next_page")
+    else:
+        print("\n⚠️  No navigation occurred")
+
+    print(f"\n✓ Test complete - Artifacts: {artifact_manager.session_dir}")

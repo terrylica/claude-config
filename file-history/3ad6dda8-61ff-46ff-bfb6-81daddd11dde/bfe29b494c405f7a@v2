@@ -1,0 +1,400 @@
+"""GitHub Issues review workflow manager for human-in-the-loop automation.
+
+Provides functions for creating review issues, waiting for approval, and
+managing the approval workflow via GitHub Issues.
+
+**Workflow**:
+1. AI creates GitHub Issue with screenshots and test results
+2. Issue assigned to human reviewer with "needs-human-review" label
+3. AI polls issue for approval keywords in comments
+4. Human comments "approved" or "rejected"
+5. AI continues (approved) or halts (rejected)
+
+**Approval Keywords**:
+- Approved: "approved", "lgtm", "looks good", "✅"
+- Rejected: "rejected", "reject", "changes requested", "❌"
+
+Usage:
+    from utils.github_review import create_review_request, wait_for_approval
+
+    # Create review issue
+    issue = create_review_request(
+        test_name="Manulife PAR Form Fill",
+        test_type="reconnaissance",
+        summary="Form filled successfully",
+        artifacts_urls={"screenshot.png": "https://..."},
+        blocking=True
+    )
+
+    # Block until approved
+    if wait_for_approval(issue['number']) == 'approved':
+        print("Proceeding with automation")
+    else:
+        raise Exception("Human review rejected")
+"""
+
+import subprocess
+import json
+import time
+from pathlib import Path
+from typing import Dict, Literal, Optional, List
+from datetime import datetime
+
+
+class ReviewRejectedError(Exception):
+    """Raised when human reviewer rejects a review request."""
+    pass
+
+
+class ReviewTimeoutError(Exception):
+    """Raised when review approval times out."""
+    pass
+
+
+def create_review_request(
+    test_name: str,
+    test_type: Literal["reconnaissance", "automation-dry-run", "automation-live"],
+    summary: str,
+    artifacts_urls: Optional[Dict[str, str]] = None,
+    trigger_reason: str = "Manual Review Request",
+    blocking: bool = True,
+    repo: Optional[str] = None
+) -> Dict[str, any]:
+    """Create GitHub Issue for human review.
+
+    Args:
+        test_name: Display name for test (e.g., "Manulife PAR Form Fill")
+        test_type: Type of test - "reconnaissance", "automation-dry-run", "automation-live"
+        summary: Brief summary of test results
+        artifacts_urls: Dict mapping artifact filename to GitHub URL
+        trigger_reason: Why review was requested (default: "Manual Review Request")
+        blocking: Whether this blocks automation (default: True)
+        repo: GitHub repo in "owner/name" format (auto-detected if None)
+
+    Returns:
+        Dict with 'number' and 'url' keys for the created issue
+
+    Raises:
+        subprocess.CalledProcessError: If gh CLI command fails
+
+    Example:
+        >>> issue = create_review_request(
+        ...     test_name="Form Fill Test",
+        ...     test_type="reconnaissance",
+        ...     summary="Test completed successfully",
+        ...     artifacts_urls={"screenshot.png": "https://raw.githubusercontent.com/..."},
+        ...     blocking=False
+        ... )
+        >>> print(f"Created issue #{issue['number']}")
+    """
+
+    # Auto-detect repo if not provided
+    if repo is None:
+        repo = _detect_github_repo()
+
+    # Build blocking level
+    blocking_level = (
+        "🔴 BLOCKING - AI is paused, urgent review needed" if blocking
+        else "🟢 INFORMATIONAL - Review at convenience"
+    )
+
+    # Build artifacts markdown
+    artifacts_markdown = "No artifacts provided"
+    if artifacts_urls:
+        from utils.artifact_uploader import generate_markdown_image_links
+        artifacts_markdown = generate_markdown_image_links(artifacts_urls)
+
+    # Build issue body
+    body = f"""## 🤖 AI Agent Review Request
+
+**Test**: {test_name}
+**Type**: {test_type}
+**Trigger**: {trigger_reason}
+**Blocking**: {blocking_level}
+**Timestamp**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## Test Summary
+
+{summary}
+
+---
+
+## Artifacts
+
+{artifacts_markdown}
+
+---
+
+## Review Checklist
+
+- [ ] Screenshots reviewed (PII properly masked)
+- [ ] Test results match expectations
+- [ ] No unexpected behaviors or errors
+- [ ] Safe to proceed with next stage
+
+---
+
+## Approval Instructions
+
+**To approve and unblock the AI agent**:
+Comment with: `approved`, `lgtm`, `looks good`, or ✅
+
+**To reject and halt the AI agent**:
+Comment with: `rejected`, `reject`, `changes requested`, or ❌
+
+*The AI agent is polling this issue for your response.*
+"""
+
+    # Build labels
+    labels = ["needs-human-review", test_type]
+    if blocking:
+        labels.append("blocking")
+
+    # Create issue via gh CLI
+    cmd = [
+        "gh", "issue", "create",
+        "--repo", repo,
+        "--title", f"[Review] {test_name}",
+        "--body", body,
+        "--label", ",".join(labels),
+        "--assignee", "@me",  # Assign to current user
+        "--json", "number,url"
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    issue_data = json.loads(result.stdout)
+
+    print(f"📝 Created review issue: {issue_data['url']}")
+
+    return issue_data
+
+
+def wait_for_approval(
+    issue_number: int,
+    poll_interval: int = 30,
+    timeout: int = 3600,
+    repo: Optional[str] = None
+) -> Literal["approved", "rejected", "timeout"]:
+    """Block until issue is approved or rejected via comment.
+
+    Polls the issue for approval/rejection keywords in comments.
+
+    Args:
+        issue_number: GitHub issue number to monitor
+        poll_interval: Seconds between polls (default: 30)
+        timeout: Maximum seconds to wait (default: 3600 = 1 hour)
+        repo: GitHub repo in "owner/name" format (auto-detected if None)
+
+    Returns:
+        "approved" if approved, "rejected" if rejected, "timeout" if timed out
+
+    Raises:
+        subprocess.CalledProcessError: If gh CLI command fails
+
+    Example:
+        >>> status = wait_for_approval(123)
+        >>> if status == 'approved':
+        ...     print("Proceeding")
+        ... elif status == 'rejected':
+        ...     print("Halting")
+    """
+
+    # Auto-detect repo if not provided
+    if repo is None:
+        repo = _detect_github_repo()
+
+    approval_keywords = ["approved", "lgtm", "looks good", "approve", "✅"]
+    rejection_keywords = ["rejected", "reject", "changes requested", "not approved", "❌"]
+
+    start_time = time.time()
+    iterations = 0
+
+    print(f"⏳ Waiting for approval on issue #{issue_number}")
+    print(f"   Poll interval: {poll_interval}s, Timeout: {timeout}s")
+
+    while True:
+        iterations += 1
+        elapsed = int(time.time() - start_time)
+
+        # Check timeout
+        if elapsed > timeout:
+            print(f"⏱️  Timeout waiting for review (waited {elapsed}s)")
+            _close_issue_with_comment(
+                issue_number,
+                "⏱️ Timeout - AI agent stopped waiting for approval",
+                repo
+            )
+            return "timeout"
+
+        # Get issue comments
+        status, comment_body = _check_issue_comments(issue_number, repo)
+
+        if status == "approved":
+            print(f"✅ Issue #{issue_number} approved!")
+            _close_issue_with_comment(
+                issue_number,
+                "✅ Approved - AI agent proceeding with automation",
+                repo
+            )
+            _add_label(issue_number, "approved", repo)
+            _remove_label(issue_number, "needs-human-review", repo)
+            return "approved"
+
+        elif status == "rejected":
+            print(f"❌ Issue #{issue_number} rejected")
+            _close_issue_with_comment(
+                issue_number,
+                "❌ Rejected - AI agent halting automation",
+                repo
+            )
+            _add_label(issue_number, "rejected", repo)
+            _remove_label(issue_number, "needs-human-review", repo)
+            return "rejected"
+
+        # Still pending - wait and retry
+        print(f"   [{iterations}] Waiting... (elapsed: {elapsed}s)")
+        time.sleep(poll_interval)
+
+
+def _check_issue_comments(
+    issue_number: int,
+    repo: str
+) -> tuple[Literal["approved", "rejected", "pending"], Optional[str]]:
+    """Check issue comments for approval/rejection keywords.
+
+    Returns:
+        Tuple of (status, comment_body) where status is "approved", "rejected", or "pending"
+    """
+
+    approval_keywords = ["approved", "lgtm", "looks good", "approve", "✅"]
+    rejection_keywords = ["rejected", "reject", "changes requested", "not approved", "❌"]
+
+    # Get all issue comments
+    cmd = [
+        "gh", "api",
+        f"repos/{repo}/issues/{issue_number}/comments",
+        "--jq", ".[] | {body, author: .user.login, created_at}"
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+    if not result.stdout.strip():
+        return ("pending", None)
+
+    # Parse comments (each line is a JSON object)
+    comments = [json.loads(line) for line in result.stdout.strip().split('\n')]
+
+    # Check comments in chronological order (earliest first)
+    for comment in comments:
+        body_lower = comment['body'].lower()
+
+        # Check for approval
+        if any(keyword in body_lower for keyword in approval_keywords):
+            return ("approved", comment['body'])
+
+        # Check for rejection
+        if any(keyword in body_lower for keyword in rejection_keywords):
+            return ("rejected", comment['body'])
+
+    return ("pending", None)
+
+
+def _close_issue_with_comment(issue_number: int, comment: str, repo: str) -> None:
+    """Close issue with a comment."""
+    subprocess.run([
+        "gh", "issue", "close", str(issue_number),
+        "--repo", repo,
+        "--comment", comment
+    ], check=True, capture_output=True)
+
+
+def _add_label(issue_number: int, label: str, repo: str) -> None:
+    """Add label to issue."""
+    try:
+        subprocess.run([
+            "gh", "issue", "edit", str(issue_number),
+            "--repo", repo,
+            "--add-label", label
+        ], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        pass  # Label might not exist or already added
+
+
+def _remove_label(issue_number: int, label: str, repo: str) -> None:
+    """Remove label from issue."""
+    try:
+        subprocess.run([
+            "gh", "issue", "edit", str(issue_number),
+            "--repo", repo,
+            "--remove-label", label
+        ], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        pass  # Label might not exist or already removed
+
+
+def _detect_github_repo() -> str:
+    """Auto-detect GitHub repo from git remote.
+
+    Returns:
+        Repo in "owner/name" format
+
+    Raises:
+        RuntimeError: If repo cannot be detected
+    """
+
+    try:
+        # Get remote URL
+        remote_url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            check=True
+        ).stdout.strip()
+
+        # Parse owner and repo from URL
+        # Example: https://github.com/tainora/insurance.git
+        # Example: git@github.com:tainora/insurance.git
+        if "github.com" in remote_url:
+            parts = remote_url.split("github.com")[-1].strip("/: ").replace(".git", "").split("/")
+            if len(parts) >= 2:
+                return f"{parts[-2]}/{parts[-1]}"
+
+        raise RuntimeError(f"Could not parse GitHub repo from remote URL: {remote_url}")
+
+    except subprocess.CalledProcessError:
+        raise RuntimeError("No git remote found - cannot auto-detect repo")
+
+
+def list_pending_reviews(repo: Optional[str] = None) -> List[Dict]:
+    """List all open review issues awaiting human approval.
+
+    Args:
+        repo: GitHub repo in "owner/name" format (auto-detected if None)
+
+    Returns:
+        List of dicts with issue metadata
+
+    Example:
+        >>> pending = list_pending_reviews()
+        >>> for issue in pending:
+        ...     print(f"#{issue['number']}: {issue['title']}")
+    """
+
+    # Auto-detect repo if not provided
+    if repo is None:
+        repo = _detect_github_repo()
+
+    cmd = [
+        "gh", "issue", "list",
+        "--repo", repo,
+        "--label", "needs-human-review",
+        "--state", "open",
+        "--json", "number,title,labels,createdAt,url"
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    issues = json.loads(result.stdout)
+
+    return issues

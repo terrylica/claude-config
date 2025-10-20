@@ -1,0 +1,255 @@
+"""Artifact capture manager for comprehensive test evidence collection.
+
+Centralizes screenshot, DOM, ARIA, HAR, trace, and telemetry capture following
+the project's fail-fast philosophy with comprehensive artifact capture.
+"""
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from playwright.sync_api import Page, Locator
+import yaml
+
+
+class ArtifactManager:
+    """Manages artifact capture for Playwright automation sessions."""
+
+    def __init__(
+        self,
+        base_dir: Path,
+        session_name: Optional[str] = None,
+        pii_mask_selectors: Optional[List[str]] = None
+    ):
+        """Initialize artifact manager.
+
+        Args:
+            base_dir: Base artifacts directory (e.g., /path/to/artifacts/)
+            session_name: Optional session name (default: auto-generated timestamp)
+            pii_mask_selectors: Optional list of selectors to mask in screenshots
+        """
+        self.base_dir = Path(base_dir)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.session_name = session_name or f"session_{timestamp}"
+        self.session_dir = self.base_dir / self.session_name
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+
+        self.pii_mask_selectors = pii_mask_selectors or []
+        self.step_counter = 0
+        self.manifest: Dict[str, Any] = {
+            "session_name": self.session_name,
+            "timestamp": timestamp,
+            "artifacts": []
+        }
+
+    def _next_step(self) -> str:
+        """Generate next step number for sequential artifact naming.
+
+        Returns:
+            Formatted step number (e.g., "001")
+        """
+        self.step_counter += 1
+        return f"{self.step_counter:03d}"
+
+    def capture_screenshot(
+        self,
+        page: Page,
+        name: str,
+        mask_additional: Optional[List[Locator]] = None,
+        full_page: bool = True
+    ) -> Path:
+        """Capture PII-safe screenshot.
+
+        Args:
+            page: Playwright page
+            name: Screenshot name (step number will be prefixed)
+            mask_additional: Additional locators to mask beyond default PII selectors
+            full_page: Capture full scrollable page (default True)
+
+        Returns:
+            Path to saved screenshot
+        """
+        step = self._next_step()
+        filename = f"{step}_{name}.png"
+        filepath = self.session_dir / filename
+
+        # Build mask list from selectors + additional locators
+        mask_locators = [page.locator(sel) for sel in self.pii_mask_selectors]
+        if mask_additional:
+            mask_locators.extend(mask_additional)
+
+        page.screenshot(
+            path=str(filepath),
+            full_page=full_page,
+            mask=mask_locators if mask_locators else None
+        )
+
+        self.manifest["artifacts"].append({
+            "step": step,
+            "type": "screenshot",
+            "filename": filename,
+            "full_page": full_page,
+            "masked": len(mask_locators) > 0
+        })
+
+        return filepath
+
+    def capture_dom(
+        self,
+        page: Page,
+        name: str
+    ) -> Path:
+        """Capture full DOM HTML snapshot.
+
+        Args:
+            page: Playwright page
+            name: DOM snapshot name (step number will be prefixed)
+
+        Returns:
+            Path to saved DOM file
+        """
+        step = self._next_step()
+        filename = f"{step}_{name}.dom.html"
+        filepath = self.session_dir / filename
+
+        dom_content = page.content()
+        filepath.write_text(dom_content, encoding="utf-8")
+
+        self.manifest["artifacts"].append({
+            "step": step,
+            "type": "dom",
+            "filename": filename,
+            "size_bytes": len(dom_content.encode("utf-8"))
+        })
+
+        return filepath
+
+    def capture_aria(
+        self,
+        page: Page,
+        name: Optional[str] = None
+    ) -> Path:
+        """Capture ARIA accessibility tree snapshot.
+
+        Args:
+            page: Playwright page
+            name: Optional ARIA snapshot name (default: uses step number only)
+
+        Returns:
+            Path to saved ARIA YAML file
+        """
+        step = self._next_step()
+        filename = f"aria_{step}.yaml" if not name else f"{step}_{name}.aria.yaml"
+        filepath = self.session_dir / filename
+
+        # Get ARIA snapshot from page locator
+        aria_tree = page.locator("body").aria_snapshot()
+
+        filepath.write_text(aria_tree, encoding="utf-8")
+
+        self.manifest["artifacts"].append({
+            "step": step,
+            "type": "aria",
+            "filename": filename,
+            "format": "yaml"
+        })
+
+        return filepath
+
+    def capture_state_snapshot(
+        self,
+        page: Page,
+        name: str,
+        include_aria: bool = True
+    ) -> Dict[str, Path]:
+        """Capture complete state snapshot (screenshot + DOM + optional ARIA).
+
+        Convenience method for capturing multiple artifacts at once.
+
+        Args:
+            page: Playwright page
+            name: Base name for artifacts
+            include_aria: Include ARIA tree snapshot (default True)
+
+        Returns:
+            Dict mapping artifact type to file path
+        """
+        artifacts = {}
+
+        # Reset step counter to keep trio together
+        current_step = self._next_step()
+        self.step_counter -= 1
+
+        artifacts["screenshot"] = self.capture_screenshot(page, name)
+        artifacts["dom"] = self.capture_dom(page, name)
+
+        if include_aria:
+            artifacts["aria"] = self.capture_aria(page, name)
+
+        return artifacts
+
+    def save_telemetry_event(
+        self,
+        event_type: str,
+        data: Dict[str, Any]
+    ) -> None:
+        """Append telemetry event to NDJSON log.
+
+        Args:
+            event_type: Event type (request, response, console, pageerror, etc.)
+            data: Event data dictionary
+        """
+        telemetry_file = self.session_dir / "telemetry.ndjson"
+
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "type": event_type,
+            **data
+        }
+
+        with telemetry_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event) + "\n")
+
+    def save_manifest(self) -> Path:
+        """Save session manifest with metadata.
+
+        Returns:
+            Path to manifest file
+        """
+        manifest_path = self.session_dir / "index.json"
+
+        self.manifest["total_artifacts"] = len(self.manifest["artifacts"])
+        self.manifest["completed_at"] = datetime.now().isoformat()
+
+        manifest_path.write_text(
+            json.dumps(self.manifest, indent=2),
+            encoding="utf-8"
+        )
+
+        return manifest_path
+
+    def get_trace_path(self) -> Path:
+        """Get path for trace file.
+
+        Returns:
+            Path where trace should be saved
+        """
+        return self.session_dir / "trace.zip"
+
+    def get_har_path(self) -> Path:
+        """Get path for HAR file.
+
+        Returns:
+            Path where HAR should be saved
+        """
+        return self.session_dir / "session.har"
+
+    @property
+    def session_path(self) -> Path:
+        """Get session directory path.
+
+        Returns:
+            Path to session artifacts directory
+        """
+        return self.session_dir

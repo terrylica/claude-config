@@ -1,0 +1,214 @@
+"""
+Reconnaissance Test: Validation Feedback Loop
+
+Purpose: Click "Start a new application" repeatedly to discover all required fields
+         through validation error feedback.
+
+Strategy:
+1. Fill form with minimal data
+2. Click "Start a new application"
+3. Capture validation errors (red text)
+4. Fix errors
+5. Repeat until navigation succeeds
+
+Goal: Use validation errors to discover what's required to reach next page
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_validation_feedback_to_next_page(page: Page, artifact_manager):
+    """
+    Use validation errors as feedback to discover required fields.
+
+    Each iteration:
+    - Click "Start a new application" button
+    - Capture validation errors
+    - Fix errors
+    - Repeat
+    """
+
+    print("\n" + "=" * 70)
+    print("VALIDATION FEEDBACK LOOP - Discovering Required Fields")
+    print("=" * 70)
+
+    # Initialize page object
+    manulife_page = ManulifeParPage(page)
+
+    # Navigate to welcome page (using storage state for auth)
+    print("\nStep 1: Navigate to welcome page...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    artifact_manager.capture_screenshot(page, "001_welcome_page")
+    print(f"✓ Welcome page loaded: {page.url}")
+
+    # Accept cookies if present
+    print("\nStep 2: Accept cookies...")
+    try:
+        accept_button = page.get_by_role("button", name="Accept all cookies")
+        if accept_button.is_visible(timeout=2000):
+            accept_button.click()
+            page.wait_for_timeout(500)
+            print("✓ Cookies accepted")
+    except:
+        print("ℹ️  No cookie banner")
+
+    # Select Manulife Par product
+    print("\nStep 3: Select Manulife Par product...")
+    product_dropdown = page.get_by_label("Product")
+    product_dropdown.select_option("1")  # Manulife Par
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "002_product_selected")
+    print("✓ Manulife Par selected")
+
+    # Check current state of illustration upload field
+    print("\nStep 4: Check illustration upload field...")
+    upload_later = page.get_by_role("radio", name="Upload Later")
+    upload_now = page.get_by_role("radio", name="Upload Now")
+
+    print(f"  Upload Later checked: {upload_later.is_checked()}")
+    print(f"  Upload Now checked: {upload_now.is_checked()}")
+
+    # Try clicking "Start an application" button first (before filling anything)
+    print("\nStep 5: Click 'Start an application' (minimal state)...")
+    start_app_button = page.get_by_role("button", name="Start an application")
+
+    url_before = page.url
+    start_app_button.click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1000)
+    url_after = page.url
+
+    print(f"  URL before: {url_before}")
+    print(f"  URL after:  {url_after}")
+    print(f"  Navigation occurred: {url_before != url_after}")
+
+    artifact_manager.capture_screenshot(page, "003_after_start_app_button")
+
+    # If we're on a new page, we're done with welcome page
+    if url_before != url_after:
+        print("\n✅ SUCCESS: Navigated to form page!")
+        print(f"   New URL: {url_after}")
+
+        # Capture new page state
+        artifact_manager.capture_aria_tree(page, "004_new_page_aria")
+        artifact_manager.capture_dom(page, "004_new_page_dom")
+
+        # List all headings on new page
+        headings = page.locator("h1, h2, h3").all_text_contents()
+        print(f"\n   Page structure ({len(headings)} headings):")
+        for i, heading in enumerate(headings[:10], 1):
+            print(f"     {i}. {heading}")
+
+        return  # Test complete - we reached the next page
+
+    print("\n⚠️  Still on welcome page - need to fill more fields")
+
+    # Fill form with minimal required data
+    print("\nStep 6: Fill form with minimal data...")
+
+    # Fill insured person details
+    manulife_page.fill_insured_name("Ada", "Lovelace")
+    manulife_page.select_sex("Female")
+    manulife_page.fill_date_of_birth("10", "December", "1990")
+    manulife_page.select_smoking_status("Non-Smoker")
+
+    # Fill coverage details
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+
+    # Fill custom React button fields
+    manulife_page.select_riders("No")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+
+    print("✓ Form filled with minimal data")
+    artifact_manager.capture_screenshot(page, "005_form_filled")
+
+    # ITERATION 1: Click "Start a new application" and check validation
+    print("\n" + "=" * 70)
+    print("ITERATION 1: Click 'Start a new application'")
+    print("=" * 70)
+
+    # Click validation button
+    manulife_page.click_validate_button()
+    artifact_manager.capture_screenshot(page, "006_after_validation_click")
+
+    # Check for validation errors
+    print("\nChecking for validation errors...")
+    errors = manulife_page.check_for_validation_errors()
+
+    if not errors:
+        print("✅ NO VALIDATION ERRORS!")
+
+        # Check if URL changed (navigation occurred)
+        url_after_validation = page.url
+        print(f"\n  URL before: {url_before}")
+        print(f"  URL after:  {url_after_validation}")
+        print(f"  Navigation: {url_before != url_after_validation}")
+
+        if url_before != url_after_validation:
+            print("\n🎉 SUCCESS: Navigated to next page!")
+            artifact_manager.capture_screenshot(page, "007_next_page")
+            artifact_manager.capture_aria_tree(page, "007_next_page_aria")
+        else:
+            print("\n⚠️  No navigation - button might not trigger navigation")
+            print("     Need to find actual navigation mechanism")
+    else:
+        print(f"❌ VALIDATION ERRORS ({len(errors)}):")
+        for i, error in enumerate(errors, 1):
+            print(f"   {i}. {error}")
+
+        # Analyze error messages to understand what's needed
+        print("\nError Analysis:")
+
+        for error in errors:
+            error_lower = error.lower()
+
+            if "illustration" in error_lower:
+                print(f"\n  📋 Illustration Error: {error}")
+                print("     Possible fixes:")
+                print("       - Select 'Upload Now' instead of 'Upload Later'")
+                print("       - Upload a PDF file")
+                print("       - Find way to bypass illustration requirement")
+
+            elif "required" in error_lower:
+                print(f"\n  ⚠️  Required Field Error: {error}")
+                print("     Need to identify which field and fill it")
+
+            else:
+                print(f"\n  ❓ Unknown Error: {error}")
+
+    # Save error state
+    with open(artifact_manager.artifacts_dir / "validation_errors.txt", "w") as f:
+        f.write(f"Iteration 1 - After form fill\n")
+        f.write(f"URL: {page.url}\n")
+        f.write(f"Errors: {len(errors)}\n\n")
+        for i, error in enumerate(errors, 1):
+            f.write(f"{i}. {error}\n")
+
+    print("\n" + "=" * 70)
+    print("NEXT STEPS based on validation errors:")
+    print("=" * 70)
+
+    if "illustration" in str(errors).lower():
+        print("1. Try selecting 'Upload Now' instead of 'Upload Later'")
+        print("2. Investigate if file upload is required")
+        print("3. Check if there's a way to proceed without illustration")
+
+    if "required" in str(errors).lower():
+        print("1. Examine screenshot to find unfilled red-marked fields")
+        print("2. Check ARIA tree for fields with aria-invalid='true'")
+        print("3. Add missing fields to form fill logic")
+
+    print("\n✓ Validation feedback loop test complete")
+    print(f"   Artifacts: {artifact_manager.artifacts_dir}")
+    print("   Review screenshots to understand error context")

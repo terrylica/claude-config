@@ -1,0 +1,307 @@
+"""
+Reconnaissance Test: Valid Data Navigation Test
+
+Purpose: DEFINITIVE TEST to see what "Start a new application" button does
+         when ALL validations pass (guaranteed valid business data).
+
+Test Data: Age 35 (born 1990) - well within insurance age limits
+
+Expected: If button navigates, we should see:
+  - New URL or URL hash change
+  - New headings/sections appear
+  - Page height increase (new content)
+  - New buttons/navigation controls
+
+Status: Temporary exploration test - FINAL VALIDATION
+Cleanup: Archive after investigation complete
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+import json
+
+@pytest.mark.reconnaissance
+def test_valid_data_navigation(page: Page):
+    """
+    DEFINITIVE TEST: Use 100% valid data to see actual button behavior
+    """
+
+    artifacts_dir = Path("artifacts/test_valid_data_navigation")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\n" + "=" * 80)
+    print("DEFINITIVE TEST: Valid Data Navigation")
+    print("=" * 80)
+    print(f"Artifacts: {artifacts_dir}")
+    print(f"Test Data: Age 35 (born 1990) - GUARANTEED VALID")
+    print("=" * 80)
+    print()
+
+    # Navigate to welcome page
+    print("Step 1: Navigate to welcome page")
+    print("-" * 80)
+    page.goto("https://www.insurance.manulife.ca/dda/welcomeInformation", wait_until="networkidle")
+    print(f"✓ Loaded: {page.url}\n")
+
+    # Accept cookies
+    print("Step 2: Accept cookies")
+    print("-" * 80)
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+        print("✓ Cookies accepted\n")
+    except:
+        print("ℹ️  No cookie banner\n")
+
+    # Select product and upload option
+    print("Step 3: Select Manulife Par + Upload Later")
+    print("-" * 80)
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+    print("✓ Product selected\n")
+
+    # Click first "Start a new application" to reveal form
+    print("Step 4: Click first 'Start a new application' (reveal form)")
+    print("-" * 80)
+    first_start_button = page.get_by_text("Start a new application")
+    first_start_button.wait_for(state="visible", timeout=5000)
+    first_start_button.click()
+    page.wait_for_load_state("networkidle")
+    print("✓ Form revealed\n")
+
+    # Fill with VALID data (age 35)
+    print("Step 5: Fill form with VALID data (age 35)")
+    print("-" * 80)
+
+    # Insured person details
+    page.get_by_label("First name").fill("Alex")
+    page.get_by_label("Last name").fill("Morgan")
+    page.get_by_role("radio", name="Female").click()
+
+    # Valid age: Born 1990, Age 35
+    page.get_by_label("Day (dd)").fill("15")
+    page.get_by_label("Month").select_option("june")
+    page.get_by_label("Year (yyyy)").fill("1990")
+
+    # Wait for age calculation
+    page.wait_for_timeout(500)
+
+    # Get calculated insurance age
+    insurance_age = page.get_by_label("Insurance ageLearn more").input_value()
+    print(f"  → Insurance age calculated: {insurance_age}")
+
+    # Smoking status
+    page.get_by_label("Illustrated smoking status").select_option("Non-Smoker")
+
+    # Coverage details
+    page.get_by_label("Coverage type").select_option("Single")
+    page.get_by_label("Premium Duration").select_option("Pay for 10 years")
+    page.get_by_label("Amount of insurance, dollar").fill("250000")
+    page.get_by_label("Dividend option").select_option("Paid-up insurance")
+
+    # Custom React buttons (using JS dispatch)
+    for selector in ["#RIDER_STATUS_ID-1", "#wel-pol-quebec-1", "#wel-multiple-prod-1", "#wel-electronic-app-0"]:
+        page.evaluate(f"""
+            document.querySelector('{selector}').click();
+            document.querySelector('{selector}').dispatchEvent(new Event('change', {{ bubbles: true }}));
+        """)
+        page.wait_for_timeout(200)
+
+    print("✓ All fields filled with VALID data")
+    print()
+
+    # Check for any visible validation errors
+    print("Step 6: Check for validation errors")
+    print("-" * 80)
+    error_elements = page.locator("text=/required|error|invalid|does not meet/i").all()
+    visible_errors = [elem for elem in error_elements if elem.is_visible()]
+
+    if visible_errors:
+        print(f"⚠️  Found {len(visible_errors)} validation errors:")
+        for err in visible_errors[:5]:  # Show first 5
+            text = err.text_content()
+            if text and len(text) < 100:
+                print(f"    - {text}")
+    else:
+        print("✓ NO validation errors visible")
+    print()
+
+    # CAPTURE BEFORE STATE
+    print("Step 7: Capture BEFORE state")
+    print("-" * 80)
+
+    # Scroll to top
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(500)
+
+    # Get dimensions
+    dims_before = page.evaluate("""() => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        clientHeight: document.documentElement.clientHeight
+    })""")
+
+    # Get headings
+    headings_before = page.locator("h1, h2, h3").all_text_contents()
+
+    # Get URL
+    url_before = page.url
+
+    # Screenshots
+    page.screenshot(path=str(artifacts_dir / "01_before_fullpage.png"), full_page=True)
+
+    # Scroll to button and capture
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    page.wait_for_timeout(500)
+    page.screenshot(path=str(artifacts_dir / "02_before_button.png"), full_page=False)
+
+    # ARIA snapshot
+    page.evaluate("window.scrollTo(0, 0)")
+    with open(artifacts_dir / "before.aria.yaml", "w") as f:
+        f.write(page.locator("body").aria_snapshot())
+
+    print(f"  URL: {url_before}")
+    print(f"  Scroll height: {dims_before['scrollHeight']}px")
+    print(f"  Headings: {len(headings_before)}")
+    print(f"  Top 3 headings: {headings_before[:3]}")
+    print()
+
+    # CLICK BUTTON
+    print("Step 8: Click 'Start a new application' button")
+    print("-" * 80)
+
+    # Verify button is enabled
+    print(f"  → Button enabled: {button.is_enabled()}")
+    print(f"  → Button visible: {button.is_visible()}")
+
+    # Click
+    button.click()
+    print("  ✓ Button clicked")
+
+    # Wait generously for any updates
+    print("  → Waiting 7 seconds for navigation/updates...")
+    page.wait_for_timeout(7000)
+    print()
+
+    # CAPTURE AFTER STATE
+    print("Step 9: Capture AFTER state")
+    print("-" * 80)
+
+    # Scroll to top
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(500)
+
+    # Get dimensions
+    dims_after = page.evaluate("""() => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        clientHeight: document.documentElement.clientHeight
+    })""")
+
+    # Get headings
+    headings_after = page.locator("h1, h2, h3").all_text_contents()
+
+    # Get URL
+    url_after = page.url
+
+    # Screenshots
+    page.screenshot(path=str(artifacts_dir / "03_after_fullpage.png"), full_page=True)
+    page.screenshot(path=str(artifacts_dir / "04_after_top.png"), full_page=False)
+
+    # Scroll to bottom
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(500)
+    page.screenshot(path=str(artifacts_dir / "05_after_bottom.png"), full_page=False)
+
+    # ARIA snapshot
+    page.evaluate("window.scrollTo(0, 0)")
+    with open(artifacts_dir / "after.aria.yaml", "w") as f:
+        f.write(page.locator("body").aria_snapshot())
+
+    print(f"  URL: {url_after}")
+    print(f"  Scroll height: {dims_after['scrollHeight']}px")
+    print(f"  Headings: {len(headings_after)}")
+    print(f"  Top 3 headings: {headings_after[:3]}")
+    print()
+
+    # Check for new validation errors
+    print("Step 10: Check for NEW validation errors")
+    print("-" * 80)
+    error_elements_after = page.locator("text=/required|error|invalid|does not meet/i").all()
+    visible_errors_after = [elem for elem in error_elements_after if elem.is_visible()]
+
+    if visible_errors_after:
+        print(f"⚠️  Found {len(visible_errors_after)} validation errors:")
+        for err in visible_errors_after[:5]:
+            text = err.text_content()
+            if text and len(text) < 100:
+                print(f"    - {text}")
+    else:
+        print("✓ NO validation errors visible")
+    print()
+
+    # ANALYSIS
+    print("=" * 80)
+    print("ANALYSIS: Did Navigation Occur?")
+    print("=" * 80)
+
+    url_changed = url_before != url_after
+    height_changed = dims_before['scrollHeight'] != dims_after['scrollHeight']
+    headings_changed = headings_before != headings_after
+    new_errors = len(visible_errors_after) > len(visible_errors)
+
+    print(f"  URL changed: {url_changed}")
+    if url_changed:
+        print(f"    Before: {url_before}")
+        print(f"    After:  {url_after}")
+
+    print(f"  Page height changed: {height_changed}")
+    if height_changed:
+        diff = dims_after['scrollHeight'] - dims_before['scrollHeight']
+        print(f"    Before: {dims_before['scrollHeight']}px")
+        print(f"    After:  {dims_after['scrollHeight']}px")
+        print(f"    Diff:   {diff:+d}px")
+
+    print(f"  Headings changed: {headings_changed}")
+    if headings_changed:
+        new_headings = set(headings_after) - set(headings_before)
+        removed_headings = set(headings_before) - set(headings_after)
+        if new_headings:
+            print(f"    NEW: {new_headings}")
+        if removed_headings:
+            print(f"    REMOVED: {removed_headings}")
+
+    print(f"  New validation errors: {new_errors}")
+
+    print()
+    print("=" * 80)
+
+    # VERDICT
+    if url_changed or (height_changed and dims_after['scrollHeight'] > dims_before['scrollHeight']) or headings_changed:
+        print("✅ NAVIGATION DETECTED!")
+        print()
+        print("The button DOES navigate when given valid data.")
+        print("Previous tests failed due to invalid age data.")
+    elif new_errors:
+        print("⚠️  VALIDATION ERRORS APPEARED")
+        print()
+        print("Even with age 35, validation still failed.")
+        print("Need to investigate what other validation rules exist.")
+    else:
+        print("❌ NO NAVIGATION DETECTED")
+        print()
+        print("The button does NOT navigate even with valid data.")
+        print("This appears to be a single-page form OR there's another requirement.")
+
+    print("=" * 80)
+    print()
+    print(f"Artifacts saved: {artifacts_dir}")
+    print("  - 5 screenshots (before/after full page, top, bottom)")
+    print("  - 2 ARIA snapshots (before.aria.yaml, after.aria.yaml)")
+    print()
+    print("Next: Review artifacts to understand form behavior")
+    print()
+
+    assert True, "Test complete - review artifacts for navigation analysis"

@@ -1,0 +1,232 @@
+# 🔍 Playwright Inspector: Step-by-Step Guide
+
+**Goal**: Discover actual selectors for riders table dropdowns
+
+**Status**: Test is ready with `page.pause()` at exact stuck point
+
+---
+
+## Quick Start (Copy-Paste Ready)
+
+### macOS/Linux Terminal:
+```bash
+cd /Users/terryli/own/insurance
+PWDEBUG=1 doppler run --project insurance --config prd -- uv run --active pytest -v tests/reconnaissance/test_term_riders_focus.py::test_term_riders_complete_workflow -s
+```
+
+### Windows PowerShell:
+```powershell
+cd C:\Users\terryli\own\insurance
+$env:PWDEBUG=1; doppler run --project insurance --config prd -- uv run --active pytest -v tests/reconnaissance/test_term_riders_focus.py::test_term_riders_complete_workflow -s
+```
+
+---
+
+## What Will Happen
+
+1. **Test runs** - Fills out all form fields
+2. **Riders selected** - "Yes" is clicked
+3. **Inspector opens** - You'll see instructions on your terminal
+4. **Browser window appears** - Shows the form at exact pause point
+5. **Inspector sidebar opens** - Shows current page state
+
+---
+
+## Using Pick Locator (The Magic Part)
+
+### Step 1: Click "Pick Locator" Button
+
+In the Inspector window (bottom-left area), find and click:
+- Button labeled: **"Pick Locator"** or icon that looks like a crosshair/pointer
+
+### Step 2: Hover Over Elements
+
+Once Pick Locator is active:
+
+1. **Hover over "Coverage type" dropdown** (the one showing "Select")
+   - You'll see the actual locator in the Inspector
+   - Example might be: `locator('label').filter(has_text='Coverage type').locator('select')`
+   - Or: `locator('#id-from-live-render')`
+   - Or: `get_by_role('combobox', name='Coverage type')`
+   - **Copy this locator** ✓
+
+2. **Hover over "Coverage applies to" dropdown**
+   - Record the locator ✓
+
+3. **Hover over "Coverage option" dropdown**
+   - Record the locator ✓
+
+4. **Hover over "Coverage amount" input field**
+   - Record the locator ✓
+
+5. **Hover over green checkmark icon** (Actions)
+   - Record the locator ✓
+
+### Step 3: Copy the Locators
+
+The Inspector shows suggested locators. Find the **best one** (usually one of these patterns):
+
+```python
+# Best (most stable):
+page.get_by_role("combobox", name="Coverage type")
+page.get_by_label("Coverage type")
+
+# Also good:
+page.locator("select#coverageType-0")  # If ID exists
+page.locator("xpath=//label[text()='Coverage type']/following::select")
+
+# What NOT to use:
+page.locator("div:nth-of-type(3)")  # Too brittle
+page.locator(".coverage-type-123")  # CSS classes change
+```
+
+---
+
+## What the Locator String Means
+
+| Locator | Meaning |
+|---------|---------|
+| `get_by_role("combobox")` | Find element with combobox role (best for dropdowns) |
+| `get_by_label("Coverage type")` | Find by associated label text |
+| `locator("#id")` | Find by HTML ID attribute |
+| `locator("css-selector")` | Find by CSS selector |
+| `get_by_text("Select")` | Find by visible text |
+
+---
+
+## Recording the Selectors
+
+**Keep a simple text file or notepad open:**
+
+```
+COVERAGE TYPE DROPDOWN:
+[paste the locator that works]
+
+COVERAGE APPLIES TO DROPDOWN:
+[paste the locator that works]
+
+COVERAGE OPTION DROPDOWN:
+[paste the locator that works]
+
+COVERAGE AMOUNT INPUT:
+[paste the locator that works]
+
+ACTIONS BUTTON:
+[paste the locator that works]
+```
+
+---
+
+## Resuming the Test
+
+After you've recorded all locators:
+
+1. Click **"Resume"** button in Inspector
+2. Test will try to continue (and likely still fail with old selectors)
+3. **That's OK** - we have the real selectors now!
+
+Or:
+
+1. Close the browser window
+2. Inspector will stop
+3. Test will end
+
+---
+
+## After You Have the Locators
+
+Once you've discovered the actual selectors, **post them here** (copy-paste the locators), and I will:
+
+1. Update the `fill_riders_table()` method with real selectors
+2. Update the `add_additional_riders()` method with real selectors
+3. Re-run the test
+4. Verify everything works
+
+---
+
+## Troubleshooting Inspector
+
+### Inspector doesn't open?
+```bash
+# Make sure you're using PWDEBUG=1 (not --debug)
+PWDEBUG=1 pytest ...
+
+# Or use --debug flag
+pytest --debug tests/reconnaissance/test_term_riders_focus.py
+```
+
+### Can't find elements?
+- Make sure to click "Pick Locator" first
+- Wait for cursor to change (usually becomes a crosshair)
+- Then hover over the element
+
+### Inspector shows multiple locators?
+- The first suggestion is usually best
+- Click on alternatives in the dropdown if first one doesn't work
+
+### Element isn't showing in Inspector?
+- Element might be in an iframe (rare for this form)
+- Try hovering on nearby elements
+- Or close Inspector and take a screenshot manually
+
+---
+
+## Inspector Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Escape` | Close Inspector |
+| `P` | Toggle Pick Locator mode |
+| `R` | Resume test |
+| `S` | Step over next line |
+
+---
+
+## Visual Guide
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Browser Window (Inspector Headed Mode)                 │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │                                                 │   │
+│  │  [Term riders]                                  │   │
+│  │  [Coverage type: Select ▼]  ← HOVER HERE      │   │
+│  │  [Coverage applies to: Select ▼]  ← HERE      │   │
+│  │  [Coverage option: Select ▼]  ← HERE          │   │
+│  │  [Coverage amount: ________]  ← HERE          │   │
+│  │  [✓]  ← AND HERE                               │   │
+│  │                                                 │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Inspector Sidebar (Bottom)                       │   │
+│  │ [Pick Locator 🎯] ← CLICK THIS                 │   │
+│  │ Suggested locator:                              │   │
+│  │ page.get_by_role("combobox", name="Coverage")  │   │
+│  │ [Resume] [Step] [Pause]                         │   │
+│  └─────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## What Happens Next
+
+Once you run this command and discover the locators:
+
+1. ✅ **You get actual selectors** - The ones that work
+2. ✅ **I update page object** - With real selectors
+3. ✅ **Tests pass** - Riders table works
+4. ✅ **Multiple riders work** - Full feature complete
+
+---
+
+## Ready?
+
+Run this command now:
+
+```bash
+PWDEBUG=1 doppler run --project insurance --config prd -- uv run --active pytest -v tests/reconnaissance/test_term_riders_focus.py::test_term_riders_complete_workflow -s
+```
+
+**Then share the locators you discover!** 🎯

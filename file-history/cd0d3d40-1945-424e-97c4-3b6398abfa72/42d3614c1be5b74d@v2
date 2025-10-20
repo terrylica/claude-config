@@ -1,0 +1,238 @@
+"""Approval gate decorator for human-in-the-loop function execution.
+
+Provides `@require_approval` decorator that blocks function execution until
+human approves via GitHub Issues.
+
+**Pattern**: Similar to HumanLayer SDK - decorate critical functions to add
+approval checkpoints.
+
+Usage:
+    from utils.approval_gate import require_approval
+
+    @require_approval(
+        test_name="Submit Manulife Form",
+        test_type="automation-live",
+        summary="Ready to submit form with live data"
+    )
+    def submit_form(page):
+        page.click("button[type='submit']")
+
+    # When called, creates review issue and blocks until approved
+    submit_form(page)  # Pauses here for human approval
+"""
+
+from functools import wraps
+from pathlib import Path
+from typing import Optional, Callable, Any
+import inspect
+
+from utils.github_review import create_review_request, wait_for_approval, ReviewRejectedError
+from utils.artifact_uploader import upload_artifacts
+
+
+def require_approval(
+    test_name: str,
+    test_type: str = "automation-live",
+    summary: Optional[str] = None,
+    trigger_reason: str = "Pre-Execution Approval Gate",
+    artifacts_dir: Optional[Path] = None,
+    timeout: int = 3600
+):
+    """Decorator to require human approval before function execution.
+
+    Creates a GitHub Issue review request and blocks until human approves
+    or rejects via comment.
+
+    Args:
+        test_name: Display name for the approval request
+        test_type: Type of test ("reconnaissance", "automation-dry-run", "automation-live")
+        summary: Summary of what the function will do (auto-generated if None)
+        trigger_reason: Why approval is needed (default: "Pre-Execution Approval Gate")
+        artifacts_dir: Optional artifacts directory to upload before requesting approval
+        timeout: Maximum seconds to wait for approval (default: 3600 = 1 hour)
+
+    Raises:
+        ReviewRejectedError: If human rejects the approval request
+        TimeoutError: If approval times out
+
+    Example:
+        >>> @require_approval(
+        ...     test_name="Submit Form",
+        ...     test_type="automation-live",
+        ...     summary="About to submit form with live data"
+        ... )
+        ... def submit_form(page):
+        ...     page.click("button[type='submit']")
+        ...
+        >>> submit_form(page)  # Blocks until human approves
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            # Auto-generate summary if not provided
+            nonlocal summary
+            if summary is None:
+                summary = f"""
+Function: `{func.__name__}()`
+Module: `{func.__module__}`
+
+**About to execute**:
+```python
+{inspect.getsource(func).strip()}
+```
+
+Review this function and approve if safe to proceed.
+"""
+
+            # Upload artifacts if provided
+            artifacts_urls = None
+            if artifacts_dir and artifacts_dir.exists():
+                print(f"📤 Uploading artifacts from: {artifacts_dir}")
+                from utils.artifact_uploader import upload_artifact_directory
+                artifacts_urls = upload_artifact_directory(artifacts_dir)
+                print(f"✅ Uploaded {len(artifacts_urls)} artifacts")
+
+            # Create review request
+            print(f"🚧 Approval required for: {func.__name__}()")
+            print(f"   Test: {test_name}")
+            print(f"   Type: {test_type}")
+
+            issue = create_review_request(
+                test_name=test_name,
+                test_type=test_type,
+                summary=summary,
+                artifacts_urls=artifacts_urls,
+                trigger_reason=trigger_reason,
+                blocking=True  # Always blocking for approval gate
+            )
+
+            # Block until approved
+            print(f"⏸️  Execution blocked - waiting for approval on issue #{issue['number']}")
+            print(f"   Review at: {issue['url']}")
+
+            status = wait_for_approval(issue['number'], timeout=timeout)
+
+            if status == "approved":
+                print(f"✅ Approved - executing {func.__name__}()")
+                return func(*args, **kwargs)
+
+            elif status == "rejected":
+                print(f"❌ Rejected - aborting {func.__name__}()")
+                raise ReviewRejectedError(
+                    f"Human reviewer rejected execution of {func.__name__}(). "
+                    f"See issue #{issue['number']} for details."
+                )
+
+            else:  # timeout
+                print(f"⏱️  Timeout - aborting {func.__name__}()")
+                raise TimeoutError(
+                    f"Approval timeout for {func.__name__()} after {timeout}s. "
+                    f"See issue #{issue['number']}."
+                )
+
+        return wrapper
+
+    return decorator
+
+
+def require_approval_with_context(
+    test_name: str,
+    test_type: str = "automation-live",
+    summary_fn: Optional[Callable] = None,
+    trigger_reason: str = "Pre-Execution Approval Gate",
+    artifacts_fn: Optional[Callable] = None,
+    timeout: int = 3600
+):
+    """Decorator with access to function arguments for dynamic summary/artifacts.
+
+    Similar to @require_approval but allows generating summary and artifacts
+    based on function arguments.
+
+    Args:
+        test_name: Display name for the approval request
+        test_type: Type of test
+        summary_fn: Function that takes (*args, **kwargs) and returns summary string
+        trigger_reason: Why approval is needed
+        artifacts_fn: Function that takes (*args, **kwargs) and returns artifacts_dir Path
+        timeout: Maximum seconds to wait for approval
+
+    Example:
+        >>> def get_summary(page, form_data):
+        ...     return f"About to submit form for: {form_data['name']}"
+        ...
+        >>> def get_artifacts(page, form_data):
+        ...     # Capture screenshot before submission
+        ...     artifacts = Path("./artifacts/pre_submit")
+        ...     artifacts.mkdir(exist_ok=True)
+        ...     page.screenshot(path=artifacts / "form_state.png")
+        ...     return artifacts
+        ...
+        >>> @require_approval_with_context(
+        ...     test_name="Submit Form",
+        ...     summary_fn=get_summary,
+        ...     artifacts_fn=get_artifacts
+        ... )
+        ... def submit_form(page, form_data):
+        ...     page.click("button[type='submit']")
+        ...
+        >>> submit_form(page, {"name": "John Doe"})
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            # Generate summary from function arguments
+            summary = None
+            if summary_fn:
+                summary = summary_fn(*args, **kwargs)
+
+            if summary is None:
+                summary = f"Function: `{func.__name__}()` with arguments: {args}, {kwargs}"
+
+            # Generate artifacts from function arguments
+            artifacts_dir = None
+            artifacts_urls = None
+            if artifacts_fn:
+                artifacts_dir = artifacts_fn(*args, **kwargs)
+
+                if artifacts_dir and artifacts_dir.exists():
+                    print(f"📤 Uploading artifacts from: {artifacts_dir}")
+                    from utils.artifact_uploader import upload_artifact_directory
+                    artifacts_urls = upload_artifact_directory(artifacts_dir)
+                    print(f"✅ Uploaded {len(artifacts_urls)} artifacts")
+
+            # Create review request
+            print(f"🚧 Approval required for: {func.__name__}()")
+
+            issue = create_review_request(
+                test_name=test_name,
+                test_type=test_type,
+                summary=summary,
+                artifacts_urls=artifacts_urls,
+                trigger_reason=trigger_reason,
+                blocking=True
+            )
+
+            # Block until approved
+            print(f"⏸️  Execution blocked - waiting for approval on issue #{issue['number']}")
+
+            status = wait_for_approval(issue['number'], timeout=timeout)
+
+            if status == "approved":
+                print(f"✅ Approved - executing {func.__name__}()")
+                return func(*args, **kwargs)
+
+            elif status == "rejected":
+                raise ReviewRejectedError(f"Execution of {func.__name__}() rejected")
+
+            else:
+                raise TimeoutError(f"Approval timeout for {func.__name__}()")
+
+        return wrapper
+
+    return decorator
+
+
+# Convenience alias
+approval_required = require_approval

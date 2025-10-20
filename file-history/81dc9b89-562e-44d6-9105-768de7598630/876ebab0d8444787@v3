@@ -1,0 +1,112 @@
+%% Multi-Symbol Multi-Timeframe Collection Orchestration
+%% Shows complex nested loops with intelligent checkpointing and resume
+%% Reference: src/gapless_crypto_data/cli.py:424-470
+
+flowchart TD
+    %% Entry Point
+    Start([CLI: gapless-crypto-data<br/>--symbol BTC,ETH,SOL<br/>--timeframes 1h,4h,1d]) --> ParseArgs[Parse CLI arguments]
+
+    ParseArgs --> InitCheckpoint[Initialize<br/>IntelligentCheckpointManager]
+
+    %% Resume Logic
+    InitCheckpoint --> CheckExists{Checkpoint<br/>file exists?}
+    CheckExists -->|No| FirstRun[First run:<br/>all symbols pending]
+    CheckExists -->|Yes| LoadCheckpoint[Load checkpoint from disk]
+
+    LoadCheckpoint --> ValidateCheckpoint{Params match<br/>checkpoint?}
+    ValidateCheckpoint -->|No| ParamsMismatch[Params changed!<br/>Clear checkpoint]
+    ValidateCheckpoint -->|Yes| CalcResume[Calculate resume plan:<br/>remaining symbols]
+
+    ParamsMismatch --> FirstRun
+    CalcResume --> ShowProgress[Show progress:<br/>X of Y symbols complete]
+
+    %% Symbol Loop Start
+    FirstRun --> SymbolLoop{For each symbol}
+    ShowProgress --> SymbolLoop
+
+    SymbolLoop --> GetNextSymbol[Get next symbol<br/>from queue]
+    GetNextSymbol --> SymbolStart[Symbol START:<br/>Log progress]
+
+    SymbolStart --> InitCollector[Initialize collector<br/>for this symbol]
+
+    %% Timeframe Loop Start
+    InitCollector --> TimeframeLoop{For each<br/>timeframe}
+    TimeframeLoop --> GetNextTF[Get next timeframe<br/>1m, 5m, 1h, etc.]
+
+    GetNextTF --> TimeframeStart[Timeframe START:<br/>Log progress]
+    TimeframeStart --> CallCollect[Call collect_timeframe_data<br/>downloads monthly ZIPs]
+
+    %% Collection Process
+    CallCollect --> CollectionResult{Collection<br/>result?}
+    CollectionResult -->|Success| GetDataFrame[Extract DataFrame<br/>from result]
+    CollectionResult -->|Partial| LogPartial[Log partial success<br/>some months failed]
+    CollectionResult -->|Error| LogError[Log error details<br/>network/format issue]
+
+    %% Data Processing
+    GetDataFrame --> CheckEmpty{DataFrame<br/>empty?}
+    CheckEmpty -->|Yes| LogNoData[Log: No data returned<br/>for this period]
+    CheckEmpty -->|No| ValidateSize[Validate file size<br/>reasonable?]
+
+    ValidateSize --> SizeCheck{Size > 0?}
+    SizeCheck -->|Yes| SaveSuccess[Save to output_dir<br/>with metadata]
+    SizeCheck -->|No| SaveWarning[Save anyway<br/>log warning]
+
+    SaveSuccess --> UpdateCheckpointTF[Update checkpoint:<br/>mark timeframe complete]
+    SaveWarning --> UpdateCheckpointTF
+    LogNoData --> UpdateCheckpointTF
+    LogPartial --> UpdateCheckpointTF
+    LogError --> MarkFailed[Mark timeframe FAILED<br/>in checkpoint]
+
+    %% Timeframe Loop Continue
+    UpdateCheckpointTF --> MoreTimeframes{More<br/>timeframes?}
+    MarkFailed --> MoreTimeframes
+
+    MoreTimeframes -->|Yes| TimeframeLoop
+    MoreTimeframes -->|No| AllTFComplete[All timeframes complete<br/>for this symbol]
+
+    %% Symbol Completion
+    AllTFComplete --> CheckpointSymbol[Update checkpoint:<br/>mark symbol complete]
+    CheckpointSymbol --> LogSymbolDone[Log: Symbol COMPLETE<br/>with statistics]
+
+    %% Symbol Loop Continue
+    LogSymbolDone --> MoreSymbols{More<br/>symbols?}
+    MoreSymbols -->|Yes| SymbolLoop
+    MoreSymbols -->|No| AllSymbolsComplete[ALL SYMBOLS COMPLETE!]
+
+    %% Final Reporting
+    AllSymbolsComplete --> GenerateSummary[Generate final summary:<br/>total files, total size,<br/>errors, success rate]
+
+    GenerateSummary --> PrintSummary[Print summary table:<br/>symbol | timeframes | status]
+
+    PrintSummary --> CleanCheckpoint{All successful?}
+    CleanCheckpoint -->|Yes| DeleteCheckpoint[Delete checkpoint file<br/>job complete!]
+    CleanCheckpoint -->|No| KeepCheckpoint[Keep checkpoint<br/>for retry/debug]
+
+    DeleteCheckpoint --> End([Exit with success])
+    KeepCheckpoint --> EndPartial([Exit with partial success])
+
+    %% Interruption Handling
+    SymbolLoop -.->|Ctrl+C or crash| SaveState[Save current state<br/>to checkpoint]
+    TimeframeLoop -.->|Ctrl+C or crash| SaveState
+    CallCollect -.->|Ctrl+C or crash| SaveState
+    SaveState -.-> InterruptExit([Exit cleanly<br/>resume next time])
+
+    %% Example Progress States
+    note1[Example Progress:<br/>BTCUSDT: 3/8 timeframes<br/>ETHUSDT: 8/8 ✓<br/>SOLUSDT: 0/8 pending] -.-> ShowProgress
+
+    %% Styling
+    classDef startNode stroke:#3b82f6,stroke-width:3px
+    classDef checkpointNode stroke:#f59e0b,stroke-width:2px
+    classDef loopNode stroke:#06b6d4,stroke-width:2px
+    classDef successNode stroke:#22c55e,stroke-width:2px
+    classDef errorNode stroke:#ef4444,stroke-width:2px
+    classDef processNode stroke:#6b7280,stroke-width:1px
+    classDef criticalNode stroke:#3b82f6,stroke-width:3px
+
+    class Start,End startNode
+    class InitCheckpoint,LoadCheckpoint,CalcResume,UpdateCheckpointTF,CheckpointSymbol,SaveState,CleanCheckpoint,DeleteCheckpoint,KeepCheckpoint checkpointNode
+    class SymbolLoop,TimeframeLoop,MoreTimeframes,MoreSymbols loopNode
+    class SaveSuccess,AllTFComplete,AllSymbolsComplete,DeleteCheckpoint,End successNode
+    class LogError,MarkFailed,LogNoData,EndPartial errorNode
+    class CallCollect,GetDataFrame,ValidateSize,GenerateSummary,PrintSummary processNode
+    class CheckExists,ValidateCheckpoint,CollectionResult,CheckEmpty,SizeCheck criticalNode

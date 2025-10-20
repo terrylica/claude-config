@@ -1,0 +1,329 @@
+# Authentication Pattern Standard
+
+**Version**: 1.0.0
+**Last Updated**: 2025-10-18
+**Status**: Active
+
+---
+
+## TL;DR
+
+Use `.type()` with 50ms delay for React form inputs. DO NOT use `.fill()`.
+
+```python
+# ✅ CORRECT - Triggers React onChange
+username_field.type(username, delay=50)
+
+# ❌ WRONG - Doesn't trigger React onChange
+username_field.fill(username)
+```
+
+---
+
+## Problem Statement
+
+The Manulife Advisor Portal signin form is built with React and requires actual typing events to trigger onChange handlers. Playwright's `.fill()` method does NOT trigger these events, causing authentication to fail silently.
+
+### Symptoms of Using `.fill()`
+
+- Form appears filled correctly in screenshots
+- No visible errors in UI
+- Submit button remains disabled OR submission fails silently
+- OAuth callback never received
+- No error messages in console
+
+---
+
+## Root Cause: React Form Validation
+
+React forms commonly use controlled components that validate on `onChange` events:
+
+```javascript
+// React form pattern (from Manulife Portal)
+<input
+  value={username}
+  onChange={(e) => {
+    setUsername(e.target.value);
+    validateForm();  // ← This doesn't fire with .fill()
+  }}
+/>
+```
+
+**Key Difference**:
+- `.fill()`: Sets value directly via DOM manipulation (no events)
+- `.type()`: Simulates actual keyboard typing (fires `keydown`, `keypress`, `input`, `onChange`)
+
+---
+
+## The Standard Pattern
+
+### Implementation
+
+```python
+from playwright.sync_api import Page
+
+def fill_react_form(page: Page, username: str, password: str):
+    """Fill React form using incremental typing.
+
+    React forms require .type() instead of .fill() to trigger onChange events.
+    """
+    # Username field
+    username_field = page.locator("#username")
+    username_field.click()           # Focus field
+    username_field.fill("")          # Clear existing value (safe use of .fill)
+    username_field.type(username, delay=50)  # Type with 50ms delay per char
+
+    # Password field
+    password_field = page.locator("#password")
+    password_field.click()
+    password_field.fill("")          # Clear existing value
+    password_field.type(password, delay=50)
+```
+
+### Parameters
+
+- **delay**: 50ms between characters
+  - Fast enough for CI/CD (< 2 seconds for typical username)
+  - Slow enough to trigger all React events reliably
+  - Mimics human typing speed
+
+### When `.fill()` IS Allowed
+
+Only for clearing fields:
+
+```python
+username_field.fill("")  # ✅ OK - Clearing field
+username_field.fill(actual_username)  # ❌ WRONG - Filling with data
+```
+
+---
+
+## Canonical Implementation
+
+**Single Source of Truth**: `/Users/terryli/own/insurance/auth/passkey_authenticator.py`
+
+```python
+# auth/passkey_authenticator.py:196-346
+class PasskeyAuthenticator:
+    def _fill_react_form(self, page: Page):
+        """Fill username and password using React-compatible method.
+
+        React forms require .type() instead of .fill() to trigger onChange events.
+
+        Args:
+            page: Playwright page
+        """
+        self._log("Filling username and password...", "INFO")
+        page.wait_for_selector("#username", timeout=10000)
+
+        # Username field - use type() for React onChange
+        username_field = page.locator("#username")
+        username_field.click()
+        username_field.fill("")  # Clear first
+        username_field.type(self.username, delay=50)  # ✅ CORRECT PATTERN
+
+        # Password field - use type() for React onChange
+        password_field = page.locator("#password")
+        password_field.click()
+        password_field.fill("")  # Clear first
+        password_field.type(self.password, delay=50)  # ✅ CORRECT PATTERN
+```
+
+**Reference**: See `auth/passkey_authenticator.py:_fill_react_form()` method
+
+---
+
+## Historical Context
+
+### Discovery Timeline
+
+1. **Initial Implementation** (Oct 17): Used `.fill()` - authentication failed
+2. **Spike Investigation** (Oct 17-18): Tested incremental typing manually
+3. **Successful Fix** (Oct 18): Changed to `.type()` with 50ms delay
+4. **OAuth Success** (Oct 18): Authentication completed in ~6 seconds without MFA
+
+### Successful Spike Artifacts
+
+Evidence that `.type()` works:
+
+```
+artifacts/spike_auth_20251018_103721/
+├── 01_signin_page.png                    # Initial page load
+├── 02_before_submit.png                  # After typing username/password
+├── 03_after_password_submit.png          # OAuth callback received
+└── 03_after_password_submit_discovery.json  # No passkey button (MFA skipped)
+```
+
+**Key Observations**:
+- OAuth callback URL: `**/products/advisor/auth?*code=*`
+- Final authenticated URL: `https://id.manulife.ca/products/advisor?ui_locales=en-CA`
+- MFA (passkey) is OPTIONAL - didn't trigger in successful run
+- Total authentication time: 6.05 seconds
+
+---
+
+## Regression Prevention
+
+### Automated Test
+
+AST-based static analysis test prevents `.fill()` violations:
+
+**Location**: `/Users/terryli/own/insurance/tests/auth/test_auth_pattern_compliance.py`
+
+```bash
+# Run regression test
+uv run --active pytest tests/auth/test_auth_pattern_compliance.py -v
+
+# Should output:
+# test_no_fill_in_auth_code PASSED
+# test_canonical_authenticator_uses_type PASSED
+```
+
+**What it does**:
+1. Parses all Python files in `auth/` and `scripts/setup/`
+2. Detects `.fill()` method calls via AST
+3. Allows `.fill("")` for clearing fields
+4. Fails CI if `.fill(text)` found where `text` is non-empty
+
+### Pre-commit Hook (Optional)
+
+Add to `.pre-commit-config.yaml`:
+
+```yaml
+- repo: local
+  hooks:
+    - id: check-auth-pattern
+      name: Check Authentication Pattern
+      entry: uv run --active pytest tests/auth/test_auth_pattern_compliance.py
+      language: system
+      pass_filenames: false
+      files: ^(auth/|scripts/setup/).*\.py$
+```
+
+---
+
+## Production Usage
+
+### Standard Authentication Script
+
+**Location**: `/Users/terryli/own/insurance/scripts/setup/authenticate.py`
+
+```bash
+# Headless mode (CI/CD):
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.authenticate
+
+# With GUI (debugging):
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.authenticate --headed
+```
+
+**Features**:
+- Uses canonical `PasskeyAuthenticator` class
+- Headless by default
+- No interactive prompts (CI/CD compatible)
+- Proper exit codes
+- Clean output
+
+### Debug Script (Verbose Logging)
+
+**Location**: `/Users/terryli/own/insurance/scripts/setup/debug_auth_verbose.py`
+
+```bash
+# With browser visible + inspection prompts:
+doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.debug_auth_verbose
+
+# Auto-close mode (for automated debugging):
+AUTO_CLOSE=true doppler run --project insurance --config prd -- \
+  uv run --active python -m scripts.setup.debug_auth_verbose
+```
+
+**Captures**:
+- Network logs (NDJSON)
+- WebAuthn events (CDP)
+- Screenshots at every step
+- DOM snapshots (HTML + ARIA)
+- All buttons/links discovered
+
+**When to use**: Only for debugging authentication issues. Use `authenticate.py` for normal operation.
+
+---
+
+## Common Mistakes
+
+### Mistake 1: Using `.fill()` for Form Data
+
+```python
+# ❌ WRONG - Doesn't trigger React onChange
+page.locator("#username").fill(username)
+page.locator("#password").fill(password)
+page.locator("button[type='submit']").click()
+# Result: Silent failure, form stays disabled
+```
+
+```python
+# ✅ CORRECT
+username_field = page.locator("#username")
+username_field.type(username, delay=50)
+password_field = page.locator("#password")
+password_field.type(password, delay=50)
+page.locator("button[type='submit']").click()
+# Result: OAuth callback received, authentication succeeds
+```
+
+### Mistake 2: Using `.fill()` Without Clearing First
+
+```python
+# ❌ WRONG - May have stale value
+username_field.type(new_username, delay=50)
+```
+
+```python
+# ✅ CORRECT - Clear then type
+username_field.fill("")  # Clear first (safe use of .fill)
+username_field.type(new_username, delay=50)
+```
+
+### Mistake 3: Not Waiting for Selectors
+
+```python
+# ❌ WRONG - May race condition
+page.locator("#username").type(username, delay=50)
+```
+
+```python
+# ✅ CORRECT - Wait first
+page.wait_for_selector("#username", timeout=10000)
+page.locator("#username").type(username, delay=50)
+```
+
+---
+
+## Related Documentation
+
+- **Canonical Implementation**: `/Users/terryli/own/insurance/auth/passkey_authenticator.py`
+- **Production Script**: `/Users/terryli/own/insurance/scripts/setup/authenticate.py`
+- **Regression Test**: `/Users/terryli/own/insurance/tests/auth/test_auth_pattern_compliance.py`
+- **Debug Script**: `/Users/terryli/own/insurance/scripts/setup/debug_auth_verbose.py`
+- **Playwright API**: [locator.type() documentation](https://playwright.dev/python/docs/api/class-locator#locator-type)
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2025-10-18 | Initial documentation after successful `.type()` fix |
+
+---
+
+## Questions?
+
+If authentication fails, check:
+
+1. Are you using `.type()` with `delay=50`?
+2. Are you clearing fields with `.fill("")` first?
+3. Are you waiting for selectors before interacting?
+4. Run debug script to capture comprehensive diagnostics
+5. Check `tests/auth/test_auth_pattern_compliance.py` passes

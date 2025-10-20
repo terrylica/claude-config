@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""
+Spike Test: Phase 1 - Incremental OHLC Generation
+
+Validates the claim that incremental OHLC generation provides significant speedup
+compared to full regeneration for incremental updates.
+
+Test Scenario:
+1. Create database with 6 months of simulated tick data (~67K bars)
+2. Add 1 month of new tick data (~11K new bars)
+3. Compare:
+   - Full regeneration (DELETE all + INSERT all)
+   - Incremental generation (INSERT OR IGNORE new only)
+
+Expected Result:
+- Incremental should be significantly faster
+- Both methods should produce identical OHLC output
+
+Success Criteria:
+- Incremental speedup >= 2x (50% reduction minimum)
+- Identical row counts and sample data verification
+
+Note: Reduced from 36 months to 6 months for practical runtime.
+"""
+
+import time
+from pathlib import Path
+from datetime import datetime, timedelta
+import duckdb
+import pandas as pd
+import sys
+
+# Add project to path
+sys.path.insert(0, "/Users/terryli/eon/exness-data-preprocess/src")
+
+from exness_data_preprocess.ohlc_generator import OHLCGenerator
+from exness_data_preprocess.session_detector import SessionDetector
+
+
+def create_test_database(db_path: Path, num_months: int = 36):
+    """Create test database with simulated tick data."""
+    print(f"Creating test database with {num_months} months of data...")
+
+    conn = duckdb.connect(str(db_path))
+
+    # Create tables with PRIMARY KEY
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS raw_spread_ticks (
+            Timestamp TIMESTAMP PRIMARY KEY,
+            Bid DOUBLE,
+            Ask DOUBLE
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS standard_ticks (
+            Timestamp TIMESTAMP PRIMARY KEY,
+            Bid DOUBLE,
+            Ask DOUBLE
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ohlc_1m (
+            Timestamp TIMESTAMP PRIMARY KEY,
+            Open DOUBLE,
+            High DOUBLE,
+            Low DOUBLE,
+            Close DOUBLE,
+            raw_spread_avg DOUBLE,
+            standard_spread_avg DOUBLE,
+            tick_count_raw_spread INTEGER,
+            tick_count_standard INTEGER,
+            range_per_spread DOUBLE,
+            range_per_tick DOUBLE,
+            body_per_spread DOUBLE,
+            body_per_tick DOUBLE,
+            ny_hour INTEGER,
+            london_hour INTEGER,
+            ny_session VARCHAR,
+            london_session VARCHAR,
+            is_us_holiday INTEGER,
+            is_uk_holiday INTEGER,
+            is_major_holiday INTEGER,
+            is_nyse_session INTEGER,
+            is_lse_session INTEGER,
+            is_xswx_session INTEGER,
+            is_xfra_session INTEGER,
+            is_xtse_session INTEGER,
+            is_xnze_session INTEGER,
+            is_xtks_session INTEGER,
+            is_xasx_session INTEGER,
+            is_xhkg_session INTEGER,
+            is_xses_session INTEGER
+        )
+    """)
+
+    # Generate simulated tick data (1 tick per minute = ~43,800 ticks/month)
+    start_date = datetime(2022, 1, 1)
+    ticks_per_month = 43800  # Approximate
+
+    for month_offset in range(num_months):
+        month_start = start_date + timedelta(days=30 * month_offset)
+
+        # Generate tick data for this month
+        timestamps = [month_start + timedelta(minutes=i) for i in range(ticks_per_month)]
+
+        # Simulate realistic FX prices (EURUSD-like)
+        base_price = 1.1000 + (month_offset * 0.001)  # Slowly trending
+
+        for ts in timestamps:
+            bid = base_price + (hash(str(ts)) % 100) * 0.0001
+            ask = bid + 0.0002  # 2 pip spread
+
+            # Insert into raw_spread_ticks
+            conn.execute(
+                "INSERT OR IGNORE INTO raw_spread_ticks (Timestamp, Bid, Ask) VALUES (?, ?, ?)",
+                (ts, bid, ask)
+            )
+
+            # Insert into standard_ticks with slightly different spread
+            ask_std = bid + 0.00056  # Standard variant spread
+            conn.execute(
+                "INSERT OR IGNORE INTO standard_ticks (Timestamp, Bid, Ask) VALUES (?, ?, ?)",
+                (ts, bid, ask_std)
+            )
+
+    # Commit and report
+    tick_count = conn.execute("SELECT COUNT(*) FROM raw_spread_ticks").fetchone()[0]
+    print(f"✓ Created database with {tick_count:,} ticks ({num_months} months)")
+
+    conn.close()
+    return tick_count
+
+
+def add_new_month_data(db_path: Path, month_offset: int = 36):
+    """Add one new month of tick data."""
+    print(f"\nAdding month {month_offset + 1} data...")
+
+    conn = duckdb.connect(str(db_path))
+
+    start_date = datetime(2022, 1, 1)
+    month_start = start_date + timedelta(days=30 * month_offset)
+    ticks_per_month = 43800
+
+    timestamps = [month_start + timedelta(minutes=i) for i in range(ticks_per_month)]
+    base_price = 1.1000 + (month_offset * 0.001)
+
+    for ts in timestamps:
+        bid = base_price + (hash(str(ts)) % 100) * 0.0001
+        ask = bid + 0.0002
+
+        conn.execute(
+            "INSERT OR IGNORE INTO raw_spread_ticks (Timestamp, Bid, Ask) VALUES (?, ?, ?)",
+            (ts, bid, ask)
+        )
+
+        ask_std = bid + 0.00056
+        conn.execute(
+            "INSERT OR IGNORE INTO standard_ticks (Timestamp, Bid, Ask) VALUES (?, ?, ?)",
+            (ts, bid, ask_std)
+        )
+
+    new_tick_count = conn.execute("SELECT COUNT(*) FROM raw_spread_ticks").fetchone()[0]
+    print(f"✓ Added new month, total ticks: {new_tick_count:,}")
+
+    conn.close()
+    return new_tick_count
+
+
+def test_full_regeneration(db_path: Path):
+    """Test full OHLC regeneration (old method)."""
+    print("\n" + "="*70)
+    print("TEST 1: Full Regeneration (Baseline)")
+    print("="*70)
+
+    conn = duckdb.connect(str(db_path))
+
+    # Clear existing OHLC
+    conn.execute("DELETE FROM ohlc_1m")
+    conn.close()
+
+    # Measure full regeneration time
+    session_detector = SessionDetector()
+    generator = OHLCGenerator(session_detector)
+
+    start_time = time.time()
+    generator.regenerate_ohlc(db_path)  # No parameters = full regeneration
+    full_time = time.time() - start_time
+
+    # Get row count
+    conn = duckdb.connect(str(db_path))
+    row_count = conn.execute("SELECT COUNT(*) FROM ohlc_1m").fetchone()[0]
+    conn.close()
+
+    print(f"✓ Full regeneration completed")
+    print(f"  Time: {full_time:.2f}s")
+    print(f"  Rows: {row_count:,}")
+
+    return full_time, row_count
+
+
+def test_incremental_generation(db_path: Path, start_date: str):
+    """Test incremental OHLC generation (new method)."""
+    print("\n" + "="*70)
+    print("TEST 2: Incremental Generation (Optimized)")
+    print("="*70)
+
+    # Don't delete existing OHLC - incremental update
+    session_detector = SessionDetector()
+    generator = OHLCGenerator(session_detector)
+
+    start_time = time.time()
+    generator.regenerate_ohlc(db_path, start_date=start_date)
+    incremental_time = time.time() - start_time
+
+    # Get row count
+    conn = duckdb.connect(str(db_path))
+    row_count = conn.execute("SELECT COUNT(*) FROM ohlc_1m").fetchone()[0]
+    conn.close()
+
+    print(f"✓ Incremental generation completed")
+    print(f"  Time: {incremental_time:.2f}s")
+    print(f"  Rows: {row_count:,}")
+
+    return incremental_time, row_count
+
+
+def verify_data_integrity(db_path: Path):
+    """Verify both methods produce identical results."""
+    print("\n" + "="*70)
+    print("DATA INTEGRITY CHECK")
+    print("="*70)
+
+    conn = duckdb.connect(str(db_path))
+
+    # Check for duplicates
+    dup_count = conn.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT Timestamp, COUNT(*) as cnt
+            FROM ohlc_1m
+            GROUP BY Timestamp
+            HAVING cnt > 1
+        )
+    """).fetchone()[0]
+
+    # Sample recent data
+    sample = conn.execute("""
+        SELECT Timestamp, Open, High, Low, Close, tick_count_raw_spread
+        FROM ohlc_1m
+        ORDER BY Timestamp DESC
+        LIMIT 5
+    """).df()
+
+    conn.close()
+
+    print(f"Duplicate timestamps: {dup_count}")
+    print(f"\nSample data (latest 5 bars):")
+    print(sample.to_string(index=False))
+
+    return dup_count == 0
+
+
+def main():
+    """Run spike test."""
+    print("="*70)
+    print("SPIKE TEST: Phase 1 - Incremental OHLC Generation")
+    print("="*70)
+
+    db_path = Path("/tmp/spike-tests/test_incremental_ohlc.duckdb")
+
+    # Clean up previous test
+    if db_path.exists():
+        db_path.unlink()
+
+    # Step 1: Create baseline database (6 months for faster testing)
+    create_test_database(db_path, num_months=6)
+
+    # Step 2: Add new month of data (now 7 months total in database)
+    add_new_month_data(db_path, month_offset=6)
+
+    # Step 3: Test full regeneration baseline (DELETE all + regenerate all 7 months)
+    full_time, full_rows = test_full_regeneration(db_path)
+
+    # Step 4: Test incremental generation (only regenerate month 7)
+    new_month_start = "2022-07-01"  # 6 months after 2022-01-01
+    incremental_time, incremental_rows = test_incremental_generation(db_path, new_month_start)
+
+    # Step 5: Verify data integrity
+    integrity_ok = verify_data_integrity(db_path)
+
+    # Results
+    print("\n" + "="*70)
+    print("RESULTS")
+    print("="*70)
+
+    speedup = full_time / incremental_time if incremental_time > 0 else 0
+    reduction = ((full_time - incremental_time) / full_time * 100) if full_time > 0 else 0
+
+    print(f"\nPerformance:")
+    print(f"  Full regeneration:    {full_time:.2f}s ({full_rows:,} rows)")
+    print(f"  Incremental update:   {incremental_time:.2f}s ({incremental_rows:,} rows)")
+    print(f"  Speedup:              {speedup:.1f}x")
+    print(f"  Time reduction:       {reduction:.1f}%")
+
+    print(f"\nData Integrity:")
+    print(f"  Row count match:      {full_rows == incremental_rows}")
+    print(f"  No duplicates:        {integrity_ok}")
+
+    # Success criteria
+    success = (
+        speedup >= 2.0 and  # At least 2x faster (50% reduction)
+        full_rows == incremental_rows and
+        integrity_ok
+    )
+
+    print("\n" + "="*70)
+    if success:
+        print("✅ SPIKE TEST PASSED")
+        print(f"   Incremental OHLC provides {speedup:.1f}x speedup ({reduction:.1f}% reduction)")
+        print("   Theory validated - proceed with implementation")
+    else:
+        print("❌ SPIKE TEST FAILED")
+        if speedup < 2.0:
+            print(f"   Speedup {speedup:.1f}x below 2x threshold")
+        if full_rows != incremental_rows:
+            print(f"   Row count mismatch: {full_rows} vs {incremental_rows}")
+        if not integrity_ok:
+            print("   Data integrity issues detected")
+        print("   Theory not validated - review implementation")
+    print("="*70)
+
+    return 0 if success else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

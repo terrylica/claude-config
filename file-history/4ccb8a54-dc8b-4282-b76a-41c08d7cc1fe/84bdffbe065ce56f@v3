@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Automated passkey authentication for Manulife Advisor Portal.
+
+This module provides complete automated authentication using CDP WebAuthn
+for passkey-based login. Generates storage-state.json for subsequent sessions.
+
+Authentication Flow:
+1. Username + password → submit
+2. Look for passkey button → click it
+3. Wait for navigation
+4. REPEAT: Look for passkey button → if found, click again
+5. Continue until we're off signin/mfa pages
+6. Save storage-state.json
+
+Usage as script:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m auth.passkey_authenticator
+
+Usage as module:
+    from auth.passkey_authenticator import PasskeyAuthenticator
+
+    authenticator = PasskeyAuthenticator(
+        username=username,
+        password=password,
+        passkey_config=passkey_config
+    )
+    storage_state = authenticator.authenticate()
+"""
+
+import base64
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Optional
+
+from playwright.sync_api import Page, BrowserContext, sync_playwright
+from jwcrypto import jwk
+
+
+class PasskeyAuthenticator:
+    """Automated passkey authentication using CDP WebAuthn."""
+
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        passkey_credential_id: str,
+        passkey_rp_id: str,
+        passkey_user_handle: str,
+        passkey_private_key_jwk: str,
+        artifacts_dir: Optional[Path] = None,
+        headless: bool = False
+    ):
+        """Initialize authenticator.
+
+        Args:
+            username: Manulife username
+            password: Manulife password
+            passkey_credential_id: Base64-encoded credential ID
+            passkey_rp_id: Relying party ID (e.g., id.manulife.ca)
+            passkey_user_handle: Base64-encoded user handle
+            passkey_private_key_jwk: JWK format private key (base64-encoded)
+            artifacts_dir: Optional directory for screenshots/artifacts
+            headless: Run browser in headless mode (default False)
+        """
+        self.username = username
+        self.password = password
+        self.passkey_credential_id = self._add_base64_padding(passkey_credential_id)
+        self.passkey_rp_id = passkey_rp_id
+        self.passkey_user_handle = self._add_base64_padding(passkey_user_handle)
+        self.passkey_private_key_jwk = passkey_private_key_jwk
+        self.headless = headless
+
+        # Setup artifacts directory
+        if artifacts_dir is None:
+            project_root = Path(__file__).parent.parent
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.artifacts_dir = project_root / "artifacts" / f"auth_{timestamp}"
+        else:
+            self.artifacts_dir = artifacts_dir
+
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _add_base64_padding(s: str) -> str:
+        """Add base64 padding if needed."""
+        missing_padding = len(s) % 4
+        if missing_padding:
+            return s + '=' * (4 - missing_padding)
+        return s
+
+    def _jwk_to_pkcs8_base64(self, jwk_base64: str) -> str:
+        """Convert JWK format private key to PKCS#8 format."""
+        jwk_base64 = self._add_base64_padding(jwk_base64)
+        jwk_json = base64.b64decode(jwk_base64).decode('utf-8')
+        jwk_dict = json.loads(jwk_json)
+        key = jwk.JWK(**jwk_dict)
+        pkcs8_pem = key.export_to_pem(private_key=True, password=None)
+        pem_lines = pkcs8_pem.decode('utf-8').strip().split('\n')
+        pkcs8_base64 = ''.join(line for line in pem_lines if not line.startswith('-----'))
+        return pkcs8_base64
+
+    def _log(self, msg: str, level: str = "INFO"):
+        """Timestamped logging."""
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        prefix = {
+            "INFO": "ℹ️ ",
+            "SUCCESS": "✅",
+            "WARNING": "⚠️ ",
+            "ERROR": "❌",
+            "STEP": "📍",
+        }.get(level, "  ")
+        print(f"[{timestamp}] {prefix} {msg}")
+
+    def _try_click_passkey_button(self, page: Page, step_name: str) -> bool:
+        """Try to find and click passkey button.
+
+        Args:
+            page: Playwright page
+            step_name: Name for artifact screenshots
+
+        Returns:
+            True if button found and clicked, False otherwise
+        """
+        self._log("Looking for passkey button on current page...", "INFO")
+
+        passkey_selectors = [
+            ("button:has-text('Passkey')", "Button with 'Passkey'"),
+            ("button:has-text('passkey')", "Button with 'passkey' (lowercase)"),
+            ("button[id='passkey']", "Button with id=passkey"),
+            ("button:has-text('Use passkey')", "Button with 'Use passkey'"),
+            ("button:has-text('Sign in with passkey')", "Button with 'Sign in with passkey'"),
+        ]
+
+        for selector, description in passkey_selectors:
+            try:
+                element = page.locator(selector).first
+                if element.is_visible(timeout=1000):
+                    btn_text = element.inner_text()
+                    self._log(f"  FOUND: {description}", "SUCCESS")
+                    self._log(f"  Button text: '{btn_text}'", "SUCCESS")
+
+                    # Screenshot before click
+                    page.screenshot(
+                        path=str(self.artifacts_dir / f"{step_name}_before_click.png")
+                    )
+
+                    # Click it
+                    self._log("  Clicking passkey button...", "INFO")
+                    element.click()
+
+                    # Wait for response
+                    self._log("  Waiting for navigation...", "INFO")
+                    page.wait_for_load_state("networkidle", timeout=15000)
+
+                    # Screenshot after click
+                    page.screenshot(
+                        path=str(self.artifacts_dir / f"{step_name}_after_click.png")
+                    )
+
+                    self._log(f"  Current URL: {page.url}", "INFO")
+                    return True
+
+            except Exception:
+                continue
+
+        self._log("  No passkey button found", "WARNING")
+        return False
+
+    def _fill_react_form(self, page: Page):
+        """Fill username and password using React-compatible method.
+
+        React forms require .type() instead of .fill() to trigger onChange events.
+
+        Args:
+            page: Playwright page
+        """
+        self._log("Filling username and password...", "INFO")
+        page.wait_for_selector("#username", timeout=10000)
+
+        # Username field - use type() for React onChange
+        username_field = page.locator("#username")
+        username_field.click()
+        username_field.fill("")  # Clear first
+        username_field.type(self.username, delay=50)
+
+        # Password field - use type() for React onChange
+        password_field = page.locator("#password")
+        password_field.click()
+        password_field.fill("")  # Clear first
+        password_field.type(self.password, delay=50)
+
+    def authenticate(self) -> Dict:
+        """Execute complete authentication flow.
+
+        Returns:
+            Storage state dictionary (cookies, localStorage, etc.)
+
+        Raises:
+            Exception: If authentication fails
+        """
+        self._log("=" * 80, "STEP")
+        self._log("Automated Passkey Authentication", "STEP")
+        self._log("=" * 80, "STEP")
+        self._log(f"Username: {self.username}", "INFO")
+        self._log(f"Passkey RP ID: {self.passkey_rp_id}", "INFO")
+        self._log(f"Artifacts: {self.artifacts_dir}", "INFO")
+
+        # Convert JWK to PKCS#8
+        self._log("Converting JWK private key to PKCS#8...", "INFO")
+        pkcs8_private_key = self._jwk_to_pkcs8_base64(self.passkey_private_key_jwk)
+        self._log("Key conversion successful", "SUCCESS")
+
+        with sync_playwright() as p:
+            self._log("Launching browser...", "INFO")
+            browser = p.chromium.launch(headless=self.headless)
+            context = browser.new_context(viewport={"width": 1280, "height": 720})
+            page = context.new_page()
+
+            # Setup virtual authenticator via CDP
+            self._log("Creating CDP session...", "INFO")
+            cdp = context.new_cdp_session(page)
+            cdp.send("WebAuthn.enable")
+
+            self._log("Creating virtual authenticator...", "INFO")
+            result = cdp.send("WebAuthn.addVirtualAuthenticator", {
+                "options": {
+                    "protocol": "ctap2",
+                    "ctap2Version": "ctap2_1",
+                    "transport": "internal",
+                    "hasResidentKey": True,
+                    "hasUserVerification": True,
+                    "automaticPresenceSimulation": True,
+                    "isUserVerified": True
+                }
+            })
+            authenticator_id = result["authenticatorId"]
+            self._log(f"Virtual authenticator ID: {authenticator_id}", "SUCCESS")
+
+            self._log("Injecting passkey credential...", "INFO")
+            cdp.send("WebAuthn.addCredential", {
+                "authenticatorId": authenticator_id,
+                "credential": {
+                    "credentialId": self.passkey_credential_id,
+                    "privateKey": pkcs8_private_key,
+                    "rpId": self.passkey_rp_id,
+                    "userHandle": self.passkey_user_handle,
+                    "signCount": 0,
+                    "isResidentCredential": True
+                }
+            })
+            self._log("Passkey credential injected successfully", "SUCCESS")
+
+            # STEP 1: Navigate and signin
+            self._log("=" * 80, "STEP")
+            self._log("STEP 1: Navigate to Signin Page", "STEP")
+            self._log("=" * 80, "STEP")
+
+            signin_url = "https://id.manulife.ca/advisor/signin"
+            self._log(f"Navigating to: {signin_url}", "INFO")
+            page.goto(signin_url, wait_until="networkidle", timeout=30000)
+
+            page.screenshot(path=str(self.artifacts_dir / "01_signin_page.png"))
+
+            # Fill credentials
+            self._fill_react_form(page)
+            page.screenshot(path=str(self.artifacts_dir / "02_credentials_filled.png"))
+
+            # Submit
+            self._log("Submitting signin form...", "INFO")
+            page.get_by_role("button", name="Sign in").click()
+            page.wait_for_load_state("networkidle", timeout=30000)
+
+            page.screenshot(path=str(self.artifacts_dir / "03_after_submit.png"))
+
+            # Wait for page to settle (passkey button may appear dynamically)
+            self._log("Waiting for page to fully settle...", "INFO")
+            time.sleep(3)
+
+            # STEP 2: Click passkey buttons in loop until authenticated
+            self._log("=" * 80, "STEP")
+            self._log("STEP 2: Click Passkey Buttons Until Authenticated", "STEP")
+            self._log("=" * 80, "STEP")
+
+            max_passkey_clicks = 5
+            passkey_clicks = 0
+
+            while passkey_clicks < max_passkey_clicks:
+                current_url = page.url.lower()
+
+                # Check if we're still on auth pages
+                if "signin" not in current_url and "mfa" not in current_url and "login" not in current_url:
+                    self._log("Not on authentication page anymore - authenticated!", "SUCCESS")
+                    break
+
+                # Try to find and click passkey button
+                step_name = f"04_passkey_click_{passkey_clicks + 1}"
+
+                if self._try_click_passkey_button(page, step_name):
+                    passkey_clicks += 1
+                    self._log(f"Passkey button clicked (total: {passkey_clicks})", "SUCCESS")
+                    time.sleep(1)
+                else:
+                    self._log("No passkey button found - checking if authenticated...", "INFO")
+                    break
+
+            # STEP 3: Verify final state
+            self._log("=" * 80, "STEP")
+            self._log("STEP 3: Verify Final Authentication State", "STEP")
+            self._log("=" * 80, "STEP")
+
+            current_url = page.url
+            self._log(f"Final URL: {current_url}", "INFO")
+            self._log(f"Total passkey clicks: {passkey_clicks}", "INFO")
+
+            page.screenshot(path=str(self.artifacts_dir / "05_final_state.png"))
+
+            # Check if authenticated
+            if "signin" in current_url.lower() or "login" in current_url.lower():
+                self._log("WARNING: Still on signin/login page", "WARNING")
+
+                # Check for errors
+                try:
+                    error = page.locator("[role='alert']").first
+                    if error.is_visible(timeout=2000):
+                        error_text = error.inner_text()
+                        self._log(f"Error message: {error_text}", "ERROR")
+                        raise Exception(f"Authentication failed: {error_text}")
+                except Exception as e:
+                    if "Authentication failed" in str(e):
+                        raise
+            else:
+                self._log("Successfully authenticated!", "SUCCESS")
+
+            # Get storage state
+            storage_state = context.storage_state()
+
+            self._log("=" * 80, "STEP")
+            self._log("AUTHENTICATION COMPLETE", "STEP")
+            self._log("=" * 80, "STEP")
+
+            browser.close()
+            return storage_state
+
+
+def main() -> int:
+    """CLI entry point for authentication script."""
+    # Get credentials from environment
+    username = os.getenv("MANULIFE_PAR_USERNAME")
+    password = os.getenv("MANULIFE_PAR_PASSWORD")
+    passkey_credential_id = os.getenv("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID")
+    passkey_rp_id = os.getenv("MANULIFE_PAR_PASSKEY_RP_ID")
+    passkey_user_handle = os.getenv("MANULIFE_PAR_PASSKEY_USER_HANDLE")
+    passkey_private_key = os.getenv("MANULIFE_PAR_PASSKEY_PRIVATE_KEY")
+
+    # Validate
+    missing = []
+    for name, value in [
+        ("MANULIFE_PAR_USERNAME", username),
+        ("MANULIFE_PAR_PASSWORD", password),
+        ("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID", passkey_credential_id),
+        ("MANULIFE_PAR_PASSKEY_RP_ID", passkey_rp_id),
+        ("MANULIFE_PAR_PASSKEY_USER_HANDLE", passkey_user_handle),
+        ("MANULIFE_PAR_PASSKEY_PRIVATE_KEY", passkey_private_key),
+    ]:
+        if not value:
+            missing.append(name)
+
+    if missing:
+        print(f"ERROR: Missing credentials: {', '.join(missing)}", file=sys.stderr)
+        return 1
+
+    try:
+        # Create authenticator
+        authenticator = PasskeyAuthenticator(
+            username=username,
+            password=password,
+            passkey_credential_id=passkey_credential_id,
+            passkey_rp_id=passkey_rp_id,
+            passkey_user_handle=passkey_user_handle,
+            passkey_private_key_jwk=passkey_private_key,
+            headless=False
+        )
+
+        # Authenticate
+        storage_state = authenticator.authenticate()
+
+        # Save storage state
+        project_root = Path(__file__).parent.parent
+        storage_state_path = project_root / "storage-state.json"
+
+        with open(storage_state_path, 'w') as f:
+            json.dump(storage_state, f, indent=2)
+
+        print(f"\n✅ Storage state saved: {storage_state_path}")
+        print("\nNext step: Run reconnaissance")
+        print("  doppler run --project insurance --config prd -- \\")
+        print("    uv run --active pytest -v -m reconnaissance tests/reconnaissance/")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Authentication failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

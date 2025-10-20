@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Production authentication script for Manulife Advisor Portal.
+
+This script uses the canonical PasskeyAuthenticator class to generate
+storage-state.json for subsequent test sessions.
+
+Features:
+- Headless by default (use --headed for GUI)
+- No interactive prompts (CI/CD compatible)
+- Clean output
+- Proper exit codes
+
+Usage:
+    # Headless (default):
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.setup.authenticate
+
+    # With GUI:
+    doppler run --project insurance --config prd -- \\
+      uv run --active python -m scripts.setup.authenticate --headed
+
+Prerequisites:
+    - Doppler credentials (MANULIFE_PAR_*)
+    - Playwright installed
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+# Add project root to path to import auth module
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from auth.passkey_authenticator import PasskeyAuthenticator
+
+
+def main() -> int:
+    """Execute production authentication."""
+    # Parse arguments
+    parser = argparse.ArgumentParser(
+        description="Authenticate to Manulife Advisor Portal"
+    )
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="Run browser in headed mode (default: headless)"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=project_root / "storage-state.json",
+        help="Output path for storage-state.json (default: ./storage-state.json)"
+    )
+    args = parser.parse_args()
+
+    # Get credentials from environment
+    username = os.getenv("MANULIFE_PAR_USERNAME")
+    password = os.getenv("MANULIFE_PAR_PASSWORD")
+    passkey_credential_id = os.getenv("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID")
+    passkey_rp_id = os.getenv("MANULIFE_PAR_PASSKEY_RP_ID")
+    passkey_user_handle = os.getenv("MANULIFE_PAR_PASSKEY_USER_HANDLE")
+    passkey_private_key = os.getenv("MANULIFE_PAR_PASSKEY_PRIVATE_KEY")
+
+    # Validate credentials
+    missing = []
+    for name, value in [
+        ("MANULIFE_PAR_USERNAME", username),
+        ("MANULIFE_PAR_PASSWORD", password),
+        ("MANULIFE_PAR_PASSKEY_CREDENTIAL_ID", passkey_credential_id),
+        ("MANULIFE_PAR_PASSKEY_RP_ID", passkey_rp_id),
+        ("MANULIFE_PAR_PASSKEY_USER_HANDLE", passkey_user_handle),
+        ("MANULIFE_PAR_PASSKEY_PRIVATE_KEY", passkey_private_key),
+    ]:
+        if not value:
+            missing.append(name)
+
+    if missing:
+        print(f"❌ Missing required credentials: {', '.join(missing)}", file=sys.stderr)
+        print("\nRun with Doppler:", file=sys.stderr)
+        print("  doppler run --project insurance --config prd -- \\", file=sys.stderr)
+        print("    uv run --active python -m scripts.setup.authenticate", file=sys.stderr)
+        return 1
+
+    print("🔐 Manulife Advisor Portal Authentication")
+    print(f"📧 Username: {username}")
+    print(f"🖥️  Mode: {'headed (GUI)' if args.headed else 'headless'}")
+    print()
+
+    try:
+        # Create authenticator
+        authenticator = PasskeyAuthenticator(
+            username=username,
+            password=password,
+            passkey_credential_id=passkey_credential_id,
+            passkey_rp_id=passkey_rp_id,
+            passkey_user_handle=passkey_user_handle,
+            passkey_private_key_jwk=passkey_private_key,
+            headless=not args.headed
+        )
+
+        # Authenticate
+        print("🔄 Authenticating...")
+        storage_state = authenticator.authenticate()
+        print()
+
+        # Save storage state
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, 'w') as f:
+            json.dump(storage_state, f, indent=2)
+
+        print(f"✅ Authentication successful!")
+        print(f"💾 Saved to: {args.output}")
+        print()
+        print("Next steps:")
+        print("  • Run tests:")
+        print("    pytest -v -m reconnaissance tests/reconnaissance/")
+        print("  • Check artifacts:")
+        print(f"    ls {authenticator.artifacts_dir}/")
+
+        return 0
+
+    except Exception as e:
+        print(f"\n❌ Authentication failed: {e}", file=sys.stderr)
+
+        # Print helpful debugging info
+        if hasattr(e, '__cause__') and e.__cause__:
+            print(f"Cause: {e.__cause__}", file=sys.stderr)
+
+        print("\nTroubleshooting:", file=sys.stderr)
+        print("  1. Check Doppler credentials are set", file=sys.stderr)
+        print("  2. Verify network connectivity", file=sys.stderr)
+        print("  3. Run with --headed to see browser interaction", file=sys.stderr)
+        print("  4. Check artifacts for screenshots", file=sys.stderr)
+
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

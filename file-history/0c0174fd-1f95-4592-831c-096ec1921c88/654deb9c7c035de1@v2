@@ -1,0 +1,203 @@
+"""Example production test using Page Object Model.
+
+This test demonstrates clean, maintainable test code using the POM pattern.
+All Playwright interactions are abstracted into page objects, making tests:
+- Readable (test intent is clear)
+- Maintainable (changes to UI only affect page objects)
+- Reusable (page objects can be used across multiple tests)
+
+Status: Example test (NOT connected to authentication yet)
+
+Reference: https://playwright.dev/python/docs/pom
+"""
+
+import pytest
+from pages.manulife_par_page import ManulifeParPage
+
+
+def test_fill_coverage_form_with_valid_data(page):
+    """Fill coverage form with valid data and validate.
+
+    This test demonstrates the value of POM:
+    - Test code is clean and readable (no low-level Playwright calls)
+    - All form interactions are delegated to ManulifeParPage
+    - Business logic (what to test) is separate from technical details (how to interact)
+
+    Test Data:
+        - Ada Lovelace, age 35 (born 1990)
+        - Female, Non-Smoker
+        - $250,000 coverage, Pay for 10 years
+        - No riders, No Quebec, Electronic application
+
+    Expected Result:
+        - Form fills successfully
+        - Validation passes (no errors)
+
+    Note:
+        This test requires authentication state (storage-state.json).
+        Run reconnaissance/explore_full_form.py first to establish auth.
+    """
+    # Initialize page object
+    par_page = ManulifeParPage(page)
+
+    # Navigate to form
+    par_page.navigate_to(par_page.welcome_url)
+
+    # TODO: Accept cookies if needed
+    # TODO: Select product + "Upload Later"
+    # TODO: Click first "Start a new application" to reveal form
+
+    # Fill complete form using high-level method
+    # Notice how clean this is - all complexity hidden in page object
+    par_page.fill_complete_form(
+        first_name="Ada",
+        last_name="Lovelace",
+        sex="Female",
+        dob_day="10",
+        dob_month="December",
+        dob_year="1990",
+        smoking_status="Non-Smoker",
+        amount="250000",
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        dividend_option="Paid-up insurance",
+        riders="No",
+        quebec="No",
+        additional_products="No",
+        medical_info="On this electronic application"
+    )
+
+    # Verify insurance age was calculated correctly
+    insurance_age = par_page.get_insurance_age()
+    assert insurance_age == "35", f"Expected age 35, got {insurance_age}"
+
+    # Trigger client-side validation
+    par_page.click_validate_button()
+
+    # Check for validation errors
+    errors = par_page.check_for_validation_errors()
+
+    # Filter out expected error about illustration upload
+    # (This is expected - we haven't uploaded an illustration)
+    real_errors = [e for e in errors if "Illustration" not in e]
+
+    assert len(real_errors) == 0, f"Validation failed with errors: {real_errors}"
+
+
+def test_fill_coverage_form_with_different_profile(page):
+    """Fill coverage form with different client profile.
+
+    Demonstrates data-driven testing with POM - same page object,
+    different test data.
+
+    Test Data:
+        - John Smith, age 46 (born 1980)
+        - Male, Smoker
+        - $500,000 coverage, Pay for 20 years
+        - Yes riders, No Quebec, Electronic application
+    """
+    par_page = ManulifeParPage(page)
+    par_page.navigate_to(par_page.welcome_url)
+
+    # TODO: Cookie acceptance + product selection
+
+    # Different client profile - notice same methods, different data
+    par_page.fill_complete_form(
+        first_name="John",
+        last_name="Smith",
+        sex="Male",
+        dob_day="15",
+        dob_month="June",
+        dob_year="1980",
+        smoking_status="Smoker",
+        amount="500000",
+        premium_duration="Pay for 20 years",
+        riders="Yes",  # Different choice
+        quebec="No",
+        additional_products="No",
+        medical_info="On this electronic application"
+    )
+
+    insurance_age = par_page.get_insurance_age()
+    assert insurance_age == "46", f"Expected age 46, got {insurance_age}"
+
+    par_page.click_validate_button()
+    errors = par_page.check_for_validation_errors()
+    real_errors = [e for e in errors if "Illustration" not in e]
+
+    assert len(real_errors) == 0, f"Validation failed: {real_errors}"
+
+
+def test_individual_field_methods(page):
+    """Demonstrates using individual field methods for fine-grained control.
+
+    Sometimes you need more control than the high-level fill_complete_form()
+    provides. POM supports both approaches.
+    """
+    par_page = ManulifeParPage(page)
+    par_page.navigate_to(par_page.welcome_url)
+
+    # TODO: Cookie acceptance + product selection
+
+    # Fill fields individually - more verbose but more control
+    par_page.fill_insured_name("Grace", "Hopper", "M")
+    par_page.select_sex("Female")
+    par_page.fill_date_of_birth("09", "December", "1990")
+
+    # Check calculated age before continuing
+    age = par_page.get_insurance_age()
+    print(f"Calculated insurance age: {age}")
+
+    par_page.select_smoking_status("Non-Smoker")
+
+    # Fill coverage with custom amounts
+    par_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay to age 100",
+        amount="1000000",  # $1M coverage
+        dividend_option="Cash"
+    )
+
+    # Handle custom React buttons
+    par_page.select_riders("No")
+    par_page.select_quebec_policy("No")
+    par_page.select_additional_products("No")
+    par_page.select_medical_info_method("On this electronic application")
+
+    # Validate
+    par_page.click_validate_button()
+    errors = par_page.check_for_validation_errors()
+    real_errors = [e for e in errors if "Illustration" not in e]
+
+    assert len(real_errors) == 0, f"Validation failed: {real_errors}"
+
+
+@pytest.mark.skip(reason="Demonstrates error handling - will fail intentionally")
+def test_validation_error_detection(page):
+    """Demonstrates that page object correctly detects validation errors.
+
+    This test intentionally uses invalid age to show error detection works.
+    """
+    par_page = ManulifeParPage(page)
+    par_page.navigate_to(par_page.welcome_url)
+
+    # TODO: Cookie acceptance + product selection
+
+    # Use age that fails business validation (too old)
+    par_page.fill_complete_form(
+        first_name="Very",
+        last_name="Old",
+        sex="Male",
+        dob_day="01",
+        dob_month="January",
+        dob_year="1920",  # 105 years old - should fail
+        smoking_status="Non-Smoker",
+        amount="100000"
+    )
+
+    par_page.click_validate_button()
+    errors = par_page.check_for_validation_errors()
+
+    # Should detect age validation error
+    age_errors = [e for e in errors if "age" in e.lower()]
+    assert len(age_errors) > 0, "Should detect age validation error"

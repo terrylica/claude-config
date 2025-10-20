@@ -1,0 +1,177 @@
+"""
+Visual Inspection Test - PAUSES at key points
+
+This test STOPS and waits for user input so you can inspect the screen
+at each stage and understand what's happening.
+"""
+
+import pytest
+from playwright.sync_api import Page
+import time
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_visual_inspection_with_pauses(page: Page, artifact_manager):
+    """
+    Run test with pauses so you can see what's on screen
+    """
+
+    manulife_page = ManulifeParPage(page)
+
+    print("\n" + "=" * 70)
+    print("VISUAL INSPECTION TEST - Pausing at each step")
+    print("=" * 70)
+
+    # Step 1
+    print("\n[STEP 1] Navigating to welcome page...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    artifact_manager.capture_screenshot(page, "01_welcome_page")
+    print("✓ Welcome page loaded")
+    print(f"   URL: {page.url}")
+    print("\n→ PAUSING for 5 seconds - Look at the browser window")
+    time.sleep(5)
+
+    # Accept cookies
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Step 2
+    print("\n[STEP 2] Selecting Manulife Par product...")
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "02_product_selected")
+    print("✓ Product selected")
+    print("\n→ PAUSING for 5 seconds - See the product dropdown and illustration question")
+    time.sleep(5)
+
+    # Step 3
+    print("\n[STEP 3] Selecting Upload Later...")
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "03_upload_later_selected")
+    print("✓ Upload Later selected")
+    print("\n→ PAUSING for 5 seconds - Notice Upload Later is now selected (dark background)")
+    time.sleep(5)
+
+    # Step 4 - Look at the button
+    print("\n[STEP 4] About to click 'Start a new application' button...")
+    button = page.get_by_role("button", name="Start a new application")
+    print("   Button found and visible on screen")
+    print("\n→ PAUSING for 5 seconds - Look at the 'Start a new application' button")
+    print("   (Is it enabled? Clickable? What's its state?)")
+    time.sleep(5)
+
+    # Step 5 - Click button
+    print("\n[STEP 5] Clicking 'Start a new application'...")
+    button.click()
+    page.wait_for_timeout(1500)
+    artifact_manager.capture_screenshot(page, "04_after_first_click")
+    print("✓ Button clicked")
+    print("\n→ PAUSING for 5 seconds - What changed on the screen?")
+    print("   (Did form fields appear? Any error messages?)")
+    time.sleep(5)
+
+    # Step 6 - Fill form
+    print("\n[STEP 6] Filling insured person name...")
+    manulife_page.fill_insured_name("Alex", "Letterman")
+    print("✓ Name filled: Alex Letterman")
+    print("\n→ PAUSING for 3 seconds - See the name fields filled")
+    time.sleep(3)
+
+    print("\n[STEP 6b] Selecting sex: Male...")
+    manulife_page.select_sex("Male")
+    print("✓ Sex selected: Male")
+
+    print("\n[STEP 6c] Filling date of birth...")
+    manulife_page.fill_date_of_birth("5", "June", "1986")
+    print("✓ DOB filled: 5 June 1986 (Age 38)")
+
+    print("\n[STEP 6d] Selecting smoking status...")
+    manulife_page.select_smoking_status("Non-Smoker")
+    print("✓ Smoking status: Non-Smoker")
+    print("\n→ PAUSING for 3 seconds - See all insured person fields filled")
+    time.sleep(3)
+
+    print("\n[STEP 6e] Filling coverage details...")
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+    print("✓ Coverage details filled")
+    artifact_manager.capture_screenshot(page, "05_form_partially_filled")
+    print("\n→ PAUSING for 3 seconds - See coverage section filled")
+    time.sleep(3)
+
+    print("\n[STEP 6f] Selecting riders: YES...")
+    manulife_page.select_riders("Yes")
+    page.wait_for_timeout(1000)
+    print("✓ Riders: YES selected")
+    artifact_manager.capture_screenshot(page, "06_riders_yes")
+    print("\n→ PAUSING for 5 seconds - New rider sections should appear!")
+    time.sleep(5)
+
+    print("\n[STEP 6g] Completing remaining fields...")
+    manulife_page.select_quebec_policy("No")
+    manulife_page.select_additional_products("No")
+    manulife_page.select_medical_info_method("On this electronic application")
+    print("✓ All remaining fields completed")
+    artifact_manager.capture_screenshot(page, "07_all_fields_filled")
+    print("\n→ PAUSING for 5 seconds - See complete form")
+    time.sleep(5)
+
+    # Step 7 - Final click
+    print("\n[STEP 7] Scrolling to see 'Start a new application' button...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "08_button_in_view")
+    print("\n→ PAUSING for 3 seconds - See the button at bottom of form")
+    time.sleep(3)
+
+    print("\n[STEP 7b] About to click 'Start a new application' for VALIDATION...")
+    print("   This should either:")
+    print("   a) Navigate to next page (PolicyInformation)")
+    print("   b) Show red validation errors")
+    print("\n→ PAUSING for 5 seconds - Ready?")
+    time.sleep(5)
+
+    print("\n[STEP 7c] CLICKING 'Start a new application'...")
+    url_before = page.url
+    button.click()
+    page.wait_for_timeout(2000)
+    url_after = page.url
+    artifact_manager.capture_screenshot(page, "09_after_validation_click")
+
+    print(f"\n   URL before: {url_before}")
+    print(f"   URL after:  {url_after}")
+
+    if url_before != url_after:
+        print(f"\n   ✅ NAVIGATION OCCURRED: {url_after}")
+    else:
+        print(f"\n   ⚠️  No navigation - checking for errors...")
+        errors = manulife_page.check_for_validation_errors()
+        if errors:
+            print(f"\n   Validation Errors ({len(errors)}):")
+            for i, error in enumerate(errors, 1):
+                print(f"      {i}. {error}")
+
+    print("\n→ PAUSING for 10 seconds - LOOK AT THE SCREEN NOW!")
+    print("   What do you see?")
+    print("   - Red error messages? Where?")
+    print("   - New page loaded?")
+    print("   - Any UI changes?")
+    time.sleep(10)
+
+    print("\n[TEST COMPLETE]")
+    print(f"Artifacts saved to: {artifact_manager.session_dir}")
+    print("Screenshots:")
+    import os
+    for f in sorted(os.listdir(artifact_manager.session_dir)):
+        if f.endswith('.png'):
+            print(f"  - {f}")

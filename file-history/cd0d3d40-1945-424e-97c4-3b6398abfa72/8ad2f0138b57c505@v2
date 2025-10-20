@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: Manulife Par - Welcome Page Specification
+  version: 1.0.0
+  description: |
+    Page-level specification for Manulife Par welcome/entry page.
+
+    **URL**: https://www.insurance.manulife.ca/dda/welcomeInformation
+    **Purpose**: Product selection and form entry flow
+    **Status**: Fully documented (2025-10-17)
+
+components:
+  schemas:
+    WelcomePageFields:
+      type: object
+      description: Welcome page entry form fields
+      required:
+        - product
+      properties:
+        product:
+          type: string
+          description: Product selection from dropdown
+          enum:
+            - Family Term
+            - Lifecheque
+            - Manulife Guaranteed Issue Life
+            - Manulife Par
+            - Manulife UL
+          const: Manulife Par
+          x-selector: select, [role='combobox']
+          x-label: Product
+          x-wait-strategy: visible
+          x-timeout: 10000
+          x-required: true
+
+    WelcomePageActions:
+      type: object
+      description: Optional actions on welcome page
+      properties:
+        accept_cookies:
+          type: boolean
+          description: Accept cookie banner if present
+          default: true
+          x-selector: button:has-text("Accept all cookies")
+          x-optional: true
+          x-timeout: 2000
+        dismiss_banner:
+          type: boolean
+          description: Dismiss info banner if present
+          default: false
+          x-selector: button:has-text("Dismiss")
+          x-optional: true
+          x-timeout: 1000
+        start_application:
+          type: boolean
+          description: Click "Start a new application" button
+          default: true
+          x-selector: button:has-text("Start a new application")
+          x-wait-strategy: visible+enabled
+          x-timeout: 5000
+          x-required: true
+
+x-page-metadata:
+  url: https://www.insurance.manulife.ca/dda/welcomeInformation
+  name: Welcome Page
+  description: Entry point for PAR application form
+  requires_auth: true
+  storage_state: storage-state.json
+
+x-navigation:
+  entry_flow:
+    - step: 1
+      action: accept_cookies
+      optional: true
+      description: Accept cookie banner if present
+    - step: 2
+      action: dismiss_banner
+      optional: true
+      description: Dismiss blue info banner if present
+    - step: 3
+      action: select_product
+      required: true
+      description: Select "Manulife Par" from product dropdown
+      field: product
+    - step: 4
+      action: start_application
+      required: true
+      description: Click "Start a new application" button
+      wait_after: networkidle
+      expected_transition: First form page loads
+
+  expected_outcome:
+    url_pattern: /dda/(?!welcomeInformation).*
+    page_load: networkidle
+    no_errors: true
+    description: React SPA client-side routing to first form page
+
+x-selectors:
+  cookie_banner: button:has-text("Accept all cookies")
+  dismiss_banner: button:has-text("Dismiss")
+  product_dropdown: select, [role='combobox']
+  start_button: button:has-text("Start a new application")
+
+x-wait-strategies:
+  product_dropdown:
+    visible: 10000
+    enabled: 5000
+  start_button:
+    visible: 5000
+    enabled: 5000
+  after_start_click:
+    networkidle: 15000
+
+x-artifacts:
+  capture_points:
+    - name: welcome_page_load
+      screenshot: true
+      dom: true
+      aria: true
+    - name: product_selected
+      screenshot: true
+    - name: first_form_page
+      screenshot: true
+      dom: true
+      aria: true

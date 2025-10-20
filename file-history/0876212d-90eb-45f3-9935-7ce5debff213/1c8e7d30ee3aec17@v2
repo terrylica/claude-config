@@ -1,0 +1,267 @@
+# Stagehand Framework Evaluation
+
+**Version**: 1.0.0
+**Date**: 2025-10-16
+**Repository**: https://github.com/browserbase/stagehand-python
+**Decision**: Not compatible with project requirements
+
+---
+
+## Summary
+
+Stagehand is an AI-native browser automation framework that wraps Playwright with runtime LLM inference for dynamic selector generation. Evaluation determined incompatibility with project's spec-driven, deterministic automation requirements.
+
+---
+
+## Architecture
+
+**Stagehand Approach**:
+- Runtime LLM inference for every operation
+- Natural language instructions (`act("click button")`)
+- Self-healing selector generation
+- Non-deterministic (LLM variance across runs)
+
+**Project Requirements**:
+- Spec-driven from static YAML
+- Deterministic execution
+- No runtime LLM dependency
+- Fail-fast with comprehensive artifacts
+
+---
+
+## Incompatibility Analysis
+
+### 1. Runtime LLM Dependency
+
+**Finding**: Every `act()`, `observe()`, `extract()` call requires LLM API request
+
+**Evidence**:
+```python
+# stagehand/handlers/observe_handler.py:77
+observation_response = await observe_inference(
+    instruction=instruction,
+    llm_client=self.stagehand.llm,  # Required
+    ...
+)
+```
+
+**Configuration**:
+```python
+# stagehand/config.py:89
+model_name: Optional[str] = Field(
+    AvailableModel.GPT_4O,  # Default
+    alias="modelName"
+)
+```
+
+**Impact**:
+- API key required (OpenAI/Anthropic/Google)
+- Cost per run: ~$0.05-$0.15
+- Network dependency
+- Non-deterministic responses
+
+**Project Requirement**: Zero runtime LLM costs, deterministic execution
+
+**Verdict**: ❌ Incompatible
+
+---
+
+### 2. Self-Healing Behavior
+
+**Finding**: Self-healing enabled by default, core feature
+
+**Evidence**:
+```python
+# stagehand/config.py:92-94
+self_heal: Optional[bool] = Field(
+    True,  # Default enabled
+    alias="selfHeal"
+)
+```
+
+**Stagehand Documentation**: *"Self-healing code dynamically generating Playwright every time, making it resilient to DOM changes"*
+
+**Project Constraint**: "No failsafe and no fallover" - explicit prohibition of retry/fallback logic
+
+**Verdict**: ❌ Violates core constraint
+
+---
+
+### 3. Natural Language vs Specification-Driven
+
+**Stagehand API**:
+```python
+await page.act("click on the 'Quickstart' button")
+await page.observe("find the email input field")
+```
+
+**Project Specification Format**:
+```yaml
+# specifications/manulife-par-form.yaml
+properties:
+  first_name:
+    type: string
+    x-aria-label: "First name"
+    x-timeout: 15000
+    x-wait-strategy: visible
+```
+
+**Stagehand**: No OpenAPI specification support, natural language only
+
+**Verdict**: ❌ Architectural mismatch
+
+---
+
+### 4. Determinism
+
+**Stagehand**: LLM responses vary across runs (temperature, sampling, model updates)
+
+**Project Requirement**: Deterministic execution - same inputs produce same outputs
+
+**Rationale**: Fail-fast with artifacts enables analysis of specification errors vs runtime issues
+
+**Verdict**: ❌ Non-deterministic by design
+
+---
+
+### 5. Cost Model
+
+**Stagehand**:
+- Per-run costs (LLM API)
+- Example: 10-field form ≈ $0.05-$0.15/run
+- Annual (1 run/day): ~$18-$55
+
+**Project**:
+- One-time reconnaissance cost (manual analysis)
+- One-time specification creation
+- Zero per-run costs
+
+**Verdict**: ❌ Ongoing costs vs one-time investment
+
+---
+
+### 6. Environment-Controlled Submission
+
+**Project Feature**:
+```bash
+export SUBMIT=false  # Dry-run mode
+export SUBMIT=true   # Actually submit
+```
+
+**Stagehand**: No built-in dry-run mode, `act("submit")` executes immediately
+
+**Verdict**: ⚠️ Not supported, requires custom wrapper
+
+---
+
+### 7. Artifact Capture
+
+**Project Requirements**:
+```
+artifacts/YYYY-MM-DD_HH-MM-SS/
+├── 001_initial.png
+├── 002_filled.png
+├── aria_002.yaml
+├── session.har
+├── trace.zip
+├── telemetry.ndjson
+└── index.json
+```
+
+**Stagehand**: Basic logging, metrics (token usage, inference time), no comprehensive artifact capture
+
+**Verdict**: ⚠️ Requires significant custom implementation
+
+---
+
+## Compatibility Matrix
+
+| Requirement | Stagehand | Project | Compatible? |
+|-------------|-----------|---------|-------------|
+| Selector source | Runtime LLM | Static YAML specs | ❌ |
+| Fallback logic | Self-healing (core feature) | Prohibited | ❌ |
+| Determinism | Non-deterministic | Required | ❌ |
+| Cost per run | $0.05-$0.15 (LLM API) | $0 | ❌ |
+| Specification format | Natural language | OpenAPI 3.1.0 | ❌ |
+| Dry-run mode | Not supported | `SUBMIT=false` | ❌ |
+| Artifacts | Basic | 11 types | ⚠️ |
+
+---
+
+## Potentially Reusable Components
+
+### DOM Settling Logic
+
+**File**: `stagehand/page.py:505-713`
+
+**Implementation**:
+- Monitors CDP Network events
+- Tracks in-flight requests
+- Removes stalled document requests after 2s
+- Resolves after 500ms quiet window
+
+**Quality**: High-quality network idle detection
+
+**Extraction Effort**: Medium (~1-2 hours, requires decoupling from StagehandPage)
+
+**Alternative**: Playwright built-in `page.wait_for_load_state('networkidle')`
+
+**Decision**: Use Playwright built-in unless insufficient
+
+---
+
+## Use Case Mismatch
+
+### Stagehand Design Goals
+
+- Automate unfamiliar websites without upfront analysis
+- Adapt to DOM changes across runs
+- Natural language interface for non-programmers
+- Cross-site generalization
+
+### Project Goals
+
+- Automate specific known form (www.insurance.manulife.ca/dda)
+- Fail-fast on unexpected changes with artifacts
+- Explicit specifications for repeatability
+- Single-form optimization
+
+**Analysis**: Opposing design philosophies
+
+---
+
+## Decision
+
+**Not compatible** - Do not integrate Stagehand
+
+**Rationale**:
+1. Runtime LLM dependency violates zero-cost requirement
+2. Self-healing violates "no failover" constraint
+3. Natural language API incompatible with OpenAPI specifications
+4. Non-determinism incompatible with fail-fast philosophy
+5. Per-run costs vs one-time specification investment
+
+**Action**: Proceed with two-phase Playwright approach as specified in [`/specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml)
+
+---
+
+## References
+
+**Stagehand Repository**: https://github.com/browserbase/stagehand-python
+**Analysis Source**: Code probe in /tmp/stagehand-test (2025-10-16)
+**Key Files Reviewed**:
+- `stagehand/page.py` - StagehandPage implementation
+- `stagehand/config.py` - Configuration and defaults
+- `stagehand/handlers/observe_handler.py` - LLM inference integration
+- `examples/quickstart.py` - Usage patterns
+
+**Project Specifications**:
+- [`/specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml) - Universal automation patterns
+- [`/specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml) - Manulife-specific mappings
+- [`/CLAUDE.md`](/Users/terryli/own/insurance/CLAUDE.md) - Implementation strategy
+
+---
+
+**Evaluation Version**: 1.0.0
+**Evaluator**: AI coding agent (Claude Code)
+**License**: Stagehand is MIT-licensed (compatible for derivative works, not used)

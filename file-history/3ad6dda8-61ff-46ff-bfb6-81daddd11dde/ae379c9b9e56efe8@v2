@@ -1,0 +1,301 @@
+"""
+Reconnaissance Test: Iterative Validation Discovery
+
+Purpose: Click "Start a new application" repeatedly at each stage to see
+         what turns red and what's required to proceed.
+
+Strategy: Fill incrementally, click button, observe red highlights, fix, repeat
+"""
+
+import pytest
+from playwright.sync_api import Page
+from pathlib import Path
+from pages.manulife_par_page import ManulifeParPage
+
+
+@pytest.mark.reconnaissance
+def test_iterative_validation_discovery(page: Page, artifact_manager):
+    """
+    Click button frequently to discover required fields through red highlights
+    """
+
+    print("\n" + "=" * 70)
+    print("ITERATIVE VALIDATION DISCOVERY")
+    print("Strategy: Click button often to see what turns red")
+    print("=" * 70)
+
+    manulife_page = ManulifeParPage(page)
+
+    # Navigate and setup
+    print("\nSetup: Navigate and accept cookies...")
+    manulife_page.navigate_to(manulife_page.welcome_url)
+    artifact_manager.capture_screenshot(page, "001_welcome")
+
+    try:
+        page.get_by_role("button", name="Accept all cookies").click(timeout=2000)
+        page.wait_for_timeout(500)
+    except:
+        pass
+
+    # Select product
+    print("\nStep 1: Select product only...")
+    page.get_by_label("Product").select_option("1")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "002_product_selected")
+
+    # ITERATION 1: Click button immediately - what's required?
+    print("\n" + "=" * 70)
+    print("ITERATION 1: Click button with ONLY product selected")
+    print("=" * 70)
+
+    print("Clicking 'Start a new application'...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "003_iter1_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 2: Select upload option
+    print("\n" + "=" * 70)
+    print("ITERATION 2: Add Upload Later selection")
+    print("=" * 70)
+
+    print("Selecting Upload Later...")
+    page.get_by_role("radio", name="Upload Later").click()
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "004_upload_later_selected")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "005_iter2_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # Check if form revealed
+    print("\nChecking if form fields are visible...")
+    try:
+        first_name = page.get_by_label("First name")
+        if first_name.is_visible():
+            print("✓ Form fields ARE visible")
+        else:
+            print("✗ Form fields NOT visible")
+    except:
+        print("✗ Form fields NOT visible")
+
+    # ITERATION 3: Fill just name fields
+    print("\n" + "=" * 70)
+    print("ITERATION 3: Fill only name fields")
+    print("=" * 70)
+
+    print("Filling name fields...")
+    manulife_page.fill_insured_name("Alex", "Morgan")
+    artifact_manager.capture_screenshot(page, "006_name_filled")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "007_iter3_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 4: Add sex
+    print("\n" + "=" * 70)
+    print("ITERATION 4: Add sex selection")
+    print("=" * 70)
+
+    print("Selecting sex...")
+    manulife_page.select_sex("Female")
+    artifact_manager.capture_screenshot(page, "008_sex_selected")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "009_iter4_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 5: Add date of birth
+    print("\n" + "=" * 70)
+    print("ITERATION 5: Add date of birth")
+    print("=" * 70)
+
+    print("Filling date of birth...")
+    manulife_page.fill_date_of_birth("15", "June", "1990")
+    page.wait_for_timeout(500)
+    artifact_manager.capture_screenshot(page, "010_dob_filled")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "011_iter5_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 6: Add smoking status
+    print("\n" + "=" * 70)
+    print("ITERATION 6: Add smoking status")
+    print("=" * 70)
+
+    print("Selecting smoking status...")
+    manulife_page.select_smoking_status("Non-Smoker")
+    artifact_manager.capture_screenshot(page, "012_smoking_selected")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "013_iter6_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 7: Add coverage details
+    print("\n" + "=" * 70)
+    print("ITERATION 7: Add coverage details")
+    print("=" * 70)
+
+    print("Filling coverage details...")
+    manulife_page.fill_coverage_details(
+        coverage_type="Single",
+        premium_duration="Pay for 10 years",
+        amount="250000",
+        dividend_option="Paid-up insurance"
+    )
+    artifact_manager.capture_screenshot(page, "014_coverage_filled")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "015_iter7_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 8: Add riders selection
+    print("\n" + "=" * 70)
+    print("ITERATION 8: Add riders selection")
+    print("=" * 70)
+
+    print("Selecting riders...")
+    manulife_page.select_riders("No")
+    artifact_manager.capture_screenshot(page, "016_riders_selected")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "017_iter8_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 9: Add Quebec selection
+    print("\n" + "=" * 70)
+    print("ITERATION 9: Add Quebec selection")
+    print("=" * 70)
+
+    print("Selecting Quebec policy...")
+    manulife_page.select_quebec_policy("No")
+    artifact_manager.capture_screenshot(page, "018_quebec_selected")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "019_iter9_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 10: Add additional products selection
+    print("\n" + "=" * 70)
+    print("ITERATION 10: Add additional products selection")
+    print("=" * 70)
+
+    print("Selecting additional products...")
+    manulife_page.select_additional_products("No")
+    artifact_manager.capture_screenshot(page, "020_additional_products_selected")
+
+    print("Clicking 'Start a new application' again...")
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(1000)
+    artifact_manager.capture_screenshot(page, "021_iter10_after_click")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # ITERATION 11: Add medical info method
+    print("\n" + "=" * 70)
+    print("ITERATION 11: Add medical info method")
+    print("=" * 70)
+
+    print("Selecting medical info method...")
+    manulife_page.select_medical_info_method("On this electronic application")
+    artifact_manager.capture_screenshot(page, "022_medical_info_selected")
+
+    print("Clicking 'Start a new application' FINAL TIME...")
+    url_before = page.url
+    button = page.get_by_role("button", name="Start a new application")
+    button.scroll_into_view_if_needed()
+    button.click()
+    page.wait_for_timeout(2000)
+    url_after = page.url
+    artifact_manager.capture_screenshot(page, "023_iter11_final")
+
+    errors = manulife_page.check_for_validation_errors()
+    print(f"Validation errors: {len(errors)}")
+    for i, error in enumerate(errors, 1):
+        print(f"   {i}. {error}")
+
+    # Check navigation
+    print(f"\nURL before: {url_before}")
+    print(f"URL after:  {url_after}")
+
+    if url_before != url_after:
+        print(f"\n🎉 SUCCESS! Navigated to: {url_after}")
+        artifact_manager.capture_screenshot(page, "024_success_page")
+    else:
+        print("\n❌ Still blocked - illustration requirement persists")
+
+    print(f"\n✓ Iterative test complete - Artifacts: {artifact_manager.session_dir}")

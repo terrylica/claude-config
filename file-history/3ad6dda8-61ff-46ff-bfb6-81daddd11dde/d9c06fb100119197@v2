@@ -1,0 +1,167 @@
+# Manulife Par Form Structure Findings
+
+**Version**: 1.0.0
+**Date**: 2025-10-17
+**Status**: Initial reconnaissance complete
+**Artifacts**: [`artifacts/test_explore_complete_form_journey/`](/Users/terryli/own/insurance/artifacts/test_explore_complete_form_journey/)
+
+---
+
+## Executive Summary
+
+The Manulife Par application form is a **single-page React SPA**, not a traditional multi-page wizard. All primary coverage fields are presented on one view, with sections that can be filled in any order.
+
+## Critical Discoveries from Visual Examination
+
+### 1. Single-Page Form Architecture
+
+**Evidence**: `014_page_2_initial.png` vs `011_page_1_all_filled.png`
+
+After filling all required fields and clicking "Start a new application", the form **does not navigate** to a different page. Instead:
+- URL remains: `https://www.insurance.manulife.ca/dda/welcomeInformation`
+- Content remains identical (confirmed via ARIA tree diff)
+- Same button persists at bottom
+
+**Conclusion**: The form uses a single-page layout with validation, not a multi-step wizard.
+
+### 2. Selector Precision is Critical
+
+**Evidence**: `008_page_1_insured_filled.png` (incorrect product selection)
+
+Initial implementation used overly broad selector:
+```python
+# WRONG - matches ANY dropdown with "Select" text
+page.locator("select, [role='combobox']").filter(has_text="Select").first
+```
+
+**Result**: Accidentally selected the Product dropdown instead of Illustrated Smoking Status, changing product from "Manulife Par" to "Family Term", which:
+- Reset the entire form
+- Loaded completely different field set
+- Lost all entered data
+
+**Visual Indicator**: Product dropdown showing "Family Term", empty fields despite code filling them.
+
+**Fix**: Use explicit role-based selectors:
+```python
+# CORRECT - targets specific field by accessible name
+smoking_dropdown = page.get_by_role("combobox", name="Illustrated smoking status")
+```
+
+### 3. Form Sections
+
+**Evidence**: `011_page_1_all_filled.png`
+
+The form contains these sections (all on single page):
+
+#### A. Product Selection (Welcome Section)
+- Product dropdown: Manulife Par, Manulife UL, Family Term, Lifecheque, Manulife Guaranteed Issue Life
+- Vitality Plus checkbox
+- Illustration upload method: Upload Now / Upload Later (REQUIRED for Par)
+
+#### B. Coverage Selection
+
+**Insured Person 1**:
+- First name (textbox, REQUIRED)
+- Middle initial (textbox, optional)
+- Last name (textbox, REQUIRED)
+- Sex (radio: Male/Female, REQUIRED)
+- Date of birth (3 fields: Day dd, Month dropdown, Year yyyy, REQUIRED)
+- Insurance age (auto-calculated from DOB)
+- Illustrated smoking status (dropdown: Smoker/Non-Smoker, REQUIRED)
+- Button: "Add another primary insured to the policy"
+
+**Coverage**:
+- Coverage type (dropdown, REQUIRED) - Options: Single
+- Premium Duration (dropdown, REQUIRED) - Options: Pay for 10 years
+- Amount of insurance (textbox with $ prefix, REQUIRED) - Example: $100,000
+- Dividend option (dropdown, REQUIRED) - Options: Paid-up insurance
+
+**Riders**:
+- "Would you like to add riders or benefits to this policy?" (radio: Yes/No, REQUIRED)
+
+**Policy Questions** (all REQUIRED):
+1. "Will the policy be issued in Quebec?" (radio: Yes/No)
+2. "Are you applying for additional products with this application?" (radio: Yes/No)
+3. "Would all the people to be insured like to provide their medical information on this application or through a telephone interview?" (radio: On this electronic application / A tele-interview)
+
+### 4. Validation Behavior
+
+**Evidence**: Button enabled/disabled states
+
+- "Start a new application" button is **disabled** until all REQUIRED fields are filled
+- Visual indicators: Red borders and "Required" text for unfilled fields
+- No inline validation during typing - validation occurs on submit attempt
+
+### 5. Dynamic Fields
+
+**Product-Specific Fields**: Changing product (e.g., Manulife Par → Family Term) completely restructures available fields:
+- Par-specific: "Illustrated smoking status", "Premium Duration", "Dividend option"
+- Term-specific: Different coverage types and options
+
+This confirms that field sets are product-dependent and must be specified carefully in specifications.
+
+### 6. ARIA-First Selector Strategy
+
+**Successful patterns** from final working test:
+
+```python
+# Named role selectors (most reliable)
+page.get_by_role("textbox", name="First name")
+page.get_by_role("combobox", name="Month")
+page.get_by_role("radio", name="Male").first  # .first for duplicate names
+
+# Text-based navigation for unlabeled radiogroups
+page.locator("text=Will the policy be issued in Quebec?") \
+    .locator("..").get_by_role("radio", name="No")
+```
+
+**Patterns to avoid**:
+- Broad CSS selectors: `select, [role='combobox']`
+- Filter by generic text: `.filter(has_text="Select")`
+- Index-based selection without verification
+
+### 7. React SPA Characteristics
+
+**Evidence**: URL and navigation behavior
+
+- Same URL for all form states: `https://www.insurance.manulife.ca/dda/welcomeInformation`
+- Content updates client-side (no page reload)
+- Must verify navigation by checking content changes (headings, field presence), NOT URL
+- `wait_for_load_state("networkidle")` is necessary after interactions
+
+---
+
+## Recommendations for Phase 2
+
+1. **Specification Structure**: Model as single-page form with field groups, not multi-step wizard
+2. **Selector Strategy**: Always use `get_by_role()` with explicit accessible names
+3. **Validation Strategy**: Check for content presence (e.g., specific headings) rather than URL changes
+4. **Test Data**: Define product-specific field sets (Par vs Term vs UL)
+5. **Error Handling**: Capture screenshots before AND after each field group to detect accidental form resets
+
+---
+
+## Artifacts Reference
+
+| Screenshot | Description | Key Learnings |
+|------------|-------------|---------------|
+| `001_welcome_page.png` | Initial welcome page | Entry point before product selection |
+| `004_product_selected.png` | After Manulife Par selected | Shows Upload Later option required |
+| `005_page_1_initial.png` | First form view | All form sections visible at once |
+| `008_page_1_basic_filled.png` | Name/sex/DOB filled | Fields persisted correctly |
+| `008_page_1_insured_filled.png` (old) | **INCORRECT**: Family Term selected | Evidence of selector bug |
+| `009_page_1_insured_filled.png` | Insured section filled correctly | Product stayed as Manulife Par |
+| `010_page_1_coverage_filled.png` | Coverage details filled | Shows dropdown options selected |
+| `011_page_1_all_filled.png` | All required fields complete | Button enabled, ready for submission |
+| `014_page_2_initial.png` | After clicking "Start" | **No navigation** - identical to Page 1 |
+
+---
+
+## Next Steps
+
+1. ✓ Entry flow working (welcome → form)
+2. ✓ All Page 1 fields successfully filled with correct selectors
+3. ⚠️ Multi-page navigation assumption incorrect - revise strategy
+4. TODO: Identify actual submission workflow (Save draft? Direct submit? Additional pages?)
+5. TODO: Map complete field catalog from ARIA trees
+6. TODO: Update OpenAPI specifications with discovered structure

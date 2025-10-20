@@ -1,0 +1,528 @@
+# Insurance Project Memory
+
+**Architecture**: Link Farm + Hub-and-Spoke with Progressive Disclosure
+
+**Purpose**: Personal insurance automation and credential management
+
+**Documentation Hub**: [`docs/INDEX.md`](/Users/terryli/own/insurance/docs/INDEX.md)
+
+---
+
+## Quick Links
+
+**Architecture**: [`docs/architecture/`](/Users/terryli/own/insurance/docs/architecture/) - Page Object Model design and test strategy
+**Specifications**: [`specifications/`](/Users/terryli/own/insurance/specifications/) - OpenAPI 3.1.0 specs
+**Tests**: [`tests/`](/Users/terryli/own/insurance/tests/) - Pytest reconnaissance and automation
+**Page Objects**: [`pages/`](/Users/terryli/own/insurance/pages/) - Reusable page classes
+**Audit**: [`docs/AUDIT.md`](/Users/terryli/own/insurance/docs/AUDIT.md) - API verification (v1.1.0)
+**Decisions**: [`docs/decisions/`](/Users/terryli/own/insurance/docs/decisions/) - Technology evaluations
+
+---
+
+## Current Status (2025-10-17)
+
+**Phase**: Phase 1 - Discovery + POM Foundation (Hybrid Approach)
+**Version**: Architecture v2.0.0 (Structure validated against industry best practices)
+
+**Phase 1 Progress** ✅:
+- ✅ Explored first form screen with visual evidence
+- ✅ Created field catalog for coverage selection page
+- ✅ **CRITICAL DISCOVERY**: Fixed 4 custom React button components requiring JS dispatch
+- ✅ **Validated project structure** against Playwright best practices
+- ✅ Documented custom component patterns in spike report
+
+**Current**: Building POM Foundation (Hybrid Approach)
+- Creating `pages/` directory with Page Object Model classes
+- Implementing `BasePage` with common patterns (JS dispatch, navigation)
+- Building minimal `ManulifeParPage` to validate pattern
+- Continuing form exploration with reconnaissance tests
+- Full POM refactor after complete form discovery
+
+**Why Hybrid**: As newcomers to form automation, we're learning TWO things - form behavior AND automation patterns. Creating POM foundation now prevents bad habits while continuing exploration gives us full context for informed design decisions.
+
+**See**:
+- [`docs/analysis/project-structure-validation.md`](/Users/terryli/own/insurance/docs/analysis/project-structure-validation.md) - Industry best practices comparison
+- [`docs/analysis/custom-react-components-spike.md`](/Users/terryli/own/insurance/docs/analysis/custom-react-components-spike.md) - Custom component solution
+
+---
+
+## Credential Management
+
+**Doppler Project**: `insurance` (production config: `prd`)
+
+**Access Pattern**:
+```bash
+doppler run --project insurance --config prd -- <command>
+```
+
+**View Secrets**:
+```bash
+doppler secrets --project insurance --config prd
+```
+
+**Current Credentials**:
+- Manulife Par Account (`MANULIFE_PAR_USERNAME`, `MANULIFE_PAR_PASSWORD`)
+- Manulife Passkey (`MANULIFE_PAR_PASSKEY_*`) - For CDP WebAuthn automation
+
+**Migration Workflow**: [`docs/workflows/credential-sync.md`](/Users/terryli/own/insurance/docs/workflows/credential-sync.md)
+**Auth Implementation**: [`docs/workflows/authentication-implementation.md`](/Users/terryli/own/insurance/docs/workflows/authentication-implementation.md)
+
+---
+
+## Playwright Automation
+
+**Framework**: Playwright (Python) with `uv`
+**Authentication**: Passkey via `storage-state.json` (gitignored)
+**Artifacts**: Screenshots, DOM dumps, HAR, trace, telemetry (no video)
+
+**Key Features**:
+- **PII-safe**: Masked screenshots, log keys only
+- **ARIA-first selectors**: Stable, accessibility-driven targeting
+- **Comprehensive capture**: HAR, trace with snapshots, telemetry NDJSON
+- **Iframe-proof**: Automatic frame detection
+- **Offline replay**: `routeFromHAR` for analysis
+
+**Usage**:
+```bash
+# Reconnaissance (discovery only, no submission)
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v -m reconnaissance tests/reconnaissance/
+
+# Automation (fill form, controlled submission) - Phase 3
+export FORM_JSON='{"first_name":"Ada",...}'
+export SUBMIT=true  # Omit or set false for dry-run
+doppler run --project insurance --config prd -- \
+  uv run --active pytest -v tests/automation/fill_par_form.py
+```
+
+**Documentation**: [`docs/automation/manulife-par.md`](/Users/terryli/own/insurance/docs/automation/manulife-par.md)
+**Specification**: [`specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml)
+
+---
+
+## 📸 Visual Inspection Mandate
+
+**STATUS**: MANDATORY for all reconnaissance, spike, and exploratory work
+**ENFORCEMENT**: Pre-commit hook + CI/CD validation
+
+### Why This Matters
+
+**2025-10-17 Critical Discovery**: Reconnaissance on Manulife Par form found a selector bug ONLY through PNG examination:
+- Overly broad selector `page.locator("select, [role='combobox']").filter(has_text="Select").first`
+- Accidentally changed product from "Manulife Par" to "Family Term"
+- ARIA tree comparison showed **NO DIFFERENCE** (same structure, different content)
+- PNG screenshot clearly showed wrong product selected
+- **Impact**: Would have caused 4+ hours of debugging in implementation phase vs. 30 seconds to catch visually
+
+**Lesson**: Screenshots are NOT optional documentation — they are MANDATORY evidence that catches issues invisible in ARIA/DOM analysis.
+
+### Mandatory Workflow
+
+**FOR EVERY RECONNAISSANCE OR SPIKE:**
+
+#### 1. Capture Screenshots at Each Step
+
+```python
+# After EVERY significant action
+artifact_manager.capture_screenshot(page, "step_description")
+```
+
+**Minimum Requirements**:
+- [ ] Initial state (`001_initial.png`)
+- [ ] After each interaction (`002_*.png`, `003_*.png`, etc.)
+- [ ] Final state (`00N_final.png`)
+
+#### 2. Examine EACH Screenshot (Not Just Generate)
+
+**Agent Reflection Pattern** - STOP after each screenshot:
+
+```markdown
+## Visual Inspection: [step_name].png
+
+**What I See**:
+- [Describe visible elements, state, layout]
+
+**Expected vs. Actual**:
+- ✅ Product dropdown shows "Manulife Par" [as expected]
+- ✅ Form fields match expected structure [as expected]
+- ⚠️  Blue banner visible [unexpected but harmless]
+
+**PII Check**: ✅ No sensitive data visible / ✅ PII properly masked
+
+**Action**: Proceed / Investigate discrepancy / Document finding
+```
+
+#### 3. Document in Report
+
+**Link screenshots to findings**:
+
+```markdown
+## Step 2: Product Selection
+
+See: `artifacts/recon_20251017/002_product_selected.png`
+
+**Visual Verification**:
+- Product dropdown correctly shows "Manulife Par"
+- "Upload Later" radio selected as expected
+- No unexpected state changes observed
+```
+
+### Pre-Commit Checklist
+
+Before committing reconnaissance work:
+
+- [ ] **Minimum 3 screenshots captured**
+- [ ] **ALL screenshots visually examined** (describe what you saw)
+- [ ] **Any visual discrepancies investigated**
+- [ ] **PII masking verified** by visual inspection
+- [ ] **Findings reference screenshots** in report.md
+- [ ] **Manifest includes screenshot inventory** (index.json)
+
+**ENFORCEMENT**: Pre-commit hook validates screenshot count and report references.
+
+### Quick Reference: Good vs. Bad
+
+✅ **GOOD**:
+```markdown
+## Step: Fill Product Dropdown
+
+Screenshot: `002_product_selected.png`
+
+Visual Check:
+- ✅ Product shows "Manulife Par"
+- ✅ Upload Later selected
+- ✅ Form fields match Par structure
+
+Conclusion: Proceed to next step.
+```
+
+❌ **BAD**:
+```markdown
+## Artifacts
+- 001.png
+- 002.png
+- 003.png
+
+Next: Implement automation.
+```
+*Problem: No evidence screenshots were examined, no visual verification, no findings.*
+
+### Enforcement
+
+**Pre-Commit Hook**: Validates minimum 3 screenshots + report references
+**CI/CD**: Blocks PR if artifacts incomplete
+**See**: [`docs/analysis/visual-inspection-enforcement-proposal.md`](/Users/terryli/own/insurance/docs/analysis/visual-inspection-enforcement-proposal.md)
+
+---
+
+## Authentication
+
+**Method**: Automated passkey via CDP WebAuthn → `storage-state.json`
+**Module**: [`auth/passkey_authenticator.py`](/Users/terryli/own/insurance/auth/passkey_authenticator.py)
+**Implementation**: [`docs/workflows/authentication-implementation.md`](/Users/terryli/own/insurance/docs/workflows/authentication-implementation.md) (v1.0.0)
+
+**Usage**:
+```bash
+# CLI script
+doppler run --project insurance --config prd -- \
+  uv run --active python -m auth.passkey_authenticator
+
+# As module (in tests/code)
+from auth.passkey_authenticator import PasskeyAuthenticator
+authenticator = PasskeyAuthenticator(...)
+storage_state = authenticator.authenticate()
+```
+
+---
+
+## Implementation Strategy
+
+**Approach**: Systematic 3-phase strategy for complex multi-page forms
+
+**Phase 0 - Structural Foundation** ✅ (COMPLETED 2025-10-17)
+- Restructure project to follow Playwright best practices
+- Page Object Model architecture
+- Shared utilities and pytest fixtures
+- Modular page-level specifications
+
+**Phase 1 - Systematic Discovery** (NEXT)
+- Explore complete multi-page form structure
+- Capture artifacts at each page transition
+- Document page inventory and field catalog
+- Map state transitions and conditional logic
+
+**Phase 2 - Structured Documentation**
+- Design page object classes for each form page
+- Create comprehensive specifications
+- Define test data sets
+
+**Phase 3 - Modular Implementation**
+- Implement page objects using base class
+- Build form orchestrator
+- Test dry-run and live submission modes
+
+**Rationale**: Multi-page forms require systematic exploration before automation - discover structure → document specs → implement deterministically
+
+**Full Strategy**: [`docs/architecture/test-strategy.md`](/Users/terryli/own/insurance/docs/architecture/test-strategy.md) (v1.0.0)
+**Alternative Considered**: Stagehand - See [`docs/decisions/stagehand-evaluation.md`](/Users/terryli/own/insurance/docs/decisions/stagehand-evaluation.md)
+
+---
+
+## Page Object Model (POM) Best Practices
+
+**Status**: MANDATORY for all production automation (validated 2025-10-17)
+**Reference**: [Playwright Official POM Docs](https://playwright.dev/python/docs/pom)
+
+### Core Principles
+
+**Official Playwright Guidance:**
+> "If you use page objects, then all interactions should be performed using page objects. It is not recommended to mix raw Playwright calls (except expect assertions) with page object calls."
+
+### Pattern Structure
+
+```python
+# pages/base_page.py - Common patterns for all pages
+class BasePage:
+    def __init__(self, page):
+        self.page = page
+
+    def navigate_to(self, url):
+        """Navigate with proper waiting"""
+        self.page.goto(url, wait_until="networkidle")
+
+    def dispatch_click_event(self, selector):
+        """Handle custom React components requiring JS dispatch"""
+        self.page.evaluate(f"""
+            const btn = document.querySelector('{selector}');
+            btn.click();
+            btn.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        """)
+
+# pages/manulife_par_page.py - Form-specific logic
+class ManulifeParPage(BasePage):
+    def __init__(self, page):
+        super().__init__(page)
+
+    @property
+    def first_name_input(self):
+        return self.page.get_by_role("textbox", name="First name")
+
+    def fill_first_name(self, name):
+        """Fill first name field with ARIA-first selector"""
+        self.first_name_input.fill(name)
+
+    def select_riders(self, choice):
+        """Select riders using custom component pattern"""
+        button_id = "RIDER_STATUS_ID-0" if choice == "Yes" else "RIDER_STATUS_ID-1"
+        self.dispatch_click_event(f"#{button_id}")
+        self.page.wait_for_timeout(500)  # Allow React state update
+```
+
+### Usage in Tests
+
+```python
+# tests/e2e/test_fill_par_form.py
+def test_fill_basic_info(page):
+    # Use page object, not raw Playwright calls
+    manulife_page = ManulifeParPage(page)
+    manulife_page.navigate_to(WELCOME_URL)
+    manulife_page.fill_first_name("John")
+    manulife_page.select_riders("No")
+
+    # Assertions can use raw Playwright
+    assert page.get_by_text("John").is_visible()
+```
+
+### Custom React Components
+
+**Critical Discovery (2025-10-17)**: Manulife form uses custom `<button role="radio">` components that require JavaScript event dispatch.
+
+**Problem**: Standard Playwright `.click()` doesn't trigger React synthetic event handlers
+**Solution**: Use `element.click()` + `dispatchEvent(new Event('change'))`
+**Affected Fields**: 4 custom radio components (Riders, Quebec, Additional Products, Medical Info)
+
+**Documentation**: [`docs/analysis/custom-react-components-spike.md`](/Users/terryli/own/insurance/docs/analysis/custom-react-components-spike.md)
+
+### Benefits
+
+- **Maintainability**: Changes centralized in page objects, not scattered across tests
+- **Reusability**: Common patterns (JS dispatch) abstracted in `BasePage`
+- **Readability**: Tests read like user workflows, not technical operations
+- **Reliability**: Decoupled test logic from page implementation details
+
+### Directory Structure
+
+```
+pages/
+├── __init__.py
+├── base_page.py                  # Common patterns (navigation, JS dispatch)
+├── manulife_par_page.py          # Main form page object
+└── components/                   # Reusable components
+    ├── __init__.py
+    ├── custom_radio.py           # Abstract custom React button pattern
+    └── coverage_section.py       # Reusable form section
+```
+
+### Reconnaissance vs Production Tests
+
+**Reconnaissance Tests** (`tests/reconnaissance/`):
+- Purpose: Exploration and discovery
+- Pattern: Raw Playwright calls acceptable
+- Temporary: Not maintained long-term
+- Output: Spike reports and field catalogs
+
+**Production Tests** (`tests/e2e/`):
+- Purpose: Automated regression testing
+- Pattern: MUST use page objects exclusively
+- Permanent: Maintained as product evolves
+- Output: Pass/fail results and artifacts
+
+**Rule**: Reconnaissance findings must be refactored into page objects before production use.
+
+---
+
+## Dynamic Form Handling
+
+**Constraint**: No selector fallbacks or retry logic - explicit waits only
+
+**Playwright Wait Strategies**:
+- **Lazy loading**: `locator.wait_for(state='visible')` - wait for element appearance
+- **API-driven dropdowns**: `page.wait_for_response(url_pattern)` - wait for data fetch
+- **SPA transitions**: `page.wait_for_load_state('networkidle')` - wait for route change
+- **Conditional fields**: `x-depends-on` in specs defines prerequisite fields
+- **Multi-step forms**: `x-form-steps` array defines navigation sequence
+- **Iframe content**: `frame_locator().locator().wait_for()` - wait for nested elements
+
+**Timeout Configuration**: Per-field via `x-timeout` in specifications (default 15s)
+**Failure Mode**: Timeout exceptions with artifacts (screenshots, trace, HAR, telemetry)
+
+---
+
+## Environment Variables
+
+**FORM_JSON**: JSON payload with form field values
+```bash
+export FORM_JSON='{"first_name":"Ada","last_name":"Lovelace","email":"ada@example.com","advisor_id":"A123456","policy":"PAR-00112233"}'
+```
+
+**SUBMIT**: Controls form submission (default: `false`)
+```bash
+export SUBMIT=true   # Actually submit form
+export SUBMIT=false  # Dry-run: fill but don't submit
+# Omit variable = dry-run mode
+```
+
+**Doppler Secrets**: Injected via `doppler run --project insurance --config prd`
+- `MANULIFE_PAR_USERNAME` - Usage determined during reconnaissance
+- `MANULIFE_PAR_PASSWORD` - Usage determined during reconnaissance
+
+---
+
+## AI Agent Brief
+
+For any AI coding agent implementing form automation:
+
+> **Environment**: Python + Playwright, auth via `storage-state.json`, secrets via Doppler
+> **Input**: JSON payload in `FORM_JSON` env var
+> **Artifacts**: Screenshots (PII-masked), DOM dumps, HAR, trace, telemetry NDJSON
+> **No video recording**
+> **Implementation**: ARIA-first selectors, explicit waits (no retry logic), fail-fast on errors
+> **Submission**: Environment-controlled via `SUBMIT=true` flag
+> **Output**: `artifacts/YYYY-MM-DD_HH-MM-SS/` with `index.json` manifest
+
+**Full specification**: [`specifications/manulife-par-form.yaml`](/Users/terryli/own/insurance/specifications/manulife-par-form.yaml)
+
+---
+
+## Development Standards
+
+**Python**: `uv run --active python -m <module>`
+**Versioning**: SemVer 2.0.0
+**Paths**: Always absolute (`/Users/terryli/...`), space after extension
+**Security**: Doppler injection only, never commit secrets
+**Machine-Readable**: OpenAPI 3.1.0 specs prioritized over human docs
+
+---
+
+## Project Structure
+
+```
+~/own/insurance/
+├── CLAUDE.md                           # Project hub (this file)
+├── pytest.ini                          # Pytest configuration
+├── .gitignore                          # Excludes secrets, artifacts, auth state
+├── pages/                              # Page objects (OUTSIDE tests/)
+│   ├── __init__.py
+│   ├── base_page.py                   # Base class with common methods
+│   └── *_page.py                      # Page-specific classes (Phase 3)
+├── tests/                              # Pytest test directory
+│   ├── __init__.py
+│   ├── conftest.py                    # Shared fixtures (browser, page, artifacts)
+│   ├── reconnaissance/                # Exploratory discovery tests
+│   │   ├── explore_welcome_page.py   # Welcome page exploration
+│   │   └── explore_full_form.py      # Full form exploration (Phase 1)
+│   └── automation/                    # Form automation tests (Phase 3)
+├── utils/                              # Shared utilities
+│   ├── __init__.py
+│   └── artifact_manager.py            # Centralized artifact capture
+├── fixtures/                           # Test data (Phase 2)
+│   └── __init__.py
+├── auth/                               # Authentication
+│   ├── __init__.py
+│   ├── passkey_authenticator.py      # Reusable auth module
+│   └── archive/                       # Archived scripts from Phase 0
+│       ├── final_auth.py             # Original auth script
+│       ├── reconnaissance.py         # Original reconnaissance
+│       └── README.md                 # Migration guide
+├── docs/                               # Documentation
+│   ├── INDEX.md                       # Documentation hub
+│   ├── AUDIT.md                       # Playwright API verification
+│   ├── architecture/                  # Architecture docs (Phase 0)
+│   │   ├── page-object-design.md     # POM design patterns (v1.0.0)
+│   │   └── test-strategy.md          # 3-phase strategy (v1.0.0)
+│   ├── automation/                    # Automation workflows
+│   ├── analysis/                      # Technical analysis
+│   ├── decisions/                     # Technology evaluations
+│   ├── research/                      # Deep-dive reference docs
+│   └── workflows/                     # Operational workflows
+├── specifications/                     # Machine-readable specs
+│   ├── playwright-automation.yaml    # Universal automation spec
+│   ├── manulife-par-form.yaml       # Main form specification
+│   ├── slo.yaml                      # Service level objectives
+│   └── pages/                         # Page-level specs (modular)
+│       └── welcome-page.yaml         # Welcome page spec (v1.0.0)
+├── artifacts/                         # Generated artifacts (gitignored)
+│   └── .gitkeep
+└── storage-state.json                 # Playwright auth state (gitignored)
+```
+
+---
+
+## Playwright Feature Requirements
+
+Specifications define required Playwright capabilities:
+
+- [x] **Tracing**: screenshots + DOM snapshots via `BrowserContext.tracing.start()`
+- [x] **HAR recording**: Network capture via `Browser.new_context(record_har=...)`
+- [x] **PII-safe screenshots**: Mask sensitive fields via `Page.screenshot(mask=[...])`
+- [x] **ARIA-first selectors**: `getByLabel/Role/Placeholder` priority
+- [x] **ARIA snapshots**: Accessibility tree via `Locator.aria_snapshot()` (YAML)
+- [x] **Iframe handling**: `FrameLocator` for nested forms
+- [x] **Network telemetry**: `request/response/requestfailed` events logged
+- [x] **Console capture**: JS errors and logs via `console/pageerror` events
+- [x] **Offline replay**: `routeFromHAR` for analysis
+- [x] **File upload**: `setInputFiles` for PDF/documents
+- [x] **Wait strategies**: `wait_for_load_state`, `wait_for_response`, `locator.wait_for`
+- [x] **No video recording**: Performance/PII concerns
+
+**API Verification**: [`docs/AUDIT.md`](/Users/terryli/own/insurance/docs/AUDIT.md) v1.1.0 (11/11 APIs confirmed)
+**Specifications**: [`specifications/playwright-automation.yaml`](/Users/terryli/own/insurance/specifications/playwright-automation.yaml) `x-implementation-requirements`
+
+---
+
+## Global Resources
+
+**Parent Config**: [`~/.claude/CLAUDE.md`](/Users/terryli/.claude/CLAUDE.md)
+**Doppler Integration**: [`~/.claude/specifications/doppler-integration.yaml`](/Users/terryli/.claude/specifications/doppler-integration.yaml)
+**Toolchain**: [`~/.claude/docs/setup/toolchain.md`](/Users/terryli/.claude/docs/setup/toolchain.md)
+**Credential Management**: [`~/.claude/docs/setup/credential-management.md`](/Users/terryli/.claude/docs/setup/credential-management.md)

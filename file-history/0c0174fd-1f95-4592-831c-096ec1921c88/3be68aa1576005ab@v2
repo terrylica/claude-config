@@ -1,0 +1,458 @@
+# Page Object Model Design
+
+**Purpose**: Document Page Object Model (POM) architecture for Manulife PAR form automation
+**Status**: Active - Phase 0 structural foundation
+**Version**: 1.0.0
+**Date**: 2025-10-17
+
+---
+
+## Overview
+
+This project follows the **Page Object Model (POM)** design pattern, a widely-adopted best practice for UI automation that separates page structure from test logic.
+
+**Key Principle**: Each page or component is represented as a class that encapsulates its elements and behaviors.
+
+---
+
+## Architecture
+
+### Directory Structure
+
+```
+insurance/
+├── pages/                      # Page objects (OUTSIDE tests/)
+│   ├── __init__.py
+│   ├── base_page.py           # Base class with common methods
+│   └── *_page.py              # Page-specific classes (to be created)
+├── tests/                      # Pytest test directory
+│   ├── conftest.py            # Shared fixtures
+│   ├── reconnaissance/        # Exploratory tests
+│   └── automation/            # Automation tests (to be created)
+├── utils/                      # Shared utilities
+│   ├── __init__.py
+│   └── artifact_manager.py    # Centralized artifact capture
+└── specifications/pages/       # Page-level specifications
+    └── welcome-page.yaml      # Welcome page spec
+```
+
+**Why Page Objects Are Outside `tests/`:**
+
+From official Playwright documentation:
+> "Page object classes should be located in a package OUTSIDE of the tests directory."
+
+**Rationale**:
+- Page objects are **reusable components**, not tests
+- Tests import and use page objects
+- Clear separation of concerns: structure (pages/) vs. behavior (tests/)
+
+---
+
+## Base Page Pattern
+
+**File**: [`/pages/base_page.py`](/Users/terryli/own/insurance/pages/base_page.py)
+
+The `BasePage` class provides common methods inherited by all page objects.
+
+### Core Capabilities
+
+**Wait Strategies**:
+- `wait_for_visible()` - Element visibility
+- `wait_for_enabled()` - Element enabled state
+- `wait_for_network_idle()` - Network idle for SPAs
+- `wait_for_response()` - Specific API responses
+
+**ARIA-First Selectors** (accessibility-driven):
+- `get_by_label()` - Get element by accessible label
+- `get_by_role()` - Get element by ARIA role
+- `get_by_text()` - Get element by visible text
+
+**Form Interactions**:
+- `fill_react_field()` - React-compatible field filling (uses `.type()`)
+- `select_option()` - Dropdown selection with waits
+- `click_button()` - Button clicking with state validation
+
+**Optional Elements**:
+- `dismiss_if_present()` - Handle optional banners/modals
+
+**Assertions**:
+- `expect_visible()` - Assert element visibility
+- `expect_url_pattern()` - Assert URL matches pattern
+
+**Navigation**:
+- `navigate_to()` - Navigate with configurable wait strategies
+- `url` property - Get current URL
+
+**Iframe Support**:
+- `get_frame_locator()` - Handle nested iframe content
+
+### Example Usage
+
+```python
+from pages.base_page import BasePage
+
+class WelcomePage(BasePage):
+    def select_product(self, product_name: str):
+        """Select product from dropdown."""
+        dropdown = self.get_by_label("Product")
+        self.select_option(dropdown, product_name)
+
+    def click_start(self):
+        """Click 'Start a new application' button."""
+        button = self.get_by_text("Start a new application")
+        self.click_button(button)
+        self.wait_for_network_idle()
+```
+
+---
+
+## Artifact Manager
+
+**File**: [`/utils/artifact_manager.py`](/Users/terryli/own/insurance/utils/artifact_manager.py)
+
+Centralizes all artifact capture logic (DRY principle).
+
+### Capabilities
+
+**Screenshot Capture**:
+- PII-safe with configurable mask selectors
+- Full-page or viewport screenshots
+- Auto-incremented step numbering
+
+**DOM Capture**:
+- Full HTML snapshots
+- Size tracking
+
+**ARIA Tree Capture**:
+- Accessibility tree snapshots (YAML format)
+- Body-level or element-level capture
+
+**State Snapshots** (convenience method):
+- Screenshot + DOM + ARIA in single call
+- Grouped by step number
+
+**Telemetry Logging**:
+- NDJSON event log
+- Network events (request, response, requestfailed)
+- Console events (console, pageerror)
+
+**Manifest Generation**:
+- Session metadata
+- Artifact inventory
+- Completion timestamps
+
+### Example Usage
+
+```python
+from utils.artifact_manager import ArtifactManager
+
+# In conftest.py fixture
+artifact_manager = ArtifactManager(
+    base_dir=ARTIFACTS_DIR,
+    session_name="welcome_page_test",
+    pii_mask_selectors=["input[type='password']"]
+)
+
+# In test
+artifact_manager.capture_state_snapshot(page, "initial_load")
+artifact_manager.capture_screenshot(page, "product_selected")
+artifact_manager.save_manifest()
+```
+
+---
+
+## Pytest Fixtures
+
+**File**: [`/tests/conftest.py`](/Users/terryli/own/insurance/tests/conftest.py)
+
+Shared fixtures for browser, context, page, and artifact management.
+
+### Key Fixtures
+
+**`playwright`** (session-scoped):
+- Playwright instance for entire test session
+
+**`browser`** (session-scoped):
+- Chromium browser instance
+- Headless mode controlled via `HEADLESS` env var
+
+**`artifact_manager`**:
+- Configured ArtifactManager for current test
+- Auto-named based on test name
+- PII-safe selectors pre-configured
+
+**`context`**:
+- Browser context with HAR recording
+- Storage state loaded from `storage-state.json` if available
+- 1920x1080 viewport
+
+**`page`**:
+- Page with tracing enabled
+- Telemetry event listeners attached
+- Auto-saves trace and manifest on teardown
+
+### Example Usage
+
+```python
+@pytest.mark.reconnaissance
+def test_explore_page(page: Page, artifact_manager: ArtifactManager):
+    """Page and artifact_manager are auto-injected by pytest."""
+    page.goto("https://example.com")
+    artifact_manager.capture_screenshot(page, "loaded")
+```
+
+---
+
+## Page Object Lifecycle
+
+### 1. Specification Phase
+
+Create page-level specification in `specifications/pages/`.
+
+**Example**: `specifications/pages/welcome-page.yaml`
+
+Defines:
+- Fields and their selectors
+- Actions and expected outcomes
+- Wait strategies and timeouts
+- Navigation flow
+
+### 2. Page Object Implementation
+
+Create page class in `pages/`.
+
+**Example**: `pages/welcome_page.py`
+
+```python
+from pages.base_page import BasePage
+from playwright.sync_api import Page
+
+class WelcomePage(BasePage):
+    """Welcome page for PAR application."""
+
+    URL = "https://www.insurance.manulife.ca/dda/welcomeInformation"
+
+    def __init__(self, page: Page):
+        super().__init__(page)
+
+    def load(self):
+        """Navigate to welcome page."""
+        self.navigate_to(self.URL)
+
+    def accept_cookies(self):
+        """Accept cookie banner if present."""
+        cookie_btn = self.page.locator("button:has-text('Accept all cookies')")
+        self.dismiss_if_present(cookie_btn, description="cookie banner")
+
+    def select_product(self, product: str):
+        """Select product from dropdown."""
+        dropdown = self.get_by_label("Product")
+        self.select_option(dropdown, product)
+
+    def start_application(self):
+        """Click start button and wait for navigation."""
+        button = self.get_by_text("Start a new application")
+        self.click_button(button)
+        self.wait_for_network_idle()
+```
+
+### 3. Fixture Integration
+
+Add page fixture to `tests/conftest.py`.
+
+```python
+@pytest.fixture
+def welcome_page(page: Page) -> WelcomePage:
+    """Welcome page fixture."""
+    return WelcomePage(page)
+```
+
+### 4. Test Implementation
+
+Use page object in tests.
+
+```python
+@pytest.mark.reconnaissance
+def test_welcome_page_flow(welcome_page: WelcomePage, artifact_manager: ArtifactManager):
+    """Test welcome page entry flow."""
+    welcome_page.load()
+    artifact_manager.capture_state_snapshot(welcome_page.page, "loaded")
+
+    welcome_page.accept_cookies()
+    welcome_page.select_product("Manulife Par")
+    artifact_manager.capture_screenshot(welcome_page.page, "product_selected")
+
+    welcome_page.start_application()
+    artifact_manager.capture_state_snapshot(welcome_page.page, "first_form_page")
+```
+
+---
+
+## Benefits of This Architecture
+
+### Maintainability
+
+**Before** (Ad-hoc):
+```python
+# Duplicate selector logic in every test
+page.locator("button:has-text('Start a new application')").click()
+page.wait_for_load_state("networkidle")
+```
+
+**After** (POM):
+```python
+# Encapsulated, reusable, testable
+welcome_page.start_application()
+```
+
+### Scalability
+
+- Adding new pages: Create new class in `pages/`
+- Updating selectors: Change in one place (page object)
+- Shared behaviors: Inherit from `BasePage`
+
+### Testability
+
+- Page objects can be unit tested independently
+- Fixtures enable dependency injection
+- Mocking/stubbing possible for faster tests
+
+### Readability
+
+Tests read like business workflows:
+```python
+welcome_page.load()
+welcome_page.accept_cookies()
+welcome_page.select_product("Manulife Par")
+welcome_page.start_application()
+```
+
+---
+
+## Best Practices
+
+### 1. Single Responsibility
+
+Each page object represents **one page or component**.
+
+**Good**:
+- `WelcomePage` - Welcome page only
+- `FormPage1` - First form page only
+
+**Bad**:
+- `ManulifeFormAutomation` - Multiple pages mixed together
+
+### 2. Encapsulation
+
+Hide implementation details.
+
+**Good**:
+```python
+def start_application(self):
+    """Public method - what to do."""
+    button = self._get_start_button()  # Private - how to do it
+    self.click_button(button)
+```
+
+**Bad**:
+```python
+# Test knows too much about page internals
+button = page.locator("button#id-react-aria-16")
+button.click()
+```
+
+### 3. ARIA-First Selectors
+
+Use accessible selectors for stability.
+
+**Preferred**:
+```python
+self.get_by_label("Product")  # Accessible label
+self.get_by_role("button", name="Start")  # ARIA role
+```
+
+**Avoid**:
+```python
+page.locator("#id-react-aria-16")  # Generated ID (brittle)
+page.locator(".css-abc123")  # Generated class (brittle)
+```
+
+### 4. Explicit Waits
+
+No retry logic or heuristics - explicit waits only.
+
+**Good**:
+```python
+element.wait_for(state="visible", timeout=10000)
+element.click()
+```
+
+**Bad**:
+```python
+try:
+    element.click()
+except:
+    time.sleep(1)
+    element.click()  # Implicit retry (don't do this!)
+```
+
+### 5. Fail-Fast Philosophy
+
+On error:
+1. Capture artifacts (screenshot, DOM, ARIA, trace)
+2. Exit with clear error message
+3. No silent failures or fallbacks
+
+---
+
+## Next Steps (Phase 1+)
+
+### Phase 1: Form Discovery
+
+Create enhanced reconnaissance that:
+- Navigates through complete form
+- Captures each page structure
+- Documents all fields and validation rules
+
+**Output**: Page inventory and field catalog
+
+### Phase 2: Page Object Design
+
+Design page object classes for each form page:
+- `WelcomePage` ✓ (specified)
+- `FormPage1` (to be discovered)
+- `FormPage2` (to be discovered)
+- ... (to be discovered)
+
+### Phase 3: Implementation
+
+Implement page objects and orchestrator:
+- One class per page
+- Form orchestrator to coordinate multi-page flow
+- Dry-run and live submission modes
+
+---
+
+## References
+
+**Playwright Best Practices**:
+- [Playwright Page Object Model](https://playwright.dev/python/docs/pom)
+- [Best Practices](https://playwright.dev/python/docs/best-practices)
+
+**Research Sources** (from Phase 0):
+- Playwright Python project structure best practices
+- Medium tutorials on Page Object Model
+- Stack Overflow test automation patterns
+
+**Related Docs**:
+- [`/docs/architecture/test-strategy.md`](/Users/terryli/own/insurance/docs/architecture/test-strategy.md) - Test strategy and phases
+- [`/specifications/pages/welcome-page.yaml`](/Users/terryli/own/insurance/specifications/pages/welcome-page.yaml) - Example page spec
+- [`/pages/base_page.py`](/Users/terryli/own/insurance/pages/base_page.py) - Base page implementation
+
+---
+
+## Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2025-10-17 | Initial architecture documentation following Phase 0 restructure |

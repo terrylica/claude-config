@@ -1,0 +1,422 @@
+openapi: 3.1.0
+info:
+  title: Manulife Par Form Specification
+  version: 3.0.0
+  description: |
+    Complete field mappings for Manulife Participating insurance application form.
+
+    **Status**: Single-page React SPA structure documented (v3.0.0)
+    **Date**: 2025-10-17
+    **Source**: Visual inspection and ARIA tree analysis from `test_explore_complete_form_journey`
+
+    **Critical Discovery**: This is a single-page React SPA, NOT a multi-page wizard.
+    - URL remains constant: `https://www.insurance.manulife.ca/dda/welcomeInformation`
+    - Content updates client-side
+    - Navigation validation must check content presence, not URL changes
+
+components:
+  schemas:
+    ManulifeParConfig:
+      allOf:
+        - $ref: './playwright-automation.yaml#/components/schemas/AutomationConfig'
+        - type: object
+          properties:
+            start_url:
+              const: https://www.insurance.manulife.ca/dda/welcomeInformation
+            form_description:
+              const: Participating insurance application - single-page React SPA
+            success_criteria:
+              type: object
+              properties:
+                success_indicators:
+                  type: array
+                  items:
+                    enum:
+                      - submitted
+                      - success
+                      - confirmation
+                      - application created
+                success_url_pattern:
+                  const: /confirmation|success|applications|summary/i
+                policy_id_present:
+                  type: boolean
+                  default: true
+
+    ProductSelectionFields:
+      type: object
+      description: Product selection section
+      required:
+        - product
+      properties:
+        product:
+          type: string
+          description: Insurance product selection
+          enum:
+            - Family Term
+            - Lifecheque
+            - Manulife Guaranteed Issue Life
+            - Manulife Par
+            - Manulife UL
+          x-role: combobox
+          x-accessible-name: Product
+          x-required: true
+          x-default: Select
+          x-wait-strategy: visible
+          x-notes: Critical - avoid broad selectors that could match this dropdown
+
+        vitality_plus:
+          type: boolean
+          description: Optional Vitality Plus add-on
+          x-role: checkbox
+          x-accessible-name: with Vitality Plus™
+          x-required: false
+
+        illustration_upload:
+          type: string
+          description: When to upload illustration (required for Manulife Par)
+          enum:
+            - Upload Now
+            - Upload Later
+          x-role: radio
+          x-radiogroup-name: An Illustration is required for Manulife Par. When would you like to upload your illustration? tooltip
+          x-required: true
+          x-depends-on: product
+          x-depends-on-value: Manulife Par
+          x-notes: Must be selected before form navigation is enabled
+
+    InsuredPersonFields:
+      type: object
+      description: Primary insured person information
+      required:
+        - first_name
+        - last_name
+        - sex
+        - dob_day
+        - dob_month
+        - dob_year
+        - smoking_status
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+          x-role: textbox
+          x-accessible-name: First name
+          x-required: true
+
+        middle_initial:
+          type: string
+          maxLength: 1
+          x-role: textbox
+          x-accessible-name: Middle initial (optional)
+          x-required: false
+
+        last_name:
+          type: string
+          minLength: 1
+          x-role: textbox
+          x-accessible-name: Last name
+          x-required: true
+
+        sex:
+          type: string
+          enum:
+            - Male
+            - Female
+          x-role: radio
+          x-radiogroup-name: Sex
+          x-required: true
+          x-notes: Use .first for strict mode (multiple Male/Female radios may exist)
+
+        dob_day:
+          type: string
+          pattern: ^\d{1,2}$
+          minLength: 1
+          maxLength: 2
+          x-role: textbox
+          x-accessible-name: Day (dd)
+          x-group: Date of birth
+          x-required: true
+          x-format: dd (1-31)
+
+        dob_month:
+          type: string
+          enum:
+            - January
+            - February
+            - March
+            - April
+            - May
+            - June
+            - July
+            - August
+            - September
+            - October
+            - November
+            - December
+          x-role: combobox
+          x-accessible-name: Month
+          x-group: Date of birth
+          x-required: true
+          x-default: Select
+
+        dob_year:
+          type: string
+          pattern: ^\d{4}$
+          minLength: 4
+          maxLength: 4
+          x-role: textbox
+          x-accessible-name: Year (yyyy)
+          x-group: Date of birth
+          x-required: true
+          x-format: yyyy (4 digits)
+
+        insurance_age:
+          type: string
+          readOnly: true
+          x-role: textbox
+          x-accessible-name: Insurance ageLearn more
+          x-required: false
+          x-notes: Auto-calculated from date of birth - do not set manually
+
+        smoking_status:
+          type: string
+          enum:
+            - Smoker
+            - Non-Smoker
+          x-role: combobox
+          x-accessible-name: Illustrated smoking status
+          x-required: true
+          x-default: Select
+          x-notes: CRITICAL - Use exact accessible name to avoid product dropdown bug
+
+    CoverageFields:
+      type: object
+      description: Coverage details and options
+      required:
+        - coverage_type
+        - premium_duration
+        - amount_of_insurance
+        - dividend_option
+      properties:
+        coverage_type:
+          type: string
+          enum:
+            - Single
+          x-role: combobox
+          x-accessible-name: Coverage type
+          x-required: true
+          x-default: Select
+          x-notes: Options may vary by product
+
+        premium_duration:
+          type: string
+          enum:
+            - Pay for 10 years
+            - Pay for 20 years
+            - Pay to age 90
+            - Pay to age 100
+          x-role: combobox
+          x-accessible-name: Premium Duration
+          x-required: true
+          x-default: Select
+          x-depends-on: product
+          x-depends-on-value: Manulife Par
+          x-notes: Product-specific field
+
+        amount_of_insurance:
+          type: string
+          pattern: ^\d{1,3}(,\d{3})*$
+          x-role: textbox
+          x-accessible-name: Amount of insurance, dollar
+          x-required: true
+          x-format: Numeric with comma separators (e.g., 100,000)
+          x-notes: Dollar sign ($) is displayed as prefix
+
+        dividend_option:
+          type: string
+          enum:
+            - Paid-up insurance
+            - Cash
+          x-role: combobox
+          x-accessible-name: Dividend option
+          x-required: true
+          x-default: Select
+          x-depends-on: product
+          x-depends-on-value: Manulife Par
+          x-notes: Product-specific field
+
+    RidersFields:
+      type: object
+      description: Riders and benefits selection
+      required:
+        - add_riders
+      properties:
+        add_riders:
+          type: string
+          enum:
+            - "Yes"
+            - "No"
+          x-role: radio
+          x-radiogroup-name: Would you like to add riders or benefits to this policy?
+          x-required: true
+          x-validation: Shows "Required" alert when unfilled
+
+    PolicyQuestionsFields:
+      type: object
+      description: Policy-related questions
+      required:
+        - quebec_policy
+        - additional_products
+        - medical_info_method
+      properties:
+        quebec_policy:
+          type: string
+          enum:
+            - "Yes"
+            - "No"
+          x-role: radio
+          x-question-text: Will the policy be issued in Quebec?
+          x-required: true
+          x-selector-strategy: parent-traversal
+          x-notes: Unlabeled radiogroup - use question text + parent traversal
+
+        additional_products:
+          type: string
+          enum:
+            - "Yes"
+            - "No"
+          x-role: radio
+          x-radiogroup-name: Are you applying for additional products with this application?
+          x-required: true
+
+        medical_info_method:
+          type: string
+          enum:
+            - On this electronic application
+            - A tele-interview
+          x-role: radio
+          x-question-text: Would all the people to be insured like to provide their medical information on this application or through a telephone interview?
+          x-required: true
+          x-selector-strategy: parent-traversal
+          x-notes: Unlabeled radiogroup - use question text + parent traversal
+
+    ManulifeParFormPayload:
+      allOf:
+        - $ref: './playwright-automation.yaml#/components/schemas/FormPayload'
+        - type: object
+          description: Complete form payload for Manulife Par application
+          required:
+            - product_selection
+            - insured_person
+            - coverage
+            - riders
+            - policy_questions
+          properties:
+            product_selection:
+              $ref: '#/components/schemas/ProductSelectionFields'
+            insured_person:
+              $ref: '#/components/schemas/InsuredPersonFields'
+            coverage:
+              $ref: '#/components/schemas/CoverageFields'
+            riders:
+              $ref: '#/components/schemas/RidersFields'
+            policy_questions:
+              $ref: '#/components/schemas/PolicyQuestionsFields'
+
+x-selector-strategies:
+  preferred:
+    description: Use role-based selectors with explicit accessible names
+    example: |
+      page.get_by_role("textbox", name="First name")
+      page.get_by_role("combobox", name="Illustrated smoking status")
+      page.get_by_role("radio", name="Male").first
+
+  parent-traversal:
+    description: For unlabeled radiogroups, navigate via question text
+    example: |
+      page.locator("text=Will the policy be issued in Quebec?") \
+          .locator("..").get_by_role("radio", name="No")
+
+  avoid:
+    description: Patterns that caused bugs
+    examples:
+      - 'page.locator("select, [role=''combobox'']").filter(has_text="Select").first  # Too broad!'
+      - 'page.locator("css-selector")  # Not ARIA-first'
+
+x-critical-discoveries:
+  product-selection-bug:
+    date: 2025-10-17
+    description: Overly broad selector accidentally changed product from Manulife Par to Family Term
+    selector: 'page.locator("select, [role=''combobox'']").filter(has_text="Select").first'
+    impact: Form reset with completely different field structure
+    detection: PNG screenshot examination (invisible in ARIA tree comparison)
+    fix: Use explicit accessible names in get_by_role()
+    reference: docs/analysis/form-structure-findings.md
+
+  single-page-spa:
+    date: 2025-10-17
+    description: Form is single-page React SPA, not multi-page wizard
+    evidence: URL unchanged after clicking "Start a new application"
+    validation: Check content presence (headings), not URL changes
+    reference: docs/analysis/form-structure-findings.md
+
+  visual-inspection-mandate:
+    date: 2025-10-17
+    description: Visual inspection caught critical bugs invisible in accessibility trees
+    enforcement: Pre-commit hook validates screenshot presence
+    reference: CLAUDE.md section "📸 Visual Inspection Mandate"
+
+x-doppler-secrets:
+  project: insurance
+  config: prd
+  required:
+    - MANULIFE_PAR_USERNAME
+    - MANULIFE_PAR_PASSWORD
+  optional:
+    - MANULIFE_PAR_ADVISOR_ID
+
+x-authentication:
+  method: passkey
+  storage_state: storage-state.json
+  notes: |
+    Authentication pre-established via Playwright storage state.
+    Passkey flow captured during initial setup using CDP WebAuthn API.
+
+x-script-name: fill_par_form.py
+x-artifacts-base: artifacts/
+
+x-implementation-requirements:
+  - ARIA-first selectors (get_by_role, get_by_label)
+  - Visual inspection at each step
+  - Minimum 3 PNG screenshots per test
+  - report.md documenting findings
+  - index.json manifest
+  - Trace with screenshots and DOM snapshots
+  - HAR for network capture
+  - PII masking on screenshots
+
+x-test-data-example:
+  product_selection:
+    product: Manulife Par
+    vitality_plus: false
+    illustration_upload: Upload Later
+  insured_person:
+    first_name: John
+    middle_initial: ""
+    last_name: Doe
+    sex: Male
+    dob_day: "15"
+    dob_month: January
+    dob_year: "1980"
+    smoking_status: Non-Smoker
+  coverage:
+    coverage_type: Single
+    premium_duration: Pay for 10 years
+    amount_of_insurance: "100,000"
+    dividend_option: Paid-up insurance
+  riders:
+    add_riders: "No"
+  policy_questions:
+    quebec_policy: "No"
+    additional_products: "No"
+    medical_info_method: On this electronic application
