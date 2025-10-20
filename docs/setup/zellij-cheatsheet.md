@@ -106,18 +106,31 @@ export ZELLIJ_AUTO_ATTACH=true
 **Location:** `~/.config/zellij/config.kdl`
 
 ```kdl
-# Save session state every 1 second
+# BALANCED POWER-USER SETUP (recommended for feature engineering)
+
+# Scrollback buffer size (in memory) - 5x default for logs/debugging
+scroll_buffer_size 50000
+
+# Save session state every 60 seconds
 session_serialization true
 
-# Save visible viewport
+# Save visible viewport when serializing
 serialize_pane_viewport true
 
-# Save scrollback (0 = unlimited, or number for limit)
-scrollback_lines_to_serialize 5000
+# Crash recovery: save 10K lines to disk (doubled for better recovery)
+scrollback_lines_to_serialize 10000
+
+# Serialization frequency (60 seconds = balanced)
+serialization_interval 60
+
+# Edit scrollback with Helix
+scrollback_editor "hx"
 
 # Auto-exit shell when Zellij closes
 auto_exit_zellij_on_quit true
 ```
+
+**See**: [`docs/setup/zellij-configuration.md`](zellij-configuration.md) for alternative profiles (maximum protection, conservative, etc.)
 
 ---
 

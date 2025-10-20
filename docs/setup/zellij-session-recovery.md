@@ -24,21 +24,37 @@ fi
 ```
 
 ### 2. **~/.config/zellij/config.kdl** - Session Recovery
-Session state serialization is fully enabled:
+Session state serialization is fully enabled with balanced power-user settings:
 
 ```kdl
-// Saves session layout, panes, tabs every 1 second
+// Buffer: 50K lines per pane (5x default for logs/debugging)
+scroll_buffer_size 50000
+
+// Saves session layout, panes, tabs every 60 seconds
 session_serialization true
 
 // Also saves visible viewport when serializing
 serialize_pane_viewport true
 
-// Save last 5000 lines of scrollback (adjust as needed)
-scrollback_lines_to_serialize 5000
+// Save last 10000 lines of scrollback for crash recovery
+// (doubled from 5000 for better recovery capability)
+scrollback_lines_to_serialize 10000
+
+// Serialization frequency (60 seconds = balanced, explicit default)
+serialization_interval 60
+
+// Edit scrollback in Helix
+scrollback_editor "hx"
 
 // Prevents nested shells when reattaching
 auto_exit_zellij_on_quit true
 ```
+
+**Configuration Profile**: Balanced Power-User
+- **Memory**: ~8 MB per pane (suitable for feature engineering workloads)
+- **Disk**: ~100-250 KB per session
+- **Recovery**: Up to 10,000 lines of scrollback preserved
+- **Performance**: Negligible overhead, minimal disk I/O
 
 ## What Gets Saved
 
@@ -117,26 +133,41 @@ zellij --session dev            # Create "dev" session
 
 ## Scrollback Configuration
 
-### Current Setting: 5000 Lines
+### Current Settings
 
-Balances:
-- **Recovery capability**: Can restore up to 5000 lines of history
-- **Disk usage**: Reasonable size without excessive storage
+**Buffer Size**: 50,000 lines (in memory)
+- Immediately available when scrolling up with `Ctrl+S`
+- Lost when pane closes or session exits
+- Provides extensive history for logs/debugging
+
+**Serialization**: 10,000 lines (to disk)
+- Restored automatically after crashes/restarts
+- Survives system shutdown
+- Doubled from previous 5000 for better recovery
 
 ### Adjusting Scrollback
 
 Edit `~/.config/zellij/config.kdl`:
 
 ```kdl
-# Save all scrollback (maximum recovery, uses more disk)
-scrollback_lines_to_serialize 0
+# BUFFER SIZE (in-memory, immediate scrollback)
+scroll_buffer_size 10000        # Conservative (default)
+scroll_buffer_size 50000        # Current: Power-user (logs/debugging)
+scroll_buffer_size 100000       # Maximum (high memory use)
 
-# Save limited scrollback (minimal disk usage)
-scrollback_lines_to_serialize 1000
-
-# Current default (good balance)
-scrollback_lines_to_serialize 5000
+# SERIALIZATION (disk, crash recovery)
+scrollback_lines_to_serialize 0         # Unlimited (uses more disk)
+scrollback_lines_to_serialize 1000      # Minimal (minimal disk)
+scrollback_lines_to_serialize 10000     # Current: Balanced power-user
+scrollback_lines_to_serialize 50000     # Maximum recovery
 ```
+
+### Why Two Settings?
+
+- **`scroll_buffer_size`**: How much Zellij keeps in RAM - determines immediate scrollback when you press `Ctrl+S`
+- **`scrollback_lines_to_serialize`**: How much gets saved to disk for crash recovery - survives system restarts
+
+Both matter for comprehensive history tracking.
 
 ## Troubleshooting
 

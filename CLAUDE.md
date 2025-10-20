@@ -69,4 +69,5 @@
 ## Terminal & Shell Configuration
 **Terminals**: [Ghostty](docs/setup/terminal-setup.md) (emoji tabs, session restore) | [Kitty](docs/setup/terminal-setup.md) (splits)
 **Editor**: Helix (`hx`) - Modal editor with LSP, tree-sitter
+**Multiplexer**: [Zellij](docs/setup/README.md) - Crash recovery, balanced power-user setup (50K scrollback, 10K recovery)
 **Shell**: [Atuin](specifications/atuin-shell-history.yaml) (history sync) | [ccstatusline](https://github.com/sirmalloc/ccstatusline) (status bar) | [OSC52](docs/setup/ssh-clipboard-osc52.md) (SSH clipboard)
