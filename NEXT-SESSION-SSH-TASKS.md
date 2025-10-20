@@ -1,0 +1,138 @@
+# Next Session: SSH Setup Completion Checklist
+
+## Current Status
+- ✅ SSH key generated: `~/.ssh/id_ed25519_terrylica`
+- ✅ SSH config updated (uses terrylica key for `.claude` directory)
+- ✅ Git remote set to SSH: `git@github.com:terrylica/claude-config.git`
+- ⏳ **PENDING**: Add public key to GitHub
+
+---
+
+## Immediate Action Items
+
+### **1. ADD SSH PUBLIC KEY TO GITHUB** (Required First)
+
+**SSH Public Key:**
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHM47aEGeNE3EARBoAYPmXUfZaHLPrpoHn7l48FFzSTK terrylica@github.com
+```
+
+**Steps:**
+1. Go to: https://github.com/settings/keys
+2. Click "New SSH key"
+3. Title: `terrylica-claude-config`
+4. Type: Authentication Key
+5. Paste key above
+6. Click "Add SSH key"
+
+---
+
+### **2. TEST SSH CONNECTION**
+
+```bash
+cd ~/.claude
+rm -f ~/.ssh/control-*  # Clear any cached connections
+ssh -T git@github.com
+# Expected output: "Hi terrylica! You've successfully authenticated..."
+```
+
+---
+
+### **3. IMPLEMENT BETTER SSH CONFIG** (Optional but Recommended)
+
+**Replace ControlMaster settings in `~/.ssh/config`:**
+
+```bash
+# Current (problematic with directory switching):
+ControlMaster auto
+ControlPath ~/.ssh/control-%r@%h:%p
+ControlPersist 600
+
+# Change to (for github.com section):
+Host github.com
+    ControlMaster no  # ADD THIS LINE
+    # Remove ControlMaster lines above or set to 'no'
+```
+
+See: `docs/setup/SSH-CACHING-ISSUE-ANALYSIS.md` (Option 2) for full implementation
+
+---
+
+### **4. VERIFY GIT OPERATIONS WORK**
+
+```bash
+cd ~/.claude
+
+# Test fetch
+git fetch origin
+
+# Test status
+git status
+
+# Test push (once we have uncommitted changes)
+git push origin main
+```
+
+---
+
+## Problem Documentation
+
+**See**: `docs/setup/SSH-CACHING-ISSUE-ANALYSIS.md`
+
+Contains:
+- Complete problem analysis
+- Why caching broke directory-based key switching
+- 4 recommended solution options
+- Performance considerations
+- Debugging techniques
+
+---
+
+## Files Involved
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `~/.ssh/id_ed25519_terrylica` | SSH private key | ✅ Generated |
+| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key | ⏳ Add to GitHub |
+| `~/.ssh/config` | SSH configuration | ✅ Updated |
+| `./.git/config` | Git remote | ✅ SSH protocol |
+
+---
+
+## Quick Test Command
+
+After adding key to GitHub:
+
+```bash
+cd ~/.claude && \
+rm -f ~/.ssh/control-* && \
+ssh -T git@github.com && \
+git fetch origin && \
+echo "✓ SSH setup complete!"
+```
+
+---
+
+## Next Session Workflow
+
+1. Add SSH public key to GitHub (5 min)
+2. Test connections (2 min)
+3. Implement better SSH config (5-10 min)
+4. Verify all git operations work (5 min)
+5. Done! No more caching issues
+
+**Total Time**: ~20 minutes
+
+---
+
+## Resources
+
+- **SSH Analysis**: `docs/setup/SSH-CACHING-ISSUE-ANALYSIS.md`
+- **SSH Config Docs**: `docs/setup/SSH-CONFIG-SETUP.md`
+- **GitHub SSH Keys**: https://github.com/settings/keys
+
+---
+
+**Created**: October 20, 2025
+**Session**: Ongoing SSH Setup
+**Next Action**: Add public key to GitHub
