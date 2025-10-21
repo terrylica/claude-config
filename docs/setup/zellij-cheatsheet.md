@@ -174,7 +174,7 @@ zellij                # Show session manager
 
 ⚠️ **Before executing recovered commands** - Always review them in case they're stale
 ⚠️ **Session naming** - Use descriptive names like `work`, `dev`, `admin`
-⚠️ **URLs require Shift+Click** - Use `Shift+Click` to open links (standard multiplexer behavior)
+⚠️ **URLs require modifier+Click** - Use `Shift+Cmd+Click` on macOS or `Shift+Click` on Linux to open links
 
 ---
 
@@ -187,7 +187,7 @@ zellij                # Show session manager
 | Duplicate sessions created | Ensure `ZELLIJ_AUTO_ATTACH=true` is set in .zshrc |
 | Too much disk usage | Lower `scrollback_lines_to_serialize` value in config.kdl |
 | Autostart not working in terminal | Verify you're using Ghostty (`echo $GHOSTTY_RESOURCES_DIR`) |
-| Links not clickable in Ghostty | Use `Shift+Click` on URLs (standard workaround for multiplexers) |
+| Links not clickable in Ghostty | `Shift+Cmd+Click` (macOS) or `Shift+Click` (Linux) |
 
 ---
 
