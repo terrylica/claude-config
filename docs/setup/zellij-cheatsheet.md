@@ -170,9 +170,11 @@ zellij                # Show session manager
 ✓ **Safety banner on resume** - Destructive commands require confirmation
 ✓ **Ghostty-only autostart** - Zellij only auto-starts inside Ghostty
 ✓ **Scroll up for history** - Previous command output is preserved in scrollback
+✓ **Mouse support enabled** - Full scrolling, tab clicking, and pane selection via mouse
 
 ⚠️ **Before executing recovered commands** - Always review them in case they're stale
 ⚠️ **Session naming** - Use descriptive names like `work`, `dev`, `admin`
+⚠️ **URLs require Shift+Click** - Use `Shift+Click` to open links (standard multiplexer behavior)
 
 ---
 
@@ -185,6 +187,7 @@ zellij                # Show session manager
 | Duplicate sessions created | Ensure `ZELLIJ_AUTO_ATTACH=true` is set in .zshrc |
 | Too much disk usage | Lower `scrollback_lines_to_serialize` value in config.kdl |
 | Autostart not working in terminal | Verify you're using Ghostty (`echo $GHOSTTY_RESOURCES_DIR`) |
+| Links not clickable in Ghostty | Use `Shift+Click` on URLs (standard workaround for multiplexers) |
 
 ---
 
