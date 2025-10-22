@@ -42,9 +42,6 @@
 **Containers**: Colima + Docker CLI (Homebrew)
 **Full Catalog**: [`docs/setup/toolchain.md`](docs/setup/toolchain.md) - Complete tool preferences and package standards
 
-### Python API Documentation
-**Standard**: Pydantic v2 + Rich docstrings pattern - [`specifications/pydantic-api-documentation-standard.yaml`](specifications/pydantic-api-documentation-standard.yaml)
-
 ## Documentation Standards
 
 ### LLM-Optimized Documentation Architecture
@@ -55,16 +52,19 @@
 - **Markdown Files**: Global `~/.claude/` allowed, project `.claude/` prohibited (slash command conflicts)
 - **README Policy**: Use `docs/README.md`, not root `README.md` - alternative naming for non-global docs
 
-## Claude Code User Custom Extensions
-**Reference**: [`docs/INDEX.md`](docs/INDEX.md) - Complete catalog of tools, specifications, and integrations
-**Quick**: [CNS](specifications/cns-conversation-notification-system.yaml) | [GFM Check](specifications/gfm-link-checker.yaml) | [Pushover](specifications/pushover-integration.yaml) | [PyPI](specifications/pypi-publishing-methods.yaml) | [git-cliff](tools/git-cliff/README.md) | [noti](tools/notifications/DEMO.md)
+## Global Skills
 
-## Credential Management & Security
-**Method**: Doppler CLI for zero-config credential injection
-**Projects**: `claude-config` (Pushover, PyPI, Atuin, Notion, EonLabs Admin) | `aws-credentials` (EonLabs account)
-**Docs**: [`specifications/doppler-integration.yaml`](specifications/doppler-integration.yaml) | [`docs/setup/credential-management.md`](docs/setup/credential-management.md)
-**Usage**: `doppler run --project <project> --config <config> -- <command>`
-**Notes**: `doppler secrets notes set <SECRET_NAME> "<note>" --project <project>` - Add documentation to secrets via CLI
+**Location**: `~/.claude/skills/` - Hierarchical structure, skills activate automatically
+
+**Available Skills**:
+- **python/api-documentation** - Pydantic v2 API documentation patterns
+- **credentials/doppler-workflows** - PyPI publishing and AWS credential management via Doppler
+- **latex/setup** - MacTeX installation and environment configuration
+- **latex/tables** - tabularray package for modern table creation
+- **latex/build** - latexmk build automation and live preview
+- **troubleshooting/session-recovery** - Claude Code session troubleshooting
+
+**Note**: Skills load contextually when relevant. Focused, single-capability design with progressive disclosure.
 
 ## Terminal & Shell Configuration
 **Terminals**: [Ghostty](docs/setup/terminal-setup.md) (emoji tabs, session restore) | [Kitty](docs/setup/terminal-setup.md) (splits)
