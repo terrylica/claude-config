@@ -18,6 +18,7 @@ auto_exit_zellij_on_quit true               # Prevent nested shells
 ```
 
 **Result**:
+
 - Per-pane memory: ~8 MB (vs 1.6 MB default)
 - Per-session disk: 100-250 KB
 - Crash recovery: Last 10,000 lines + viewport
@@ -30,6 +31,7 @@ auto_exit_zellij_on_quit true               # Prevent nested shells
 ### Scroll Buffer vs. Serialization
 
 **`scroll_buffer_size` (50000)**
+
 - Lines stored in **memory** per pane
 - Available immediately when scrolling up (`Ctrl+S`)
 - Lost when pane closes or session exits
@@ -37,6 +39,7 @@ auto_exit_zellij_on_quit true               # Prevent nested shells
 - **Your use case**: Large training logs, debug output, build logs
 
 **`scrollback_lines_to_serialize` (10000)**
+
 - Lines saved to **disk** when session closes/crashes
 - Restored automatically on `zellij attach`
 - Survives system restarts and crashes
@@ -44,6 +47,7 @@ auto_exit_zellij_on_quit true               # Prevent nested shells
 - **Your use case**: Context preservation after unexpected termination
 
 **Key distinction:**
+
 - Want to scroll back immediately? Use larger `scroll_buffer_size`
 - Want to recover history after crash? Use larger `scrollback_lines_to_serialize`
 
@@ -62,6 +66,7 @@ scrollback_editor "hx"
 ```
 
 **Best for**: Feature engineering, ML workflows, debugging
+
 - Extensive immediate history (50K lines in memory)
 - Good crash recovery (10K lines to disk every 60s)
 - ~8 MB per pane memory
@@ -80,6 +85,7 @@ scrollback_editor "hx"
 ```
 
 **Best for**: Mission-critical work, long-running processes, production debugging
+
 - Extreme history: 100K lines in memory
 - Near-complete recovery (no limits)
 - Frequent saves minimize data loss (<10s)
@@ -100,6 +106,7 @@ scrollback_editor "hx"
 ```
 
 **Best for**: Low-memory systems, many concurrent panes, minimal overhead
+
 - Moderate immediate history (10K lines)
 - Minimal recovery capability
 - Layout still recovers, but no scrollback history
@@ -118,6 +125,7 @@ scrollback_lines_to_serialize 0
 ```
 
 **Best for**: Temporary sessions, ephemeral work
+
 - Pure in-memory multiplexer
 - No disk overhead
 - Nothing survives session close
@@ -127,12 +135,12 @@ scrollback_lines_to_serialize 0
 
 ## Memory vs. Disk Tradeoffs
 
-| Setting | Memory/Pane | Disk/Session | Recovery | Performance |
-|---------|------------|--------------|----------|-------------|
-| **Default (10K)** | 1.6 MB | 20-50 KB | Layout only | Fast |
-| **Balanced (50K/10K)** | 8 MB | 100-250 KB | Full context | Good |
-| **Maximum (100K/0)** | 16 MB | 500KB-5MB | Complete | Sluggish |
-| **Conservative** | 1.6 MB | <20 KB | Minimal | Fast |
+| Setting                | Memory/Pane | Disk/Session | Recovery     | Performance |
+| ---------------------- | ----------- | ------------ | ------------ | ----------- |
+| **Default (10K)**      | 1.6 MB      | 20-50 KB     | Layout only  | Fast        |
+| **Balanced (50K/10K)** | 8 MB        | 100-250 KB   | Full context | Good        |
+| **Maximum (100K/0)**   | 16 MB       | 500KB-5MB    | Complete     | Sluggish    |
+| **Conservative**       | 1.6 MB      | <20 KB       | Minimal      | Fast        |
 
 ---
 
@@ -142,14 +150,15 @@ scrollback_lines_to_serialize 0
 
 **Per-pane estimates** (80 characters average line width):
 
-| Lines | Memory | Comparison |
-|-------|--------|------------|
-| 10,000 | 1.6 MB | Default Zellij |
-| 50,000 | 8 MB | Your current |
-| 100,000 | 16 MB | Maximum |
-| 1,000,000 | 160 MB | Warning zone |
+| Lines     | Memory | Comparison     |
+| --------- | ------ | -------------- |
+| 10,000    | 1.6 MB | Default Zellij |
+| 50,000    | 8 MB   | Your current   |
+| 100,000   | 16 MB  | Maximum        |
+| 1,000,000 | 160 MB | Warning zone   |
 
 **Scaling with multiple panes:**
+
 - 5 panes × 50K lines = 40 MB session memory
 - 10 panes × 50K lines = 80 MB session memory
 - Monitor with `top` or `ps aux | grep zellij`
@@ -157,11 +166,13 @@ scrollback_lines_to_serialize 0
 ### Disk I/O
 
 **Serialization writes per minute:**
+
 - `serialization_interval 60` = 1 write/minute (minimal)
 - `serialization_interval 10` = 6 writes/minute (noticeable on HDD)
 - `serialization_interval 1` = 60 writes/minute (audible disk noise)
 
 **Typical disk usage growth:**
+
 ```
 Day 1:   ~100 KB per active session
 Week 1:  ~1-2 MB (old snapshots auto-cleaned)
@@ -175,12 +186,14 @@ Month 1: ~2-5 MB (steady state, Zellij cleans old data)
 ⚠️ **Known Limitation**: Lines with 2000+ characters cause **exponential memory usage**
 
 **Example**:
+
 ```
 10,000 lines × 80 chars  = 1.6 MB  ✓
 10,000 lines × 2000 chars = 1.2 GB ✗ (crashes!)
 ```
 
 **Prevention**:
+
 ```bash
 # Bad (huge output crashes scrollback):
 echo "$(cat huge-file)" | sed 's/pattern/replacement/g'
@@ -197,12 +210,14 @@ tail -f output.log
 ### Debugging with Scrollback
 
 **Access scrollback editor:**
+
 ```
 Ctrl+S              # Enter scroll mode
 e                   # Open in Helix
 ```
 
 **Search in Helix:**
+
 ```
 /pattern            # Search
 n                   # Next match
@@ -210,6 +225,7 @@ N                   # Previous match
 ```
 
 **Export scrollback to file:**
+
 ```
 Ctrl+S
 e
@@ -242,28 +258,29 @@ sudo iotop | grep -i zellij
 
 ### Zellij vs. tmux
 
-| Feature | Zellij | tmux |
-|---------|--------|------|
-| Default scrollback | 10,000 | 2,000 |
-| Memory efficiency | Lower (Rust overhead) | Higher |
-| Session persistence | Built-in | Plugin (tmux-resurrect) |
-| Automatic recovery | Yes (if configured) | Manual |
-| Viewport serialization | Configurable | N/A |
-| Empty session memory | 80 MB | 6 MB |
+| Feature                | Zellij                | tmux                    |
+| ---------------------- | --------------------- | ----------------------- |
+| Default scrollback     | 10,000                | 2,000                   |
+| Memory efficiency      | Lower (Rust overhead) | Higher                  |
+| Session persistence    | Built-in              | Plugin (tmux-resurrect) |
+| Automatic recovery     | Yes (if configured)   | Manual                  |
+| Viewport serialization | Configurable          | N/A                     |
+| Empty session memory   | 80 MB                 | 6 MB                    |
 
 **For your use case (feature engineering):**
+
 - Zellij superior due to built-in crash recovery
 - Memory overhead acceptable for development work
 - Serialization more reliable than tmux plugins
 
 ### Zellij vs. screen
 
-| Feature | Zellij | screen |
-|---------|--------|--------|
-| Default scrollback | 10,000 | 100-1,024 |
-| Recommended | 50,000 | 10,000-200,000 |
-| Session persistence | Modern | Legacy |
-| Memory usage | Moderate | Light |
+| Feature             | Zellij   | screen         |
+| ------------------- | -------- | -------------- |
+| Default scrollback  | 10,000   | 100-1,024      |
+| Recommended         | 50,000   | 10,000-200,000 |
+| Session persistence | Modern   | Legacy         |
+| Memory usage        | Moderate | Light          |
 
 ---
 
@@ -272,6 +289,7 @@ sudo iotop | grep -i zellij
 ### Session Serialization Format
 
 Sessions are saved as human-readable KDL files:
+
 ```bash
 ~/.cache/zellij/
 ├── session-name-uuid1/
@@ -304,6 +322,7 @@ zellij --layout ~/my-session.kdl --session restored
 **Symptoms**: Zellij using >500 MB RAM
 
 **Solutions**:
+
 ```kdl
 # Reduce scrollback size
 scroll_buffer_size 25000        # Instead of 50000
@@ -320,6 +339,7 @@ scrollback_lines_to_serialize 5000  # Instead of 10000
 **Symptoms**: `~/.cache/zellij/ > 500 MB`
 
 **Solutions**:
+
 ```bash
 # Reduce serialization
 scrollback_lines_to_serialize 1000
@@ -336,6 +356,7 @@ zellij delete-all-sessions
 **Symptoms**: Terminal lags when resizing with large buffers
 
 **Solution**:
+
 ```kdl
 # Reduce scrollback (fewer lines to recalculate on resize)
 scroll_buffer_size 25000
@@ -372,11 +393,13 @@ zellij ls --exited | head -5
 ## References
 
 ### Official Documentation
+
 - [Zellij Configuration Options](https://zellij.dev/documentation/options.html)
 - [Session Resurrection](https://zellij.dev/documentation/session-resurrection.html)
 - [Scrollback Management](https://zellij.dev/documentation/)
 
 ### Your Workspace
+
 - [Zellij Cheatsheet](zellij-cheatsheet.md) - Printable command reference
 - [Session Recovery](zellij-session-recovery.md) - Auto-recovery procedures
 - [Terminal Setup](terminal-setup.md) - Ghostty + Zellij integration

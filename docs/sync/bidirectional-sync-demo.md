@@ -3,14 +3,16 @@
 ## ✅ Current Status: Claude Code Installed on GPU Workstation
 
 ### Installation Complete:
+
 - **Node.js**: v22.17.0 ✅
-- **Claude Code**: v1.0.64 ✅ 
+- **Claude Code**: v1.0.64 ✅
 - **PATH**: Configured for user access ✅
 - **Workspace**: ~/eon/nt/ ready ✅
 
 ## 🔄 Bidirectional Sync Flow
 
 ### Scenario 1: Develop on GPU Workstation → Sync to macOS
+
 ```bash
 # SSH to GPU workstation
 ssh zerotier-remote
@@ -26,7 +28,8 @@ claude
 # → All changes automatically sync back to macOS in ~10 seconds
 ```
 
-### Scenario 2: Develop on macOS → Sync to GPU Workstation  
+### Scenario 2: Develop on macOS → Sync to GPU Workstation
+
 ```bash
 # Work locally on macOS
 cd ~/eon/nt/
@@ -42,13 +45,16 @@ cd ~/eon/nt/
 ## 🎯 Optimal Workflow for SAGE Development
 
 ### Primary Development: GPU Workstation (Recommended)
+
 **Why GPU workstation as primary?**
+
 - ✅ **TiRex model access** - Direct GPU for inference
 - ✅ **No network latency** - All computation local
 - ✅ **Full Claude Code features** - AI assistance where compute happens
 - ✅ **Real-time GPU monitoring** - nvidia-smi, htop, etc.
 
 ### Backup/Reference: macOS
+
 - ✅ **Automatic backup** of all work via Syncthing
 - ✅ **Documentation viewing** - Rich documentation on local machine
 - ✅ **Offline access** - Continue work without network
@@ -57,25 +63,28 @@ cd ~/eon/nt/
 ## 🚀 Complete Setup Commands
 
 ### 1. Start Syncthing (if not running)
+
 ```bash
 # On macOS (should already be running)
 brew services status syncthing
 
-# On GPU workstation  
+# On GPU workstation
 ssh zerotier-remote "~/bin/syncthing --no-browser --no-restart > ~/syncthing.log 2>&1 &"
 ```
 
 ### 2. Configure Shared Folder (via Web Interface)
+
 1. Open http://localhost:8384
 2. Add folder: `/Users/terryli/eon/nt/` → Share with GPU workstation
 3. Accept on remote side
 
 ### 3. Start Development Session
+
 ```bash
 # Connect to GPU workstation
 ssh zerotier-remote
 
-# Navigate to synced workspace  
+# Navigate to synced workspace
 cd ~/eon/nt/
 
 # Start Claude Code
@@ -90,6 +99,7 @@ claude
 ### Test the bidirectional sync:
 
 #### From macOS → GPU Workstation:
+
 ```bash
 # On macOS
 echo "Test from macOS $(date)" > ~/eon/nt/sync-test-mac.txt
@@ -99,17 +109,19 @@ ssh zerotier-remote "cat ~/eon/nt/sync-test-mac.txt"
 ```
 
 #### From GPU Workstation → macOS:
+
 ```bash
 # On GPU workstation
 ssh zerotier-remote 'echo "Test from GPU $(date)" > ~/eon/nt/sync-test-gpu.txt'
 
-# Check on macOS (~10 seconds later)  
+# Check on macOS (~10 seconds later)
 cat ~/eon/nt/sync-test-gpu.txt
 ```
 
 ## 🎯 SAGE Development Workflow
 
 ### Phase 0 Execution (GPU Workstation):
+
 ```bash
 ssh zerotier-remote
 cd ~/eon/nt/
@@ -120,12 +132,13 @@ claude
 
 # Now you can:
 # 1. Access all SAGE models (AlphaForge, catch22, tsfresh, TiRex)
-# 2. Use RTX 4090 for TiRex inference  
+# 2. Use RTX 4090 for TiRex inference
 # 3. Get AI assistance from Claude Code
 # 4. All changes sync back to macOS automatically
 ```
 
 ### Development Commands:
+
 ```bash
 # Check GPU status
 nvidia-smi
@@ -145,6 +158,7 @@ print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"
 ## 🔧 Troubleshooting
 
 ### If Claude Code doesn't start:
+
 ```bash
 # Check PATH
 echo $PATH | grep npm-global
@@ -157,6 +171,7 @@ claude --version
 ```
 
 ### If sync is slow:
+
 ```bash
 # Check Syncthing status
 curl -s http://localhost:8384/rest/system/status
@@ -166,6 +181,7 @@ curl -s http://localhost:8384/rest/db/status?folder=nt-workspace
 ```
 
 ### If remote connection issues:
+
 ```bash
 # Check ZeroTier peer status
 sudo zerotier-cli peers | grep 8f53f201b7
@@ -177,20 +193,23 @@ ping -c 3 172.25.253.142
 ## ✅ Benefits of This Setup
 
 ### Development Experience:
+
 - ✅ **Full AI assistance** on the machine with GPU access
 - ✅ **Real-time model testing** without network delays
 - ✅ **Automatic backup** to macOS via Syncthing
 - ✅ **Seamless workspace switching** between machines
 
 ### Performance:
-- ✅ **Zero latency** for GPU computations  
+
+- ✅ **Zero latency** for GPU computations
 - ✅ **Local development** with full system access
 - ✅ **Background sync** doesn't interrupt workflow
 - ✅ **Optimal resource utilization** (GPU where needed)
 
 ### Reliability:
+
 - ✅ **Dual workspace backup** (macOS + GPU workstation)
-- ✅ **Conflict resolution** via Syncthing versioning  
+- ✅ **Conflict resolution** via Syncthing versioning
 - ✅ **Recovery options** if one machine fails
 - ✅ **Complete audit trail** of all changes
 

@@ -13,12 +13,14 @@ When switching between project directories frequently, SSH's ControlMaster cachi
 ### What Happened
 
 1. **Initial Setup**: SSH config uses Match directives with `exec` commands to select keys based on `$PWD`
+
    ```bash
    Match host github.com exec "echo $PWD | grep -q '/.claude'"
        IdentityFile ~/.ssh/id_ed25519_terrylica
    ```
 
 2. **First Connection**: SSH cached the connection via ControlMaster
+
    ```bash
    ControlMaster auto
    ControlPath ~/.ssh/control-%r@%h:%p
@@ -35,6 +37,7 @@ When switching between project directories frequently, SSH's ControlMaster cachi
 ### Why This Happened
 
 SSH's ControlMaster feature:
+
 - Caches SSH connection multiplexing
 - Evaluates Match directives only on initial connection
 - Reuses cached connection for subsequent commands
@@ -48,6 +51,7 @@ SSH's ControlMaster feature:
 ## Current Solution (Temporary)
 
 **Clear control masters when switching directories:**
+
 ```bash
 rm -f ~/.ssh/control-*
 cd ~/.claude
@@ -55,6 +59,7 @@ ssh -T git@github.com  # Now uses correct key
 ```
 
 **Limitations:**
+
 - Manual step required
 - Easy to forget
 - Inefficient with frequent switching
@@ -80,11 +85,13 @@ Host github.com
 ```
 
 **Pros:**
+
 - Simple, immediate fix
 - No manual cache clearing
 - Works with all Match directives
 
 **Cons:**
+
 - Slight performance hit (new SSH connection each time)
 - Loss of connection multiplexing benefits
 
@@ -113,11 +120,13 @@ Host github.com
 ```
 
 **Pros:**
+
 - Keeps multiplexing for stable internal hosts
 - Disables only where problematic
 - Best of both worlds
 
 **Cons:**
+
 - Requires careful configuration
 - Must update if adding new hosts
 
@@ -159,10 +168,12 @@ Host github.com
 ```
 
 **Pros:**
+
 - Intelligent switching
 - Fully automated
 
 **Cons:**
+
 - Complex to implement
 - ProxyCommand workarounds needed
 - SSH config doesn't support conditional ControlMaster directly
@@ -207,6 +218,7 @@ Host github.com
 ```
 
 **Usage in Git:**
+
 ```bash
 # terrylica repo
 git remote set-url origin git@gh-terrylica:terrylica/claude-config.git
@@ -219,6 +231,7 @@ git remote set-url origin git@gh-459ecs:459ecs/project.git
 ```
 
 **Pros:**
+
 - Explicit and clear
 - No directory-based assumptions
 - Works with ControlMaster
@@ -226,6 +239,7 @@ git remote set-url origin git@gh-459ecs:459ecs/project.git
 - No magic or hidden behavior
 
 **Cons:**
+
 - Requires per-repo configuration
 - More git remote URLs to manage
 - Less "automatic" than directory matching
@@ -275,6 +289,7 @@ Match host github.com exec "echo $PWD | grep -q '/459ecs'"
 ```
 
 **Benefits:**
+
 - ✅ Works with frequent directory switching
 - ✅ No cache clearing needed
 - ✅ Automatic key selection per directory
@@ -287,6 +302,7 @@ Match host github.com exec "echo $PWD | grep -q '/459ecs'"
 ## Implementation Steps for Next Session
 
 ### **1. Update SSH Config**
+
 ```bash
 # Edit ~/.ssh/config
 # Remove ControlMaster settings for github.com
@@ -294,6 +310,7 @@ Match host github.com exec "echo $PWD | grep -q '/459ecs'"
 ```
 
 ### **2. Test Switching Behavior**
+
 ```bash
 # From terrylica directory
 cd ~/.claude && ssh -T git@github.com
@@ -307,6 +324,7 @@ cd ~/eon/project && ssh -T git@github.com
 ```
 
 ### **3. Verify Git Operations**
+
 ```bash
 # Each directory should automatically use correct key
 cd ~/.claude && git push origin main
@@ -319,10 +337,10 @@ cd ~/eon/project && git push origin main
 
 ### **ControlMaster Impact**
 
-| Setting | First SSH | Subsequent | Switching | Multi-Account |
-|---------|-----------|------------|-----------|---------------|
-| **With ControlMaster** | Slower | Fast | Broken | Broken |
-| **Without ControlMaster** | Normal | Normal | Works | Works ✓ |
+| Setting                   | First SSH | Subsequent | Switching | Multi-Account |
+| ------------------------- | --------- | ---------- | --------- | ------------- |
+| **With ControlMaster**    | Slower    | Fast       | Broken    | Broken        |
+| **Without ControlMaster** | Normal    | Normal     | Works     | Works ✓       |
 
 **Conclusion**: For multi-account workflows with directory switching, the performance loss is negligible and worth the reliability gain.
 
@@ -331,16 +349,19 @@ cd ~/eon/project && git push origin main
 ## Monitoring & Debugging
 
 ### **Check Active SSH Connections**
+
 ```bash
 ls -la ~/.ssh/control-* 2>/dev/null || echo "No cached connections"
 ```
 
 ### **Test Which Key Is Used**
+
 ```bash
 ssh -vv git@github.com 2>&1 | grep "Offering public key"
 ```
 
 ### **Manual Cache Clear (Emergency)**
+
 ```bash
 rm -f ~/.ssh/control-*
 ```
@@ -352,6 +373,7 @@ rm -f ~/.ssh/control-*
 **Issue**: SSH ControlMaster caching prevented terrylica key selection
 **Current State**: SSH configured but requires GitHub key registration
 **Next Steps**:
+
 1. Add SSH public key to GitHub (terrylica account)
 2. Implement Option 2 (disable ControlMaster for GitHub)
 3. Test directory switching without manual cache clearing

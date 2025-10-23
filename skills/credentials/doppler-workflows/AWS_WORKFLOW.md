@@ -9,6 +9,7 @@
 This workflow manages AWS IAM credentials using Doppler for secure storage, rotation, and comprehensive documentation. All credentials are stored with contextual notes for future reference.
 
 **Key Features:**
+
 - ✅ Zero-exposure credential creation (never displayed on screen)
 - ✅ Safe dual-key rotation (old key remains active during testing)
 - ✅ Comprehensive access audits (read-only, non-intrusive)
@@ -22,6 +23,7 @@ This workflow manages AWS IAM credentials using Doppler for secure storage, rota
 **Config**: `dev` (or `staging`, `production`)
 
 **Secrets**:
+
 ```
 AWS_ACCESS_KEY_ID              # Active primary credential
 AWS_SECRET_ACCESS_KEY          # Active primary credential
@@ -201,6 +203,7 @@ open https://dashboard.doppler.com
 ### AWS_ACCESS_INVENTORY_REPORT (JSON)
 
 Machine-readable inventory with:
+
 - IAM permissions and policies
 - Resource counts by service
 - Detailed resource lists
@@ -212,6 +215,7 @@ Machine-readable inventory with:
 ### AWS_ACCESS_SUMMARY (Text)
 
 Human-readable summary with:
+
 - IAM user and permissions
 - Resource inventory counts
 - Key resources by service
@@ -233,6 +237,7 @@ Last comprehensive audit date.
 ### Credential Handling
 
 ✅ **DO**:
+
 - Use Doppler for all credential storage
 - Pipe credentials directly to Doppler (never display)
 - Test thoroughly before deleting old credentials
@@ -240,6 +245,7 @@ Last comprehensive audit date.
 - Rotate credentials quarterly or when exposed
 
 ✗ **DON'T**:
+
 - Store credentials in plain text files
 - Display credentials on screen
 - Share credentials via chat/email
@@ -249,11 +255,13 @@ Last comprehensive audit date.
 ### Audit Safety
 
 ✅ **Safe commands** (read-only):
+
 - `list-*` - List resources
 - `describe-*` - Describe resources
 - `get-*` - Get resource details
 
 ✗ **Avoid during audits**:
+
 - `create-*`, `delete-*`, `update-*` - Modify resources
 - `put-*` - Write operations
 - Any command without `--dry-run` flag when available
@@ -263,18 +271,21 @@ Last comprehensive audit date.
 ## Account Details
 
 **Current Setup:**
+
 - **IAM User**: `terryli`
 - **Account ID**: `050214414362` (EonLabs)
 - **Group**: `fullstack-eng`
 - **Region**: `us-west-2`
 
 **Effective Permissions:** Near-Administrator
+
 - ✅ Full access to S3, Lambda, DynamoDB, ECS, ECR, CloudWatch
 - ✅ Can create/modify/delete most resources
 - ✗ Cannot modify IAM users/policies
 - ✗ Cannot modify AWS Organizations
 
 **Key Resources:**
+
 - 33 S3 buckets (ML models, portfolios, predictions)
 - 28 Lambda functions (Touchstone, Cron, Realtime)
 - 19 DynamoDB tables (ModelPredictions, TradeModels, etc.)
@@ -328,14 +339,17 @@ doppler secrets notes set AWS_ACCESS_KEY_ID \
 ## Related Documentation
 
 **Hub (User Memory)**:
+
 - **Credential Management**: [`~/.claude/CLAUDE.md`](../../CLAUDE.md#credential-management-security) - Central hub for all credential workflows
 - **Documentation Index**: [`docs/INDEX.md`](../INDEX.md) - Hub-and-spoke navigation
 
 **Specifications (Machine-Readable)**:
+
 - **Doppler Integration**: [`specifications/doppler-integration.yaml`](../../specifications/doppler-integration.yaml) - OpenAPI 3.1.0 spec
 - **AWS Credentials Management**: [`specifications/aws-credentials-management.yaml`](../../specifications/aws-credentials-management.yaml) - Complete workflow spec
 
 **Setup Guides (Human-Readable)**:
+
 - **This Document**: Rotation and usage workflows
 - **Elimination Plan**: [`docs/setup/aws-credentials-elimination.md`](aws-credentials-elimination.md) - Reference implementation for ml-feature-experiments
 

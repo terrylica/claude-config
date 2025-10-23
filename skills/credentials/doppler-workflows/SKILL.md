@@ -8,6 +8,7 @@ description: Complete credential management using Doppler CLI for PyPI tokens an
 ## Quick Reference
 
 **When to use this skill:**
+
 - Publishing Python packages to PyPI
 - Rotating AWS access keys
 - Managing credentials across multiple services
@@ -18,11 +19,13 @@ description: Complete credential management using Doppler CLI for PyPI tokens an
 ## Core Pattern: Doppler CLI
 
 **Standard Usage:**
+
 ```bash
 doppler run --project <project> --config <config> --command='<command>'
 ```
 
 **Why --command flag:**
+
 - Official Doppler pattern (auto-detects shell)
 - Ensures variables expand AFTER Doppler injects them
 - Without it: shell expands `$VAR` before Doppler runs → empty string
@@ -32,6 +35,7 @@ doppler run --project <project> --config <config> --command='<command>'
 ## Use Case 1: PyPI Package Publishing
 
 ### Quick Start
+
 ```bash
 # Publish package
 doppler run --project claude-config --config dev \
@@ -41,15 +45,18 @@ doppler run --project claude-config --config dev \
 ### Token Setup
 
 **Doppler Storage:**
+
 - Project: `claude-config`
 - Config: `dev`
 - Secret naming: `PYPI_TOKEN` (primary), `PYPI_TOKEN_{ABBREV}` (additional packages)
 
 **Active Tokens:**
+
 - `PYPI_TOKEN` → atr-adaptive-laguerre (aal token)
 - `PYPI_TOKEN_GCD` → gapless-crypto-data (gcd token)
 
 **Create New Token:**
+
 ```bash
 # Step 1: Create project-scoped token on PyPI
 # Go to: https://pypi.org/manage/account/token/
@@ -72,16 +79,19 @@ doppler run --project claude-config --config dev \
 ### PyPI Troubleshooting
 
 **Issue: 403 Forbidden**
+
 - Root cause: Token expired/revoked on PyPI
 - Solution: Create new project-scoped token, update Doppler
 - Verify: `doppler secrets get PYPI_TOKEN --plain | head -c 50` (should start with `pypi-AgEI`)
 
 **Issue: Empty Token (Variable Not Expanding)**
+
 - Root cause: Not using `--command` flag
 - ❌ Wrong: `doppler run -- uv publish --token "$VAR"`
 - ✅ Correct: `doppler run --command='uv publish --token "$VAR"'`
 
 **Issue: Display vs Actual Value**
+
 - `doppler secrets get` adds newline to display (formatting only)
 - Actual value has NO newline when injected
 - Verify: `doppler run --command='printf "%s" "$TOKEN" | wc -c'`
@@ -91,6 +101,7 @@ doppler run --project claude-config --config dev \
 ## Use Case 2: AWS Credential Management
 
 ### Quick Start
+
 ```bash
 # Use AWS credentials
 doppler run --project aws-credentials --config dev \
@@ -100,10 +111,12 @@ doppler run --project aws-credentials --config dev \
 ### Credential Setup
 
 **Doppler Storage:**
+
 - Project: `aws-credentials`
 - Configs: `dev`, `staging`, `prod` (one per AWS account)
 
 **Required Secrets:**
+
 ```
 AWS_ACCESS_KEY_ID           # IAM access key (20 chars)
 AWS_SECRET_ACCESS_KEY       # IAM secret (40 chars)
@@ -116,12 +129,14 @@ AWS_ROTATION_INTERVAL_DAYS  # e.g., 90
 ### AWS Rotation Workflow
 
 **Step 1: Create New Credentials**
+
 ```bash
 # In AWS IAM Console:
 # Users → Select user → Security credentials → Create access key
 ```
 
 **Step 2: Store in Doppler**
+
 ```bash
 echo -n 'AKIAIOSFODNN7EXAMPLE' | doppler secrets set AWS_ACCESS_KEY_ID \
   --project aws-credentials --config dev
@@ -136,6 +151,7 @@ doppler secrets set AWS_LAST_ROTATED_DATE \
 ```
 
 **Step 3: Verify Injection**
+
 ```bash
 doppler run --project aws-credentials --config dev \
   --command='echo "KEY: ${#AWS_ACCESS_KEY_ID}; SECRET: ${#AWS_SECRET_ACCESS_KEY}"'
@@ -143,6 +159,7 @@ doppler run --project aws-credentials --config dev \
 ```
 
 **Step 4: Test AWS Access**
+
 ```bash
 doppler run --project aws-credentials --config dev \
   --command='aws sts get-caller-identity'
@@ -150,6 +167,7 @@ doppler run --project aws-credentials --config dev \
 ```
 
 **Step 5: Deactivate Old Key**
+
 ```bash
 # In AWS IAM Console:
 # Mark old key as Inactive → Wait 24 hours → Delete
@@ -158,11 +176,13 @@ doppler run --project aws-credentials --config dev \
 ### AWS Troubleshooting
 
 **Issue: 403 Forbidden / InvalidClientTokenId**
+
 - Root cause: Credentials expired/rotated elsewhere, or wrong region
 - Verify: `doppler run --command='aws sts get-caller-identity'`
 - Check region: `doppler secrets get AWS_DEFAULT_REGION --plain`
 
 **Issue: Works on One Machine, Not Another**
+
 - Root cause: Different Doppler config or HOME variable
 - Verify: `doppler me` (check logged-in user), `echo $HOME`
 
@@ -171,6 +191,7 @@ doppler run --project aws-credentials --config dev \
 ## Multi-Service / Multi-Account Patterns
 
 ### Multiple PyPI Packages
+
 ```bash
 # Package 1
 doppler run --project claude-config --config dev \
@@ -182,6 +203,7 @@ doppler run --project claude-config --config dev \
 ```
 
 ### Multiple AWS Accounts
+
 ```bash
 # Deploy to staging
 doppler run --project aws-credentials --config staging \
@@ -209,12 +231,14 @@ doppler run --project aws-credentials --config prod \
 ## Setup Checklist
 
 **PyPI:**
+
 - [ ] Create project-scoped token on PyPI
 - [ ] Store in `claude-config/dev/PYPI_TOKEN`
 - [ ] Verify injection: `doppler run --command='echo ${#PYPI_TOKEN}'`
 - [ ] Test publish with `--verbose` flag first
 
 **AWS:**
+
 - [ ] Create IAM access key
 - [ ] Store in `aws-credentials/{env}/AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
 - [ ] Verify injection: `doppler run --command='echo ${#AWS_ACCESS_KEY_ID}'`

@@ -12,4 +12,3 @@ Machine-readable specifications and plans (OpenAPI, YAML).
 - [PyPI Publishing Methods](pypi-publishing-methods.yaml)
 - [Pushover Integration](pushover-integration.yaml)
 - [Session Storage Adoption](session-storage-adoption.yaml)
-

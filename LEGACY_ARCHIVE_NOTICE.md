@@ -8,6 +8,7 @@
 The following legacy components have been archived due to migration to the official Claude Code session storage standard:
 
 ### 📦 Archive Location
+
 ```
 archive/legacy-session-system-20250811/
 ├── legacy-session-system.tar.gz  (502MB, 2167 files)
@@ -19,7 +20,7 @@ archive/legacy-session-system-20250811/
 
 1. **Legacy Session Storage** (`system/sessions*`)
    - Custom `~/.claude/system/sessions/` directory structure
-   - Multiple backup snapshots (sessions.backup.*)
+   - Multiple backup snapshots (sessions.backup.\*)
    - 2034+ session files in non-standard format
 
 2. **Canonical Session Tools** (`sage-aliases/lib/sage-canonical-sessions.sh`)
@@ -35,12 +36,15 @@ archive/legacy-session-system-20250811/
 ## Why These Were Archived
 
 ### 🔍 Discovery of Official Standard
+
 Through Docker isolation testing, we discovered that official Claude Code uses:
+
 - **Location**: `~/.claude/projects/` (not custom `system/sessions`)
 - **Format**: Path-encoded directories (e.g., `-home-tca-eon-nt`)
 - **Behavior**: Native Claude session handling without custom transformations
 
 ### ❌ Problems with Legacy System
+
 - **Non-standard location**: Used custom `system/sessions` instead of official `projects`
 - **Symlink complexity**: `projects -> system/sessions` masked official behavior
 - **Overcomplicated logic**: 444+ lines for what Claude does natively
@@ -49,12 +53,14 @@ Through Docker isolation testing, we discovered that official Claude Code uses:
 ## Current State (Official Standard)
 
 ### ✅ What We Use Now
+
 - **Location**: `~/.claude/projects/` (Docker-verified official)
 - **Format**: Native Claude path-encoded directories
 - **Tools**: Updated SAGE sync tools using official format
 - **Sessions**: 647+ sessions successfully migrated and working
 
 ### 🚀 Benefits of Official Standard
+
 - **Native compatibility**: Works exactly as Claude intended
 - **Cross-platform**: macOS ↔ Ubuntu without custom transformations
 - **Simplified maintenance**: No custom logic required

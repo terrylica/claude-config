@@ -7,9 +7,10 @@
 The tool provides global access via `~/.local/bin` (industry standard):
 
 ### Core Commands
+
 ```bash
 gpu-ws           # GPU workstation connection and management
-sage-dev         # SAGE development environment launcher  
+sage-dev         # SAGE development environment launcher
 sage-status      # Infrastructure health monitoring
 sage-sync        # Comprehensive sync tool for dual environments
 ```
@@ -17,12 +18,14 @@ sage-sync        # Comprehensive sync tool for dual environments
 ## Command Reference
 
 ### GPU Workstation (`gpu-ws`)
+
 ```bash
 gpu-ws           # SSH to GPU workstation
 gpu-ws --help    # Show all available options
 ```
 
 ### SAGE Development (`sage-dev`)
+
 ```bash
 sage-dev docs    # Documentation work (macOS)
 sage-dev tirex   # TiRex GPU development
@@ -33,6 +36,7 @@ sage-dev diag    # Environment diagnostics
 ```
 
 ### Infrastructure Status (`sage-status`)
+
 ```bash
 sage-status      # Complete health check
 sage-status sync # Syncthing status
@@ -44,6 +48,7 @@ sage-status models # SAGE models availability
 ## Alias Categories
 
 ### Available Alias Files
+
 - `aliases/gpu-workstation.sh` - GPU connection and monitoring
 - `aliases/sage-development.sh` - SAGE-specific development workflows
 - `aliases/sync-monitoring.sh` - Syncthing synchronization management
@@ -60,6 +65,7 @@ The tool follows the standard `~/.claude/tools/` pattern:
 ## Architecture
 
 ### Directory Structure
+
 ```
 sage-aliases/
 ├── bin/                    # Universal access executables
@@ -76,6 +82,7 @@ sage-aliases/
 ```
 
 ### Design Principles
+
 - **Working Directory Preservation**: Commands work from any location
 - **Environment Auto-Detection**: Optimal environment selection based on task
 - **Universal Access**: Consistent command interface across workspaces
@@ -84,6 +91,7 @@ sage-aliases/
 ## Usage Examples
 
 ### Quick Development Session
+
 ```bash
 # Check infrastructure health
 sage-status
@@ -93,6 +101,7 @@ gpu dev
 ```
 
 ### SAGE Model Development
+
 ```bash
 # Check model availability
 sage-dev status
@@ -104,6 +113,7 @@ sage-dev tirex       # TiRex GPU development
 ```
 
 ### Infrastructure Monitoring
+
 ```bash
 # Monitor synchronization
 sage-status sync
@@ -118,12 +128,15 @@ sage-status gpu
 ## Integration
 
 ### Shell Configuration
+
 The tool integrates with shell configuration via:
+
 - Industry standard: `~/.local/bin` location
 - Selective alias sourcing as needed
 - Working directory preservation
 
 ### SAGE Development Workflow
+
 - **Phase 0 Complete**: All infrastructure ready
 - **Model Validation**: Individual model testing workflows
 - **Ensemble Integration**: Full SAGE meta-framework development

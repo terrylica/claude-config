@@ -9,6 +9,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, Write, Edit, LS
 **Purpose**: Validate and ensure proper alignment between command files and their corresponding agent specifications, with focus on auto-suggestion completeness and argument hint accuracy.
 
 **Usage Options**:
+
 - `/command-agent-check [command-name]` - Validate specific command-agent pair
 - `/command-agent-check --create [new-command]` - Create new command-agent pair from scratch
 - `/command-agent-check --fix [command]` - Auto-fix alignment issues in existing command
@@ -18,6 +19,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, Write, Edit, LS
 ## Validation Framework
 
 **Alignment Checks**:
+
 1. **Frontmatter Completeness**
    - `description` field presence and clarity
    - `argument-hint` field with option coverage
@@ -82,29 +84,29 @@ echo ""
 if [[ "$mode" == "list" ]]; then
     echo "📋 Command-Agent Alignment Status"
     echo "================================="
-    
+
     commands_dir="$HOME/.claude/commands"
     agents_dir="$HOME/.claude/agents"
-    
+
     if [[ -d "$commands_dir" ]]; then
         for cmd_file in "$commands_dir"/*.md; do
             [[ ! -f "$cmd_file" ]] && continue
-            
+
             cmd_basename=$(basename "$cmd_file" .md)
             agent_file="$agents_dir/${cmd_basename}.md"
-            
+
             # Check frontmatter
             has_description=$(grep -q "^description:" "$cmd_file" && echo "✓" || echo "○")
             has_arg_hint=$(grep -q "^argument-hint:" "$cmd_file" && echo "✓" || echo "○")
             has_agent=$([ -f "$agent_file" ] && echo "✓" || echo "○")
-            
+
             echo "📄 $cmd_basename"
             echo "   Description: $has_description | Arg-Hint: $has_arg_hint | Agent: $has_agent"
         done
     else
         echo "❌ Commands directory not found: $commands_dir"
     fi
-    
+
     echo ""
     echo "Legend: ✓ = Present | ○ = Missing"
     exit 0
@@ -119,13 +121,13 @@ if [[ "$mode" == "create" ]]; then
         echo "Usage: /command-agent-check --create [new-command-name]"
         exit 1
     fi
-    
+
     echo "🚀 Creating Command-Agent Pair: $target_name"
     echo "============================================"
-    
+
     command_file="$HOME/.claude/commands/${target_name}.md"
     agent_file="$HOME/.claude/agents/${target_name}.md"
-    
+
     # Check if files already exist
     if [[ -f "$command_file" ]] || [[ -f "$agent_file" ]]; then
         echo "⚠️  Warning: Files already exist!"
@@ -135,7 +137,7 @@ if [[ "$mode" == "create" ]]; then
         echo "Use --fix mode to update existing files instead."
         exit 1
     fi
-    
+
     # Interactive creation process
     echo "📝 Command Template Creation Process"
     echo "Please provide the following information:"
@@ -162,39 +164,39 @@ fi
 # VALIDATE MODE - Check specific command-agent pair
 # =============================================================================
 if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
-    
+
     validate_command_agent_pair() {
         local cmd_name="$1"
         local cmd_file="$HOME/.claude/commands/${cmd_name}.md"
         local agent_file="$HOME/.claude/agents/${cmd_name}.md"
-        
+
         echo "🔍 Validating: $cmd_name"
         echo "========================"
-        
+
         # 1. File Existence Check
         local cmd_exists="false"
         local agent_exists="false"
-        
+
         if [[ -f "$cmd_file" ]]; then
             cmd_exists="true"
             echo "✅ Command file: $cmd_file"
         else
             echo "❌ Command file missing: $cmd_file"
         fi
-        
+
         if [[ -f "$agent_file" ]]; then
             agent_exists="true"
             echo "✅ Agent file: $agent_file"
         else
             echo "⚠️  Agent file missing: $agent_file (optional)"
         fi
-        
+
         # 2. Frontmatter Validation
         if [[ "$cmd_exists" == "true" ]]; then
             echo ""
             echo "📋 Frontmatter Analysis"
             echo "----------------------"
-            
+
             # Check required fields
             if grep -q "^description:" "$cmd_file"; then
                 description=$(grep "^description:" "$cmd_file" | cut -d'"' -f2)
@@ -202,11 +204,11 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
             else
                 echo "❌ Missing description field"
             fi
-            
+
             if grep -q "^argument-hint:" "$cmd_file"; then
                 arg_hint=$(grep "^argument-hint:" "$cmd_file" | sed 's/^argument-hint: //')
                 echo "✅ Argument hint: $arg_hint"
-                
+
                 # Analyze argument complexity
                 option_count=$(echo "$arg_hint" | grep -o '\--[a-zA-Z-]*\|[|\[]' | wc -l)
                 if [[ $option_count -gt 3 ]]; then
@@ -217,7 +219,7 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
             else
                 echo "❌ Missing argument-hint field"
             fi
-            
+
             # Check optional fields
             if grep -q "^allowed-tools:" "$cmd_file"; then
                 tools=$(grep "^allowed-tools:" "$cmd_file" | sed 's/^allowed-tools: //')
@@ -226,17 +228,17 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
                 echo "ℹ️  No tool restrictions specified"
             fi
         fi
-        
+
         # 3. Agent Alignment Check
         if [[ "$cmd_exists" == "true" ]] && [[ "$agent_exists" == "true" ]]; then
             echo ""
             echo "🤝 Command-Agent Alignment"
             echo "-------------------------"
-            
+
             # Extract usage patterns from both files
             cmd_usage_count=$(grep -c "Usage\|usage" "$cmd_file" || echo "0")
             agent_usage_count=$(grep -c "Usage\|usage" "$agent_file" || echo "0")
-            
+
             if [[ $cmd_usage_count -gt 0 ]] && [[ $agent_usage_count -gt 0 ]]; then
                 echo "✅ Both files contain usage documentation"
             else
@@ -244,7 +246,7 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
                 echo "   Command usage patterns: $cmd_usage_count"
                 echo "   Agent usage patterns: $agent_usage_count"
             fi
-            
+
             # Check for tool consistency
             if grep -q "allowed-tools:" "$cmd_file" && grep -q "Tools:" "$agent_file"; then
                 echo "✅ Tool specifications present in both files"
@@ -252,15 +254,15 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
                 echo "ℹ️  Tool specifications may need alignment review"
             fi
         fi
-        
+
         # 4. Auto-Suggestion Readiness Score
         echo ""
         echo "📊 Auto-Suggestion Readiness Score"
         echo "---------------------------------"
-        
+
         local score=0
         local max_score=10
-        
+
         # Scoring criteria
         [[ -f "$cmd_file" ]] && ((score++))
         [[ -f "$cmd_file" ]] && grep -q "^description:" "$cmd_file" && ((score++))
@@ -272,10 +274,10 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
         [[ -f "$cmd_file" ]] && grep -q "allowed-tools:" "$cmd_file" && ((score++))
         [[ -f "$cmd_file" ]] && grep -q "Examples:\|examples:" "$cmd_file" && ((score++))
         [[ -f "$cmd_file" ]] && [[ -f "$agent_file" ]] && ((score++))
-        
+
         local percentage=$((score * 100 / max_score))
         echo "Score: $score/$max_score ($percentage%)"
-        
+
         if [[ $percentage -ge 80 ]]; then
             echo "✅ Excellent auto-suggestion readiness"
         elif [[ $percentage -ge 60 ]]; then
@@ -283,17 +285,17 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
         else
             echo "❌ Poor readiness - significant improvements needed"
         fi
-        
+
         echo ""
         echo "=" # Separator for multiple validations
         echo ""
     }
-    
+
     if [[ "$mode" == "validate-all" ]]; then
         echo "🔍 Validating All Command-Agent Pairs"
         echo "====================================="
         echo ""
-        
+
         commands_dir="$HOME/.claude/commands"
         if [[ -d "$commands_dir" ]]; then
             for cmd_file in "$commands_dir"/*.md; do
@@ -310,7 +312,7 @@ if [[ "$mode" == "validate" ]] || [[ "$mode" == "validate-all" ]]; then
             echo "Usage: /command-agent-check [command-name]"
             exit 1
         fi
-        
+
         validate_command_agent_pair "$target_name"
     fi
 fi
@@ -324,10 +326,10 @@ if [[ "$mode" == "fix" ]]; then
         echo "Usage: /command-agent-check --fix [command-name]"
         exit 1
     fi
-    
+
     echo "🔧 Auto-Fix Mode: $target_name"
     echo "==============================="
-    
+
     echo "AGENT_TASK_REQUEST: Use Task tool with 'simple-helper' agent for command-agent alignment repair."
     echo ""
     echo "🎯 FIX_PARAMETERS:"
@@ -357,7 +359,7 @@ echo "### Available Color Options (12 total):"
 echo ""
 echo "Primary Colors (Confirmed Working):"
 echo "• red - Critical operations, auditing, compliance"
-echo "• blue - Research, analysis, information gathering"  
+echo "• blue - Research, analysis, information gathering"
 echo "• green - Development, building, success operations"
 echo "• yellow - Warnings, monitoring, status checks"
 echo "• purple - Quality assurance, testing, validation"

@@ -8,6 +8,7 @@ description: Install and configure complete LaTeX development environment on mac
 ## Quick Reference
 
 **When to use this skill:**
+
 - Installing LaTeX on a new machine
 - Setting up MacTeX distribution
 - Configuring Skim PDF viewer with SyncTeX
@@ -16,11 +17,11 @@ description: Install and configure complete LaTeX development environment on mac
 
 ## Recommended Stack
 
-| Component | Purpose | Status |
-|-----------|---------|--------|
-| **MacTeX 2025** | Full LaTeX distribution (TeX Live 2025) | ✅ Recommended |
-| **Skim 1.7.11** | PDF viewer with SyncTeX support | ✅ macOS only |
-| **TeXShop 5.57** | Integrated LaTeX IDE (optional) | ✅ Native macOS |
+| Component        | Purpose                                 | Status          |
+| ---------------- | --------------------------------------- | --------------- |
+| **MacTeX 2025**  | Full LaTeX distribution (TeX Live 2025) | ✅ Recommended  |
+| **Skim 1.7.11**  | PDF viewer with SyncTeX support         | ✅ macOS only   |
+| **TeXShop 5.57** | Integrated LaTeX IDE (optional)         | ✅ Native macOS |
 
 ---
 
@@ -150,6 +151,7 @@ tlmgr list --only-installed
 ### Enable SyncTeX
 
 **In your LaTeX compilation:**
+
 ```bash
 # Add -synctex=1 flag
 pdflatex -synctex=1 document.tex
@@ -166,6 +168,7 @@ latexmk -pdf document.tex
 4. **Arguments:** Depends on editor (e.g., for VS Code: `--goto %file:%line`)
 
 **For Helix:**
+
 ```
 Command: /usr/local/bin/hx
 Arguments: %file:%line

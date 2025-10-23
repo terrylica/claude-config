@@ -8,37 +8,41 @@
 
 ## Stack Overview
 
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| **MacTeX** | 2025 (TeX Live 2025) | Full LaTeX distribution |
-| **latexmk** | 4.86a (Dec 2024) | Build automation, live preview |
-| **Skim** | 1.7.11 | PDF viewer with SyncTeX |
-| **TeXShop** | 5.57 (2025) | Integrated LaTeX IDE |
-| **tabularray** | Latest (TeX Live 2025) | Modern table system |
+| Component      | Version                | Purpose                        |
+| -------------- | ---------------------- | ------------------------------ |
+| **MacTeX**     | 2025 (TeX Live 2025)   | Full LaTeX distribution        |
+| **latexmk**    | 4.86a (Dec 2024)       | Build automation, live preview |
+| **Skim**       | 1.7.11                 | PDF viewer with SyncTeX        |
+| **TeXShop**    | 5.57 (2025)            | Integrated LaTeX IDE           |
+| **tabularray** | Latest (TeX Live 2025) | Modern table system            |
 
 ---
 
 ## Why This Stack?
 
 ### latexmk
+
 - Auto-detects dependencies, runs correct number of times
 - Continuous preview mode (`-pvc`) watches files
 - Actively maintained (latest Dec 2024)
 - Industry standard, bundled with MacTeX
 
 ### Skim
+
 - **Only** macOS viewer with full SyncTeX support
 - Auto-reloads when PDF changes
 - Forward/inverse search (click PDF ↔ LaTeX source)
 - Open source, actively maintained
 
 ### TeXShop
+
 - Native macOS integrated IDE
 - Editor + viewer in one window
 - One-click typesetting
 - Bundled with MacTeX
 
 ### tabularray
+
 - Modern LaTeX3 package
 - Replaces old packages (tabular, tabularx, longtable, booktabs)
 - **Critical**: Proper fixed-width column support
@@ -48,32 +52,38 @@
 ## Installation
 
 ### 1. Install MacTeX
+
 ```bash
 brew install --cask mactex-no-gui
 ```
 
 After installation, update PATH:
+
 ```bash
 eval "$(/usr/libexec/path_helper)"
 ```
 
 Verify:
+
 ```bash
 which pdflatex
 # Should output: /Library/TeX/texbin/pdflatex
 ```
 
 ### 2. Install Skim
+
 ```bash
 brew install --cask skim
 ```
 
 Configure auto-reload:
+
 ```bash
 defaults write -app Skim SKAutoReloadFileUpdate -boolean true
 ```
 
 ### 3. Install TeXShop (Optional but Recommended)
+
 ```bash
 brew install --cask texshop
 ```
@@ -116,32 +126,38 @@ $force_mode = 1;  # Force completion even with errors
 ### Workflow 1: latexmk + Skim (Terminal-based)
 
 #### Start continuous preview:
+
 ```bash
 cd /path/to/project
 latexmk -pdf -pvc document.tex
 ```
 
 This will:
+
 1. Compile your document
 2. Open it in Skim
 3. Watch for changes and auto-recompile
 4. Skim auto-updates when PDF changes
 
 #### Edit in Helix/VS Code/any editor
+
 - Save file → automatic recompilation (typically <1 second)
 - Skim updates instantly
 
 #### Stop watching:
+
 ```bash
 # Press Ctrl+C in terminal
 ```
 
 #### One-time compilation:
+
 ```bash
 latexmk -pdf document.tex
 ```
 
 #### Clean auxiliary files:
+
 ```bash
 latexmk -c document.tex  # Keep PDF
 latexmk -C document.tex  # Remove PDF too
@@ -157,11 +173,13 @@ latexmk -C document.tex  # Remove PDF too
 4. Preview updates automatically
 
 **Advantages**:
+
 - All-in-one solution
 - No terminal needed
 - Native macOS experience
 
 **Disadvantages**:
+
 - Manual typesetting (not continuous)
 - Less flexible than Helix/VS Code
 
@@ -199,6 +217,7 @@ latexmk -C document.tex  # Remove PDF too
 ```
 
 **Why this works**:
+
 - `p{3.8cm}` = **absolute fixed width**, honored regardless of content
 - `X[l]` = flexible width, takes remaining space
 - All tables using same `\shortcutcolwidth` = **perfect alignment**
@@ -217,11 +236,13 @@ latexmk -C document.tex  # Remove PDF too
 ### Forward Search: LaTeX → PDF
 
 **Command line**:
+
 ```bash
 displayline <line-number> <pdf-file> <tex-file>
 ```
 
 Example:
+
 ```bash
 displayline 42 document.pdf document.tex
 ```
@@ -231,10 +252,12 @@ This highlights the PDF location for line 42 in your `.tex` file.
 ### Inverse Search: PDF → LaTeX
 
 **In Skim**:
+
 1. `Cmd+Shift+Click` on any text in PDF
 2. Your editor jumps to corresponding line in `.tex` file
 
 **Configuration** (Skim → Preferences → Sync):
+
 - Preset: Custom
 - Command: `/opt/homebrew/bin/hx` (for Helix)
 - Arguments: `%file:%line`
@@ -265,6 +288,7 @@ args = ["%l", "%p", "%f"]
 ### VS Code
 
 Install: **LaTeX Workshop** extension
+
 - Auto-compiles with latexmk
 - Built-in SyncTeX
 - 10M+ downloads
@@ -272,6 +296,7 @@ Install: **LaTeX Workshop** extension
 ### Vim/Neovim
 
 Use: **VimTeX** plugin
+
 - Full latexmk integration
 - SyncTeX with Skim works out-of-box
 
@@ -303,6 +328,7 @@ Use: **VimTeX** plugin
 ### Skim not auto-reloading
 
 **Fix**:
+
 ```bash
 defaults write -app Skim SKAutoReloadFileUpdate -boolean true
 ```
@@ -312,6 +338,7 @@ Or: Skim → Preferences → Sync → "Check for file changes" enabled
 ### latexmk can't find pdflatex
 
 **Fix**: Use absolute path in `.latexmkrc`:
+
 ```perl
 $pdflatex = '/Library/TeX/texbin/pdflatex -synctex=1 -interaction=nonstopmode %O %S';
 ```
@@ -319,6 +346,7 @@ $pdflatex = '/Library/TeX/texbin/pdflatex -synctex=1 -interaction=nonstopmode %O
 ### Compilation errors
 
 Check log file:
+
 ```bash
 tail -50 document.log
 ```
@@ -378,11 +406,13 @@ latexmk -pdf -pvc document.tex  # Rebuild from scratch
 ## Real-World Example: Ghostty Cheat Sheet
 
 **Files**:
+
 - Source: `/tmp/ghostty-keybindings-fixed.tex`
 - Config: `/tmp/.latexmkrc`
 - Output: `~/Downloads/ghostty-keybindings-FIXED.pdf`
 
 **Key features**:
+
 - Landscape US Letter (11×8.5")
 - 3-column layout with minipages
 - 12 tables with perfect vertical alignment
@@ -390,6 +420,7 @@ latexmk -pdf -pvc document.tex  # Rebuild from scratch
 - All shortcuts in fixed-width `p{3.8cm}` columns
 
 **Workflow**:
+
 ```bash
 cd /tmp
 latexmk -pdf -pvc ghostty-keybindings-fixed.tex

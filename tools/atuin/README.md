@@ -34,6 +34,7 @@ atuin import auto
 **Location**: `~/.config/atuin/config.toml`
 
 **Key settings**:
+
 ```toml
 # Enable automatic sync
 auto_sync = true
@@ -62,6 +63,7 @@ atuin key
 ```
 
 **⚠️ CRITICAL**: Save this 24-word mnemonic phrase securely. Store in:
+
 - Password manager (1Password, Bitwarden, etc.)
 - Doppler (recommended): `doppler secrets set ATUIN_KEY="<24-word-phrase>" --project claude-config --config dev`
 
@@ -78,6 +80,7 @@ atuin login -u <username>
 **Project**: `claude-config/dev`
 
 **Stored secrets**:
+
 ```bash
 # Username
 doppler secrets set ATUIN_USERNAME="<username>" --project claude-config --config dev
@@ -93,6 +96,7 @@ doppler secrets set ATUIN_PASSWORD="<password>" --project claude-config --config
 ```
 
 **Retrieve credentials**:
+
 ```bash
 doppler secrets get ATUIN_USERNAME ATUIN_EMAIL ATUIN_KEY --project claude-config --config dev --plain
 ```
@@ -186,6 +190,7 @@ atuin sync
 ### Lost encryption key
 
 If you lose your encryption key:
+
 - Check Doppler: `doppler secrets get ATUIN_KEY --project claude-config --config dev --plain`
 - Check local file: `cat ~/.local/share/atuin/key`
 - If both lost: History is unrecoverable (end-to-end encryption)

@@ -7,8 +7,9 @@ allowed-tools: Task, Bash, Glob, Grep, Read, Write
 # Workspace Refactor: Comprehensive Technical Debt Reduction
 
 **Usage Options**:
+
 - `/workspace-refactor [workspace_path]` - Full workspace analysis and refactoring of specified path
-- `/workspace-refactor --audit-only [path]` - Analysis and recommendations without execution  
+- `/workspace-refactor --audit-only [path]` - Analysis and recommendations without execution
 - `/workspace-refactor --modularize [script_file]` - Focus on single large file modularization
 - `/workspace-refactor --dry-run [path]` - Preview all planned changes without execution
 
@@ -18,7 +19,7 @@ allowed-tools: Task, Bash, Glob, Grep, Read, Write
 
 ### Integration Patterns
 
-**Technical Debt Management**: Systematic workspace analysis with strategic modularization, safety-first execution, and comprehensive rollback preparation.  
+**Technical Debt Management**: Systematic workspace analysis with strategic modularization, safety-first execution, and comprehensive rollback preparation.
 
 ## Agent Deployment
 

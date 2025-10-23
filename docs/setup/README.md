@@ -17,4 +17,3 @@ Installation and configuration guides for the workspace.
 - [OSC52 SSH Clipboard: Deep Dive](osc52-deep-dive.md)
 - [OSC52 Implementation Summary](osc52-implementation-summary.md)
 - [OSC52 Implementation Checklist](osc52-implementation-checklist.md)
-

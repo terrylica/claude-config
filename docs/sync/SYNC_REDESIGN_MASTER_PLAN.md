@@ -1,17 +1,20 @@
 # SAGE Sync Infrastructure Redesign - Master Plan
 
 ## 🎯 **Mission Statement**
+
 Transform SAGE sync from a dangerous file-copying utility into a conversation preservation system with data protection and disaster recovery.
 
 ## 📊 **Problem Analysis - Data Loss Incident 2025-08-09**
 
 ### Root Cause
+
 - **Primary Failure**: SAGE sync performed destructive `rsync --delete` operation
 - **Data Lost**: Complete remote GPU conversation history (unknown quantity)
 - **No Recovery**: Zero backup automation, no rollback capability
 - **Silent Destruction**: No user warning or confirmation for destructive operation
 
 ### Systemic Failures Identified
+
 1. No backup automation before destructive operations
 2. No conflict detection or merge intelligence
 3. No user confirmation for data loss risk
@@ -22,6 +25,7 @@ Transform SAGE sync from a dangerous file-copying utility into a conversation pr
 ## 🏗️ **REDESIGNED ARCHITECTURE**
 
 ### Core Principles
+
 1. **Data Preservation First**: Never lose conversation history
 2. **Merging**: Smart bidirectional sync with conflict resolution
 3. **Safety**: Multiple backup layers with verified rollback
@@ -29,6 +33,7 @@ Transform SAGE sync from a dangerous file-copying utility into a conversation pr
 5. **Session Awareness**: Understand conversation content and context
 
 ### Technical Foundation
+
 ```
 Storage Structure:
 ~/.claude/system/
@@ -48,9 +53,11 @@ Storage Structure:
 ## 🚀 **IMPLEMENTATION ROADMAP**
 
 ### 🚨 **PHASE 1: Emergency Safety (Week 1) - CRITICAL**
+
 **Objective**: Prevent future data loss immediately
 
 #### Components
+
 1. **Backup-Before-Sync Protocol**
    - Mandatory backup creation before ANY sync operation
    - Backup verification and integrity testing
@@ -67,6 +74,7 @@ Storage Structure:
    - Backup integrity verification
 
 #### Files to Create/Modify
+
 ```
 .claude/tools/emergency-backup.sh        # NEW - Safety backup creation
 .claude/tools/rollback-restore.sh        # NEW - Emergency restoration
@@ -74,9 +82,11 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
 ```
 
 ### 🧠 **PHASE 2: Intelligent Sync Engine (Weeks 2-3) - HIGH**
+
 **Objective**: Replace destructive sync with smart merge
 
 #### Components
+
 1. **Session Metadata System**
    - Session fingerprinting via content hashing
    - Change detection and state tracking
@@ -93,6 +103,7 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
    - Interactive conflict resolution
 
 #### Files to Create
+
 ```
 .claude/lib/session-metadata.sh         # NEW - Session tracking system
 .claude/lib/conflict-detection.sh       # NEW - Conflict engine
@@ -100,9 +111,11 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
 ```
 
 ### ⚡ **PHASE 3: Additional Features (Weeks 4-5) - MEDIUM**
+
 **Objective**: User experience and control
 
 #### Components
+
 1. **Interactive Conflict Resolution**
    - Conflict resolution UI
    - Session diff viewer
@@ -119,9 +132,11 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
    - Batch conflict resolution
 
 ### 🏢 **PHASE 4: Enterprise Resilience (Weeks 6-8) - LOW**
+
 **Objective**: Long-term infrastructure reliability
 
 #### Components
+
 1. **Automated Backup Orchestration**
    - Scheduled backup automation
    - Multiple retention policies
@@ -135,19 +150,21 @@ sage-aliases/bin/sage-sync               # MODIFY - Add safety wrapper
 ## 🔧 **TECHNICAL SPECIFICATIONS**
 
 ### Session Fingerprinting Algorithm
+
 ```bash
 generate_session_fingerprint() {
     local session_file="$1"
-    
+
     # Extract and hash conversation content (ignore metadata)
     session_content=$(jq -r '.messages[] | "\(.timestamp):\(.role):\(.content)"' "$session_file" | sort)
-    
-    # Create fingerprint combining content + structure  
+
+    # Create fingerprint combining content + structure
     echo "$session_content" | sha256sum | cut -d' ' -f1
 }
 ```
 
 ### Intelligent Sync Operation Flow
+
 ```
 1. PRE-SYNC SAFETY PROTOCOL
    └── create_emergency_backup() || ABORT
@@ -171,6 +188,7 @@ generate_session_fingerprint() {
 ```
 
 ### Safety Confirmation Protocol
+
 ```bash
 "🚨 DANGER: DESTRUCTIVE OPERATION DETECTED"
 "📋 This will PERMANENTLY OVERWRITE N remote sessions"
@@ -184,16 +202,18 @@ generate_session_fingerprint() {
 ## 📈 **SUCCESS METRICS**
 
 ### Before vs After Transformation
-| Metric | Before (Current) | After (Redesigned) |
-|--------|-----------------|-------------------|
-| Data Loss Risk | HIGH (destructive by design) | ZERO (preservation first) |
-| Backup Automation | None | Multi-layer with verification |
-| Conflict Resolution | None (overwrite) | Intelligent + user-guided |
-| Rollback Capability | None | Tested emergency restoration |
-| User Confirmation | Silent destruction | Explicit risk acknowledgment |
-| Session Intelligence | File-copying only | Conversation-aware |
+
+| Metric               | Before (Current)             | After (Redesigned)            |
+| -------------------- | ---------------------------- | ----------------------------- |
+| Data Loss Risk       | HIGH (destructive by design) | ZERO (preservation first)     |
+| Backup Automation    | None                         | Multi-layer with verification |
+| Conflict Resolution  | None (overwrite)             | Intelligent + user-guided     |
+| Rollback Capability  | None                         | Tested emergency restoration  |
+| User Confirmation    | Silent destruction           | Explicit risk acknowledgment  |
+| Session Intelligence | File-copying only            | Conversation-aware            |
 
 ### Implementation Success Criteria
+
 - ✅ Zero data loss in all sync operations
 - ✅ Sub-30 second backup creation and verification
 - ✅ 100% successful rollback testing
@@ -211,6 +231,7 @@ generate_session_fingerprint() {
 6. **Begin Phase 2 intelligent sync engine development**
 
 ## 💡 **Long-term Vision**
+
 Transform this data loss incident into the catalyst for building the most robust conversation preservation system in any development workflow. The new SAGE sync will be a model for how critical data synchronization should work - with intelligence, safety, and user control at its core.
 
 ---

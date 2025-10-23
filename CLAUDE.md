@@ -24,19 +24,23 @@
 ## System Architecture & Environment
 
 ### Platform & Path Conventions
+
 - **Target Platform**: Unix-like systems (macOS, Linux) - not Windows compatible
 - **Standards**: `$HOME/.claude/` workspace, POSIX shells, use Unix conventions (`$HOME`, `$USER`) for portability
 
 ### Universal Tool Access & Working Directory Preservation
+
 - **Hybrid Architecture**: `$HOME/.local/bin/` for executables, `$HOME/.claude/tools/` for configs - scripts use absolute paths and preserve working directory
 - **PATH Standard**: Only `$HOME/.local/bin` in PATH, cross-platform consistency, avoid `cd` operations that change user context
 
 ### Current User Context
+
 - Engineering lead responsible for features engineering for downstream seq-2-seq model consumption
 
 ## Development Environment & Tools
 
 ### Primary Toolchain
+
 **Python**: `uv` (management), `uv run --active python -m` (execution), 3.12+ - **Avoid**: pip, conda, setuptools, poetry
 **Rust**: `cargo`, `cargo nextest run`, `cargo deny check`, pre-commit hooks mandatory
 **Containers**: Colima + Docker CLI (Homebrew)
@@ -45,10 +49,12 @@
 ## Documentation Standards
 
 ### LLM-Optimized Documentation Architecture
+
 - **Machine-Readable Priority**: OpenAPI 3.1.0 specs, JSON Schema, YAML specifications take precedence over human documentation
 - **Integration Targets**: Cursor IDE, Claude Code CLI, AI coding assistants
 
 ### Claude Code Markdown Restrictions & README Policies
+
 - **Markdown Files**: Global `~/.claude/` allowed, project `.claude/` prohibited (slash command conflicts)
 - **README Policy**: Use `docs/README.md`, not root `README.md` - alternative naming for non-global docs
 
@@ -57,6 +63,7 @@
 **Location**: `~/.claude/skills/` - Hierarchical structure, skills activate automatically
 
 **Available Skills**:
+
 - **python/api-documentation** - Pydantic v2 API documentation patterns
 - **credentials/doppler-workflows** - PyPI publishing and AWS credential management via Doppler
 - **latex/setup** - MacTeX installation and environment configuration
@@ -67,6 +74,7 @@
 **Note**: Skills load contextually when relevant. Focused, single-capability design with progressive disclosure.
 
 ## Terminal & Shell Configuration
+
 **Terminals**: [Ghostty](docs/setup/terminal-setup.md) (emoji tabs, session restore) | [Kitty](docs/setup/terminal-setup.md) (splits)
 **Editor**: Helix (`hx`) - Modal editor with LSP, tree-sitter
 **Multiplexer**: [Zellij](docs/setup/README.md) - Crash recovery, balanced power-user setup (50K scrollback, 10K recovery)

@@ -14,6 +14,7 @@
 ## Universal Access Commands
 
 ### Available Globally (via ~/.local/bin)
+
 ```bash
 gpu-ws           # GPU workstation connection and management
 sage-dev         # SAGE development environment launcher
@@ -22,6 +23,7 @@ sage-sync        # Comprehensive sync tool for dual environments
 ```
 
 ### Command Examples
+
 ```bash
 # Test GPU workstation connectivity
 gpu-ws
@@ -39,13 +41,17 @@ sage-sync --sync-sessions
 ## Shell Integration Options
 
 ### Option 1: Universal Commands Only (Recommended)
+
 Use the universal commands without sourcing aliases:
+
 - Minimal shell impact
 - Clean command interface
 - Preserves working directory
 
 ### Option 2: Full Alias Integration
+
 Source specific alias categories as needed:
+
 ```bash
 # Add to ~/.zshrc or ~/.bashrc if desired
 source ~/.claude/tools/sage-aliases/aliases/gpu-workstation.sh
@@ -55,6 +61,7 @@ source ~/.claude/tools/sage-aliases/aliases/sage-development.sh
 ## Architecture Benefits
 
 ### Universal Access Pattern
+
 - **Industry Standard**: Uses `~/.local/bin` location (same as pipx, uv, etc.)
 - **Cross-Platform**: Same pattern on macOS and Linux environments
 - **Shell Agnostic**: Works in bash, zsh, fish, and any POSIX shell
@@ -62,6 +69,7 @@ source ~/.claude/tools/sage-aliases/aliases/sage-development.sh
 - **No Sudo Required**: User-owned installation and updates
 
 ### Organized Structure
+
 - **Modular Design**: Separate concerns (GPU, SAGE, sync, network)
 - **Universal Commands**: High-level interface via `bin/` executables
 - **Detailed Aliases**: Category-specific aliases for power users
@@ -70,12 +78,15 @@ source ~/.claude/tools/sage-aliases/aliases/sage-development.sh
 ## Migration from Loose Files
 
 ### Files Relocated
+
 - `~/.claude/gpu-workstation-aliases.sh` → `sage-aliases/aliases/gpu-workstation.sh`
 - Created organized structure with universal access
 - Added comprehensive command interface
 
 ### Shell Configuration Update
+
 The old shell configuration referencing loose files can be:
+
 1. **Removed** (use universal commands only)
 2. **Updated** to reference new organized structure
 3. **Kept minimal** with selective sourcing
@@ -83,14 +94,16 @@ The old shell configuration referencing loose files can be:
 ## Usage Verification
 
 ### Test Universal Commands
+
 ```bash
 # Should work immediately (via PATH)
 gpu help
-sage-dev help  
+sage-dev help
 sage-status help
 ```
 
 ### Test Infrastructure
+
 ```bash
 # Complete infrastructure check
 sage-status
@@ -105,18 +118,23 @@ sage-dev status
 ## Troubleshooting
 
 ### If Commands Not Found
+
 Check PATH includes `~/.local/bin`:
+
 ```bash
 echo $PATH | grep ".local/bin"
 ```
 
 If not found, add to your shell config:
+
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
 
 ### If Aliases Not Working
+
 Source specific alias files:
+
 ```bash
 source ~/.claude/tools/sage-aliases/aliases/gpu-workstation.sh
 ```

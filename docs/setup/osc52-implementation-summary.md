@@ -9,6 +9,7 @@ A transparent clipboard bridge enabling Claude Code CLI `/export` command to cop
 **Problem**: Claude Code `/export` hardcoded to call `xclip -selection clipboard`
 
 **Solution**: Create fake `xclip` at `~/.local/bin/xclip` that:
+
 1. Accepts same CLI arguments as real xclip
 2. Reads stdin (the data to copy)
 3. Base64 encodes it
@@ -19,22 +20,26 @@ A transparent clipboard bridge enabling Claude Code CLI `/export` command to cop
 ## Critical Discovery: `>&2` vs `/dev/tty`
 
 ### First Attempt (Failed)
+
 ```bash
 printf '\033]52;c;%s\007' "$encoded" > /dev/tty
 # Error: /dev/tty: No such device or address
 ```
 
 ### Why It Failed
+
 - Claude Code executes tools in **non-interactive subprocesses**
 - Non-interactive processes lack a **controlling terminal**
 - `/dev/tty` doesn't exist in this context
 
 ### Working Solution
+
 ```bash
 printf '\033]52;c;%s\007' "$encoded" >&2
 ```
 
 ### Why It Works
+
 1. **stderr (fd 2) always available** - even in non-interactive contexts
 2. **Terminal emulators read both stdout and stderr** for control sequences
 3. **Escape sequences are invisible** - terminal interprets them, doesn't display
@@ -105,6 +110,7 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ## Files Created/Modified
 
 ### New Files
+
 1. **`~/.local/bin/xclip`** (remote Linux)
    - xclip-compatible wrapper
    - Emits OSC 52 to stderr
@@ -122,6 +128,7 @@ printf '\033]52;c;%s\007' "$encoded" >&2
    - Security considerations
 
 ### Modified Files
+
 1. **`~/.zshrc`** (remote Linux)
    - Added `osc52-copy()` function
    - Added `pbcopy` alias for interactive use
@@ -138,6 +145,7 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ## Testing & Verification
 
 ### What Works ✅
+
 ```bash
 # Claude Code
 > /export
@@ -155,6 +163,7 @@ osc52-copy "direct text"
 ```
 
 ### Terminal Support Verified
+
 - ✅ Ghostty (with clipboard-write = allow)
 - ✅ Through tmux 3.x
 - ✅ Over SSH (any distance, any latency)
@@ -162,34 +171,44 @@ osc52-copy "direct text"
 ## Why This Architecture is Correct
 
 ### 1. Wrapper Pattern
+
 **Advantage**: Transparent to Claude Code
+
 - No source code changes needed
 - Works with any tool expecting `xclip`
 - Drop-in replacement
 
 ### 2. OSC 52 Protocol
+
 **Advantage**: Terminal-native clipboard
+
 - No X11 forwarding (security risk, complexity)
 - No reverse SSH (firewall issues)
 - No cloud clipboard (privacy concerns)
 - Works through SSH transparently
 
 ### 3. stderr Output
+
 **Advantage**: Works in non-interactive contexts
+
 - No TTY requirement
 - subprocess-safe
 - Terminal emulators monitor both stdout/stderr
 - Invisible to user (control sequences don't display)
 
 ### 4. tmux Detection
+
 **Advantage**: Automatic adaptation
+
 - Checks `$TMUX` environment variable
 - Applies correct wrapping automatically
 - No user configuration needed
 - Works both inside and outside tmux
 
 ### 5. Base64 Encoding
+
 **Advantage**: Binary-safe transport
+
 - Handles any character encoding
 - No shell escaping issues
 - No line-ending problems
@@ -226,7 +245,9 @@ Following `~/.claude/` hub-and-spoke pattern:
 ## Key Learnings for Future Reference
 
 ### 1. Non-Interactive Subprocess Execution
+
 When tools run in contexts like:
+
 - Claude Code tool execution
 - CI/CD pipelines
 - Cron jobs
@@ -236,7 +257,9 @@ When tools run in contexts like:
 **Safe alternative**: stderr (`>&2`) or stdout
 
 ### 2. Terminal Control Sequences
+
 Control sequences work via **any output stream**:
+
 - stdout: `printf '...' >&1`
 - stderr: `printf '...' >&2`
 - /dev/tty: `printf '...' >/dev/tty` (if exists)
@@ -244,7 +267,9 @@ Control sequences work via **any output stream**:
 Terminal emulators **scan all streams** for escape sequences. Choose the stream that's guaranteed available in your execution context.
 
 ### 3. Protocol Layering
+
 When working through multiplexers (tmux, screen):
+
 1. Check if inside multiplexer (env var)
 2. Apply appropriate wrapping
 3. Let multiplexer pass through to terminal
@@ -252,7 +277,9 @@ When working through multiplexers (tmux, screen):
 Don't try to bypass the multiplexer—work with it.
 
 ### 4. Binary Shimming Pattern
+
 To intercept system commands:
+
 1. Create wrapper in `~/.local/bin/`
 2. Ensure `~/.local/bin/` early in PATH
 3. Preserve CLI compatibility (parse arguments)
@@ -260,13 +287,16 @@ To intercept system commands:
 5. Make transparent to caller
 
 This pattern works for:
+
 - Clipboard: xclip, wl-copy, pbcopy
 - Editors: $EDITOR wrapper
 - Build tools: make, cargo, npm wrappers
 - Notification: notify-send wrapper
 
 ### 5. Documentation as Link Farm
+
 For user memory systems (like CLAUDE.md):
+
 - **Keep it concise**: Only irreducible essentials
 - **Link liberally**: Point to detailed docs
 - **Emphasize critical details**: The `>&2` vs `/dev/tty` gotcha
@@ -278,6 +308,7 @@ For user memory systems (like CLAUDE.md):
 The solution cannot be simplified further:
 
 **Cannot remove**:
+
 - ❌ Base64 encoding (binary safety)
 - ❌ OSC 52 format (terminal protocol)
 - ❌ stderr output (non-interactive requirement)
@@ -285,12 +316,14 @@ The solution cannot be simplified further:
 - ❌ xclip wrapper (Claude Code expects it)
 
 **Cannot substitute**:
+
 - ❌ X11 forwarding (requires admin, security risk)
 - ❌ Cloud clipboard (privacy, latency)
 - ❌ netcat bridge (firewall, security)
 - ❌ pbcopy SSH reverse (connectivity, complexity)
 
 **Each component essential**:
+
 1. **xclip wrapper** → intercepts Claude Code call
 2. **OSC 52** → terminal-native clipboard protocol
 3. **Base64** → encoding for binary safety
@@ -303,24 +336,28 @@ Remove any one → solution breaks.
 ## Success Metrics
 
 ✅ **Functional**:
+
 - Claude Code `/export` works
 - Command-line clipboard works
 - Works through tmux
 - Works over SSH (any distance)
 
 ✅ **Transparent**:
+
 - No Claude Code modifications
 - No SSH config changes
 - No sudo/admin access needed
 - Automatic tmux detection
 
 ✅ **Documented**:
+
 - CLAUDE.md updated (essentials + links)
 - Setup guide created (step-by-step)
 - Deep dive written (technical details)
 - Terminal setup doc updated (cross-reference)
 
 ✅ **Maintainable**:
+
 - Single wrapper script
 - Clear documentation path
 - Hub-and-spoke architecture
@@ -329,12 +366,14 @@ Remove any one → solution breaks.
 ## Future Extensions
 
 ### For other use cases:
+
 1. **Paste support**: Add OSC 52 read capability (if terminal supports)
 2. **Selection targets**: Support primary selection (`-selection primary`)
 3. **Clipboard history**: Log copies to file for recovery
 4. **Notification**: Pushover alert on large clipboard operations
 
 ### For other tools:
+
 - `wl-copy` wrapper (same pattern, different binary name)
 - `pbcopy` wrapper (for scripts that hardcode macOS command)
 - `xsel` wrapper (alternative to xclip)

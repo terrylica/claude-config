@@ -12,7 +12,7 @@ Use the global command from any directory:
 # Check current directory
 gfm-check
 
-# Check specific directory  
+# Check specific directory
 gfm-check /path/to/other/workspace
 
 # Check with options
@@ -30,6 +30,7 @@ gfm-check --no-completeness --verbose
 ## Verification
 
 Test from any directory:
+
 ```bash
 cd /tmp
 gfm-check --help

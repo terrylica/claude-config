@@ -9,8 +9,9 @@ allowed-tools: Task, Bash, Read, Glob, Grep, Write, Edit
 **Comprehensive command validation combining infrastructure health checks and flag behavior auditing**
 
 **Flags:**
+
 - `--health|-h` - Run infrastructure health checks only (UV, files, dependencies)
-- `--flags|-f` - Run flag behavior audit only (compatibility, parsing)  
+- `--flags|-f` - Run flag behavior audit only (compatibility, parsing)
 - `--compatibility|-c` - Include flag compatibility testing (requires --flags)
 - `--verbose|-v` - Detailed output and diagnostics
 - `--fix|-x` - Auto-fix discovered issues where possible
@@ -18,6 +19,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, Write, Edit
 **Default Behavior:** Run both health checks and flag audit if no specific scope flags provided
 
 **Examples:**
+
 - `/command-check` - Full validation of default command (gfm-check)
 - `/command-check tts --verbose` - Full validation of tts command with details
 - `/command-check gfm-check --health` - Infrastructure health only
@@ -74,7 +76,7 @@ report_status() {
     local check_name="$1"
     local status="$2"
     local detail="$3"
-    
+
     if [[ "$status" == "PASS" ]]; then
         echo "✅ $check_name"
     elif [[ "$status" == "WARN" ]]; then
@@ -82,7 +84,7 @@ report_status() {
     else
         echo "❌ $check_name - $detail"
     fi
-    
+
     [[ "$verbose" == "true" ]] && [[ -n "$detail" ]] && echo "   Detail: $detail"
 }
 
@@ -92,7 +94,7 @@ report_status() {
 if [[ "$run_health" == "true" ]]; then
     echo "🏥 INFRASTRUCTURE HEALTH"
     echo "========================"
-    
+
     # 1. UV Environment Check
     echo "🔧 Environment Validation..."
     if command -v uv &> /dev/null; then
@@ -101,7 +103,7 @@ if [[ "$run_health" == "true" ]]; then
     else
         report_status "UV Installation" "FAIL" "UV not found in PATH"
     fi
-    
+
     # 2. Command Structure Check
     echo ""
     echo "🛠️  Command Structure Validation..."
@@ -111,21 +113,21 @@ if [[ "$run_health" == "true" ]]; then
     else
         report_status "Command File" "FAIL" "Missing: $command_file"
     fi
-    
+
     # 3. Argument Documentation Check
     if [[ -f "$command_file" ]] && grep -q "argument-hint:" "$command_file"; then
         report_status "Argument Documentation" "PASS"
-        
+
         # Flag completeness check
         if [[ -f "$command_file" ]]; then
             arg_hint_line=$(grep "argument-hint:" "$command_file")
             long_flags=$(echo "$arg_hint_line" | grep -o '\--[a-zA-Z-]*' | wc -l)
             short_flags=$(echo "$arg_hint_line" | grep -o '\-[a-zA-Z]' | wc -l)
-            
+
             if [[ "$verbose" == "true" ]]; then
                 echo "   Long flags: $long_flags, Short flags: $short_flags"
             fi
-            
+
             if [[ $long_flags -gt $short_flags ]]; then
                 report_status "Flag Completeness" "WARN" "Some flags may be missing short versions"
             else
@@ -135,13 +137,13 @@ if [[ "$run_health" == "true" ]]; then
     else
         report_status "Argument Documentation" "WARN" "No argument hints found"
     fi
-    
+
     # 4. Dependency Check
     echo ""
     echo "📦 Dependency Validation..."
     if [[ -f "$HOME/.claude/tools/gfm-link-checker/pyproject.toml" ]]; then
         report_status "Project Config" "PASS"
-        
+
         # Check if dependencies are synced
         if uv sync --directory "$HOME/.claude/tools/gfm-link-checker" --dry-run &>/dev/null; then
             report_status "Dependency Sync" "PASS"
@@ -151,7 +153,7 @@ if [[ "$run_health" == "true" ]]; then
     else
         report_status "Project Config" "FAIL" "pyproject.toml missing"
     fi
-    
+
     # 5. Interface Validation
     echo ""
     echo "🔌 Interface Validation..."
@@ -161,7 +163,7 @@ if [[ "$run_health" == "true" ]]; then
     else
         report_status "GFM Script Interface" "FAIL" "Help output malformed"
     fi
-    
+
     # 6. Security Check
     echo ""
     echo "🛡️  Security Validation..."
@@ -170,7 +172,7 @@ if [[ "$run_health" == "true" ]]; then
     else
         report_status "Temp Directory Access" "WARN" "Limited temp access"
     fi
-    
+
     # 7. Integration Test
     echo ""
     echo "🔗 Integration Test..."
@@ -180,19 +182,19 @@ if [[ "$run_health" == "true" ]]; then
 # Test
 [test](missing-file.md)
 EOF
-    
+
     test_result=$(uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" "$test_workspace" 2>&1)
     test_exit_code=$?
-    
+
     if [[ $test_exit_code -ne 0 ]]; then
         report_status "Integration Test" "PASS" "Correctly detected broken link"
     else
         report_status "Integration Test" "WARN" "Should have detected broken link"
     fi
-    
+
     # Cleanup
     rm -rf "$test_workspace"
-    
+
     echo ""
 fi
 
@@ -202,11 +204,11 @@ fi
 if [[ "$run_flags" == "true" ]]; then
     echo "🏴 FLAG BEHAVIOR AUDIT"
     echo "======================"
-    
+
     # Generate audit request for specialized agent
     audit_timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
     audit_report_file="/tmp/flag_audit_${audit_timestamp}.json"
-    
+
     echo "🤖 Deploying flag parsing validation agent..."
     echo ""
     echo "AGENT_TASK_REQUEST: Use Task tool with 'simple-helper' agent for command flag parsing validation."

@@ -9,12 +9,15 @@ Zellij is configured to automatically save your session state every 1 second and
 ## Configuration Files
 
 ### 1. **~/.zshrc** - Shell Integration
+
 Zellij is configured to:
+
 - Auto-start only when running inside Ghostty (via `GHOSTTY_RESOURCES_DIR` detection)
 - Auto-attach to existing sessions (reuse instead of creating duplicates)
 - Auto-exit shell when Zellij closes (prevents nested shells)
 
 **Key Settings:**
+
 ```zsh
 if [[ -n "$GHOSTTY_RESOURCES_DIR" ]]; then
   export ZELLIJ_AUTO_ATTACH=true
@@ -24,6 +27,7 @@ fi
 ```
 
 ### 2. **~/.config/zellij/config.kdl** - Session Recovery
+
 Session state serialization is fully enabled with balanced power-user settings:
 
 ```kdl
@@ -51,6 +55,7 @@ auto_exit_zellij_on_quit true
 ```
 
 **Configuration Profile**: Balanced Power-User
+
 - **Memory**: ~8 MB per pane (suitable for feature engineering workloads)
 - **Disk**: ~100-250 KB per session
 - **Recovery**: Up to 10,000 lines of scrollback preserved
@@ -59,25 +64,30 @@ auto_exit_zellij_on_quit true
 ## What Gets Saved
 
 ✓ **Always Saved:**
+
 - Session layout (panes, tabs, splits)
 - Running commands in each pane
 
 ✓ **Optional (Currently Enabled):**
+
 - Pane viewport (what was visible on screen)
 - Scrollback buffer (command history, last 5000 lines)
 
 ✗ **Not Saved (By Design):**
+
 - Environment variables (can be problematic on recovery)
 - Command output/results (can be huge)
 
 ## How Recovery Works
 
 ### After Normal Shutdown
+
 1. Zellij saves final session state
 2. Session moves to "EXITED" status in session manager
 3. Can be resumed anytime with `zellij attach <session-name>`
 
 ### After Crash or System Restart
+
 1. Previous session stored in cache (~/.cache/zellij)
 2. Next time terminal opens in Ghostty:
    - Zellij autostart activates
@@ -86,6 +96,7 @@ auto_exit_zellij_on_quit true
    - Commands show "Press ENTER to run..." safety banner
 
 ### Safety Measures
+
 - Destructive commands (like `rm -rf`) require confirmation before running
 - Prevents accidental data loss from stale commands
 - You can review and edit commands before execution
@@ -95,6 +106,7 @@ auto_exit_zellij_on_quit true
 See **[Zellij Command Cheatsheet](zellij-cheatsheet.md)** for a printable reference of all Zellij commands.
 
 The cheatsheet includes:
+
 - Session management commands
 - Pane and tab controls
 - Keyboard shortcuts
@@ -109,6 +121,7 @@ The cheatsheet includes:
 **See the cheatsheet for complete command reference!**
 
 ### Resume from Crash
+
 ```bash
 # Open new Ghostty terminal
 # Session auto-resumes automatically
@@ -119,6 +132,7 @@ zellij attach <session-name>    # Attach to specific session
 ```
 
 ### Switch Between Sessions
+
 ```bash
 zellij                          # Show session manager
 zellij ls                       # List all sessions
@@ -126,6 +140,7 @@ zellij attach work              # Attach to "work" session
 ```
 
 ### Create Named Session
+
 ```bash
 zellij --session main           # Create "main" session
 zellij --session dev            # Create "dev" session
@@ -136,11 +151,13 @@ zellij --session dev            # Create "dev" session
 ### Current Settings
 
 **Buffer Size**: 50,000 lines (in memory)
+
 - Immediately available when scrolling up with `Ctrl+S`
 - Lost when pane closes or session exits
 - Provides extensive history for logs/debugging
 
 **Serialization**: 10,000 lines (to disk)
+
 - Restored automatically after crashes/restarts
 - Survives system shutdown
 - Doubled from previous 5000 for better recovery
@@ -172,21 +189,25 @@ Both matter for comprehensive history tracking.
 ## Troubleshooting
 
 ### Session Not Recovering
+
 - Check if session is in "EXITED" status: `zlr`
 - Verify `session_serialization true` in config.kdl
 - Check cache directory: `ls ~/.cache/zellij/`
 - Try manual attach: `zla <session-name>`
 
 ### Duplicate Sessions Created
+
 - Ensure `ZELLIJ_AUTO_ATTACH=true` is set in .zshrc
 - Disable auto-attach if you prefer manual control (remove the env var)
 
 ### Commands Not Running on Recovery
+
 - This is intentional! Commands show "Press ENTER to run..." banner
 - Allows review before execution
 - Edit or skip problematic commands
 
 ### Excessive Disk Usage
+
 - Reduce `scrollback_lines_to_serialize` value
 - Or set to 0 if unlimited scrollback causes issues
 

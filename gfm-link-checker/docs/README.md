@@ -5,7 +5,7 @@ Ultra-comprehensive link validation system for local workspaces with GitHub-spec
 ## Features
 
 - **GitHub-aware directory validation** - Checks for README.md auto-rendering
-- **Precise anchor validation** - Implements GitHub's heading-to-anchor conversion rules  
+- **Precise anchor validation** - Implements GitHub's heading-to-anchor conversion rules
 - **Multi-format support** - Handles `.md`, `.markdown`, `.mdown`, `.mkdn` files
 - **Git repository intelligence** - Workspace-aware relative path resolution
 - **Comprehensive error reporting** - Line-precise validation with categorized errors
@@ -47,7 +47,7 @@ uv run gfm_link_checker.py
 ## Link Types Validated
 
 - **Local files** - Relative and absolute path validation
-- **Directories** - GitHub README.md auto-render checking  
+- **Directories** - GitHub README.md auto-render checking
 - **Anchors** - Internal heading references with GFM rules
 - **External URLs** - HTTP/HTTPS with intelligent fallbacks
 - **Mailto links** - Basic email format validation
@@ -55,6 +55,7 @@ uv run gfm_link_checker.py
 ## GitHub Flavored Markdown Intelligence
 
 This tool implements GitHub's exact behavior for:
+
 - Directory link auto-rendering (checks for README.md)
 - Heading anchor generation (lowercase, hyphens, special char removal)
 - Relative path resolution from Git repository context

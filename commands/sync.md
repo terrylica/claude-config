@@ -13,6 +13,7 @@ allowed-tools: Task, Bash, Read
 ## Recommended Workflow
 
 ### 1. 📁 Workspace Sync (Use Git)
+
 ```bash
 # Push changes to remote repository
 git add . && git commit -m "Work in progress" && git push
@@ -22,12 +23,14 @@ git pull
 ```
 
 ### 2. 🗂️ Session Sync (Use sage-sync)
+
 ```bash
 # Automatically sync Claude sessions in both directions (local → remote, remote → local)
 /sync --sync-sessions --verbose
 ```
 
 ### 3. ✅ Status Check
+
 ```bash
 # Verify sync infrastructure health
 /sync --status
@@ -42,7 +45,7 @@ git pull
 ## Options
 
 - `--dry-run` - Preview changes without executing
-- `--verbose` - Detailed output and diagnostics  
+- `--verbose` - Detailed output and diagnostics
 - `--force` - Skip confirmations and force operations
 - `--version` - Show version and system configuration
 
@@ -82,7 +85,7 @@ else
                 ;;
         esac
     done
-    
+
     # Default to status if no operation specified
     if [[ -z "$operation" ]]; then
         operation="--status --verbose"

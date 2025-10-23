@@ -8,6 +8,7 @@ description: Build and compile LaTeX documents using latexmk with live preview, 
 ## Quick Reference
 
 **When to use this skill:**
+
 - Compiling LaTeX documents
 - Setting up live preview with auto-rebuild
 - Managing multi-file projects
@@ -18,6 +19,7 @@ description: Build and compile LaTeX documents using latexmk with live preview, 
 ## Why latexmk?
 
 **Industry Standard Build Tool:**
+
 - ✅ Auto-detects dependencies (bibliography, index, etc.)
 - ✅ Runs correct number of times (handles cross-references)
 - ✅ Live preview mode watches for file changes
@@ -240,6 +242,7 @@ $sleep_time = 1;
 ```
 
 Place in project root, then:
+
 ```bash
 latexmk -pvc main.tex
 # Uses settings from .latexmkrc
@@ -266,11 +269,13 @@ export PATH="/Library/TeX/texbin:$PATH"
 ### Issue: PDF Not Auto-Reloading in Skim
 
 **Check Skim preferences:**
+
 1. Skim → Preferences → Sync
 2. Check "Check for file changes"
 3. Check "Reload automatically"
 
 **Verify SyncTeX enabled:**
+
 ```bash
 latexmk -pdf -synctex=1 document.tex
 # Should create document.synctex.gz

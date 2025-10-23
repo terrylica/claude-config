@@ -7,6 +7,7 @@ allowed-tools: Bash, Task
 # GFM Link Checker: $ARGUMENTS
 
 **Flags:**
+
 - `--format|-f text|json` - Output format (default: text)
 - `--no-external|-ne` - Skip external URL checking (faster)
 - `--no-completeness|-nc` - Skip README completeness checking
@@ -16,6 +17,7 @@ allowed-tools: Bash, Task
 - `--fix|-x` - Auto-fix broken internal links only (external links are reported for manual review)
 
 **Examples:**
+
 - `/gfm-check -x` - Check and auto-fix current directory
 - `/gfm-check /docs -ne -x` - Check docs, skip external URLs, auto-fix
 - `/gfm-check -f json` - Generate JSON report
@@ -24,12 +26,14 @@ allowed-tools: Bash, Task
 - `/gfm-check -ii -v` - Include ignored directories with verbose output
 
 **Claude Code Agent Validation:**
+
 - Automatically validates `.claude/agents/` directory compliance
 - Checks required frontmatter fields (especially `name:` field)
 - Detects non-agent files in agents directory
 - Validates agent directory purity (no subdirectories, only `.md` files)
 
 **Direct Usage (from any workspace):**
+
 ```
 $HOME/.claude/tools/gfm-link-checker/bin/gfm-check [options]
 ```
@@ -127,18 +131,18 @@ check_and_setup_uv() {
         echo "   • Zero-configuration project setup"
         return 1
     fi
-    
+
     # Check if target workspace has Python project structure
     original_dir=$(pwd)
     cd "$workspace_path" 2>/dev/null || { echo "❌ Cannot access workspace: $workspace_path"; return 1; }
-    
+
     # Look for Python project indicators
     has_pyproject=false
     has_python_files=false
-    
+
     [[ -f "pyproject.toml" ]] && has_pyproject=true
     [[ $(find . -maxdepth 2 -name "*.py" | head -1) ]] && has_python_files=true
-    
+
     if [[ "$has_python_files" == "true" && "$has_pyproject" == "false" ]]; then
         echo "🐍 Python files detected but no pyproject.toml found."
         echo "💡 Consider initializing UV project structure:"
@@ -151,7 +155,7 @@ check_and_setup_uv() {
         echo "   uv add package-name        # Add dependencies"
         echo "   uv sync                    # Install dependencies"
         echo ""
-        
+
         # Offer auto-setup for clean directories
         python_count=$(find "$workspace_path" -maxdepth 2 -name "*.py" | wc -l)
         if [[ $python_count -le 3 ]]; then
@@ -167,7 +171,7 @@ check_and_setup_uv() {
         echo "   uv add httpx requests   # Add common dependencies"
         echo ""
     fi
-    
+
     # Check for CLAUDE.md and suggest UV preferences
     if [[ ! -f "$workspace_path/.claude/CLAUDE.md" ]]; then
         echo "📝 Consider creating .claude/CLAUDE.md with UV preferences:"
@@ -177,7 +181,7 @@ check_and_setup_uv() {
         echo "   echo '- **Avoid**: pip, conda, pipenv' >> .claude/CLAUDE.md"
         echo ""
     fi
-    
+
     # Educational UV best practices
     echo "✅ UV environment validated. Key benefits you're now using:"
     echo "   • 10-100x faster dependency resolution than pip"
@@ -185,7 +189,7 @@ check_and_setup_uv() {
     echo "   • Reproducible builds with uv.lock"
     echo "   • Single tool for project management (no more virtualenv/pip confusion)"
     echo ""
-    
+
     cd "$original_dir"
     return 0
 }
@@ -196,7 +200,7 @@ if ! check_and_setup_uv; then
     exit 1
 fi
 
-# Run the GFM link checker using universal Claude Code path (preserves working directory)  
+# Run the GFM link checker using universal Claude Code path (preserves working directory)
 echo "🔍 Running GFM link integrity check..."
 uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" $cmd_args
 
@@ -205,15 +209,15 @@ exit_code=$?
 if [[ $exit_code -ne 0 && "$auto_fix" == "true" ]]; then
     echo ""
     echo "❌ Link issues found. Initiating intelligent auto-fix process..."
-    
+
     # Re-run with JSON output to get structured error data for analysis
     echo "🔧 Generating structured error report for analysis..."
     json_output=$(uv run --directory "$HOME/.claude/tools/gfm-link-checker" "$HOME/.claude/tools/gfm-link-checker/gfm_link_checker.py" $cmd_args --format json 2>/dev/null)
-    
+
     # Save JSON output to temporary file for agent analysis
     temp_file="/tmp/gfm_check_errors_$(date +%s).json"
     echo "$json_output" > "$temp_file"
-    
+
     echo "📋 Link errors saved to: $temp_file"
     echo "🤖 Deploying specialized link repair agent with deep analysis..."
     echo ""

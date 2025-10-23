@@ -3,17 +3,20 @@
 ## Quick Start (2 minutes)
 
 ### 1. Clone the Workspace
+
 ```bash
 git clone <your-repo-url> ~/.claude
 ```
 
 ### 2. Install ALL Workspace Tools (Automated)
+
 ```bash
 cd ~/.claude
 ./install-all-tools
 ```
 
 **The installer will:**
+
 - ✅ Install SAGE development tools (sage-dev, sage-sync, sage-status, gpu-ws)
 - ✅ Install GFM link checker (gfm-check)
 - ✅ Install CNS notification system (cns-notify)
@@ -26,6 +29,7 @@ cd ~/.claude
 - ✅ Handle missing tools gracefully (skips unavailable tools)
 
 ### 3. Restart Your Shell (if needed)
+
 ```bash
 # The installer will tell you if this is needed:
 source ~/.zshrc  # for zsh users
@@ -33,6 +37,7 @@ source ~/.bashrc # for bash users
 ```
 
 ### 4. Test Installation
+
 ```bash
 sage-dev --help
 gfm-check --help
@@ -44,21 +49,25 @@ tmux-session --help
 ### Universal Commands (available from any directory):
 
 #### SAGE Development Suite:
+
 - **`sage-dev`** - SAGE development environment launcher
-- **`sage-sync`** - Workspace/session sync tool  
+- **`sage-sync`** - Workspace/session sync tool
 - **`sage-status`** - Infrastructure health monitoring
 - **`gpu-ws`** - GPU workstation connection and management
 
 #### Documentation & Quality Tools:
+
 - **`gfm-check`** - GitHub Flavored Markdown link integrity checker
 
 #### System & Productivity Tools:
+
 - **`cns-notify`** - Audio notification system for Claude Code
 - **`tmux-session`** - Terminal session management
 - **`tmux-list`** - List active terminal sessions
 - **`tmux-kill`** - Kill terminal sessions
 
 ### Example Usage:
+
 ```bash
 # SAGE Development
 sage-status                                    # Check infrastructure health
@@ -85,11 +94,13 @@ gpu-ws                                         # Connect to GPU workstation
 ## How It Works
 
 ### Hybrid Architecture:
+
 - **Source files**: Organized in `~/.claude/tools/sage-aliases/`
 - **Executables**: Globally accessible via `~/.local/bin/`
 - **PATH**: Automatically configured by installer
 
 ### Benefits:
+
 - ✅ **Universal Access**: Commands work from any directory
 - ✅ **Industry Standard**: Uses `~/.local/bin` (same as pipx, uv, cargo)
 - ✅ **Shell Agnostic**: Works in bash, zsh, fish
@@ -103,12 +114,15 @@ gpu-ws                                         # Connect to GPU workstation
 The installer handles most issues automatically, but if you encounter problems:
 
 ### Commands Not Found After Installation?
+
 **First, try re-running the installer** - it includes diagnostics and safety features:
+
 ```bash
 ~/.claude/install-all-tools
 ```
 
 The enhanced installer will:
+
 - ✅ Check if files exist and are executable
 - ✅ Verify PATH configuration
 - ✅ **Test commands actually execute and work properly**
@@ -117,12 +131,15 @@ The enhanced installer will:
 - ✅ Provide specific fix instructions
 
 ### Manual Diagnostics (if installer doesn't help):
+
 1. **Check PATH includes `~/.local/bin`:**
+
    ```bash
    echo $PATH | grep ".local/bin"
    ```
 
 2. **Check files exist and are executable:**
+
    ```bash
    ls -la ~/.local/bin/sage-*
    ls -la ~/.local/bin/gpu-ws
@@ -135,6 +152,7 @@ The enhanced installer will:
    ```
 
 ### If All Else Fails
+
 The installer provides a **manual installation section** with step-by-step instructions for cases where the automated process doesn't work.
 
 ## Manual Installation (if installer fails)

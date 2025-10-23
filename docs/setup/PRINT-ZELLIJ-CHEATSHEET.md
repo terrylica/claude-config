@@ -1,7 +1,9 @@
 # How to Print Zellij Cheatsheet
 
 ## Step 1: View the Cheatsheet
+
 Open the cheatsheet in your browser or preferred markdown viewer:
+
 ```bash
 # View in terminal
 cat ~/.claude/docs/setup/zellij-cheatsheet.md
@@ -13,6 +15,7 @@ open ~/.claude/docs/setup/zellij-cheatsheet.md
 ## Step 2: Print to PDF
 
 ### macOS (Quick Method)
+
 1. Open the markdown file in a browser or application
 2. Press `Cmd + P` to open print dialog
 3. Click "PDF" dropdown in bottom-left
@@ -21,6 +24,7 @@ open ~/.claude/docs/setup/zellij-cheatsheet.md
 6. Click "Save"
 
 ### macOS (Browser Method)
+
 1. Open the file in your browser (Firefox, Safari, Chrome)
 2. Press `Cmd + P`
 3. In the print dialog:
@@ -30,6 +34,7 @@ open ~/.claude/docs/setup/zellij-cheatsheet.md
 4. Click "Save"
 
 ### Convert to HTML First (Better Formatting)
+
 ```bash
 # Using pandoc (if installed):
 pandoc ~/.claude/docs/setup/zellij-cheatsheet.md -o zellij-cheatsheet.html
@@ -48,6 +53,7 @@ open zellij-cheatsheet.html
 ## Step 4: Keep It Handy
 
 Print the PDF and:
+
 - Keep near your desk
 - Post on your monitor
 - Add to a binder with other documentation

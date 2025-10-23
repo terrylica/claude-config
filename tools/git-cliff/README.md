@@ -86,6 +86,7 @@ echo "📝 Commit: $(git rev-parse HEAD)"
 ## Simplified Usage for AI Agents
 
 **For commits only:**
+
 ```bash
 command -v git-cliff >/dev/null || cargo install git-cliff
 # AI: analyze `git diff --cached` → synthesize conventional commit message
@@ -94,6 +95,7 @@ git commit -m "$MSG"
 ```
 
 **For full release:**
+
 ```bash
 # AI: ensure configs exist (copy from templates if needed)
 # AI: run version bump → changelog → push → GitHub release
@@ -104,6 +106,7 @@ git commit -m "$MSG"
 ## Template Configs
 
 Located in `~/.claude/tools/git-cliff/templates/`:
+
 - `cliff.toml` - Detailed changelog (developer-focused, all commits)
 - `cliff-release-notes.toml` - Release notes (user-facing, latest release only)
 - `cz.toml.template` - Commitizen config (SemVer version tracking)

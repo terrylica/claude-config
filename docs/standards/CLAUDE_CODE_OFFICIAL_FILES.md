@@ -5,23 +5,27 @@ This document catalogues critical files and directories that are integral to Cla
 ## 🚨 CRITICAL CLAUDE CODE SYSTEM FILES
 
 ### Core Configuration Files
+
 - `CLAUDE.md` - ✅ **CLAUDE CODE OFFICIAL** - User memory and global instructions
 - `settings.json` - ✅ **CLAUDE CODE OFFICIAL** - Claude Code configuration and settings
 - `.gitignore` - ⚠️ **SYSTEM CRITICAL** - Version control exclusions (customizable but essential)
 
 ### System Directories
+
 - `system/` - ✅ **CLAUDE CODE OFFICIAL** - Session management and runtime data
   - `~/.claude/projects/` - Auto-generated session files (canonical)
   - `system/todos/` - Todo tracking system files
   - **WARNING**: Do not move or delete the `system/` directory
 
 ### Automation Integration
+
 - `automation/cns/` - ⚠️ **CLAUDE CODE INTEGRATION** - CNS hook system
   - CNS configuration and execution files via `settings.json`
   - Integration with Claude Code's event system
   - **CAUTION**: Modifications may break automation features
 
 ### Auto-Generated Runtime Data
+
 - `shell-snapshots/` - 🔄 **AUTO-GENERATED** - Temporary shell command snapshots
   - Auto-created during Claude Code sessions
   - Excluded from version control
@@ -49,6 +53,7 @@ These directories are user-created and safe to modify:
 ## 🔧 SAFE MODIFICATIONS
 
 You can safely:
+
 - Add custom files to user directories
 - Modify user automation scripts
 - Create new tools and utilities
@@ -58,6 +63,7 @@ You can safely:
 ## ⛔ DANGEROUS OPERATIONS
 
 **Never do these:**
+
 - Move or rename the `system/` directory
 - Delete `CLAUDE.md` or `settings.json`
 - Modify auto-generated session files

@@ -8,6 +8,7 @@ description: Create modern LaTeX tables with tabularray package for fixed-width 
 ## Quick Reference
 
 **When to use this skill:**
+
 - Creating tables with fixed-width columns
 - Formatting complex table layouts
 - Need precise column alignment
@@ -17,6 +18,7 @@ description: Create modern LaTeX tables with tabularray package for fixed-width 
 ## Why tabularray?
 
 **Modern LaTeX3 Package (replaces old solutions):**
+
 - ✅ Fixed-width columns with proper alignment
 - ✅ Clean, consistent syntax
 - ✅ Replaces: `tabular`, `tabularx`, `longtable`, `booktabs`
@@ -132,13 +134,13 @@ sudo tlmgr install tabularray
 
 ### Alignment Options
 
-| Code | Meaning |
-|------|---------|
-| `l` | Left-aligned |
-| `c` | Centered |
-| `r` | Right-aligned |
-| `X` | Flexible width (expands to fill) |
-| `Q[width]` | Fixed width with wrapping |
+| Code       | Meaning                          |
+| ---------- | -------------------------------- |
+| `l`        | Left-aligned                     |
+| `c`        | Centered                         |
+| `r`        | Right-aligned                    |
+| `X`        | Flexible width (expands to fill) |
+| `Q[width]` | Fixed width with wrapping        |
 
 ### Examples
 
@@ -219,6 +221,7 @@ For tables spanning multiple pages:
 ### Issue: Table Too Wide
 
 **Solution 1: Fixed-width columns**
+
 ```latex
 % Instead of:
 colspec = {ccc}
@@ -228,11 +231,13 @@ colspec = {Q[2cm] Q[3cm] Q[2cm]}
 ```
 
 **Solution 2: Flexible columns**
+
 ```latex
 colspec = {XXX}  % All columns expand equally
 ```
 
 **Solution 3: Scale table**
+
 ```latex
 \usepackage{graphicx}
 
@@ -250,6 +255,7 @@ colspec = {XXX}  % All columns expand equally
 **Problem:** Using `c` or `l` or `r` doesn't wrap
 
 **Solution:** Use `Q[width]` for wrapping
+
 ```latex
 % ❌ Won't wrap:
 colspec = {ccc}

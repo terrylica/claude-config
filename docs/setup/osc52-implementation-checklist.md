@@ -3,10 +3,12 @@
 ## What We Built ✅
 
 ### Files Created (Remote Linux)
+
 - [x] `~/.local/bin/xclip` - OSC 52 wrapper script
 - [x] `~/.zshrc` - Added `osc52-copy()` function and `pbcopy` alias
 
 ### Documentation Created (~/.claude/)
+
 - [x] `docs/setup/ssh-clipboard-osc52.md` - Complete setup guide
 - [x] `docs/setup/osc52-deep-dive.md` - Technical deep dive
 - [x] Updated `docs/setup/terminal-setup.md` - Added OSC 52 reference
@@ -19,6 +21,7 @@
 **Root Cause**: Claude Code executes tools in non-interactive subprocess contexts that lack a controlling terminal
 
 **Solution**: Changed from `> /dev/tty` to `>&2` (stderr)
+
 - stderr always available in subprocesses
 - Terminal emulators read both stdout and stderr for escape sequences
 - Escape sequences are invisible to user output
@@ -30,6 +33,7 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 ```
 
 **Critical Components**:
+
 1. **xclip wrapper** intercepts Claude Code call
 2. **OSC 52** terminal-native clipboard protocol
 3. **stderr output** (>&2) works in non-interactive contexts
@@ -39,6 +43,7 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 ## Verification ✓
 
 ### Test Results
+
 ```bash
 # All working:
 ✅ Claude Code: > /export → clipboard updated
@@ -69,6 +74,7 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 ```
 
 ### Design Principles Applied
+
 1. **Link Farm**: CLAUDE.md minimal, links to details
 2. **Hub-and-Spoke**: Central docs/INDEX.md navigation
 3. **Separation**: Config in ~/.local/bin/, docs in ~/.claude/docs/
@@ -80,6 +86,7 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 ### For Future You
 
 **Location of files**:
+
 - Wrapper: `~/.local/bin/xclip` (remote Linux)
 - Setup guide: `~/.claude/docs/setup/ssh-clipboard-osc52.md`
 - Deep dive: `~/.claude/docs/setup/osc52-deep-dive.md`
@@ -89,6 +96,7 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 Use `>&2` not `/dev/tty` when writing escape sequences in non-interactive contexts.
 
 **Testing**:
+
 ```bash
 # Quick test
 echo "test from wrapper" | xclip -selection clipboard
@@ -101,18 +109,21 @@ Added to "Terminal Setup" section:
 
 ```markdown
 ### SSH Clipboard Integration (OSC 52)
+
 **Purpose**: Enable Claude Code CLI `/export` to copy to macOS clipboard when SSH'd into remote Linux (works through tmux)
 **Mechanism**: `~/.local/bin/xclip` wrapper emits OSC 52 escape sequences to stderr (`>&2`), travels over SSH, interpreted by Ghostty
 **Requirements**:
+
 - Ghostty config: `clipboard-write = allow` (macOS)
 - xclip wrapper: `~/.local/bin/xclip` (remote Linux)
-**Critical detail**: Use `>&2` not `/dev/tty` (non-interactive contexts like Claude Code tool execution lack controlling terminal)
-**Docs**:
+  **Critical detail**: Use `>&2` not `/dev/tty` (non-interactive contexts like Claude Code tool execution lack controlling terminal)
+  **Docs**:
 - Setup: [`~/.claude/docs/setup/ssh-clipboard-osc52.md`](docs/setup/ssh-clipboard-osc52.md)
 - Deep dive: [`~/.claude/docs/setup/osc52-deep-dive.md`](docs/setup/osc52-deep-dive.md)
 ```
 
 **Why this format**:
+
 - Concise (5 lines + links)
 - Highlights critical detail (`>&2` vs `/dev/tty`)
 - Links to comprehensive docs
@@ -122,6 +133,7 @@ Added to "Terminal Setup" section:
 ## Integration with Existing Structure 🏗️
 
 ### Fits into ~/.claude/ hierarchy:
+
 ```
 ~/.claude/
 ├── CLAUDE.md                    # ← Updated: SSH Clipboard section
@@ -135,6 +147,7 @@ Added to "Terminal Setup" section:
 ```
 
 ### Aligns with existing patterns:
+
 - Similar to "Process Monitoring (noti)" section
 - Similar to "git-cliff Release Automation" section
 - Same **[Title] → Purpose → Mechanism → Requirements → Docs** format
@@ -142,6 +155,7 @@ Added to "Terminal Setup" section:
 ## Why This Solution is Irreducible ⚡
 
 Cannot remove any component:
+
 - ✗ Remove Base64 → binary data breaks
 - ✗ Remove OSC 52 → no terminal protocol
 - ✗ Remove stderr (use /dev/tty) → fails in non-interactive
@@ -149,6 +163,7 @@ Cannot remove any component:
 - ✗ Remove xclip wrapper → Claude Code can't find binary
 
 Cannot substitute alternatives:
+
 - ✗ X11 forwarding → requires admin, security risk, complexity
 - ✗ Cloud clipboard → privacy, latency, dependency
 - ✗ netcat bridge → firewall, security, manual
@@ -159,24 +174,28 @@ Each piece essential for the solution to work.
 ## Success Criteria Met 🎯
 
 ✅ **Functional Requirements**:
+
 - Claude Code `/export` copies to macOS clipboard
 - Works over SSH (any distance)
 - Works through tmux
 - No sudo/admin access needed
 
 ✅ **User Experience**:
+
 - Transparent (no Claude Code mods)
 - Automatic (no manual steps per use)
 - Fast (< 50ms over LAN)
 - Reliable (no dependencies on external services)
 
 ✅ **Documentation**:
+
 - CLAUDE.md updated (link farm pattern)
 - Setup guide created (step-by-step)
 - Deep dive written (technical details)
 - Cross-references added (terminal-setup.md)
 
 ✅ **Maintainability**:
+
 - Single wrapper script
 - Clear documentation path
 - Hub-and-spoke architecture
@@ -185,12 +204,14 @@ Each piece essential for the solution to work.
 ## Next Steps (Optional) 🚀
 
 ### If you want to extend:
+
 1. **Add to docs/INDEX.md**: Reference under "Terminal Setup" or "Tools"
 2. **Create specification**: `specifications/ssh-clipboard-osc52.yaml` (OpenAPI format)
 3. **Add to other machines**: Copy wrapper to other remote Linux boxes
 4. **Share with team**: Point them to setup guide
 
 ### If issues arise:
+
 1. Check `~/.local/bin/xclip` is executable
 2. Verify Ghostty has `clipboard-write = allow`
 3. Test outside Claude Code: `echo "test" | xclip -selection clipboard`
@@ -208,6 +229,7 @@ Each piece essential for the solution to work.
 **Why it works**: Terminal emulators monitor all output streams (stdout/stderr) for escape sequences, and stderr is always available even without a controlling terminal
 
 **Where it's documented**:
+
 - Quick ref: `~/.claude/CLAUDE.md` → Terminal Setup → SSH Clipboard Integration
 - Setup: `~/.claude/docs/setup/ssh-clipboard-osc52.md`
 - Deep dive: `~/.claude/docs/setup/osc52-deep-dive.md`

@@ -1,7 +1,9 @@
 # Automation Directory
+
 **Purpose**: Automated workflows, hooks, and integration scripts
 
 ## Contents
+
 - `cns/` - **CNS (Conversation Notification System)** (Formerly TTS, renamed 2025-07-28)
   - `config/` - Configuration system
     - `cns_config.json` - Clipboard and notification settings with volume control
@@ -22,6 +24,7 @@
   - `scripts/test_foundation.sh` - Test foundation script
 
 ## Claude Code Official Status
+
 ❌ **USER DIRECTORY** - Safe to customize and modify
 
 This directory contains user automation scripts and is not part of Claude Code's core functionality.

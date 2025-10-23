@@ -13,26 +13,32 @@ Slash commands are invoked using the `/` prefix in Claude Code:
 ## Available Commands
 
 ### Development & Quality Assurance
+
 - `/python-qa` - Python code quality assurance with multi-layer validation
 - `/command-check` - Comprehensive command validation and health checks
 
 ### Documentation & Links
+
 - `/gfm-check` - GitHub Flavored Markdown link integrity checker with auto-fix
 - `/command-agent-check` - Validate command-agent pair alignment
 
 ### Architecture & Planning
+
 - `/apcf` - Architecture-Preserving Commit Format for git commits
 - `/workspace-refactor` - Execute comprehensive workspace refactoring
 
 ### Research & Analysis
+
 - `/research` - Multi-perspective research with parallel keyword processing
 
 ### Synchronization
+
 - `/sync` - Claude Code session synchronization across environments
 
 ## Command Documentation
 
 Each command file contains:
+
 - Detailed usage instructions
 - Available flags and options
 - Examples and use cases
@@ -47,6 +53,7 @@ Each command file contains:
 ## Creating Custom Commands
 
 Place markdown files in this directory following the pattern:
+
 ```
 /command-name.md
 ```

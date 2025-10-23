@@ -3,7 +3,9 @@
 ## What We Discovered
 
 ### The Problem
+
 Claude Code CLI's `/export` command was failing with:
+
 ```
 Failed to copy to clipboard. Make sure `xclip` or `wl-copy` is installed
 ```
@@ -13,17 +15,20 @@ This happened even though we SSH'd from macOS (which has clipboard) into a Linux
 ### Root Cause Analysis
 
 #### Layer 1: Claude Code's Hardcoded Binary Check
+
 - Claude Code CLI `/export` command is **hardcoded** to look for `xclip` or `wl-copy` binaries
 - It does NOT use shell aliases or functions
 - It does NOT try `pbcopy` (macOS native)
 - It directly executes: `xclip -selection clipboard` or `wl-copy`
 
 #### Layer 2: SSH Session Limitations
+
 - Traditional clipboard tools (`xclip`, `wl-copy`) require local X11/Wayland display server
 - SSH sessions typically lack direct access to the client's display
 - Setting `DISPLAY=:0` only works if X11 forwarding is configured (security risk, complex setup)
 
 #### Layer 3: Terminal Escape Sequences (OSC 52)
+
 - **OSC** = Operating System Command
 - **OSC 52** = Specific sequence for clipboard operations
 - Format: `\033]52;<target>;base64(data)\007`
@@ -33,6 +38,7 @@ This happened even though we SSH'd from macOS (which has clipboard) into a Linux
   - Terminated with BEL (`\007`) or ST (`\033\\`)
 
 #### Layer 4: tmux Complication
+
 - tmux intercepts escape sequences for session management
 - OSC 52 sequences must be **double-wrapped** when inside tmux:
   ```
@@ -97,23 +103,27 @@ This happened even though we SSH'd from macOS (which has clipboard) into a Linux
 ### Why `>&2` Instead of `>/dev/tty`?
 
 **First Attempt Failed:**
+
 ```bash
 printf '\033]52;c;%s\007' "$encoded" > /dev/tty
 # Error: /dev/tty: No such device or address
 ```
 
 **Root Cause:**
+
 - `/dev/tty` is the **controlling terminal** device
 - Claude Code runs tools in non-interactive subprocess contexts
 - No controlling terminal allocated
 - `/dev/tty` does not exist or is not accessible
 
 **Working Solution:**
+
 ```bash
 printf '\033]52;c;%s\007' "$encoded" >&2
 ```
 
 **Why stderr (fd 2) Works:**
+
 1. stderr is always connected (even for non-interactive processes)
 2. Escape sequences written to stderr are processed by terminal emulator
 3. Terminal emulators read from both stdout and stderr for control sequences
@@ -144,16 +154,16 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 
 ### Terminal Support Matrix
 
-| Terminal | OSC 52 Support | Notes |
-|----------|----------------|-------|
-| Ghostty | ✅ Full | Native, requires `clipboard-write = allow` |
-| iTerm2 | ✅ Full | Native since v3.4.0 |
-| WezTerm | ✅ Full | Native |
-| Kitty | ✅ Full | Native |
-| Alacritty | ✅ With config | Requires `osc52` feature enabled |
-| tmux | ✅ Passthrough | Requires special wrapping (Ptmux) |
-| Terminal.app | ❌ None | Does not support OSC 52 |
-| xterm | ⚠️ Partial | Requires compile-time flag |
+| Terminal     | OSC 52 Support | Notes                                      |
+| ------------ | -------------- | ------------------------------------------ |
+| Ghostty      | ✅ Full        | Native, requires `clipboard-write = allow` |
+| iTerm2       | ✅ Full        | Native since v3.4.0                        |
+| WezTerm      | ✅ Full        | Native                                     |
+| Kitty        | ✅ Full        | Native                                     |
+| Alacritty    | ✅ With config | Requires `osc52` feature enabled           |
+| tmux         | ✅ Passthrough | Requires special wrapping (Ptmux)          |
+| Terminal.app | ❌ None        | Does not support OSC 52                    |
+| xterm        | ⚠️ Partial     | Requires compile-time flag                 |
 
 ### Ghostty Specific Configuration
 
@@ -165,6 +175,7 @@ clipboard-write = allow
 ```
 
 Optional (improves compatibility):
+
 ```
 osc-color-report-format = 8-bit
 ```
@@ -172,6 +183,7 @@ osc-color-report-format = 8-bit
 ### Security Implications
 
 **Why OSC 52 is safer than X11 forwarding:**
+
 - No full display server access needed
 - Only clipboard data can be transferred
 - Can be controlled with terminal config (`clipboard-write = allow`)
@@ -179,6 +191,7 @@ osc-color-report-format = 8-bit
 - Unidirectional (client can't inject data back via OSC 52 alone)
 
 **Potential risks:**
+
 - Malicious script on server could exfiltrate sensitive data to clipboard
 - User might paste compromised content unknowingly
 - Mitigation: Trust your servers, use for personal/team environments
@@ -186,6 +199,7 @@ osc-color-report-format = 8-bit
 ### Why Not X11 Forwarding?
 
 **X11 Forwarding approach:**
+
 ```bash
 # Local ~/.ssh/config
 Host remote
@@ -197,6 +211,7 @@ echo "test" | xclip -selection clipboard
 ```
 
 **Disadvantages:**
+
 1. Requires `X11Forwarding yes` in `/etc/ssh/sshd_config` (admin access)
 2. Requires X11 server running on macOS (XQuartz)
 3. Higher security risk (full display access)
@@ -204,6 +219,7 @@ echo "test" | xclip -selection clipboard
 5. Breaks if X11 forwarding disabled by policy
 
 **OSC 52 advantages:**
+
 - No server-side config changes needed
 - No admin/sudo required
 - Works with any terminal supporting OSC 52
@@ -213,30 +229,39 @@ echo "test" | xclip -selection clipboard
 ### Alternative Approaches (Not Used)
 
 #### 1. SSH RemoteCommand with pbcopy
+
 ```bash
 # Remote ~/.local/bin/pbcopy
 ssh ${SSH_CLIENT%% *} pbcopy
 ```
+
 **Why not:**
+
 - Requires SSH back from server to client (reverse connectivity)
 - Firewall issues
 - Authentication complexity
 
 #### 2. netcat Bridge
+
 ```bash
 # Client: nc -l 12345 | pbcopy
 # Server: echo "data" | nc client-ip 12345
 ```
+
 **Why not:**
+
 - Requires firewall rules
 - Manual port management
 - Security risk (unencrypted, unauthenticated)
 
 #### 3. Cloud Clipboard Service
+
 ```bash
 # curl -X POST https://clipboard.example.com -d @-
 ```
+
 **Why not:**
+
 - Data leaves trusted network
 - Requires internet connection
 - Privacy/security concerns
@@ -245,12 +270,14 @@ ssh ${SSH_CLIENT%% *} pbcopy
 ### Performance Characteristics
 
 **Payload size limits:**
+
 - Most terminals: 100KB - 1MB safe
 - Ghostty: tested up to 10MB
 - tmux: may require `set -g set-clipboard on`
 - Base64 overhead: ~33% size increase
 
 **Latency:**
+
 - Local machine: <1ms
 - LAN SSH: 1-10ms
 - WAN SSH: 50-200ms (depends on RTT)
@@ -259,27 +286,32 @@ ssh ${SSH_CLIENT%% *} pbcopy
 ### Debugging Techniques
 
 **Test raw OSC 52 (outside tmux):**
+
 ```bash
 printf '\033]52;c;%s\a' "$(echo -n 'test' | base64)"
 ```
 
 **Test with tmux wrapper:**
+
 ```bash
 printf '\033Ptmux;\033\033]52;c;%s\a\033\\' "$(echo -n 'test' | base64)"
 ```
 
 **Verify base64 encoding:**
+
 ```bash
 echo -n "Hello" | base64
 # Should output: SGVsbG8=
 ```
 
 **Check if terminal is processing sequence:**
+
 ```bash
 strace -e write bash -c 'printf "\033]52;c;dGVzdA==\a" >&2' 2>&1 | grep 52
 ```
 
 **Monitor tmux passthrough:**
+
 ```bash
 tmux show-options -g | grep clipboard
 # set-clipboard should be 'on' or 'external'
@@ -288,18 +320,21 @@ tmux show-options -g | grep clipboard
 ### Common Pitfalls
 
 1. **Forgot `\n` stripping in base64:**
+
    ```bash
    base64 | tr -d '\n'  # Correct
    base64               # Wrong: includes newlines
    ```
 
 2. **Wrong terminator:**
+
    ```bash
    printf '...\007'  # BEL (correct)
    printf '...\n'    # Wrong
    ```
 
 3. **Missing tmux detection:**
+
    ```bash
    if [ -n "$TMUX" ]; then  # Correct
    if [ "$TMUX" ]; then     # Also works
@@ -316,6 +351,7 @@ tmux show-options -g | grep clipboard
 ### Integration Points
 
 **Where this solution touches:**
+
 1. `~/.local/bin/xclip` - Wrapper script (created)
 2. `~/.zshrc` - Optional: `osc52-copy()` function and `pbcopy` alias
 3. Ghostty config - Must have `clipboard-write = allow`
@@ -343,6 +379,7 @@ tmux show-options -g | grep clipboard
 **Problem:** Claude Code `/export` needs `xclip`, but remote Linux has no access to macOS clipboard.
 
 **Solution:** Create `~/.local/bin/xclip` wrapper that:
+
 1. Reads stdin (what xclip would do)
 2. Base64 encodes it
 3. Wraps in OSC 52 escape sequence
@@ -350,6 +387,7 @@ tmux show-options -g | grep clipboard
 5. Outputs to stderr (not /dev/tty)
 
 **Why it works:**
+
 - Escape sequences travel back over SSH
 - Ghostty terminal intercepts OSC 52
 - Updates macOS system clipboard

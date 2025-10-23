@@ -32,6 +32,7 @@ Detailed instructions and process documentation...
 ## Disabled Agents
 
 Archived agents (saved context: 419 tokens):
+
 - `context-bound-planner.md` - Planning agent for context-aware task breakdown
 - `research-scout.md` - Research automation agent
 

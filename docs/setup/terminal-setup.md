@@ -19,6 +19,7 @@ shell-integration-features = no-title
 ```
 
 **Features**:
+
 - `window-save-state = always` - Restores window position, size, tabs, and splits on restart
 - `window-inherit-working-directory = true` - New tabs/splits inherit current directory
 - `macos-titlebar-style = native` - Enables native macOS tab drag-to-merge (drag window onto another window)
@@ -136,12 +137,14 @@ rm /tmp/xterm-ghostty.ti
 #### Enable TERM Forwarding
 
 **Local** `~/.ssh/config`:
+
 ```ssh
 Host remote-host
     SendEnv TERM
 ```
 
 **Remote** `/etc/ssh/sshd_config` (requires sudo):
+
 ```
 AcceptEnv TERM
 ```
@@ -167,6 +170,7 @@ Enable Claude Code `/export` to copy to macOS clipboard over SSH:
 **See**: [ssh-clipboard-osc52.md](ssh-clipboard-osc52.md) for complete setup
 
 **Quick setup**:
+
 1. Local Ghostty: Add `clipboard-write = allow` to `~/.config/ghostty/config`
 2. Remote Linux: Install xclip wrapper to `~/.local/bin/xclip`
 
@@ -185,11 +189,13 @@ The wrapper emits OSC 52 escape sequences that travel over SSH and are interpret
 #### Required Setup
 
 **1. Install Prettier globally**:
+
 ```bash
 npm install -g prettier@latest
 ```
 
 **2. Create system symlinks** (ensures tools available regardless of shell config):
+
 ```bash
 sudo ln -sf ~/.nvm/versions/node/v22.17.0/bin/node /usr/local/bin/node
 sudo ln -sf ~/.nvm/versions/node/v22.17.0/bin/prettier /usr/local/bin/prettier
@@ -198,12 +204,14 @@ sudo ln -sf ~/.nvm/versions/node/v22.17.0/bin/prettier /usr/local/bin/prettier
 **3. Configure Kitty PATH** (`~/.config/kitty/kitty.conf`):
 
 Add in the `env` section (~line 1658):
+
 ```toml
 # Add /usr/local/bin to PATH for tools like prettier and node
 env PATH=/usr/local/bin:/opt/homebrew/bin:${PATH}
 ```
 
 **4. Configure Helix formatter** (`~/.config/helix/languages.toml`):
+
 ```toml
 [[language]]
 name = "markdown"

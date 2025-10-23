@@ -8,6 +8,7 @@ description: Troubleshooting Claude Code session storage and resume failures. Us
 ## Quick Reference
 
 **When to use this skill:**
+
 - "No conversations found to resume" when running `claude -r`
 - New conversations not creating session files
 - Sessions appearing in wrong locations (`/tmp/` instead of `~/.claude/projects/`)
@@ -20,6 +21,7 @@ description: Troubleshooting Claude Code session storage and resume failures. Us
 **Standard Location:** `~/.claude/projects/`
 
 **Structure:**
+
 ```
 ~/.claude/projects/
 ├── -home-username-my-project/     # Encoded absolute path
@@ -33,9 +35,11 @@ description: Troubleshooting Claude Code session storage and resume failures. Us
 ## Critical Pitfall: HOME Variable
 
 ### Problem
+
 Claude Code uses `$HOME` environment variable to determine session storage location. If `$HOME` is incorrect, sessions go to wrong directory or disappear.
 
 ### Symptoms
+
 - `claude -r` shows "No conversations found to resume"
 - New conversations work but files don't appear in expected location
 - Sessions found in `/tmp/` or other unexpected paths
@@ -75,6 +79,7 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
 ### Prevention
 
 **Check IDE/Terminal Settings:**
+
 - **Cursor**: Settings → Environment → Verify HOME variable
 - **VS Code**: Settings → Environment → Check Remote SSH config
 - **macOS Terminal**: System Preferences → Advanced → Shell login behavior
@@ -85,18 +90,21 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
 ### Checklist: If Sessions Aren't Creating
 
 1. **Verify Authentication**
+
    ```bash
    claude /login
    # Should show: "✓ Authenticated as user@email.com"
    ```
 
 2. **Check HOME Variable**
+
    ```bash
    echo "HOME: $HOME"
    # Should show: /home/username (on Linux) or /Users/username (on macOS)
    ```
 
 3. **Test Directory Access**
+
    ```bash
    ls -ld ~/.claude/projects/
    # Should show: drwx------ (readable/writable)
@@ -107,6 +115,7 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
    ```
 
 4. **Monitor Session File Creation**
+
    ```bash
    # Count before
    BEFORE=$(find ~/.claude/projects -name "*.jsonl" | wc -l)
@@ -131,17 +140,20 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
 ### "No Conversations Found to Resume"
 
 **This message can mean:**
+
 - Sessions exist but are marked as complete (normal behavior)
 - Sessions exist but have format issues
 - Sessions stored in wrong location (HOME variable issue)
 - No valid incomplete sessions available
 
 **Incomplete sessions** (can resume):
+
 - Must have at least one assistant message
 - Must not be marked as complete
 - Must be reachable via `~/.claude/projects/`
 
 **Complete sessions** (won't resume):
+
 - Are archived automatically after finishing
 - Can be viewed but not resumed
 - Don't appear in `claude -r` output

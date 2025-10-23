@@ -8,6 +8,7 @@ description: Industry-standard Python API documentation using Pydantic v2 models
 ## Quick Reference
 
 **When to use this skill:**
+
 - You're documenting a Python package's public API
 - Creating reusable data structures with validation
 - Generating JSON schemas for AI agents or external consumers
@@ -19,6 +20,7 @@ description: Industry-standard Python API documentation using Pydantic v2 models
 ### The 3-Layer Architecture
 
 **Layer 1: Literal Types (Define Valid Values)**
+
 ```python
 from typing import Literal
 
@@ -27,6 +29,7 @@ TimeframeType = Literal["1m", "5m", "15m", "1h", "4h", "1d"]
 ```
 
 **Layer 2: Pydantic Models (Data Structure + Validation)**
+
 ```python
 from pydantic import BaseModel, Field
 
@@ -44,6 +47,7 @@ class UpdateResult(BaseModel):
 ```
 
 **Layer 3: Rich Docstrings (Usage & Examples)**
+
 ```python
 def update_data(
     self,

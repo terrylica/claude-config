@@ -6,60 +6,62 @@
 
 ## Session Management
 
-| Command | Description |
-|---------|-------------|
-| `zellij` | Start Zellij or show session manager |
-| `zellij ls` | List all running sessions |
-| `zellij ls --exited` | List crashed/exited sessions (resurrectable) |
-| `zellij attach <name>` | Attach to existing session |
-| `zellij --session <name>` | Create new named session |
-| `zellij kill-session <name>` | Kill a running session |
-| `zellij kill-all-sessions` | Kill all sessions |
+| Command                      | Description                                  |
+| ---------------------------- | -------------------------------------------- |
+| `zellij`                     | Start Zellij or show session manager         |
+| `zellij ls`                  | List all running sessions                    |
+| `zellij ls --exited`         | List crashed/exited sessions (resurrectable) |
+| `zellij attach <name>`       | Attach to existing session                   |
+| `zellij --session <name>`    | Create new named session                     |
+| `zellij kill-session <name>` | Kill a running session                       |
+| `zellij kill-all-sessions`   | Kill all sessions                            |
 
 ---
 
 ## Pane Controls (Inside Zellij)
 
 ### Navigation
-| Key | Action |
-|-----|--------|
-| `Ctrl+G` | Enter normal mode (from any mode) |
-| `H` / `←` | Move focus left |
-| `J` / `↓` | Move focus down |
-| `K` / `↑` | Move focus up |
-| `L` / `→` | Move focus right |
-| `P` | Cycle through panes |
+
+| Key       | Action                            |
+| --------- | --------------------------------- |
+| `Ctrl+G`  | Enter normal mode (from any mode) |
+| `H` / `←` | Move focus left                   |
+| `J` / `↓` | Move focus down                   |
+| `K` / `↑` | Move focus up                     |
+| `L` / `→` | Move focus right                  |
+| `P`       | Cycle through panes               |
 
 ### Pane Management
-| Key | Action |
-|-----|--------|
-| `D` | Split new pane down |
-| `R` | Split new pane right |
+
+| Key | Action                   |
+| --- | ------------------------ |
+| `D` | Split new pane down      |
+| `R` | Split new pane right     |
 | `N` | Split new pane (stacked) |
-| `C` | Rename pane |
-| `F` | Toggle pane fullscreen |
-| `W` | Toggle floating panes |
-| `Z` | Toggle pane frames |
-| `E` | Embed/float pane |
-| `I` | Toggle pane pinned |
+| `C` | Rename pane              |
+| `F` | Toggle pane fullscreen   |
+| `W` | Toggle floating panes    |
+| `Z` | Toggle pane frames       |
+| `E` | Embed/float pane         |
+| `I` | Toggle pane pinned       |
 
 ---
 
 ## Tab Controls
 
-| Key | Action |
-|-----|--------|
-| `1-9` | Jump to tab 1-9 |
-| `H` / `←` | Previous tab |
-| `J` / `↓` | Next tab |
-| `K` / `↑` | Previous tab |
-| `L` / `→` | Next tab |
-| `N` | New tab |
-| `R` | Rename tab |
-| `S` | Toggle sync mode (all panes) |
-| `[` | Break pane left |
-| `]` | Break pane right |
-| `B` | Break pane to new tab |
+| Key       | Action                       |
+| --------- | ---------------------------- |
+| `1-9`     | Jump to tab 1-9              |
+| `H` / `←` | Previous tab                 |
+| `J` / `↓` | Next tab                     |
+| `K` / `↑` | Previous tab                 |
+| `L` / `→` | Next tab                     |
+| `N`       | New tab                      |
+| `R`       | Rename tab                   |
+| `S`       | Toggle sync mode (all panes) |
+| `[`       | Break pane left              |
+| `]`       | Break pane right             |
+| `B`       | Break pane to new tab        |
 
 ---
 
@@ -68,12 +70,14 @@
 ### After Crash or Reboot
 
 **Automatic (if configured correctly):**
+
 1. Open new Ghostty terminal
 2. Zellij auto-resumes previous session
 3. Commands show "Press ENTER to run..." banner
 4. Review and execute commands
 
 **Manual Recovery:**
+
 ```bash
 # List resurrectable sessions
 zellij ls --exited
@@ -93,6 +97,7 @@ zellij
 ### Enable/Disable Autostart
 
 **Modify ~/.zshrc:**
+
 ```zsh
 # To enable autostart in Ghostty:
 export ZELLIJ_AUTO_ATTACH=true
@@ -139,17 +144,20 @@ auto_exit_zellij_on_quit true
 ### Common Workflows
 
 #### Resume After Crash
+
 ```bash
 zellij attach <session-name>
 ```
 
 #### List Everything
+
 ```bash
 zellij ls              # Show all sessions
 zellij ls --exited    # Show crashed sessions
 ```
 
 #### Create and Name Session
+
 ```bash
 zellij --session work
 zellij --session dev
@@ -157,6 +165,7 @@ zellij --session email
 ```
 
 #### Switch Between Sessions
+
 ```bash
 zellij                # Show session manager
 # Select session from list
@@ -180,14 +189,14 @@ zellij                # Show session manager
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| Session not recovering | Check: `zellij ls --exited` to see available sessions |
-| Commands won't run on recovery | Normal! Press ENTER to execute, press ESC to skip |
-| Duplicate sessions created | Ensure `ZELLIJ_AUTO_ATTACH=true` is set in .zshrc |
-| Too much disk usage | Lower `scrollback_lines_to_serialize` value in config.kdl |
+| Problem                           | Solution                                                    |
+| --------------------------------- | ----------------------------------------------------------- |
+| Session not recovering            | Check: `zellij ls --exited` to see available sessions       |
+| Commands won't run on recovery    | Normal! Press ENTER to execute, press ESC to skip           |
+| Duplicate sessions created        | Ensure `ZELLIJ_AUTO_ATTACH=true` is set in .zshrc           |
+| Too much disk usage               | Lower `scrollback_lines_to_serialize` value in config.kdl   |
 | Autostart not working in terminal | Verify you're using Ghostty (`echo $GHOSTTY_RESOURCES_DIR`) |
-| Links not clickable in Ghostty | `Shift+Cmd+Click` (macOS) or `Shift+Click` (Linux) |
+| Links not clickable in Ghostty    | `Shift+Cmd+Click` (macOS) or `Shift+Click` (Linux)          |
 
 ---
 

@@ -1,6 +1,7 @@
 # Next Session: SSH Setup Completion Checklist
 
 ## Current Status
+
 - ✅ SSH key generated: `~/.ssh/id_ed25519_terrylica`
 - ✅ SSH config updated (uses terrylica key for `.claude` directory)
 - ✅ Git remote set to SSH: `git@github.com:terrylica/claude-config.git`
@@ -13,11 +14,13 @@
 ### **1. ADD SSH PUBLIC KEY TO GITHUB** (Required First)
 
 **SSH Public Key:**
+
 ```
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHM47aEGeNE3EARBoAYPmXUfZaHLPrpoHn7l48FFzSTK terrylica@github.com
 ```
 
 **Steps:**
+
 1. Go to: https://github.com/settings/keys
 2. Click "New SSH key"
 3. Title: `terrylica-claude-config`
@@ -80,6 +83,7 @@ git push origin main
 **See**: `docs/setup/SSH-CACHING-ISSUE-ANALYSIS.md`
 
 Contains:
+
 - Complete problem analysis
 - Why caching broke directory-based key switching
 - 4 recommended solution options
@@ -90,12 +94,12 @@ Contains:
 
 ## Files Involved
 
-| File | Purpose | Status |
-|------|---------|--------|
-| `~/.ssh/id_ed25519_terrylica` | SSH private key | ✅ Generated |
-| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key | ⏳ Add to GitHub |
-| `~/.ssh/config` | SSH configuration | ✅ Updated |
-| `./.git/config` | Git remote | ✅ SSH protocol |
+| File                              | Purpose           | Status           |
+| --------------------------------- | ----------------- | ---------------- |
+| `~/.ssh/id_ed25519_terrylica`     | SSH private key   | ✅ Generated     |
+| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key    | ⏳ Add to GitHub |
+| `~/.ssh/config`                   | SSH configuration | ✅ Updated       |
+| `./.git/config`                   | Git remote        | ✅ SSH protocol  |
 
 ---
 

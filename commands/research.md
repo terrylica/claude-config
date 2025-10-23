@@ -7,9 +7,10 @@ allowed-tools: Task, WebSearch, WebFetch, Read, Write, TodoWrite
 # Research: Systematic Direction Exploration
 
 **Usage Options**:
+
 - `/research [keywords]` - Standard sequential keyword exploration with analysis
 - `/research [keywords] --parallel` - Simultaneous multi-keyword processing with cross-domain synthesis
-- `/research [keywords] --depth=N` - Control exploration depth (1-5, default: 2)  
+- `/research [keywords] --depth=N` - Control exploration depth (1-5, default: 2)
 - `/research [keywords] --mode=deep-dive` - Intensive single-domain exploration with multi-perspective analysis
 - `/research [keywords] --mode=comparative` - Systematic analysis of competing concepts or approaches
 - `/research [keywords] --format=json|markdown` - Output format (default: markdown)
@@ -23,8 +24,9 @@ allowed-tools: Task, WebSearch, WebFetch, Read, Write, TodoWrite
 ### Integration Patterns
 
 **Research-Driven Development**:
+
 - Links to existing project documentation and decisions
-- Identifies knowledge gaps requiring further investigation  
+- Identifies knowledge gaps requiring further investigation
 - Generates actionable research todos for systematic follow-up
 - Creates research artifacts suitable for team knowledge sharing
 

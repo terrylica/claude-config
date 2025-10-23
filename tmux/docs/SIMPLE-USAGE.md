@@ -5,6 +5,7 @@ Clean, minimal tmux session management with smart naming.
 ## 🎯 Philosophy
 
 **Simple. Clean. Transparent.**
+
 - Pure tmux commands under the hood
 - Smart folder-based naming
 - No plugins, no persistence, no complexity
@@ -13,22 +14,25 @@ Clean, minimal tmux session management with smart naming.
 ## 🚀 Quick Start
 
 ### One-Command Setup
+
 ```bash
 setup-simple-tmux
 ```
 
 That's it! You now have:
-- ✅ Smart session management  
+
+- ✅ Smart session management
 - ✅ Simple commands (ts/tl/tk)
 - ✅ Zero configuration needed
 - ✅ Clean, fast operation
 
 ### Basic Usage
+
 ```bash
 # Create/attach session using current folder name
 ts                    # or: tmux-session
 
-# Create/attach session with custom name  
+# Create/attach session with custom name
 ts auth               # or: tmux-session auth
 
 # List all sessions
@@ -46,23 +50,25 @@ td                    # Smart detach command (recommended)
 
 The session manager automatically creates session names:
 
-| Directory | Session Name | Reason |
-|-----------|--------------|--------|
-| `~/my-project` | `my-project` | Standard naming |
-| `~/.config` | `dotconfig` | Dot folder awareness |
-| `~/.git` | `dotgit` | Preserves dot nature |
-| `/tmp/Test_App` | `test-app` | Normalized to lowercase |
+| Directory       | Session Name  | Reason                   |
+| --------------- | ------------- | ------------------------ |
+| `~/my-project`  | `my-project`  | Standard naming          |
+| `~/.config`     | `dotconfig`   | Dot folder awareness     |
+| `~/.git`        | `dotgit`      | Preserves dot nature     |
+| `/tmp/Test_App` | `test-app`    | Normalized to lowercase  |
 | `~/My-Cool-App` | `my-cool-app` | Spaces/symbols → hyphens |
 
 ## 📋 Commands
 
 ### Core Commands
+
 - `tmux-session [name]` - Create/attach session (uses folder name if no name provided)
 - `tmux-list` - List all sessions with status
 - `tmux-kill <name>` - Kill specific session
 - `tmux-detach [name]` - Smart detach from current or specified session
 
 ### Quick Aliases
+
 - `ts [name]` - Short for `tmux-session`
 - `tl` - Short for `tmux-list`
 - `tk <name>` - Short for `tmux-kill`
@@ -70,6 +76,7 @@ The session manager automatically creates session names:
 - `tmux-here` - Same as `ts` (create/attach using folder name)
 
 ### Help
+
 - `tmux-help` - Show complete usage guide (shell function)
 
 ## 🎪 Example Workflow
@@ -83,7 +90,7 @@ ts                           # Creates 'my-awesome-project' session
 # Use 'td' to detach (session keeps running) - much easier than Ctrl+b d!
 
 # Later, return to work
-cd ~/my-awesome-project  
+cd ~/my-awesome-project
 ts                           # Attaches to existing 'my-awesome-project' session
 
 # Multiple contexts in same project
@@ -108,6 +115,7 @@ tk backend
 ## 🔧 Features
 
 ### ✅ What It Does
+
 - **Smart naming**: Converts folder names to valid session names
 - **Dot folder awareness**: `.config` → `dotconfig`
 - **Session management**: Create if new, attach if exists
@@ -115,6 +123,7 @@ tk backend
 - **Clean operation**: No background processes or plugins
 
 ### ❌ What It Doesn't Do
+
 - No session persistence across reboots
 - No complex automation or send-keys
 - No Claude Code integration
@@ -128,7 +137,7 @@ tk backend
 ~/.claude/tmux/
 ├── bin/
 │   ├── tmux-session          # Main session manager
-│   ├── tmux-list            # Session listing utility  
+│   ├── tmux-list            # Session listing utility
 │   └── tmux-kill            # Session killer utility
 ├── config/
 │   ├── simple-shell-integration.sh  # Shell aliases & functions
@@ -159,26 +168,28 @@ The scripts are simple bash files - feel free to modify them:
 ## ⚡ Session Management
 
 ### Detaching vs Exiting
+
 - **Detach** (`td` or `Ctrl+b, d`): Session keeps running in background
 - **Exit** (`exit` or `Ctrl+d`): Terminates session completely
 
 ### Session Lifecycle
+
 - Sessions exist only while tmux is running
 - Detached sessions persist until system reboot or manual kill
 - No automatic restoration after reboot (by design)
 
 ## ✨ Benefits of Simple Approach
 
-| Aspect | Simple Approach | Complex Systems |
-|--------|----------------|-----------------|
-| **Learning** | Standard tmux knowledge | Custom commands |
-| **Debugging** | Visible commands | Hidden automation |
-| **Portability** | Works everywhere | Requires setup |
-| **Maintenance** | Minimal | High overhead |
-| **Reliability** | Predictable | Race conditions |
-| **Performance** | Fast | Complex logic |
-| **Resources** | Minimal | Background processes |
+| Aspect          | Simple Approach         | Complex Systems      |
+| --------------- | ----------------------- | -------------------- |
+| **Learning**    | Standard tmux knowledge | Custom commands      |
+| **Debugging**   | Visible commands        | Hidden automation    |
+| **Portability** | Works everywhere        | Requires setup       |
+| **Maintenance** | Minimal                 | High overhead        |
+| **Reliability** | Predictable             | Race conditions      |
+| **Performance** | Fast                    | Complex logic        |
+| **Resources**   | Minimal                 | Background processes |
 
 ---
 
-*Simple tools for simple needs. Tmux does session management perfectly - no plugins required.*
+_Simple tools for simple needs. Tmux does session management perfectly - no plugins required._

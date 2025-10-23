@@ -3,6 +3,7 @@
 ## Current Status: ✅ SETUP DETECTED
 
 ### ZeroTier Performance Analysis
+
 - **Connection Type**: DIRECT (peer-to-peer, not relayed)
 - **Latency**: 7ms (suitable for same LAN)
 - **Local Network Detection**: ✅ Working (192.168.0.111)
@@ -11,6 +12,7 @@
 **Result**: ZeroTier is NOT slowing down connectivity - it's using local network speeds!
 
 ### Syncthing Installation Status
+
 - **macOS**: ✅ Installed via Homebrew
 - **GPU Workstation**: ✅ Installed in user space (~/bin/syncthing)
 
@@ -19,6 +21,7 @@
 ### Start Syncthing on Both Machines
 
 #### On macOS:
+
 ```bash
 # Start Syncthing service
 brew services start syncthing
@@ -28,6 +31,7 @@ syncthing --device-id
 ```
 
 #### On GPU Workstation:
+
 ```bash
 # Start Syncthing (will auto-create config)
 ssh zerotier-remote "~/bin/syncthing --no-browser --no-restart > ~/syncthing.log 2>&1 &"
@@ -37,12 +41,14 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 ```
 
 ### Web Interface Access
+
 - **macOS**: http://localhost:8384
 - **Remote**: http://172.25.253.142:8384 (via ZeroTier)
 
 ## Setup Phase 2: Configure Sync
 
 ### 1. Add Remote Device
+
 1. Open http://localhost:8384 on your Mac
 2. Click "Add Remote Device"
 3. Enter GPU workstation's Device ID
@@ -50,6 +56,7 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 5. Save
 
 ### 2. Create Shared Folder
+
 1. Click "Add Folder"
 2. **Folder Path**: `/Users/terryli/eon/nt/`
 3. **Folder ID**: `nt-workspace`
@@ -70,6 +77,7 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 6. Save
 
 ### 3. Accept on Remote
+
 1. SSH to remote: `ssh zerotier-remote`
 2. Open remote web interface or accept via command line
 3. Accept the shared folder to `~/eon/nt/`
@@ -77,6 +85,7 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 ## Setup Phase 3: Create Quick Commands
 
 ### Add to ~/.claude/gpu-workstation-aliases.sh:
+
 ```bash
 # Syncthing status and control
 alias sync-status='curl -s http://localhost:8384/rest/system/status | jq .myID'
@@ -97,6 +106,7 @@ alias sync-check='echo "=== Local Status ===" && ls -la ~/eon/nt/ | head -5 && e
 ### Daily Usage Pattern:
 
 #### Working Locally (macOS):
+
 ```bash
 cd ~/eon/nt
 # Edit files with Claude Code, VS Code, etc.
@@ -104,6 +114,7 @@ cd ~/eon/nt
 ```
 
 #### Switching to Remote Work:
+
 ```bash
 work-remote  # SSH to GPU workstation
 cd ~/eon/nt  # Same workspace, kept in sync
@@ -112,6 +123,7 @@ cd ~/eon/nt  # Same workspace, kept in sync
 ```
 
 #### Sync Monitoring:
+
 ```bash
 sync-status    # Check sync health
 sync-conflicts # Check for any conflicts
@@ -121,12 +133,14 @@ sync-check     # Verify both sides are in sync
 ## Performance Characteristics
 
 ### Background Sync Performance:
+
 - **File Detection**: Real-time (inotify/kqueue file watching)
 - **Transfer Speed**: Full local network speed (via ZeroTier direct P2P)
 - **CPU Usage**: Minimal background process
 - **Conflict Resolution**: Automatic with versioning
 
 ### Network Usage:
+
 - **Same LAN**: Direct local network transfer
 - **External**: ZeroTier P2P connection (still direct after handshake)
 - **Bandwidth**: Only changed files transfer (delta sync)
@@ -134,6 +148,7 @@ sync-check     # Verify both sides are in sync
 ## Troubleshooting
 
 ### If Sync is Slow:
+
 ```bash
 # Check if connection is still DIRECT
 sudo zerotier-cli peers | grep 8f53f201b7
@@ -144,12 +159,15 @@ ssh zerotier-remote "pkill syncthing && ~/bin/syncthing --no-browser --no-restar
 ```
 
 ### Conflict Resolution:
+
 - Syncthing creates `.sync-conflict` files for manual review
 - Original files are never overwritten
 - Both versions preserved until manually resolved
 
 ### Exclude Large Files:
+
 Add to ignore patterns:
+
 ```
 **/data_cache/*.parquet
 **/trade_logs/*.csv
@@ -159,11 +177,13 @@ Add to ignore patterns:
 ## Selective Sync
 
 ### For Different Work Patterns:
+
 - **Code Only**: Sync just `/src/` and `/docs/`
 - **Full Workspace**: Sync everything except data files
 - **Results Only**: Separate sync for GPU computation results
 
 ### Multiple Folder Setup:
+
 1. **nt-code**: Source code only
 2. **nt-data**: Data files (larger, less frequent sync)
 3. **nt-results**: GPU computation results
@@ -171,11 +191,13 @@ Add to ignore patterns:
 ## Security Notes
 
 ### ZeroTier Security:
+
 - All traffic encrypted end-to-end
 - Direct P2P connection (no relay servers for your setup)
 - Network access controlled by ZeroTier network admin
 
 ### Syncthing Security:
+
 - Device-to-device encryption
 - No cloud servers involved
 - Local network traffic only

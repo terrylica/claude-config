@@ -7,6 +7,7 @@ allowed-tools: Task, Bash, Glob, Grep, Read, Write
 # Python QA: Comprehensive Quality Assurance
 
 **Usage Options**:
+
 - `/python-qa` - Full 6-layer quality validation with auto-fixing
 - `/python-qa --critical-only` - Focus on production-blocking issues only
 - `/python-qa --check-only` - Dry-run analysis without making changes
@@ -22,6 +23,7 @@ allowed-tools: Task, Bash, Glob, Grep, Read, Write
 ### Integration Patterns
 
 **Comprehensive Quality Assurance**:
+
 - Replaces separate ruff-fix and import-check workflows
 - Unified quality reporting with actionable recommendations
 - CI/CD integration guidance with quality gates
