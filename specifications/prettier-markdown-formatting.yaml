@@ -1,0 +1,243 @@
+openapi: 3.1.0
+info:
+  title: Prettier Markdown Formatting Stop Hook
+  description: |
+    Automatic markdown formatting system that runs when Claude Code CLI stops responding.
+    Formats all .md files in the workspace using Prettier with GitHub-compatible settings.
+  version: 1.0.0
+
+x-metadata:
+  implementation_date: 2025-10-22
+  integration_type: claude_code_stop_hook
+  execution_pattern: fire_and_forget_async
+  max_exit_time_ms: 10
+
+components:
+  schemas:
+    PrettierConfig:
+      type: object
+      description: Prettier configuration for markdown formatting
+      properties:
+        proseWrap:
+          type: string
+          enum: [preserve]
+          description: Preserve line breaks for GitHub/BitBucket compatibility
+        printWidth:
+          type: integer
+          default: 80
+        tabWidth:
+          type: integer
+          default: 2
+        useTabs:
+          type: boolean
+          default: false
+
+    FormatScope:
+      type: object
+      description: Files included/excluded from formatting
+      properties:
+        included:
+          type: array
+          items:
+            type: string
+          example:
+            - "**/*.md"
+        excluded:
+          type: array
+          items:
+            type: string
+          example:
+            - "**/node_modules/**"
+            - "**/.git/**"
+            - "**/file-history/**"
+            - "**/plugins/**"
+
+paths:
+  /hooks/stop/prettier:
+    post:
+      summary: Format markdown files on Claude stop
+      description: |
+        Automatically formats all markdown files in workspace when Claude Code CLI
+        stops responding. Uses fire-and-forget async pattern for instant exit.
+
+      operationId: formatMarkdownOnStop
+
+      requestBody:
+        description: Claude Code session metadata (stdin JSON)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  enum: [stop]
+                workspace_dir:
+                  type: string
+                  description: Current workspace directory
+
+      responses:
+        '0':
+          description: Script exits immediately (< 10ms)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ""
+
+        background:
+          description: Prettier runs in background after script exits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  formatted_files:
+                    type: array
+                    items:
+                      type: string
+                    description: List of .md files formatted
+                  errors:
+                    type: array
+                    items:
+                      type: string
+                    description: Any formatting errors (logged, not shown to user)
+
+x-implementation:
+  architecture:
+    pattern: fire_and_forget
+    description: |
+      Script spawns background process with `{ work } &` and exits immediately.
+      Critical for Claude Code responsiveness - hooks must complete in < 10ms.
+
+  components:
+    script:
+      path: ~/.claude/automation/prettier/format-markdown.sh
+      permissions: 0755
+      shebang: "#!/usr/bin/env bash"
+
+    config:
+      path: ~/.claude/.prettierrc
+      format: JSON
+
+    prettier_binary:
+      path: ~/.nvm/versions/node/v22.17.0/bin/prettier
+      version: latest
+
+    settings:
+      path: ~/.claude/settings.json
+      hook_type: Stop
+      hook_order: 2
+      description: Runs after CNS notification hook
+
+  workflow:
+    trigger: Claude Code CLI stops responding
+    timing: After main agent finishes (not on user interrupt)
+
+    steps:
+      - step: 1
+        action: Claude Code invokes Stop hooks
+        timing: Agent response complete
+
+      - step: 2
+        action: CNS notification hook executes
+        timing: "< 10ms exit"
+        background: Sends notification
+
+      - step: 3
+        action: Prettier formatting hook executes
+        timing: "< 10ms exit"
+        background: Formats all .md files
+
+      - step: 4
+        action: User sees formatted files
+        timing: Next file read or git status
+
+  best_practices:
+    async_execution:
+      - Use `{ command } &` to spawn background process
+      - Exit immediately with `exit 0`
+      - Never wait for formatting to complete
+      - Redirect output to /dev/null
+
+    file_discovery:
+      - Use `find` with `-type f -name "*.md"`
+      - Exclude common patterns (node_modules, .git, etc.)
+      - Work from workspace directory
+
+    prettier_flags:
+      - "--write": Modify files in place
+      - "--prose-wrap preserve": GitHub-compatible line breaks
+      - "--config": Explicit config path
+
+    error_handling:
+      - Suppress errors (> /dev/null 2>&1)
+      - Don't block on missing files
+      - Use `set -euo pipefail` for safety
+
+x-testing:
+  manual_test:
+    description: Test hook execution time
+    command: |
+      time ~/.claude/automation/prettier/format-markdown.sh
+      # Should complete in < 10ms (script exit, not formatting)
+
+  integration_test:
+    description: Test with Claude Code
+    steps:
+      - Create test .md file with bad formatting
+      - Run Claude Code command
+      - Wait for Stop hook
+      - Verify file is formatted
+
+  validation:
+    exit_time: "< 10ms"
+    formatting_accuracy: "All .md files in workspace formatted"
+    no_user_blocking: "User never sees formatting delay"
+
+x-troubleshooting:
+  hook_not_running:
+    symptoms:
+      - Markdown files not formatted after Claude stops
+    checks:
+      - Verify hook in settings.json Stop array
+      - Check script is executable (chmod +x)
+      - Test script manually
+
+  slow_execution:
+    symptoms:
+      - Delay after Claude stops responding
+    checks:
+      - Verify fire-and-forget pattern `{ work } &`
+      - Check script exits immediately
+      - Measure exit time with `time` command
+
+  formatting_errors:
+    symptoms:
+      - Files not formatted correctly
+    checks:
+      - Verify .prettierrc exists
+      - Check Prettier binary path
+      - Test Prettier manually on sample file
+
+  workspace_not_detected:
+    symptoms:
+      - Wrong directory being formatted
+    checks:
+      - Verify CLAUDE_WORKSPACE_DIR environment variable
+      - Check fallback to $(pwd)
+      - Test with explicit workspace path
+
+x-related_specifications:
+  - cns-conversation-notification-system.yaml
+  - file: settings.json
+    section: hooks.Stop
+
+x-references:
+  prettier:
+    docs: https://prettier.io/docs/en/options.html
+    prose_wrap: https://prettier.io/docs/en/options.html#prose-wrap
+
+  claude_code:
+    hooks: https://docs.claude.com/en/docs/claude-code/hooks
+    stop_hook: Best practice - exit in < 10ms, use async pattern
