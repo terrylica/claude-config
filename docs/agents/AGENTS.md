@@ -4,11 +4,11 @@
 
 ## Available Agents
 
-### [Research Scout](../../agents/research-scout.md) (`research-scout`)
+### [Research Scout](../../agents-disabled/research-scout.md) (`research-scout`)
 
 Explores research directions from seed keywords. Use when you need systematic exploration of topics.
 
-### [Context-Bound Planner](../../agents/context-bound-planner.md) (`context-bound-planner`)
+### [Context-Bound Planner](../../agents-disabled/context-bound-planner.md) (`context-bound-planner`)
 
 Planning assistant that keeps solutions tied to explicit context, constraints, and invariants.
 

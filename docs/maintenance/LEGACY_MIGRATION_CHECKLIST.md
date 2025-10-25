@@ -8,7 +8,6 @@
 
 ### **Confirmed Legacy References**
 
-- `commands/sync.md` - Legacy session migration options (`--migrate-sessions`)
 - `LEGACY_ARCHIVE_NOTICE.md` - Archive documentation (502MB archived)
 - `docs/standards/CLAUDE_SESSION_STORAGE_STANDARD.md` - References removed legacy symlinks
 

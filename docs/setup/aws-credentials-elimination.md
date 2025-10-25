@@ -227,7 +227,7 @@ Eliminate all plain-text AWS credentials from local files and migrate to Doppler
 
 **Hub (User Memory)**:
 
-- **Credential Management**: [`~/.claude/CLAUDE.md`](../../CLAUDE.md#credential-management-security) - Central hub for all credential workflows
+- **User Memory**: [`~/.claude/CLAUDE.md`](../../CLAUDE.md) - Global workspace configuration and conventions
 - **Documentation Index**: [`docs/INDEX.md`](../INDEX.md) - Hub-and-spoke navigation
 
 **Specifications (Machine-Readable)**:

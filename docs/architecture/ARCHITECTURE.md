@@ -11,7 +11,6 @@ This document describes the refactored architecture of the Claude Code workspace
 ├── settings.json              # [FIXED] Main Claude Code configuration
 ├── CLAUDE.md                  # [FIXED] User memory & APCF methodology
 ├── agents/                    # [FIXED] Agent configurations
-├── commands/                  # [FIXED] Slash commands (/python-qa, /apcf, /gfm-check)
 ├── bin/                       # [NEW] Utility scripts
 │   └── cns-notify             # Manual CNS notification trigger
 ├── automation/                # [NEW] Automation subsystem
@@ -158,6 +157,7 @@ Session storage is canonical at `~/.claude/projects/`.
 
 - `README.md`: Main configuration documentation
 - `ARCHITECTURE.md`: This architecture document
+- `architecture/workflow-orchestration-comparison.md`: Event-driven workflow orchestration research and recommendations
 
 ## Integration Patterns
 
@@ -274,7 +274,6 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ### Development Tools
 
-- **Slash Commands**: `/python-qa`, `/apcf`, `/gfm-check` for workflow automation
 - **Agents**: Specialized agents for compliance, testing, research
 - **Hook Automation**: Async logging and session management (no delays)
 - **Manual Utilities**: `bin/cns-notify` for independent testing
@@ -310,6 +309,133 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 
 ---
 
-**Last Updated**: September 12, 2025  
-**Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete  
-**Compatible with**: Claude Code official constraints as of September 2025
+## Workspace Reorganization Plan
+
+### Status: Proposed (Documentation Phase Complete)
+
+As of October 2025, a comprehensive workspace reorganization has been planned to address organizational debt and improve maintainability.
+
+### Current Issues
+
+- **Artifact Accumulation**: 210 MB of unmanaged runtime data
+- **Organizational Debt**: Root-level scripts, backup files, unclear taxonomy
+- **Current Score**: 7.2/10 organization quality
+- **Target Score**: 9.0/10 with clear standards and automation
+
+### Reorganization Documentation
+
+Complete reorganization specifications and guides available:
+
+- **[Workspace Reorganization Specification](/specifications/workspace-reorganization.yaml)** - Target architecture, migration rules, retention policies
+- **[Complete Move Map](/specifications/reorg-move-map.yaml)** - 28 file operations with dependencies and validation
+- **[Tool Organization Standards](/docs/standards/TOOL_ORGANIZATION.md)** - Taxonomy, decision tree, development workflow
+- **[Tool Manifest](/tools/tool-manifest.yaml)** - Machine-readable registry of 19 tools
+- **[Cleanup Targets](/specifications/reorg-cleanup-targets.yaml)** - 12 cleanup operations with safety protocols
+- **[Artifact Retention Policy](/docs/maintenance/ARTIFACT_RETENTION.md)** - 30-day retention with automated archival
+- **[Health Check Specification](/specifications/workspace-health-check.yaml)** - 42 validation checks across 8 categories
+- **[Rollback Procedures](/docs/maintenance/REORGANIZATION_ROLLBACK.md)** - Phase-by-phase safety procedures
+- **[Migration Guide](/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md)** - Step-by-step execution instructions
+- **[Execution Checklists](/specifications/reorg-execution-checklists.yaml)** - Pre/phase/post migration checklists
+
+### Target Directory Structure
+
+The proposed reorganization enhances the existing structure:
+
+```
+~/.claude/
+├── [Existing Core - Unchanged]
+├── tools/                        # Enhanced tool organization
+│   ├── bin/                      # [NEW] Executable wrappers
+│   ├── config/                   # [NEW] Configuration utilities
+│   ├── lib/                      # [NEW] Shared libraries
+│   └── {tool-name}/              # Individual tool directories
+├── system/                       # Enhanced system organization
+│   ├── todos/                    # [MOVED FROM ROOT]
+│   ├── file-history/             # [MOVED FROM ROOT]
+│   ├── debug/                    # [MOVED FROM ROOT]
+│   ├── history/                  # [CONSOLIDATED]
+│   │   ├── session-history.jsonl # [MOVED FROM ROOT]
+│   │   └── archive/              # [MOVED FROM ROOT]
+│   └── [existing system files]
+├── archive/                      # [NEW] Compressed old artifacts
+│   ├── shell-snapshots-YYYY-MM.tar.gz
+│   ├── debug-logs-YYYY-MM.tar.gz
+│   └── file-history-YYYY-MM.tar.gz
+└── specifications/               # [ENHANCED] Machine-readable specs
+    └── [reorganization specs]
+```
+
+### Reorganization Phases
+
+1. **Phase 1: Documentation** ✅ Complete (October 2025)
+   - All specifications and guides created
+   - Tool manifest documented
+   - Target architecture defined
+
+2. **Phase 2: Safe Cleanup** - Remove backup files, fix anomalies
+3. **Phase 3: Root Cleanup** - Move root scripts to tools/
+4. **Phase 4: System Consolidation** ⚠️ High Risk - Move runtime artifacts
+5. **Phase 5: Archival** - Compress old artifacts (30-day policy)
+6. **Phase 6: Advanced** - Optional uv migration
+
+### Conservative Approach
+
+- **Documentation-first**: Complete blueprint before execution
+- **Phased execution**: Independent, reversible phases
+- **Validation gates**: Health checks after each phase
+- **Rollback procedures**: Documented for every operation
+- **Risk assessment**: Clear marking of high-risk operations
+
+### Tool Organization Taxonomy
+
+New decision tree for script placement:
+
+- **Automation hooks** → `/automation/{system-name}/`
+- **Configuration utilities** → `/tools/config/`
+- **Standalone tools** → `/tools/{tool-name}/`
+- **Executable wrappers** → `/tools/bin/`
+- **System integration** → `/bin/` (minimize new scripts)
+
+See `/docs/standards/TOOL_ORGANIZATION.md` for complete taxonomy.
+
+### Artifact Retention
+
+Automated 30-day retention policy:
+
+- **Shell snapshots**: Archive after 30 days, ~80% compression
+- **Debug logs**: Archive after 30 days, selective by severity
+- **File history**: Archive after 30 days, test Claude Code compatibility
+- **Automation**: Monthly LaunchAgent or cron job
+
+Expected space savings: ~150-200 MB initially, ongoing management
+
+### Health Monitoring
+
+42 validation checks across 8 categories:
+
+1. File organization (8 checks)
+2. Tool validation (6 checks)
+3. Symlink integrity (4 checks)
+4. Hook validation (5 checks)
+5. Documentation links (3 checks)
+6. Permission validation (4 checks)
+7. Artifact management (6 checks)
+8. Git health (6 checks)
+
+Automation target: `/tools/bin/workspace-health-check.sh`
+
+### Execution Status
+
+- **Current**: Documentation phase complete
+- **Next**: Review and approval
+- **Timeline**: Phased execution over 2-4 weeks
+- **Risk mitigation**: Conservative approach, extensive validation
+
+For detailed execution instructions, see `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md`.
+
+---
+
+**Last Updated**: October 23, 2025 (Architecture version 2.2, Reorganization plan v1.0.0)
+**Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete
+**Reorganization Status**: Documentation phase complete, awaiting execution approval
+**Compatible with**: Claude Code official constraints as of October 2025

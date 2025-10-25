@@ -227,5 +227,5 @@ Zellij session serialization has minimal performance impact while providing comp
 
 ## See Also
 
-- [Ghostty Shell Integration](../terminal-setup.md)
+- [Ghostty Shell Integration](terminal-setup.md)
 - [Terminal Setup Guide](terminal-setup.md)

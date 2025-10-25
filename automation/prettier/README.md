@@ -56,6 +56,7 @@ exit 0  # Immediate exit
 ```
 
 **Hook Order**:
+
 1. CNS notification hook (sends notification)
 2. Prettier formatting hook (formats markdown)
 
@@ -124,6 +125,7 @@ cat test.md
 **Symptoms**: Files not formatted after Claude stops
 
 **Checks**:
+
 ```bash
 # Verify hook in settings
 jq '.hooks.Stop' ~/.claude/settings.json
@@ -140,6 +142,7 @@ ls -l ~/.claude/automation/prettier/format-markdown.sh
 **Symptoms**: Delay after Claude stops
 
 **Checks**:
+
 ```bash
 # Measure exit time
 time ~/.claude/automation/prettier/format-markdown.sh
@@ -152,6 +155,7 @@ time ~/.claude/automation/prettier/format-markdown.sh
 **Symptoms**: Files not formatted correctly
 
 **Checks**:
+
 ```bash
 # Verify config exists
 cat ~/.claude/.prettierrc

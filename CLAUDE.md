@@ -4,22 +4,40 @@
 
 **Navigation Index**: [`docs/INDEX.md`](docs/INDEX.md) - Hub-and-spoke documentation architecture
 
-**Quick Links**: [Tools](tools/) | [Specifications](specifications/) | [Agents](docs/agents/AGENTS.md) | [Commands](docs/commands/commands.md) | [Docs](docs/)
+**Quick Links**: [Tools](tools/) | [Specifications](specifications/) | [Automation](automation/) | [Agents](docs/agents/AGENTS.md) | [Docs](docs/)
 
 ---
 
 ## Conventions
 
 - Apply neutral, promotional-free language to generated docs/comments and new identifiers only; never alter user text
-- Use SemVer 2.0.0 (init 1.0.0 if stable else 0.1.0); bump MAJOR for breaking, MINOR for additive, PATCH for fixes
-- Update versions consistently across README/docstrings/metadata
 - **File Paths**: ALWAYS output absolute paths starting with `/` with space after extension before punctuation (e.g., `/path/to/file.md ` not `path/to/file.md.`) - Ghostty Cmd+click requires this, no exceptions
+
+### Version Management
+
+**Standard**: SemVer 2.0.0 (init 1.0.0 if stable else 0.1.0) - MAJOR.MINOR.PATCH
+
+**Single Source of Truth**: Git tags (e.g., `v1.2.3`)
+
+**Version Locations** (3 only):
+
+- ✅ **Git tags** - Authoritative release versions
+- ✅ **CLAUDE.md** - Temporal context for AI agents (project-level only)
+- ✅ **CHANGELOG.md** - Required by Keep a Changelog standard
+
+**Avoid Embedding Versions In**:
+
+- ❌ README.md - Use shields.io auto-updating badges instead
+- ❌ Individual docs files - Creates maintenance burden, sync issues
+- ❌ Multiple locations - Risk of inconsistency
+
+**Rationale**: Industry standard (Kubernetes, Node.js, Django, React). Eliminates duplicate maintenance, prevents version drift, enables automation. [Research: terrylica/claude-code-skills-github-issues v4.0.1]
 
 ## Planning
 
-- **Machine-Readable**: Define and maintain OpenAPI 3.1.1 spec for persistent planning files
+- **Machine-Readable**: Define and maintain OpenAPI 3.1.1 spec for persistent planning files (e.g., [`link-validation-autofix-system.yaml`](/Users/terryli/.claude/specifications/link-validation-autofix-system.yaml))
 - **Logical Dependencies**: Organize by capabilities, not time-based roadmapping - use Success Gates/Sluices for validation checkpoints
-- **Dynamic Evolution**: Objectives and implementations evolve dynamically
+- **Dynamic Evolution**: Objectives and implementations evolve dynamically - track findings in SSoT `x-implementation-findings`
 
 ## System Architecture & Environment
 
@@ -41,10 +59,12 @@
 
 ### Primary Toolchain
 
-**Python**: `uv` (management), `uv run --active python -m` (execution), 3.12+ - **Avoid**: pip, conda, setuptools, poetry
-**Rust**: `cargo`, `cargo nextest run`, `cargo deny check`, pre-commit hooks mandatory
-**Containers**: Colima + Docker CLI (Homebrew)
-**Full Catalog**: [`docs/setup/toolchain.md`](docs/setup/toolchain.md) - Complete tool preferences and package standards
+**Python**: `uv` (management), `uv run scriptname.py` (execution), 3.12+ - **Avoid**: pip, conda, setuptools, poetry
+
+- **Inline Dependencies**: PEP 723 (`# /// script`) - self-contained scripts
+  **Rust**: `cargo`, `cargo nextest run`, `cargo deny check`, pre-commit hooks mandatory
+  **Containers**: Colima + Docker CLI (Homebrew)
+  **Full Catalog**: [`docs/setup/toolchain.md`](docs/setup/toolchain.md) - Complete tool preferences and package standards
 
 ## Documentation Standards
 
@@ -72,6 +92,11 @@
 - **troubleshooting/session-recovery** - Claude Code session troubleshooting
 
 **Note**: Skills load contextually when relevant. Focused, single-capability design with progressive disclosure.
+
+## Automation
+
+**Telegram**: Pyrogram (one-time auth → persistent session) - [`automation/lychee/`](/Users/terryli/.claude/automation/lychee/)
+**Credentials**: Doppler `claude-config/dev` - [`DOPPLER_SECRETS.md`](/Users/terryli/.claude/automation/lychee/DOPPLER_SECRETS.md)
 
 ## Terminal & Shell Configuration
 

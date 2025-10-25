@@ -8,7 +8,12 @@ Central navigation point for all workspace documentation with direct links to mo
 ## **🏗️ Core Architecture**
 
 - **[Architecture Overview](architecture/ARCHITECTURE.md)** - Workspace structure and design patterns
+- **[Workflow Orchestration Research](architecture/workflow-orchestration-comparison.md)** - Event-driven architecture solutions for Claude Code CLI workflows
+- **[Task Queue Research](architecture/lightweight-async-task-queue-research.md)** - Lightweight async task queue systems without external services (Redis/RabbitMQ)
+- **[Task Queue Quick Reference](architecture/task-queue-quick-reference.md)** - Quick start guide for persist-queue with SQLite
+- **[Task Queue Architecture Diagrams](architecture/task-queue-architecture-diagrams.md)** - Visual comparison of file-based vs SQLite queue architectures
 - **[Standards & Guidelines](standards/)** - Development standards and best practices
+- **[Tool Organization Standards](standards/TOOL_ORGANIZATION.md)** - Tool taxonomy, decision tree, development workflow
 
 ## **🤖 Agent System**
 
@@ -32,13 +37,36 @@ Central navigation point for all workspace documentation with direct links to mo
 ## **📊 Project Management**
 
 - **[SAGE Aliases](../sage-aliases/)** - Development environment shortcuts
-- **[Command System](commands/commands.md)** - Available commands and their usage
 - **[Todo Management](../todos/)** - Task tracking and progress management
+- **[Tool Manifest](../tools/tool-manifest.yaml)** - Machine-readable registry of all workspace tools
 
 ## **📈 Reports & Analysis**
 
 - **[MHR Reports](reports/MHR_SAGE_SYNC_REPORT.md)** - Module housekeeping and refactoring reports
 - **[System Reports](reports/)** - Various system analysis reports
+
+## **🔧 Workspace Reorganization**
+
+### Specifications
+
+- **[Reorganization Specification](../specifications/workspace-reorganization.yaml)** - Target architecture, migration rules, retention policies
+- **[Complete Move Map](../specifications/reorg-move-map.yaml)** - 28 file operations with dependencies and validation
+- **[Cleanup Targets](../specifications/reorg-cleanup-targets.yaml)** - 12 cleanup operations with safety protocols
+- **[Health Check Specification](../specifications/workspace-health-check.yaml)** - 42 validation checks across 8 categories
+- **[Execution Checklists](../specifications/reorg-execution-checklists.yaml)** - Pre/phase/post migration checklists
+
+### Documentation
+
+- **[Migration Guide](maintenance/WORKSPACE_REORGANIZATION_GUIDE.md)** - Step-by-step execution instructions
+- **[Artifact Retention Policy](maintenance/ARTIFACT_RETENTION.md)** - 30-day retention with automated archival
+- **[Rollback Procedures](maintenance/REORGANIZATION_ROLLBACK.md)** - Phase-by-phase safety procedures
+
+### Status
+
+- **Phase 1**: ✅ Documentation Complete (October 2025)
+- **Current Score**: 7.2/10 → **Target**: 9.0/10
+- **Space Recovery**: ~150-200 MB from artifact archival
+- **Next Step**: Review documentation, then execute Phase 2
 
 ## **📚 Reference Materials**
 
@@ -54,7 +82,6 @@ Central navigation point for all workspace documentation with direct links to mo
 - **Agents**: [Registry](agents/AGENTS.md) | [Development](agents/)
 - **Tools**: [Installation](../install-all-tools) | [Tmux](../tmux/) | [GFM Checker](../gfm-link-checker/)
 - **Configuration**: [Standards](standards/) | [Setup](setup/) | [Sync](sync/)
-- **Commands**: [Available Commands](commands/commands.md) | [Usage Examples](commands/command-extensions.md)
 
 ### By Task Type
 

@@ -80,12 +80,6 @@ Message:
 - **Clipboard**: Only first heading line saved
 - **Example**: `# APCF: Audit-Proof Commit Format` → `# APCF: Audit-Proof Commit Format`
 
-### Slash Commands (`/apcf`)
-
-- **Detection**: Prompts starting with `/`
-- **Clipboard**: Only command name saved
-- **Example**: `/apcf` → `/apcf`
-
 ### Natural Language
 
 - **Detection**: All other prompts

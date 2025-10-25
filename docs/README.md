@@ -10,7 +10,7 @@ This repository serves as a template for Claude Code workspace configuration, pr
 | 🏗️ **Architecture** | System design and architectural principles    | [Architecture Overview](architecture/ARCHITECTURE.md)                    |
 | ⚙️ **Setup**        | Installation and configuration guides         | [Team Setup](setup/TEAM_SETUP.md), [GPU Setup](setup/gpu-cloud-setup.md) |
 | 🔄 **Sync**         | Cross-platform synchronization workflows      | [Sync Strategy](sync/claude-code-sync-strategy.md)                       |
-| 🤖 **Agents**       | AI agents and slash commands                  | [Agents](agents/AGENTS.md), [Commands](commands/commands.md)             |
+| 🤖 **Agents**       | AI agents and slash commands                  | [Agents](agents/AGENTS.md)                                               |
 | 📊 **Reports**      | Analysis and project reports                  | [SAGE Sync Report](reports/MHR_SAGE_SYNC_REPORT.md)                      |
 
 ## Quick Start
@@ -54,13 +54,11 @@ Cross-platform sync strategies and workflows:
 - [Bidirectional Sync Demo](sync/bidirectional-sync-demo.md) - Sync demonstration
 - [Sync Redesign Master Plan](sync/SYNC_REDESIGN_MASTER_PLAN.md) - Sync architecture
 
-### 🤖 Agents & Commands
+### 🤖 Agents
 
-AI agents and slash command documentation:
+AI agent documentation:
 
 - [Agent Configurations](agents/AGENTS.md) - Available AI agents and their capabilities
-- [Command Extensions](commands/commands.md) - Available slash commands
-- [Command Extensions Documentation](commands/command-extensions.md) - Implementation details
 
 ### 📊 Reports & Analysis
 
@@ -97,11 +95,6 @@ Project reports and analysis documentation:
 - **Tmux Session Management**: `tmux/`
 - **Documentation**: [Tmux Tools Documentation](../tmux/docs/README.md)
 - **Commands**: `tmux-session`, `tmux-list`, `tmux-kill`
-
-### Command Extensions
-
-- **Location**: `commands/`
-- **Documentation**: [Command Extensions Documentation](commands/command-extensions.md)
 
 ### Agent Configurations
 

@@ -340,18 +340,18 @@ doppler secrets notes set AWS_ACCESS_KEY_ID \
 
 **Hub (User Memory)**:
 
-- **Credential Management**: [`~/.claude/CLAUDE.md`](../../CLAUDE.md#credential-management-security) - Central hub for all credential workflows
-- **Documentation Index**: [`docs/INDEX.md`](../INDEX.md) - Hub-and-spoke navigation
+- **User Memory**: [`~/.claude/CLAUDE.md`](../../../CLAUDE.md) - Global workspace configuration and conventions
+- **Documentation Index**: [`docs/INDEX.md`](../../../docs/INDEX.md) - Hub-and-spoke navigation
 
 **Specifications (Machine-Readable)**:
 
-- **Doppler Integration**: [`specifications/doppler-integration.yaml`](../../specifications/doppler-integration.yaml) - OpenAPI 3.1.0 spec
-- **AWS Credentials Management**: [`specifications/aws-credentials-management.yaml`](../../specifications/aws-credentials-management.yaml) - Complete workflow spec
+- **Doppler Integration**: [`specifications/doppler-integration.yaml`](../../../specifications/doppler-integration.yaml) - OpenAPI 3.1.0 spec
+- **AWS Credentials Management**: [`specifications/aws-credentials-management.yaml`](../../../specifications/aws-credentials-management.yaml) - Complete workflow spec
 
 **Setup Guides (Human-Readable)**:
 
 - **This Document**: Rotation and usage workflows
-- **Elimination Plan**: [`docs/setup/aws-credentials-elimination.md`](aws-credentials-elimination.md) - Reference implementation for ml-feature-experiments
+- **Elimination Plan**: [`docs/setup/aws-credentials-elimination.md`](../../../docs/setup/aws-credentials-elimination.md) - Reference implementation for ml-feature-experiments
 
 ---
 
