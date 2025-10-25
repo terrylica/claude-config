@@ -1,0 +1,462 @@
+---
+cleanup_specification:
+  version: "1.0.0"
+  generated: "2025-10-23"
+  description: |
+    Comprehensive list of files and directories targeted for cleanup during
+    workspace reorganization. Includes backup files, old artifacts, redundant
+    data, and accumulated runtime artifacts.
+
+metadata:
+  total_cleanup_targets: 12
+  estimated_space_recovery_mb: 210
+  safety_level: "conservative"
+  verification_required: true
+  git_history_check: "mandatory"
+
+cleanup_categories:
+  backup_files:
+    description: "Backup files that should use git history instead"
+    risk: "low"
+    recovery_method: "git restore"
+    total_targets: 3
+    estimated_space_kb: 15
+
+  runtime_artifacts:
+    description: "Accumulated runtime data that needs archival"
+    risk: "low"
+    recovery_method: "archive compression"
+    total_targets: 3
+    estimated_space_mb: 189
+
+  nested_anomalies:
+    description: "Incorrect directory nesting"
+    risk: "low"
+    recovery_method: "git restore"
+    total_targets: 1
+    estimated_space_kb: 2
+
+  deprecated_files:
+    description: "Legacy files that should be archived"
+    risk: "low"
+    recovery_method: "move to archive"
+    total_targets: 5
+    estimated_space_kb: 50
+
+# ==============================================================================
+# BACKUP FILES (DELETE after git verification)
+# ==============================================================================
+
+backup_files_to_delete:
+  - target_id: "CLEANUP-001"
+    type: "backup_file"
+    path: "/Users/terryli/.claude/statusline.sh.backup"
+    size_bytes: 2700
+    reason: "Backup of statusline.sh - use git history instead"
+    verification_steps:
+      - "Verify /statusline.sh exists and is functional"
+      - "Check git log statusline.sh for history"
+      - "Confirm backup is redundant"
+    git_check: "git log statusline.sh"
+    risk: "low"
+    dependencies: []
+    execution_phase: "phase_2_safe_cleanup"
+    rollback: "git restore statusline.sh.backup"
+
+  - target_id: "CLEANUP-002"
+    type: "backup_file"
+    path: "/Users/terryli/.claude/archive/sage-sync-legacy/sage-sync.original"
+    size_bytes: "unknown"
+    reason: "Original backup in archive directory - redundant"
+    verification_steps:
+      - "Verify file is in archive directory (already archived)"
+      - "Check git history for this file"
+      - "Confirm not actively referenced"
+    git_check: "git log archive/sage-sync-legacy/sage-sync.original"
+    risk: "low"
+    dependencies: []
+    execution_phase: "phase_2_safe_cleanup"
+    rollback: "git restore from .git/"
+    note: "Already in archive directory, safe to remove"
+
+  - target_id: "CLEANUP-003"
+    type: "backup_file"
+    path: "/Users/terryli/.claude/automation/cns/cns_hook_entry.sh.backup"
+    size_bytes: "unknown"
+    reason: "Backup in active automation directory - use git instead"
+    verification_steps:
+      - "Verify /automation/cns/cns_hook_entry.sh exists and works"
+      - "Run CNS tests to confirm functionality"
+      - "Check git log for history"
+    git_check: "git log automation/cns/cns_hook_entry.sh"
+    risk: "low"
+    dependencies:
+      - "CNS automation must be functional"
+    execution_phase: "phase_2_safe_cleanup"
+    rollback: "git restore"
+    critical_check: "Run automation/cns/tests before deleting"
+
+# ==============================================================================
+# RUNTIME ARTIFACTS (ARCHIVE with compression)
+# ==============================================================================
+
+runtime_artifacts_to_archive:
+  - target_id: "ARCHIVE-001"
+    type: "runtime_artifact_directory"
+    path: "/Users/terryli/.claude/shell-snapshots"
+    size_mb: 69
+    file_count: 371
+    reason: "Claude Code shell session snapshots - accumulated runtime data"
+    retention_policy:
+      keep_recent_days: 30
+      archive_older: true
+      compression: "tar.gz"
+    archive_target: "/Users/terryli/.claude/archive/shell-snapshots-2025-10.tar.gz"
+    verification_steps:
+      - "Calculate file modification times"
+      - "Keep files modified within last 30 days"
+      - "Archive older files to compressed format"
+      - "Verify compression successful"
+      - "Delete originals only after verification"
+    risk: "low"
+    dependencies: []
+    execution_phase: "phase_5_archival"
+    rollback: "Extract tar.gz back to original location"
+    automation_candidate: true
+    future_automation: "Monthly cron job for automatic archival"
+
+  - target_id: "ARCHIVE-002"
+    type: "runtime_artifact_directory"
+    path: "/Users/terryli/.claude/debug"
+    size_mb: 57
+    file_count: "unknown"
+    reason: "Debug logs - accumulated debugging data"
+    retention_policy:
+      keep_recent_days: 30
+      archive_older: true
+      compression: "tar.gz"
+    archive_target: "/Users/terryli/.claude/archive/debug-logs-2025-10.tar.gz"
+    verification_steps:
+      - "Identify files older than 30 days"
+      - "Compress to tar.gz"
+      - "Verify no active logging processes"
+      - "Delete originals after verification"
+    risk: "low"
+    dependencies:
+      - "Must move to /system/debug/ first (see MOVE-010)"
+    execution_phase: "phase_5_archival"
+    rollback: "Extract from archive"
+    note: "Should be moved to /system/debug/ before archival"
+
+  - target_id: "ARCHIVE-003"
+    type: "runtime_artifact_directory"
+    path: "/Users/terryli/.claude/file-history"
+    size_mb: 63
+    file_count: "~300 UUID directories"
+    reason: "Claude Code file version history - accumulated data"
+    retention_policy:
+      keep_recent_days: 30
+      archive_older: true
+      compression: "tar.gz"
+    archive_target: "/Users/terryli/.claude/archive/file-history-2025-10.tar.gz"
+    verification_steps:
+      - "Identify directories by modification time"
+      - "Archive UUID directories older than 30 days"
+      - "Verify compression successful"
+      - "Test Claude Code file history still works"
+    risk: "medium"
+    dependencies:
+      - "Must move to /system/file-history/ first (see MOVE-009)"
+      - "Claude Code may reference this path"
+    execution_phase: "phase_5_archival"
+    rollback: "Extract from archive"
+    critical_check: "Verify Claude Code file history works after archival"
+    note: "HIGH RISK: May affect Claude Code functionality"
+
+# ==============================================================================
+# NESTED ANOMALIES (FIX structure)
+# ==============================================================================
+
+nested_anomalies_to_fix:
+  - target_id: "FIX-001"
+    type: "nested_directory"
+    path: "/Users/terryli/.claude/.claude"
+    contents:
+      - "settings.local.json (1,607 bytes)"
+    reason: "Incorrect nesting - .claude within .claude"
+    action: "Move contents to /system/ and remove nested directory"
+    move_target: "/Users/terryli/.claude/system/settings.local.json"
+    verification_steps:
+      - "Move settings.local.json to /system/"
+      - "Verify nested directory is empty"
+      - "Remove empty .claude/ directory"
+      - "Check if settings.local.json is referenced anywhere"
+    risk: "low"
+    dependencies: []
+    execution_phase: "phase_2_safe_cleanup"
+    rollback: "Recreate structure if needed"
+
+# ==============================================================================
+# DEPRECATED FILES (MOVE to archive)
+# ==============================================================================
+
+deprecated_files_to_archive:
+  - target_id: "DEPRECATE-001"
+    type: "legacy_script"
+    path: "/Users/terryli/.claude/instant-sync-option.sh"
+    size_bytes: "unknown"
+    reason: "Legacy sync script - superseded by new sync system"
+    action: "Move to archive/legacy/"
+    archive_target: "/Users/terryli/.claude/archive/legacy/instant-sync-option.sh"
+    verification_steps:
+      - "Verify not referenced in active automation"
+      - "Check documentation for references"
+      - "Move to archive/legacy/"
+    risk: "low"
+    dependencies: []
+    execution_phase: "phase_3_root_cleanup"
+    rollback: "Move back to root"
+
+  - target_id: "DEPRECATE-002"
+    type: "virtual_environment"
+    path: "/Users/terryli/.claude/gfm-link-checker/.venv"
+    size_mb: "1-2 (estimated)"
+    reason: "Virtual environment - user standard is 'uv' not .venv"
+    action: "Remove after migrating to uv"
+    verification_steps:
+      - "Create pyproject.toml if needed"
+      - "Test gfm-link-checker with 'uv run'"
+      - "Verify all functionality works"
+      - "Remove .venv directory"
+    risk: "medium"
+    dependencies:
+      - "uv must be installed"
+      - "gfm-link-checker must work with uv"
+    execution_phase: "phase_6_advanced"
+    rollback: "Restore .venv from backup"
+    note: "Per user standards: use uv, not pip/conda/venv"
+
+  - target_id: "DEPRECATE-003"
+    type: "legacy_configuration"
+    path: "/Users/terryli/.claude/disable-pyright.sh"
+    size_bytes: 2400
+    reason: "Configuration script in root - should be in tools/config/"
+    action: "Move to /tools/config/"
+    move_target: "/Users/terryli/.claude/tools/config/disable-pyright.sh"
+    verification_steps:
+      - "Create /tools/config/ if needed"
+      - "Move script to config directory"
+      - "Test script execution from new location"
+      - "Update documentation if referenced"
+    risk: "low"
+    dependencies: []
+    execution_phase: "phase_3_root_cleanup"
+    rollback: "Move back to root"
+
+  - target_id: "DEPRECATE-004"
+    type: "large_changelog"
+    path: "/Users/terryli/.claude/CHANGELOG.md"
+    size_kb: 244
+    reason: "Large changelog - consider archiving old entries"
+    action: "Keep recent entries, archive old"
+    archive_target: "/Users/terryli/.claude/archive/CHANGELOG-archive-2025.md"
+    verification_steps:
+      - "Keep last 6 months of entries in CHANGELOG.md"
+      - "Move older entries to archive"
+      - "Add note in CHANGELOG.md pointing to archive"
+    risk: "low"
+    dependencies: []
+    execution_phase: "optional"
+    rollback: "Concatenate files back together"
+    note: "Optional - CHANGELOG.md is appropriate at root, just large"
+
+  - target_id: "DEPRECATE-005"
+    type: "unused_files"
+    path: "/Users/terryli/.claude/statusline.sh"
+    size_bytes: "unknown"
+    reason: "User statusline script - should be in user config, not workspace"
+    action: "Document proper usage, consider moving"
+    documentation_target: "/Users/terryli/.claude/docs/setup/statusline-setup.md"
+    verification_steps:
+      - "Document that this should be symlinked from user config"
+      - "Create setup guide"
+      - "Consider moving to /tools/config/ or leaving as-is"
+    risk: "low"
+    dependencies:
+      - "ccstatusline system must continue working"
+    execution_phase: "optional"
+    rollback: "none (documentation only)"
+    note: "Don't move yet - needs user config migration strategy"
+
+# ==============================================================================
+# EXECUTION STRATEGY
+# ==============================================================================
+
+execution_phases:
+  phase_2_safe_cleanup:
+    name: "Safe Cleanup - Backups & Anomalies"
+    targets:
+      - "CLEANUP-001" # statusline.sh.backup
+      - "CLEANUP-002" # sage-sync.original
+      - "CLEANUP-003" # cns_hook_entry.sh.backup
+      - "FIX-001"     # Nested .claude directory
+    estimated_duration: "15 minutes"
+    space_recovery_kb: 15
+    risk: "low"
+    mandatory_checks:
+      - "Git working directory clean"
+      - "Git log verification for all backup files"
+      - "Confirmation that production files exist and work"
+
+  phase_3_root_cleanup:
+    name: "Root-Level Script Cleanup"
+    targets:
+      - "DEPRECATE-001" # instant-sync-option.sh
+      - "DEPRECATE-003" # disable-pyright.sh
+    estimated_duration: "20 minutes"
+    space_recovery_kb: 10
+    risk: "low"
+    mandatory_checks:
+      - "Scripts not referenced in active automation"
+      - "Documentation updated if needed"
+
+  phase_5_archival:
+    name: "Runtime Artifact Archival"
+    targets:
+      - "ARCHIVE-001" # shell-snapshots
+      - "ARCHIVE-002" # debug logs
+      - "ARCHIVE-003" # file-history
+    estimated_duration: "45 minutes"
+    space_recovery_mb: 189
+    risk: "medium"
+    mandatory_checks:
+      - "30-day retention policy correctly calculated"
+      - "Compression successful and verified"
+      - "Original files deleted only after verification"
+      - "Claude Code functionality tested after archival"
+
+  phase_6_advanced:
+    name: "Advanced Cleanup (Optional)"
+    targets:
+      - "DEPRECATE-002" # .venv migration
+      - "DEPRECATE-004" # CHANGELOG archival (optional)
+      - "DEPRECATE-005" # statusline.sh documentation (optional)
+    estimated_duration: "30 minutes"
+    space_recovery_mb: 2
+    risk: "medium"
+    mandatory_checks:
+      - "uv available and tested"
+      - "All functionality verified after changes"
+
+# ==============================================================================
+# SAFETY PROTOCOLS
+# ==============================================================================
+
+safety_protocols:
+  before_any_cleanup:
+    - "Full workspace backup"
+    - "Git working directory clean"
+    - "Git commit of current state with message: 'pre-cleanup snapshot'"
+    - "Verify all production files exist and work"
+
+  before_each_target:
+    - "Read target file to understand content"
+    - "Check git log for history"
+    - "Verify not actively referenced"
+    - "Document rollback procedure"
+
+  after_each_target:
+    - "Git commit if successful: 'cleanup: [target_id] - [description]'"
+    - "Test affected systems if applicable"
+    - "Update this specification with actual results"
+
+  if_something_goes_wrong:
+    - "STOP immediately"
+    - "Do not proceed to next target"
+    - "git reset --hard HEAD~1 for immediate rollback"
+    - "Restore from backup if needed"
+    - "Document issue in /docs/maintenance/REORGANIZATION_ISSUES.md"
+
+# ==============================================================================
+# VALIDATION CHECKLIST
+# ==============================================================================
+
+validation_checklist:
+  pre_cleanup:
+    - [ ] Workspace fully backed up
+    - [ ] Git working directory clean
+    - [ ] Git commit created: "pre-cleanup snapshot"
+    - [ ] All tests passing
+    - [ ] Documentation links valid (gfm-check)
+
+  per_target:
+    - [ ] Read and understand file content
+    - [ ] Check git log for history
+    - [ ] Verify not actively referenced
+    - [ ] Execute cleanup operation
+    - [ ] Verify cleanup successful
+    - [ ] Test affected systems
+    - [ ] Git commit if successful
+
+  post_cleanup:
+    - [ ] All tools still functional
+    - [ ] All automation hooks working
+    - [ ] Documentation links valid
+    - [ ] No broken symlinks
+    - [ ] Space recovery achieved
+    - [ ] Git history preserved
+
+# ==============================================================================
+# AUTOMATION CANDIDATES
+# ==============================================================================
+
+future_automation:
+  monthly_archival:
+    description: "Automate monthly archival of runtime artifacts"
+    targets:
+      - "shell-snapshots/"
+      - "debug/"
+      - "file-history/"
+    implementation: "Cron job or LaunchAgent"
+    specification: "/specifications/artifact-archival-automation.yaml"
+    script_location: "/tools/maintenance/archive-old-artifacts.sh"
+    schedule: "First day of each month"
+
+  backup_file_prevention:
+    description: "Pre-commit hook to prevent backup files"
+    implementation: "Git pre-commit hook"
+    pattern_to_block: "*.backup, *.original, *.old"
+    message: "Do not commit backup files - use git history instead"
+
+  tool_manifest_validation:
+    description: "Validate tool manifest completeness"
+    implementation: "Pre-commit hook"
+    checks:
+      - "Every tool in /tools/ has README.md"
+      - "Every tool in /tools/ has tool-manifest.yaml"
+      - "Global manifest up to date"
+
+# ==============================================================================
+# NOTES & WARNINGS
+# ==============================================================================
+
+notes:
+  - "This specification is documentation only - do not execute without review"
+  - "All cleanup operations must verify git history first"
+  - "Compression must be verified before deleting originals"
+  - "Space recovery estimates are approximate"
+  - "Conservative approach: when in doubt, archive instead of delete"
+  - "Runtime artifact archival may require Claude Code configuration updates"
+
+warnings:
+  - "ARCHIVE-003 (file-history) is HIGH RISK - may affect Claude Code"
+  - "DEPRECATE-002 (.venv migration) requires thorough testing"
+  - "Always test affected systems after each cleanup operation"
+  - "Keep recent artifacts (< 30 days) to avoid disrupting active work"
+
+related_specifications:
+  - "/specifications/workspace-reorganization.yaml" # Overall plan
+  - "/specifications/reorg-move-map.yaml" # File moves
+  - "/docs/maintenance/ARTIFACT_RETENTION.md" # Retention policies
+  - "/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md" # Execution guide
+---

@@ -1,0 +1,337 @@
+---
+specification:
+  name: "Claude Code Workspace Reorganization"
+  version: "1.0.0"
+  status: "proposed"
+  created: "2025-10-23"
+  author: "workspace-reorganization-plan"
+  description: |
+    Comprehensive specification for reorganizing ~/.claude/ workspace from current
+    ad-hoc organization to structured, maintainable hierarchy. This is a machine-readable
+    contract defining target architecture, classification rules, and migration policies.
+
+metadata:
+  survey_date: "2025-10-23"
+  current_file_count: 2200
+  current_size_gb: 2.3
+  artifact_accumulation_mb: 210
+  identified_issues: 24
+  overall_score: 7.2
+
+target_architecture:
+  description: "Hub-and-spoke architecture with clear separation of concerns"
+
+  directories:
+    - name: "/"
+      purpose: "Root configuration and entry points only"
+      allowed_files:
+        - "CLAUDE.md"
+        - "CHANGELOG.md"
+        - "LEGACY_ARCHIVE_NOTICE.md"
+        - "*.json" # Configuration files
+        - "*.toml" # Configuration files
+        - ".gitignore"
+        - ".cursorrules"
+        - ".prettierrc"
+      forbidden_files:
+        - "*.sh" # Scripts belong in tools/ or automation/
+        - "*.py" # Scripts belong in tools/
+        - "*.backup" # No backup files
+        - "*.original" # No backup files
+
+    - name: "/docs"
+      purpose: "Documentation hub with link-farm architecture"
+      structure:
+        - "INDEX.md" # Central navigation hub
+        - "/agents" # Agent system documentation
+        - "/architecture" # System architecture docs
+        - "/commands" # Command documentation
+        - "/maintenance" # Maintenance procedures
+        - "/reports" # Analysis reports
+        - "/setup" # Setup guides
+        - "/standards" # Development standards
+        - "/sync" # Synchronization documentation
+
+    - name: "/specifications"
+      purpose: "Machine-readable OpenAPI 3.1.0, JSON Schema, YAML specs"
+      allowed_extensions:
+        - ".yaml"
+        - ".yml"
+        - ".json"
+        - ".openapi.yaml"
+      naming_convention: "kebab-case"
+
+    - name: "/tools"
+      purpose: "Development tools and utilities with documentation"
+      structure:
+        - "/bin" # Executable wrapper scripts
+        - "/config" # Tool configuration files
+        - "/lib" # Shared libraries
+        - "{tool-name}/" # Individual tool directories
+      tool_directory_requirements:
+        - "README.md" # Required
+        - "tool-manifest.yaml" # Required metadata
+        - "*.py|*.sh" # Implementation
+        - "/tests/" # Optional test suite
+
+    - name: "/automation"
+      purpose: "Automated processes (hooks, CNS, formatters)"
+      subdirectories:
+        - "/cns" # Claude Notification System
+        - "/prettier" # Markdown formatting
+        - "/hooks" # Future hook implementations
+
+    - name: "/commands"
+      purpose: "Slash command definitions"
+      allowed_extensions: [".md"]
+
+    - name: "/agents"
+      purpose: "Agent configurations and definitions"
+
+    - name: "/skills"
+      purpose: "Hierarchical global skills"
+      structure: "{category}/{skill-name}/"
+
+    - name: "/system"
+      purpose: "Runtime system files and state"
+      subdirectories:
+        - "/ide" # IDE integration files
+        - "/sessions" # Session management
+        - "/todos" # Task tracking
+        - "/statsig" # Analytics
+        - "/history" # Shell history consolidated
+        - "/debug" # Debug logs (with retention)
+        - "/file-history" # File version tracking (with retention)
+
+    - name: "/archive"
+      purpose: "Archived legacy systems and old artifacts"
+      retention: "indefinite"
+
+    - name: "/projects"
+      purpose: "Active project workspaces"
+      note: "Not in git due to size"
+
+    - name: "/plugins"
+      purpose: "External marketplace skills"
+      source: "Anthropic Agent Skills"
+
+    - name: "/bin"
+      purpose: "Minimal executable scripts with symlinks to ~/.local/bin/"
+      note: "Keep this directory small, prefer tools/bin/"
+
+file_classification:
+  scripts:
+    executable_wrapper:
+      location: "/tools/bin/"
+      purpose: "Entry point scripts that delegate to implementations"
+      naming: "kebab-case"
+      shebang: "#!/usr/bin/env bash" # or appropriate interpreter
+      permissions: "755"
+
+    utility_script:
+      location: "/tools/{utility-name}/"
+      purpose: "Standalone utility tools"
+      structure: "Full tool directory with README"
+
+    automation_script:
+      location: "/automation/{system-name}/"
+      purpose: "Hook-driven automated processes"
+      examples: ["cns", "prettier", "git hooks"]
+
+    system_integration:
+      location: "/bin/"
+      purpose: "Minimal system integration scripts"
+      note: "Avoid creating new scripts here, prefer tools/bin/"
+
+  documentation:
+    primary_docs:
+      location: "/docs/"
+      format: "GitHub Flavored Markdown"
+      link_validation: "Required via gfm-check"
+
+    tool_docs:
+      location: "/tools/{tool-name}/README.md"
+      requirements: ["Purpose", "Usage", "Dependencies", "Maintenance"]
+
+    specifications:
+      location: "/specifications/"
+      format: "YAML (OpenAPI 3.1.0 preferred) or JSON Schema"
+      purpose: "Machine-readable contracts"
+
+  configuration:
+    root_config:
+      location: "/"
+      examples: ["settings.json", "pyrightconfig.json", ".cz.toml"]
+
+    tool_config:
+      location: "/tools/config/" # or "/tools/{tool-name}/config/"
+      purpose: "Tool-specific configurations"
+
+naming_conventions:
+  directories: "kebab-case"
+  scripts: "kebab-case.{sh|py}"
+  docs: "SCREAMING_SNAKE_CASE.md or kebab-case.md"
+  specs: "kebab-case.yaml"
+  tools: "kebab-case/"
+
+migration_rules:
+  move_batches:
+    description: "Files must be moved in logical batches, not individually"
+    batch_types:
+      - "root_cleanup" # Remove backup files, move root scripts
+      - "system_reorganization" # Consolidate system artifacts
+      - "tool_restructure" # Organize tools directory
+      - "documentation_updates" # Update all documentation links
+
+  validation_gates:
+    description: "Each batch requires validation before proceeding"
+    required_checks:
+      - "symlink_integrity" # All symlinks valid
+      - "hook_validation" # settings.json hooks exist and executable
+      - "documentation_links" # All markdown links valid
+      - "import_references" # Python/Shell imports still valid
+
+  rollback_points:
+    description: "Git commit after each successful batch"
+    commit_message_format: "refactor(workspace): {batch_name} - {summary}"
+
+artifact_retention:
+  policies:
+    shell_snapshots:
+      directory: "/shell-snapshots/"
+      current_size_mb: 69
+      file_count: 371
+      retention_days: 30
+      action: "archive_and_compress"
+      archive_location: "/archive/shell-snapshots-{YYYY-MM}/"
+
+    debug_logs:
+      directory: "/debug/"
+      current_size_mb: 57
+      retention_days: 30
+      action: "archive_and_compress"
+      archive_location: "/archive/debug-logs-{YYYY-MM}/"
+
+    file_history:
+      directory: "/file-history/"
+      current_size_mb: 63
+      retention_days: 30
+      action: "archive_and_compress"
+      archive_location: "/archive/file-history-{YYYY-MM}/"
+
+    todos:
+      directory: "/todos/"
+      current_size_mb: 3.6
+      action: "move_to_system"
+      target: "/system/todos/"
+
+    history_jsonl:
+      file: "/history.jsonl"
+      current_size_mb: 1.2
+      action: "move_to_system"
+      target: "/system/history/session-history.jsonl"
+
+anti_patterns:
+  critical:
+    - name: "nested_claude_directory"
+      location: "/.claude/.claude/"
+      action: "remove_nested_structure"
+
+    - name: "backup_files_in_production"
+      pattern: "*.backup, *.original"
+      action: "delete_after_git_verification"
+
+    - name: "multiple_history_storage"
+      locations: ["/history.jsonl", "/history/", "/shell-snapshots/"]
+      action: "consolidate_to_system_history"
+
+  high_priority:
+    - name: "root_level_scripts"
+      files:
+        - "/install-all-tools"
+        - "/disable-pyright.sh"
+        - "/instant-sync-option.sh"
+        - "/statusline.sh"
+      action: "move_to_appropriate_locations"
+
+    - name: "venv_in_source_tree"
+      location: "/gfm-link-checker/.venv"
+      action: "migrate_to_uv"
+
+    - name: "runtime_artifacts_at_root"
+      directories: ["/todos/", "/file-history/", "/debug/"]
+      action: "move_to_system_directory"
+
+validation_requirements:
+  pre_migration:
+    - "Full workspace backup"
+    - "Git working directory clean"
+    - "All tests passing"
+    - "Documentation links valid"
+
+  per_batch:
+    - "Symlinks valid"
+    - "Hooks executable"
+    - "Imports resolve"
+    - "No broken references"
+
+  post_migration:
+    - "Health check passes"
+    - "All tools functional"
+    - "Documentation accessible"
+    - "No orphaned files"
+
+success_criteria:
+  organizational_score: 9.0 # Up from 7.2
+  no_root_scripts: true
+  no_backup_files: true
+  artifacts_managed: true
+  clear_taxonomy: true
+  documentation_complete: true
+  validation_passing: true
+
+phased_execution:
+  phase_1_foundation:
+    name: "Documentation & Specification"
+    risk: "minimal"
+    changes: "documentation_only"
+    duration_hours: 8
+
+  phase_2_safe_cleanup:
+    name: "Remove Backup Files & Archive Old Artifacts"
+    risk: "low"
+    changes: "delete_backups_archive_artifacts"
+    duration_hours: 2
+
+  phase_3_root_cleanup:
+    name: "Move Root-Level Scripts"
+    risk: "medium"
+    changes: "file_moves_with_symlinks"
+    duration_hours: 3
+
+  phase_4_system_consolidation:
+    name: "Consolidate System Artifacts"
+    risk: "medium"
+    changes: "directory_reorganization"
+    duration_hours: 4
+
+  phase_5_tool_restructure:
+    name: "Reorganize Tools Directory"
+    risk: "high"
+    changes: "comprehensive_restructure"
+    duration_hours: 6
+
+  phase_6_validation:
+    name: "Final Validation & Documentation Update"
+    risk: "minimal"
+    changes: "verification_and_docs"
+    duration_hours: 2
+
+notes:
+  - "This specification is the single source of truth for reorganization"
+  - "All file moves must reference this document"
+  - "Changes to target architecture require version bump"
+  - "Execution phases can be performed independently"
+  - "Conservative approach: document first, execute with validation"
+  - "Functional scripts not modified, only moved/documented"
+---

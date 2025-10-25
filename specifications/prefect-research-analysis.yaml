@@ -1,0 +1,1439 @@
+---
+specification:
+  title: Prefect 3.x Research Analysis for Claude Code CLI Workflow Orchestration
+  version: 1.0.0
+  date: 2025-10-24
+  status: completed
+
+context:
+  current-state:
+    - Manual background processes using 2 Python scripts (polling/watching)
+    - Fragile architecture with poor state management
+    - Need to orchestrate: Telegram bot → file watching → Claude CLI → notifications
+    - Future requirement: Multi-round approval workflows with external triggers
+  requirements:
+    - Lightweight local development on macOS
+    - Event-driven triggers (file watching, Telegram button clicks)
+    - State management and retry mechanisms
+    - No cloud dependencies (local-first)
+    - Future-proof and off-the-shelf solution
+
+research-findings:
+
+  1-architecture-overview:
+    description: "Prefect 3.x core architecture and execution model"
+    findings:
+      execution-model: |
+        Prefect uses a hybrid architecture with decentralized agent-worker model.
+        Code runs wherever you want (local, Kubernetes, AWS, etc.) with SDK
+        phoning home to Prefect server for status updates.
+
+      local-vs-cloud: |
+        LOCAL-FIRST: Prefect is fundamentally local-first. The server component
+        can run entirely locally with SQLite (bundled with Python).
+
+        Cloud is OPTIONAL: Prefect Cloud provides additional features (RBAC, SSO,
+        audit logs, webhooks) but is NOT required for core functionality.
+
+      deployment-patterns:
+        static-infrastructure:
+          method: ".serve()"
+          description: "Long-running process for regular flow executions"
+          use-case: "Simple scheduled tasks, lightweight local development"
+          benefits:
+            - Complete infrastructure control
+            - Minimal configuration
+            - Rapid iteration
+            - No additional infrastructure needed
+
+        dynamic-infrastructure:
+          method: "Work Pools + Workers"
+          description: "Dynamically provision infrastructure per flow run"
+          use-case: "Expensive resources, heterogeneous needs, production scale"
+          benefits:
+            - Ephemeral resources
+            - Infrastructure configuration via UI
+            - Supports Docker, Kubernetes, serverless
+
+      core-components:
+        server: "Orchestration backend (local SQLite or PostgreSQL)"
+        api: "REST API + GraphQL for full programmatic control"
+        sdk: "Python SDK with decorators (@flow, @task)"
+        ui: "Web UI at http://127.0.0.1:4200 for monitoring"
+        workers: "Optional client-side processes for work pools"
+
+    architecture-type: "Hybrid: Local execution + centralized state tracking"
+    cloud-first: false
+
+  2-local-deployment-feasibility:
+    description: "Can Prefect run completely locally without cloud/server components?"
+
+    answer: "YES - Fully local deployment is supported and straightforward"
+
+    requirements:
+      python: "3.9+ (3.12+ recommended for your use case with uv)"
+      database: "SQLite (bundled with Python, zero config)"
+      installation: "pip install prefect OR uv pip install prefect"
+      startup: "prefect server start"
+      ui-access: "http://127.0.0.1:4200"
+
+    database-options:
+      sqlite:
+        location: "~/.prefect/prefect.db"
+        setup: "Automatic (no configuration needed)"
+        best-for: "Lightweight, single-server deployments"
+        note: "Comes bundled with Python"
+
+      postgresql:
+        setup: "Manual (requires Docker or system install)"
+        best-for: "Production environments, external database connections"
+
+    no-cloud-required: |
+      Prefect Open Source is 100% free and self-hosted under open-source license.
+      No limits on users, workflows, or runtime. Prefect Cloud is entirely optional.
+
+    verdict: "Perfect for local macOS development - minimal dependencies"
+
+  3-event-driven-triggers:
+    description: "Support for event-driven triggers and file watching"
+
+    native-event-system:
+      emit-event-function:
+        description: "Python function to emit custom events from anywhere"
+        signature: "emit_event(event: str, resource: dict, payload: dict = None)"
+        example: |
+          from prefect.events import emit_event
+
+          emit_event(
+              event="file.detected",
+              resource={"prefect.resource.id": "file-watcher.inbox"},
+              payload={"filename": "data.csv", "size": 1024}
+          )
+
+      automations:
+        description: "Configure actions that execute automatically based on triggers"
+        trigger-types:
+          - "Event triggers (presence/absence of events)"
+          - "Metric triggers (threshold-based)"
+          - "Compound triggers (complex conditions)"
+          - "Sequence triggers (ordered events)"
+
+        actions:
+          - "Run deployment"
+          - "Send notification"
+          - "Pause/cancel flow"
+          - "Change flow run state"
+
+      webhooks:
+        availability: "Prefect Cloud only (NOT self-hosted)"
+        workaround: |
+          For self-hosted: Use REST API directly or emit events from external scripts.
+          Example: Python script with watchdog → emit_event → trigger automation
+
+    file-watching:
+      native-support: false
+
+      recommended-approach: |
+        Prefect does NOT have built-in file system watching. Recommended pattern:
+
+        1. Use Python watchdog library to monitor directories
+        2. In watchdog event handler, call emit_event() to send custom events
+        3. Configure Prefect automation to trigger flow based on events
+
+        Example architecture:
+          watchdog (monitors dir) → emit_event() → Prefect automation → flow run
+
+      implementation:
+        dependencies:
+          - "watchdog (Python package for file system monitoring)"
+          - "prefect (SDK for event emission)"
+
+        code-pattern: |
+          from watchdog.observers import Observer
+          from watchdog.events import FileSystemEventHandler
+          from prefect.events import emit_event
+
+          class FileWatcher(FileSystemEventHandler):
+              def on_created(self, event):
+                  if event.is_directory:
+                      return
+                  emit_event(
+                      event="file.created",
+                      resource={"prefect.resource.id": "inbox-watcher"},
+                      payload={"filepath": event.src_path}
+                  )
+
+          # Run as separate long-running process
+          observer = Observer()
+          observer.schedule(FileWatcher(), path="/path/to/watch", recursive=False)
+          observer.start()
+
+    telegram-triggers:
+      approach: "Custom event emission from Pyrogram handlers"
+      pattern: |
+        In your Telegram bot callback handlers:
+        1. User clicks button in Telegram
+        2. Pyrogram handler receives callback
+        3. Handler calls emit_event() with approval/rejection
+        4. Prefect automation triggers next workflow step
+
+      requires: "Prefect server running locally to receive events"
+
+      code-example: |
+        from pyrogram import Client, filters
+        from prefect.events import emit_event
+
+        @app.on_callback_query(filters.regex("^approve_"))
+        async def handle_approval(client, callback_query):
+            task_id = callback_query.data.split("_")[1]
+
+            emit_event(
+                event="task.approved",
+                resource={"prefect.resource.id": f"task.{task_id}"},
+                payload={"user_id": callback_query.from_user.id}
+            )
+
+    verdict: |
+      Event-driven triggers are well-supported through custom events. File watching
+      requires external integration (watchdog + emit_event pattern) but is straightforward.
+      Telegram button clicks can easily emit events to resume paused workflows.
+
+  4-state-management-retry:
+    description: "State management and retry mechanisms"
+
+    state-management:
+      execution-history: |
+        Prefect tracks full execution history in SQLite/PostgreSQL database.
+        All flow runs, task runs, states, and transitions are persisted.
+
+      state-types:
+        - "Scheduled: Flow run scheduled but not started"
+        - "Running: Flow currently executing"
+        - "Completed: Flow finished successfully"
+        - "Failed: Flow encountered error"
+        - "Cancelled: Flow was cancelled"
+        - "Crashed: Flow crashed unexpectedly"
+        - "Paused: Flow paused waiting for input/approval"
+        - "Suspended: Flow suspended (infrastructure torn down)"
+
+      pause-resume:
+        description: "Built-in support for long-running workflows with external input"
+
+        pause-flow-run:
+          function: "pause_flow_run(timeout: int = 3600, wait_for_input: Type[RunInput] = None)"
+          behavior: "Flow blocks but infrastructure keeps running"
+          timeout: "1 hour default (configurable)"
+          use-case: "Quick approvals, UI-based input"
+
+        suspend-flow-run:
+          function: "suspend_flow_run(wait_for_input: Type[RunInput] = None)"
+          behavior: "Flow exits, infrastructure tears down, resumes later"
+          timeout: "No timeout (waits indefinitely)"
+          use-case: "Long-running approvals, multi-day workflows"
+
+        resume-methods:
+          ui: "Click Resume button in Prefect UI"
+          api: "resume_flow_run(flow_run_id) from Python"
+          rest: "POST /api/flow-runs/{id}/resume"
+
+        external-resume-example: |
+          # From Telegram bot callback:
+          from prefect import resume_flow_run
+
+          @app.on_callback_query(filters.regex("^approve_"))
+          async def handle_approval(client, callback_query):
+              flow_run_id = callback_query.data.split("_")[1]
+              resume_flow_run(flow_run_id)
+
+    retry-mechanisms:
+      task-level:
+        decorator: "@task(retries=3, retry_delay_seconds=60)"
+        strategies:
+          - "Fixed delay"
+          - "Exponential backoff (configurable)"
+          - "Conditional retry (retry_condition_fn)"
+
+        example: |
+          from prefect import task
+          from prefect.tasks import exponential_backoff
+
+          @task(
+              retries=3,
+              retry_delay_seconds=exponential_backoff(backoff_factor=2)
+          )
+          def unstable_task():
+              # Task with automatic retries
+              pass
+
+      flow-level:
+        decorator: "@flow(retries=2)"
+        behavior: "Entire flow re-executes on failure"
+
+      automation-based:
+        description: "Trigger retry flows based on failure events"
+        example: "On flow.failed event → run deployment (recovery workflow)"
+
+    verdict: |
+      Excellent state management with persistent storage. Built-in pause/resume
+      with external API control is perfect for Telegram approval workflows.
+      Retry mechanisms are flexible and configurable at multiple levels.
+
+  5-deployment-complexity:
+    rating: 2
+    scale: "1 (simplest) to 5 (most complex)"
+
+    initial-setup:
+      steps:
+        1: "Install: uv pip install prefect"
+        2: "Start server: prefect server start (opens UI at localhost:4200)"
+        3: "Write flow: Add @flow decorator to Python function"
+        4: "Run locally: python script.py"
+
+      time-estimate: "15-30 minutes for first deployment"
+      complexity: "Very low - simpler than most orchestrators"
+
+    ongoing-maintenance:
+      server: |
+        Keep prefect server start running (or set up as systemd service).
+        SQLite database requires no maintenance for local development.
+
+      deployments: |
+        For scheduled/triggered flows: flow.serve() or flow.deploy()
+        .serve() is simplest: just keeps Python process running
+
+      updates: "uv pip install --upgrade prefect"
+
+    comparison:
+      airflow: "Complexity: 5/5 - Requires separate scheduler, webserver, database"
+      temporal: "Complexity: 3/5 - Requires server + worker + persistence setup"
+      prefect: "Complexity: 2/5 - Single command server, optional workers"
+
+    verdict: |
+      Deployment is remarkably simple for local development. One command starts
+      the server, decorators turn functions into workflows. Minimal complexity.
+
+  6-long-running-workflows:
+    description: "Support for long-running workflows with external triggers"
+
+    support-level: "Excellent - specifically designed for this use case"
+
+    capabilities:
+      suspend-resume:
+        description: "Workflow can suspend indefinitely, resume days/weeks later"
+        state-preservation: "All variables, execution context preserved in database"
+        infrastructure: "Resources freed during suspension (cost-effective)"
+
+        example: |
+          from prefect import flow, suspend_flow_run
+          from prefect.input import RunInput
+
+          class ApprovalInput(RunInput):
+              approved: bool
+              comments: str = ""
+
+          @flow
+          def approval_workflow():
+              print("Submitting request...")
+
+              # Suspend and wait for external approval
+              approval = suspend_flow_run(
+                  wait_for_input=ApprovalInput
+              )
+
+              if approval.approved:
+                  print(f"Approved: {approval.comments}")
+                  # Continue workflow
+              else:
+                  print(f"Rejected: {approval.comments}")
+                  # Handle rejection
+
+      external-triggers:
+        telegram-button-pattern: |
+          Flow workflow:
+          1. Flow sends notification to Telegram
+          2. Flow calls suspend_flow_run(wait_for_input=ApprovalInput)
+          3. User clicks button in Telegram
+          4. Pyrogram handler calls resume_flow_run() or API POST
+          5. Flow resumes with approval data
+          6. Flow continues execution based on approval
+
+        api-resume: |
+          # From any external system:
+          import httpx
+
+          httpx.post(
+              "http://localhost:4200/api/flow-runs/{flow_run_id}/resume",
+              json={"approved": True, "comments": "LGTM"}
+          )
+
+      multi-round-approval:
+        description: "Chain multiple suspend/resume cycles in single flow"
+        pattern: |
+          @flow
+          def multi_round_workflow():
+              # Round 1: Manager approval
+              mgr_approval = suspend_flow_run(wait_for_input=ApprovalInput)
+              if not mgr_approval.approved:
+                  return
+
+              # Do some work...
+
+              # Round 2: Director approval
+              dir_approval = suspend_flow_run(wait_for_input=ApprovalInput)
+              if not dir_approval.approved:
+                  return
+
+              # Final execution
+              execute_task()
+
+    timeout-handling:
+      pause: "1 hour default, configurable"
+      suspend: "No timeout (indefinite wait)"
+      custom: "Can implement timeout logic with automation triggers"
+
+    state-durability:
+      database: "All state persisted to SQLite/PostgreSQL"
+      crash-recovery: "Server restart does not lose suspended workflow state"
+
+    verdict: |
+      Excellent support for long-running workflows with external triggers.
+      Suspend/resume with external API control is exactly what you need for
+      Telegram approval workflows. Can handle multi-round approvals easily.
+
+  7-resource-footprint:
+    description: "Memory and CPU resource requirements"
+
+    server-footprint:
+      base-memory: "~100-250 MB for server process"
+      sqlite: "Minimal overhead (~10-20 MB)"
+      ui: "Served by server process (no additional overhead)"
+
+      scale-concerns: |
+        Memory consumption increased significantly in Prefect 2.x vs 1.x:
+        - Each subprocess: ~250 MB
+        - Import time: 2+ seconds (vs <1s in v1)
+        - GraphQL component: Up to 10 GB at scale (100s-1000s concurrent flows)
+
+    worker-footprint:
+      serve-method: "Same process as flow execution (~50-100 MB base + flow overhead)"
+      work-pool-workers: "~100-200 MB per worker process"
+
+    flow-execution:
+      subprocess-model: "Each flow run spawns subprocess (250 MB overhead)"
+      checkpointing: "Result persistence can increase memory if returning large objects"
+
+      optimization-strategies:
+        - "Turn off checkpointing for large DataFrames/objects"
+        - "Return file paths instead of large objects"
+        - "Use persist_result to offload to storage"
+
+    local-development-assessment:
+      lightweight-verdict: "Moderate"
+
+      for-your-use-case:
+        telegram-bot: "Minimal - just event emission"
+        file-watcher: "~50 MB for watchdog + Prefect SDK"
+        claude-cli-orchestration: "250 MB per concurrent flow run"
+        total-estimate: "~500 MB - 1 GB for typical operation"
+
+      concerns:
+        - "Memory footprint larger than simple Python scripts"
+        - "Import time (2+ seconds) may feel slow for rapid iteration"
+        - "Not as lightweight as manual background processes"
+
+      benefits:
+        - "Much lighter than Airflow (multi-GB)"
+        - "Simpler than Temporal (additional services)"
+        - "Acceptable for modern macOS development machines"
+
+    verdict: |
+      NOT ultra-lightweight, but reasonable for modern hardware. Heavier than
+      your current manual scripts but much lighter than Airflow. Memory concerns
+      primarily at scale (100+ concurrent flows), not an issue for local dev.
+
+  8-temporal-comparison:
+    description: "Detailed comparison with Temporal.io"
+
+    philosophy:
+      prefect: |
+        Python-native, data workflow orchestration. "Make workflow orchestration
+        as simple as writing Python functions." Developer experience first.
+
+      temporal: |
+        Polyglot, mission-critical reliability. "Make code durable and fault-tolerant."
+        Execution guarantees and state management first.
+
+    architecture:
+      prefect:
+        model: "Ephemeral execution + centralized state tracking"
+        execution: "Code runs anywhere, SDK phones home with updates"
+        state: "Database stores history, not execution state"
+        simplicity: "Very simple - server + flows"
+
+      temporal:
+        model: "Durable execution with replay mechanism"
+        execution: "Workers replay history to recover exact state"
+        state: "Execution history is the source of truth"
+        simplicity: "More complex - server + worker + persistence"
+
+    language-support:
+      prefect: "Python only (strong Python ecosystem integration)"
+      temporal: "Polyglot (Go, Java, Python, TypeScript, PHP, .NET)"
+
+    use-case-fit:
+      data-pipelines:
+        prefect: "5/5 - Designed specifically for data/ML workflows"
+        temporal: "3/5 - Works but not optimized for data use cases"
+
+      microservices:
+        prefect: "3/5 - Can work but not the primary focus"
+        temporal: "5/5 - Designed for microservice orchestration"
+
+      event-driven:
+        prefect: "4/5 - Good event system, some limitations (webhooks cloud-only)"
+        temporal: "5/5 - Native event-driven architecture"
+
+      human-approval:
+        prefect: "4/5 - pause/suspend/resume with external API"
+        temporal: "4/5 - Signals/queries for external interaction"
+
+      long-running:
+        prefect: "4/5 - Suspend/resume works well, state in database"
+        temporal: "5/5 - Durable execution, can run for years"
+
+    deployment-complexity:
+      prefect: "2/5 - Very simple local setup"
+      temporal: "3/5 - Requires more components and configuration"
+
+    developer-experience:
+      prefect:
+        learning-curve: "Low - just Python decorators"
+        iteration-speed: "Fast - change code and rerun"
+        debugging: "Python debugger works naturally"
+
+      temporal:
+        learning-curve: "Medium - need to understand replay, determinism"
+        iteration-speed: "Medium - more conceptual overhead"
+        debugging: "More complex due to replay mechanism"
+
+    for-your-use-case:
+      rating: "Prefect: 4/5, Temporal: 3/5"
+
+      prefect-advantages:
+        - "Simpler deployment for local macOS development"
+        - "Python-native fits your existing Python automation"
+        - "Better for CLI orchestration and file watching workflows"
+        - "Lower learning curve and faster iteration"
+        - "Sufficient state management for your needs"
+
+      temporal-advantages:
+        - "More robust durable execution guarantees"
+        - "Better if you needed polyglot support"
+        - "Stronger guarantees for mission-critical workflows"
+
+      not-needed-for-you:
+        - "Polyglot support (you're Python-only)"
+        - "Years-long workflow execution (your workflows are hours/days)"
+        - "Microservice orchestration (CLI automation focus)"
+
+    verdict: |
+      Prefect is the better choice for your use case. Simpler, Python-native,
+      better fit for data/CLI workflows. Temporal is overkill unless you need
+      absolute execution guarantees or polyglot support.
+
+  9-cloud-dependency:
+    description: "Is Prefect Cloud required or fully optional?"
+
+    answer: "Prefect Cloud is FULLY OPTIONAL"
+
+    self-hosted-capabilities:
+      core-features:
+        - "Flow execution and orchestration"
+        - "Task retry and state management"
+        - "Scheduling (cron, interval, rrule)"
+        - "Event-driven triggers and automations"
+        - "Pause/suspend/resume workflows"
+        - "REST API and GraphQL API"
+        - "Web UI for monitoring"
+        - "Work pools and workers"
+        - "Local and remote deployments"
+
+      limitations:
+        - "No webhooks (need to use emit_event + REST API instead)"
+        - "No RBAC (role-based access control)"
+        - "No SSO (single sign-on)"
+        - "No audit logs"
+        - "No managed infrastructure"
+
+    workarounds:
+      webhooks: |
+        For self-hosted, expose REST API endpoint and call from external systems:
+
+        # Instead of webhook:
+        curl -X POST http://localhost:4200/api/deployments/{id}/create-flow-run
+
+        # Or emit event from external script:
+        from prefect.events import emit_event
+        emit_event(event="external.trigger", resource={...})
+
+      rbac-sso: "Not needed for single-user local development"
+
+    pricing:
+      self-hosted: "Free forever (open-source license)"
+      cloud-hobby: "Free (personal projects)"
+      cloud-starter: "$100/month (team deployments on own infrastructure)"
+      cloud-team: "$400/month (scaling teams)"
+      cloud-enterprise: "Custom pricing (advanced features)"
+
+    connectivity:
+      self-hosted: "No outbound connections required"
+      cloud: "Hybrid execution model - code runs on your infra, phones home to Cloud"
+
+    for-your-use-case:
+      verdict: "Self-hosted is perfect - no cloud needed"
+      reasoning: |
+        - Single-user local development (no RBAC/SSO needed)
+        - Can work around webhook limitation with emit_event
+        - Full control over data and execution
+        - Zero ongoing costs
+
+  10-python-ecosystem:
+    description: "Maturity and integration with Python ecosystem"
+
+    maturity:
+      first-release: "2018 (Prefect 1.0)"
+      current-version: "3.x (released 2024)"
+      adoption: "Widely adopted in data engineering/ML communities"
+
+      stability: |
+        Prefect 2.0 was major rewrite (2022), some breaking changes.
+        Prefect 3.0 (2024) is more stable evolution of 2.x.
+
+        Note: Version churn may be concern but 3.x appears stable.
+
+    python-integration:
+      python-versions: "3.9+ (3.12+ recommended)"
+      package-manager: "pip, uv, poetry all supported"
+
+      native-features:
+        - "Decorators for flows and tasks (@flow, @task)"
+        - "Type hints and Pydantic for input validation"
+        - "Async/await support for asyncio workflows"
+        - "Context managers for flow/task context"
+        - "Standard Python exceptions and error handling"
+
+      integrations:
+        data:
+          - "pandas, polars DataFrames"
+          - "dask for distributed computing"
+          - "dbt for data transformations"
+
+        ml:
+          - "MLflow for experiment tracking"
+          - "Weights & Biases"
+          - "Hugging Face"
+
+        cloud:
+          - "AWS (S3, ECS, Lambda)"
+          - "GCP (Cloud Run, Vertex AI)"
+          - "Azure (Container Instances)"
+
+        databases:
+          - "SQLAlchemy"
+          - "PostgreSQL, MySQL, SQLite"
+
+        messaging:
+          - "Slack (official blocks)"
+          - "Email, PagerDuty"
+          - "Custom webhooks"
+
+    developer-tooling:
+      cli: "Rich CLI for server management, deployments, runs"
+      sdk: "Comprehensive Python SDK with intuitive API"
+      ui: "Modern web UI for monitoring and interaction"
+      testing: "Flows are just Python functions - standard testing works"
+
+      ide-support:
+        - "Full autocomplete and type hints"
+        - "Standard Python debugging (breakpoints work)"
+        - "No DSL or YAML configuration required"
+
+    community:
+      github-stars: "~15k+ stars"
+      activity: "Very active development and community"
+      documentation: "Comprehensive and well-maintained"
+      support: "Active Slack community, Discourse forum"
+
+    for-your-use-case:
+      fit-rating: "5/5 - Excellent"
+
+      advantages:
+        - "Native Python - works with uv, your preferred toolchain"
+        - "Pyrogram integration straightforward (just emit events)"
+        - "Subprocess execution for Claude CLI works naturally"
+        - "File system integration via watchdog + emit_event"
+        - "No DSL or YAML - pure Python"
+
+      compatibility:
+        uv: "✓ Standard pip package, works with uv"
+        python-312: "✓ Fully supported"
+        macos: "✓ First-class support"
+        sqlite: "✓ Default database (bundled)"
+
+    verdict: |
+      Excellent Python ecosystem maturity. Native Python approach means it fits
+      naturally with your existing toolchain (uv, Python 3.12+, macOS). Rich
+      integration ecosystem for data/ML workflows.
+
+code-examples:
+
+  1-basic-workflow:
+    description: "Simple workflow with retry and scheduling"
+    code: |
+      # workflow.py
+      from prefect import flow, task
+
+      @task(retries=3, retry_delay_seconds=60)
+      def process_file(filepath: str) -> dict:
+          """Process a file with automatic retries."""
+          print(f"Processing {filepath}")
+          # Claude CLI invocation
+          result = subprocess.run(
+              ["claude", "code", "process", filepath],
+              capture_output=True
+          )
+          return {"status": "success", "output": result.stdout}
+
+      @flow(name="file-processor")
+      def process_workflow(filepath: str):
+          """Main workflow orchestration."""
+          result = process_file(filepath)
+          print(f"Completed: {result}")
+          return result
+
+      if __name__ == "__main__":
+          # Run locally
+          process_workflow.serve(
+              name="file-processor-deployment",
+              tags=["production"],
+              interval=3600  # Run every hour
+          )
+
+  2-event-driven-file-watcher:
+    description: "File system watcher that triggers Prefect workflows"
+    code: |
+      # file_watcher.py
+      from watchdog.observers import Observer
+      from watchdog.events import FileSystemEventHandler
+      from prefect.events import emit_event
+      import time
+
+      class InboxWatcher(FileSystemEventHandler):
+          """Watch directory and emit Prefect events on new files."""
+
+          def on_created(self, event):
+              if event.is_directory:
+                  return
+
+              print(f"New file detected: {event.src_path}")
+
+              # Emit event to trigger Prefect workflow
+              emit_event(
+                  event="inbox.file.created",
+                  resource={
+                      "prefect.resource.id": "claude-inbox-watcher"
+                  },
+                  payload={
+                      "filepath": event.src_path,
+                      "timestamp": time.time()
+                  }
+              )
+
+      if __name__ == "__main__":
+          # Set up watchdog
+          observer = Observer()
+          observer.schedule(
+              InboxWatcher(),
+              path="/Users/terryli/claude_inbox",
+              recursive=False
+          )
+
+          print("Starting file watcher...")
+          observer.start()
+
+          try:
+              while True:
+                  time.sleep(1)
+          except KeyboardInterrupt:
+                  observer.stop()
+
+          observer.join()
+
+  3-telegram-approval-workflow:
+    description: "Multi-round approval workflow with Telegram integration"
+    code: |
+      # approval_workflow.py
+      from prefect import flow, suspend_flow_run
+      from prefect.input import RunInput
+      from pyrogram import Client, filters
+      import asyncio
+
+      # Define approval input schema
+      class ApprovalInput(RunInput):
+          approved: bool
+          reviewer: str
+          comments: str = ""
+
+      # Prefect workflow
+      @flow(name="telegram-approval-workflow")
+      def approval_workflow(request_id: str, request_data: dict):
+          """Workflow that pauses for Telegram approval."""
+
+          print(f"Processing request {request_id}")
+
+          # Send notification to Telegram
+          send_telegram_notification(
+              message=f"New request: {request_id}",
+              request_data=request_data,
+              flow_run_id=flow.flow_run.id  # Pass flow run ID for resume
+          )
+
+          # Suspend workflow waiting for approval
+          print("Waiting for approval via Telegram...")
+          approval = suspend_flow_run(
+              wait_for_input=ApprovalInput
+          )
+
+          if not approval.approved:
+              print(f"Request rejected by {approval.reviewer}: {approval.comments}")
+              return {"status": "rejected", "reviewer": approval.reviewer}
+
+          print(f"Request approved by {approval.reviewer}")
+
+          # Execute approved workflow
+          result = execute_claude_cli(request_data)
+
+          # Notify completion
+          send_telegram_notification(
+              message=f"Request {request_id} completed!",
+              result=result
+          )
+
+          return {"status": "approved", "result": result}
+
+      # Telegram bot handlers
+      app = Client("claude_bot", api_id=API_ID, api_hash=API_HASH)
+
+      @app.on_callback_query(filters.regex("^approve_"))
+      async def handle_approval(client, callback_query):
+          """Handle approval button click in Telegram."""
+
+          # Parse callback data: "approve_{flow_run_id}"
+          flow_run_id = callback_query.data.split("_")[1]
+          user = callback_query.from_user.username
+
+          # Resume Prefect workflow with approval
+          from prefect import resume_flow_run
+
+          resume_flow_run(
+              flow_run_id,
+              run_input={
+                  "approved": True,
+                  "reviewer": user,
+                  "comments": "Approved via Telegram"
+              }
+          )
+
+          await callback_query.answer("Request approved!")
+
+      @app.on_callback_query(filters.regex("^reject_"))
+      async def handle_rejection(client, callback_query):
+          """Handle rejection button click in Telegram."""
+
+          flow_run_id = callback_query.data.split("_")[1]
+          user = callback_query.from_user.username
+
+          from prefect import resume_flow_run
+
+          resume_flow_run(
+              flow_run_id,
+              run_input={
+                  "approved": False,
+                  "reviewer": user,
+                  "comments": "Rejected via Telegram"
+              }
+          )
+
+          await callback_query.answer("Request rejected!")
+
+      def send_telegram_notification(message: str, **kwargs):
+          """Send notification with approval buttons to Telegram."""
+          # Implement Telegram message sending with inline buttons
+          pass
+
+      def execute_claude_cli(data: dict) -> dict:
+          """Execute Claude CLI command."""
+          # Implement CLI execution
+          pass
+
+  4-complete-integration:
+    description: "Complete system integration: file watcher + Telegram + Claude CLI"
+    code: |
+      # orchestration.py
+      """Complete integration of file watching, Telegram, and Claude CLI."""
+
+      from prefect import flow, task
+      from prefect.events import emit_event
+      from prefect.deployments import DeploymentTrigger
+      import subprocess
+
+      # === TASK DEFINITIONS ===
+
+      @task(name="notify-telegram", retries=2)
+      def notify_telegram(message: str, flow_run_id: str = None):
+          """Send notification to Telegram with approval buttons."""
+          # Use Pyrogram to send message
+          # Include inline keyboard with approve/reject buttons
+          # Buttons contain flow_run_id for resume callback
+          pass
+
+      @task(name="execute-claude", retries=3, retry_delay_seconds=60)
+      def execute_claude_cli(filepath: str) -> dict:
+          """Execute Claude CLI on file."""
+          result = subprocess.run(
+              ["claude", "code", "analyze", filepath],
+              capture_output=True,
+              text=True,
+              timeout=300
+          )
+
+          if result.returncode != 0:
+              raise Exception(f"Claude CLI failed: {result.stderr}")
+
+          return {
+              "status": "success",
+              "output": result.stdout,
+              "filepath": filepath
+          }
+
+      @task(name="cleanup-file")
+      def cleanup_file(filepath: str, archive: bool = True):
+          """Archive or delete processed file."""
+          if archive:
+              # Move to archive directory
+              pass
+          else:
+              # Delete file
+              pass
+
+      # === WORKFLOW DEFINITIONS ===
+
+      @flow(name="file-processing-workflow")
+      def process_file_workflow(filepath: str):
+          """
+          Main workflow: Process file with Claude CLI and Telegram notifications.
+          Triggered by file watcher events.
+          """
+
+          print(f"Starting workflow for {filepath}")
+
+          # Step 1: Notify start
+          notify_telegram(
+              message=f"New file detected: {filepath}\nProcessing started...",
+              flow_run_id=None
+          )
+
+          # Step 2: Execute Claude CLI
+          try:
+              result = execute_claude_cli(filepath)
+
+              # Step 3: Notify success
+              notify_telegram(
+                  message=f"✓ File processed successfully!\n{filepath}"
+              )
+
+              # Step 4: Cleanup
+              cleanup_file(filepath, archive=True)
+
+              return result
+
+          except Exception as e:
+              # Notify failure
+              notify_telegram(
+                  message=f"✗ Processing failed!\n{filepath}\n{str(e)}"
+              )
+              raise
+
+      @flow(name="approval-required-workflow")
+      def approval_workflow(filepath: str, auto_approve: bool = False):
+          """
+          Workflow requiring manual approval before processing.
+          Pauses for Telegram button click.
+          """
+          from prefect import get_run_context, suspend_flow_run
+          from prefect.input import RunInput
+
+          class ApprovalInput(RunInput):
+              approved: bool
+              comments: str = ""
+
+          print(f"Approval workflow for {filepath}")
+
+          # Get current flow run ID
+          ctx = get_run_context()
+          flow_run_id = ctx.flow_run.id
+
+          if not auto_approve:
+              # Send approval request
+              notify_telegram(
+                  message=f"Approval required for: {filepath}",
+                  flow_run_id=flow_run_id  # Include for button callbacks
+              )
+
+              # Suspend until Telegram button click resumes
+              approval = suspend_flow_run(wait_for_input=ApprovalInput)
+
+              if not approval.approved:
+                  print(f"Request rejected: {approval.comments}")
+                  notify_telegram(message=f"Request rejected for {filepath}")
+                  return {"status": "rejected"}
+
+          # Approved - process file
+          result = execute_claude_cli(filepath)
+
+          notify_telegram(
+              message=f"✓ Approved request completed!\n{filepath}"
+          )
+
+          cleanup_file(filepath, archive=True)
+          return result
+
+      # === DEPLOYMENT CONFIGURATION ===
+
+      if __name__ == "__main__":
+          # Deploy both workflows with event-driven triggers
+
+          # Standard processing workflow (auto-triggered)
+          process_file_workflow.deploy(
+              name="file-processor",
+              work_pool_name="local-pool",
+              triggers=[
+                  DeploymentTrigger(
+                      expect=["inbox.file.created"],
+                      parameters={"filepath": "{{ event.payload.filepath }}"}
+                  )
+              ],
+              tags=["production", "auto"]
+          )
+
+          # Approval workflow (manual trigger)
+          approval_workflow.deploy(
+              name="approval-processor",
+              work_pool_name="local-pool",
+              tags=["production", "manual-approval"]
+          )
+
+          print("Deployments created!")
+          print("Start server: prefect server start")
+          print("Start worker: prefect worker start --pool local-pool")
+          print("Start file watcher: python file_watcher.py")
+          print("Start Telegram bot: python telegram_bot.py")
+
+  5-automation-configuration:
+    description: "Configure automation in Prefect UI or via API"
+    code: |
+      # automation_setup.py
+      """Set up Prefect automations for event-driven workflows."""
+
+      from prefect import get_client
+      from prefect.events.schemas.automations import (
+          Automation,
+          EventTrigger,
+          Posture,
+          RunDeployment
+      )
+
+      async def create_file_watcher_automation():
+          """Create automation to run deployment on file events."""
+
+          async with get_client() as client:
+
+              # Define automation
+              automation = Automation(
+                  name="file-watcher-trigger",
+                  description="Trigger file processing on inbox.file.created events",
+
+                  # Trigger on custom events from watchdog
+                  trigger=EventTrigger(
+                      expect=["inbox.file.created"],
+                      posture=Posture.Reactive,
+                      threshold=1,
+                      within=0
+                  ),
+
+                  # Action: Run the deployment
+                  actions=[
+                      RunDeployment(
+                          deployment_id="<deployment-id>",
+                          parameters={
+                              "filepath": "{{ event.payload.filepath }}"
+                          }
+                      )
+                  ],
+
+                  enabled=True
+              )
+
+              # Create automation
+              result = await client.create_automation(automation)
+              print(f"Created automation: {result.id}")
+
+      if __name__ == "__main__":
+          import asyncio
+          asyncio.run(create_file_watcher_automation())
+
+recommendations:
+
+  verdict: "RECOMMENDED - Prefect is better than Temporal for this use case"
+
+  confidence: "High (4/5)"
+
+  summary: |
+    Prefect 3.x is a strong fit for your Claude Code CLI workflow orchestration needs.
+    It provides the right balance of simplicity, local-first architecture, and powerful
+    features for event-driven workflows with external triggers. It's significantly
+    simpler than Temporal for your use case while providing sufficient state management
+    and retry capabilities.
+
+  strengths:
+    deployment:
+      rating: "5/5"
+      notes: "Extremely simple local deployment - just `prefect server start`"
+
+    local-first:
+      rating: "5/5"
+      notes: "Zero cloud dependency, runs entirely locally with SQLite"
+
+    python-integration:
+      rating: "5/5"
+      notes: "Native Python, works seamlessly with uv, no DSL"
+
+    event-driven:
+      rating: "4/5"
+      notes: "Good event system, requires watchdog integration for files"
+
+    approval-workflows:
+      rating: "4/5"
+      notes: "Excellent suspend/resume, external API control works well"
+
+    state-management:
+      rating: "4/5"
+      notes: "Persistent state, good retry mechanisms, adequate durability"
+
+  weaknesses:
+    resource-footprint:
+      rating: "3/5"
+      notes: "Not ultra-lightweight (~500MB-1GB), heavier than manual scripts"
+      impact: "Low - acceptable for modern macOS development"
+
+    file-watching:
+      rating: "3/5"
+      notes: "No native file watching, requires watchdog integration"
+      impact: "Low - integration is straightforward with emit_event"
+
+    webhooks:
+      rating: "2/5"
+      notes: "Webhooks only in Cloud, not self-hosted"
+      impact: "Low - can work around with emit_event or REST API"
+
+    import-overhead:
+      rating: "3/5"
+      notes: "2+ second import time, may feel slow during development"
+      impact: "Low - only affects startup, not runtime"
+
+  comparison-to-temporal:
+    simplicity: "Prefect wins - much simpler deployment and operation"
+    python-fit: "Prefect wins - native Python vs polyglot focus"
+    data-workflows: "Prefect wins - designed for data/CLI orchestration"
+    durability: "Temporal wins - stronger execution guarantees"
+    event-driven: "Tie - both support event-driven patterns"
+    learning-curve: "Prefect wins - lower barrier to entry"
+
+    for-your-needs: "Prefect is better fit (4/5 vs Temporal 3/5)"
+
+  comparison-to-current-state:
+    vs-manual-scripts:
+      pros:
+        - "Structured state management (vs fragile polling)"
+        - "Built-in retry and error handling"
+        - "UI for monitoring and debugging"
+        - "Pause/resume for multi-round approvals"
+        - "Event-driven architecture (vs polling)"
+        - "Easy to extend with new workflows"
+
+      cons:
+        - "Higher resource footprint (~500 MB vs ~50 MB)"
+        - "Additional dependency to maintain"
+        - "Learning curve (though minimal)"
+        - "Requires server process to stay running"
+
+    trade-off-verdict: "Worth the added complexity for reliability and extensibility"
+
+  risks:
+
+    1-version-churn:
+      description: "Prefect has had major version changes (1.x → 2.x → 3.x)"
+      mitigation: "3.x is stable evolution of 2.x, less disruptive than 2.0 was"
+      risk-level: "Low"
+
+    2-memory-footprint:
+      description: "Memory consumption increased in 2.x, may grow further"
+      mitigation: "Disable checkpointing, use persist_result, optimize task design"
+      risk-level: "Low (not scaling to 100s of concurrent flows)"
+
+    3-self-hosted-limitations:
+      description: "Some features (webhooks) only in Cloud"
+      mitigation: "Workarounds exist (emit_event, REST API), features not critical"
+      risk-level: "Very Low"
+
+    4-file-watching-integration:
+      description: "No native file watching, requires external tool"
+      mitigation: "Watchdog is mature and well-maintained, integration is simple"
+      risk-level: "Very Low"
+
+  alternatives-considered:
+
+    temporal:
+      verdict: "Overkill for this use case"
+      reasoning: |
+        More complex deployment, polyglot focus not needed, heavier learning curve.
+        Durability guarantees exceed requirements for CLI automation workflows.
+
+    airflow:
+      verdict: "Too heavy and complex"
+      reasoning: |
+        Requires scheduler + webserver + database, DAG-only model, complex deployment.
+        Designed for large-scale batch processing, not interactive workflows.
+
+    manual-scripts:
+      verdict: "Current approach is too fragile"
+      reasoning: |
+        No state persistence, fragile error handling, polling is inefficient,
+        multi-round approvals would be very complex to implement correctly.
+
+    celery:
+      verdict: "Too low-level"
+      reasoning: |
+        Task queue, not workflow orchestration. Would need to build state management,
+        retry logic, UI, and approval workflows manually.
+
+    dagster:
+      verdict: "Viable alternative, but heavier"
+      reasoning: |
+        Good for data pipelines but more opinionated and complex than Prefect.
+        Stronger focus on data assets vs general workflow orchestration.
+
+migration-plan:
+
+  phase-1-evaluation:
+    duration: "1-2 days"
+
+    tasks:
+      1: "Install Prefect: uv pip install prefect"
+      2: "Start server: prefect server start"
+      3: "Create simple test workflow with @flow decorator"
+      4: "Test emit_event from watchdog file watcher"
+      5: "Test pause/resume with REST API"
+      6: "Evaluate UI and monitoring capabilities"
+
+    success-criteria:
+      - "Can run local server with SQLite"
+      - "Can emit events from Python scripts"
+      - "Can trigger flow from custom events"
+      - "Can pause flow and resume via API"
+      - "UI is accessible and usable"
+
+  phase-2-prototype:
+    duration: "2-3 days"
+
+    tasks:
+      1: "Implement file watcher with watchdog + emit_event"
+      2: "Create workflow for Claude CLI execution"
+      3: "Integrate Telegram approval buttons with resume_flow_run"
+      4: "Test end-to-end: file → Telegram → approval → Claude CLI"
+      5: "Add error handling and retry logic"
+      6: "Test multi-round approval workflow"
+
+    success-criteria:
+      - "File watcher triggers Prefect workflows"
+      - "Telegram buttons resume paused workflows"
+      - "Claude CLI executes successfully in workflow"
+      - "Error handling and retries work correctly"
+      - "Multi-round approvals function as expected"
+
+  phase-3-production:
+    duration: "1-2 days"
+
+    tasks:
+      1: "Set up Prefect server as systemd service (or launchd on macOS)"
+      2: "Configure work pool for local execution"
+      3: "Deploy all workflows with .deploy() or .serve()"
+      4: "Add comprehensive logging and monitoring"
+      5: "Document deployment and operation procedures"
+      6: "Create runbook for common issues"
+
+    success-criteria:
+      - "Prefect server auto-starts on boot"
+      - "All workflows deployed and functional"
+      - "Monitoring and alerting configured"
+      - "Documentation complete"
+      - "Ready for production use"
+
+  rollback-plan:
+    description: "If Prefect doesn't meet needs, can revert to manual scripts"
+
+    decision-points:
+      after-phase-1:
+        question: "Does Prefect meet basic technical requirements?"
+        revert-if: "Cannot run locally, event system doesn't work, or UI inaccessible"
+
+      after-phase-2:
+        question: "Does integration with existing tools work smoothly?"
+        revert-if: "Telegram/watchdog integration too complex, or approval workflows don't work"
+
+    revert-cost: "Low - minimal time investment in evaluation phase"
+
+  estimated-total-time: "5-7 days to production-ready deployment"
+
+next-steps:
+
+  immediate:
+    1:
+      action: "Review this research document"
+      time: "30 minutes"
+
+    2:
+      action: "Make go/no-go decision on Prefect evaluation"
+      time: "Decision point"
+
+    3:
+      action: "Set up development environment"
+      commands:
+        - "uv pip install prefect watchdog"
+        - "prefect server start"
+      time: "15 minutes"
+
+  evaluation:
+    4:
+      action: "Create hello-world workflow"
+      code: |
+        from prefect import flow, task
+
+        @task
+        def say_hello():
+            print("Hello, Prefect!")
+
+        @flow
+        def hello_flow():
+            say_hello()
+
+        if __name__ == "__main__":
+            hello_flow()
+      time: "30 minutes"
+
+    5:
+      action: "Test event emission and automation"
+      code: |
+        from prefect.events import emit_event
+
+        emit_event(
+            event="test.event",
+            resource={"prefect.resource.id": "test"}
+        )
+      time: "1 hour"
+
+    6:
+      action: "Test pause/resume with external API"
+      time: "1 hour"
+
+  prototype:
+    7:
+      action: "Implement file watcher integration"
+      reference: "See code-examples.2-event-driven-file-watcher"
+      time: "2-3 hours"
+
+    8:
+      action: "Implement Telegram approval workflow"
+      reference: "See code-examples.3-telegram-approval-workflow"
+      time: "3-4 hours"
+
+    9:
+      action: "Integrate Claude CLI execution"
+      reference: "See code-examples.4-complete-integration"
+      time: "2-3 hours"
+
+  production:
+    10:
+      action: "Set up auto-start for Prefect server"
+      note: "Create launchd plist for macOS"
+      time: "1 hour"
+
+    11:
+      action: "Deploy workflows and test end-to-end"
+      time: "2-3 hours"
+
+    12:
+      action: "Create documentation and runbooks"
+      time: "2-3 hours"
+
+resources:
+
+  official-documentation:
+    main-docs: "https://docs.prefect.io/v3/"
+    api-reference: "https://reference.prefect.io/prefect/"
+    concepts: "https://docs.prefect.io/v3/concepts/"
+    how-to-guides: "https://docs.prefect.io/v3/how-to-guides/"
+
+    key-pages:
+      deployments: "https://docs.prefect.io/v3/concepts/deployments"
+      events: "https://docs.prefect.io/v3/automate/events/events"
+      automations: "https://docs.prefect.io/v3/automate/events/automations-triggers"
+      pause-resume: "https://docs.prefect.io/v3/develop/pause-resume"
+      inputs: "https://docs.prefect.io/v3/develop/inputs"
+      self-host: "https://docs.prefect.io/v3/manage/self-host"
+
+  examples:
+    interactive-workflows: "https://github.com/PrefectHQ/interactive_workflow_examples"
+    main-repo: "https://github.com/PrefectHQ/prefect"
+
+  community:
+    slack: "https://prefect.io/slack"
+    discourse: "https://discourse.prefect.io/"
+    github-discussions: "https://github.com/PrefectHQ/prefect/discussions"
+
+  related-tools:
+    watchdog: "https://github.com/gorakhargosh/watchdog"
+    pyrogram: "https://docs.pyrogram.org/"
+
+  comparison-articles:
+    prefect-vs-temporal-2025: "https://procycons.com/en/blogs/workflow-orchestration-platforms-comparison-2025/"
+    prefect-vs-airflow: "https://blog.adyog.com/2025/01/18/prefect-vs-airflow-2025-comparison-for-workflow-orchestration-excellence/"
+
+conclusion: |
+  Prefect 3.x is highly recommended for your Claude Code CLI workflow orchestration needs.
+
+  Key reasons:
+  1. Simple local deployment with zero cloud dependencies
+  2. Python-native approach fits your existing toolchain
+  3. Excellent support for long-running workflows with external triggers
+  4. Built-in pause/resume with external API control for Telegram approvals
+  5. Good event system (can integrate with watchdog for file watching)
+  6. Significantly simpler than Temporal for your use case
+  7. Reasonable resource footprint for local development
+
+  The combination of simplicity, local-first architecture, and powerful features makes
+  Prefect a much better foundation than fragile manual scripts, while avoiding the
+  complexity overhead of Temporal which is designed for mission-critical microservices.
+
+  Recommended action: Proceed with Phase 1 evaluation (1-2 days) to validate technical
+  fit before committing to full migration.

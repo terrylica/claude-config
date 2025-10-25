@@ -1,0 +1,478 @@
+openapi: 3.1.0
+info:
+  title: Lychee Link Validation Stop Hook
+  version: 0.1.1
+
+  x-deprecated:
+    status: superseded
+    date: 2025-10-23
+    superseded_by: link-validation-autofix-system.yaml
+    reason: Detection-only, no auto-fix capability
+    keep_as: historical reference
+    operational_component: "TIER 1 and TIER 2 detection still used in new system"
+
+  description: |
+    ⚠️ **DEPRECATED**: This specification is superseded by
+    link-validation-autofix-system.yaml which includes full auto-fix capabilities
+    with Telegram-based mobile approval and AI-powered heuristics.
+
+    The detection components (TIER 1 and TIER 2) are still operational and
+    referenced by the new system.
+
+    ---
+
+    Automated markdown link validation using Lychee link checker.
+    Implements hybrid validation pattern with selective blocking for modified files
+    and comprehensive background checks for all documentation.
+
+  x-metadata:
+    implementation_date: 2025-10-23
+    implementation_status: operational
+    probe_location: /tmp/probe/lychee/
+    empirical_testing: complete
+    unit_testing: complete
+    integration_testing: complete
+
+  x-version-history:
+    - version: 0.1.1
+      date: 2025-10-23
+      changes:
+        - Implementation complete and tested
+        - All unit tests passing
+        - Integration test with real workspace successful
+        - Found 16 broken links in 194 total links checked
+        - Hook exit time acceptable (< 150ms including background spawn)
+        - Infinite loop prevention verified
+        - Blocking on errors verified
+        - SessionStart injection verified
+
+    - version: 0.1.0
+      date: 2025-10-23
+      changes:
+        - Initial specification based on empirical probe results
+        - Hybrid pattern with selective blocking
+        - SessionStart injection for visibility
+        - Infinite loop prevention via stop_hook_active guard
+
+  x-slos:
+    availability:
+      target: 99.9%
+      measurement: Hook executes successfully on every stop event
+      failure_mode: Hook crashes or fails to execute
+
+    correctness:
+      target: 100%
+      measurement: No false negatives (missed broken links) or false positives (valid links marked broken)
+      validation: Compare with manual lychee execution
+
+    observability:
+      target: 100%
+      measurement: All hook executions logged with outcomes
+      log_locations:
+        - /tmp/claude_lychee_full.txt
+        - ~/.claude/logs/lychee.log
+
+    maintainability:
+      target: Updates require < 5 minutes
+      measurement: Time to adjust exclusions or modify validation logic
+      documentation: README.md with examples
+
+components:
+  schemas:
+    HookInput:
+      type: object
+      required:
+        - session_id
+        - transcript_path
+        - cwd
+        - hook_event_name
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          description: Unique session identifier
+        transcript_path:
+          type: string
+          description: Absolute path to JSONL transcript file
+        cwd:
+          type: string
+          description: Current working directory
+        hook_event_name:
+          type: string
+          enum: [Stop]
+          description: Hook event type
+        stop_hook_active:
+          type: boolean
+          default: false
+          description: True if already continuing from previous stop hook block (infinite loop prevention)
+
+    BlockDecision:
+      type: object
+      required:
+        - decision
+        - reason
+      properties:
+        decision:
+          type: string
+          enum: [block]
+          description: Block stop event and force continuation
+        reason:
+          type: string
+          description: Markdown-formatted message fed to Claude explaining why blocking
+        systemMessage:
+          type: string
+          description: User-visible notification message
+
+    ValidationResult:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total links checked
+        successful:
+          type: integer
+          description: Valid links
+        errors:
+          type: integer
+          description: Broken links
+        excluded:
+          type: integer
+          description: Links excluded via .lycheeignore
+        duration:
+          type: string
+          description: Execution time
+        timestamp:
+          type: string
+          format: date-time
+
+    LycheeConfig:
+      type: object
+      description: Configuration parameters for Lychee validation
+      properties:
+        offline:
+          type: boolean
+          default: true
+          description: Only check local files (no network requests)
+        include_fragments:
+          type: boolean
+          default: true
+          description: Validate anchor fragments (#section)
+        cache:
+          type: boolean
+          default: true
+          description: Enable response caching
+        max_cache_age:
+          type: string
+          default: "7d"
+          description: Cache expiration duration
+        no_progress:
+          type: boolean
+          default: true
+          description: Disable progress bar (required for non-interactive)
+        exclude_path:
+          type: array
+          items:
+            type: string
+          description: File path exclusion patterns (regex)
+
+paths:
+  /automation/lychee/check-links-hybrid.sh:
+    post:
+      summary: Stop hook entry point
+      description: |
+        Hybrid validation pattern:
+        - TIER 1: Full background check (all .md files)
+        - TIER 2: Selective blocking (modified files only)
+        - Guards against infinite loops via stop_hook_active flag
+
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HookInput'
+
+      responses:
+        '0':
+          description: No errors or allowed to stop
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ""
+
+        '2':
+          description: Blocking stop with JSON decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockDecision'
+
+      x-execution:
+        pattern: fire-and-forget
+        exit_requirement: < 10ms
+        background_work: Full validation runs asynchronously
+        blocking_condition: Modified .md files contain errors AND stop_hook_active=false
+
+  /automation/lychee/inject-results.sh:
+    post:
+      summary: SessionStart hook for result injection
+      description: |
+        Injects previous session validation results as context.
+        Only displays if errors found in full validation.
+
+      responses:
+        '0':
+          description: Results injected or no results available
+          content:
+            text/markdown:
+              schema:
+                type: string
+                description: Formatted validation results for Claude context
+
+x-implementation:
+  file_structure:
+    root: ~/.claude/
+    directories:
+      - automation/lychee/
+      - logs/
+    files:
+      - .lycheerc.toml
+      - .lycheeignore
+      - automation/lychee/check-links-hybrid.sh
+      - automation/lychee/inject-results.sh
+      - automation/lychee/README.md
+
+  dependencies:
+    external:
+      - name: lychee
+        version: ">=0.20.0"
+        install: brew install lychee
+        binary_path: /opt/homebrew/bin/lychee
+      - name: jq
+        version: ">=1.6"
+        install: brew install jq
+        binary_path: /opt/homebrew/bin/jq
+
+    internal:
+      - CLAUDE_WORKSPACE_DIR environment variable
+      - CLAUDE_FILE_PATHS environment variable (optional, for selective blocking)
+
+  configuration:
+    lychee_config:
+      path: ~/.claude/.lycheerc.toml
+      required_settings:
+        - offline: true
+        - include_fragments: true
+        - cache: true
+        - no_progress: true
+
+    settings_json:
+      path: ~/.claude/settings.json
+      modifications:
+        - Add check-links-hybrid.sh to Stop hooks array
+        - Add inject-results.sh to SessionStart hooks array
+
+  execution_flow:
+    stop_hook:
+      - step: 1
+        action: Read stdin JSON input
+        validates: Hook receives session metadata
+
+      - step: 2
+        action: Check stop_hook_active flag
+        decision: If true, exit 0 immediately (infinite loop prevention)
+
+      - step: 3
+        action: Spawn background full validation
+        async: true
+        output: /tmp/claude_lychee_full.txt
+        timing: < 1ms spawn time
+
+      - step: 4
+        action: Check CLAUDE_FILE_PATHS for .md files
+        condition: Environment variable set AND stop_hook_active=false
+
+      - step: 5
+        action: Validate modified .md files
+        timing: < 100ms for typical file count
+        synchronous: true
+
+      - step: 6
+        action: If errors found, output BlockDecision JSON
+        triggers: Claude Code forces continuation
+
+      - step: 7
+        action: Exit 0 if no errors or blocking not needed
+
+    session_start_hook:
+      - step: 1
+        action: Check if /tmp/claude_lychee_full.txt exists and non-empty
+
+      - step: 2
+        action: Grep for error count > 0
+
+      - step: 3
+        action: If errors, output formatted results to stdout
+        injects: Claude sees results as conversation context
+
+x-testing:
+  unit_tests:
+    - name: Hook exit timing
+      command: time echo '{"stop_hook_active":false}' | ~/.claude/automation/lychee/check-links-hybrid.sh
+      expected: < 10ms user time
+
+    - name: stop_hook_active guard
+      command: echo '{"stop_hook_active":true}' | ~/.claude/automation/lychee/check-links-hybrid.sh
+      expected: Exit 0 immediately, no validation
+
+    - name: Blocking on errors
+      setup: |
+        echo '[broken](./missing.md)' >> /tmp/test.md
+        export CLAUDE_WORKSPACE_DIR=/tmp
+        export CLAUDE_FILE_PATHS=/tmp/test.md
+      command: echo '{"stop_hook_active":false}' | ~/.claude/automation/lychee/check-links-hybrid.sh
+      expected: JSON output with decision="block"
+
+    - name: SessionStart injection
+      setup: echo "🔍 5 Total ✅ 3 OK 🚫 2 Errors" > /tmp/claude_lychee_full.txt
+      command: ~/.claude/automation/lychee/inject-results.sh
+      expected: Formatted markdown output with results
+
+  integration_tests:
+    - name: Full workflow
+      steps:
+        - Modify markdown file with broken link
+        - Trigger stop hook via Claude Code
+        - Verify blocking occurs
+        - Verify Claude receives reason
+        - Verify fix applied
+        - Trigger stop again
+        - Verify allowed (stop_hook_active=true)
+
+x-error-handling:
+  principles:
+    - Fail fast - raise errors immediately
+    - No silent failures - all errors logged
+    - No retries - validation is idempotent
+    - No fallbacks - use configured settings only
+
+  error_scenarios:
+    - scenario: Lychee binary not found
+      detection: which lychee fails
+      action: Exit 1 with error message to stderr
+
+    - scenario: Invalid JSON input
+      detection: jq parse error
+      action: Log error, exit 1
+
+    - scenario: CLAUDE_WORKSPACE_DIR not set
+      detection: Variable empty
+      action: Use $(pwd) as fallback (acceptable default)
+
+    - scenario: Permission denied on result file
+      detection: Write to /tmp fails
+      action: Exit 1 with error message
+
+    - scenario: Lychee config file missing
+      detection: File not found at ~/.claude/.lycheerc.toml
+      action: Use inline defaults, log warning
+
+x-observability:
+  logs:
+    primary:
+      path: ~/.claude/logs/lychee.log
+      format: "[ISO8601_timestamp] message"
+      rotation: Manual (not automated)
+      retention: Until manually cleared
+
+    results:
+      path: /tmp/claude_lychee_full.txt
+      format: Lychee markdown output
+      persistence: Until next full validation
+
+  metrics_tracked:
+    - Hook execution count
+    - Blocking events count
+    - Average links checked per run
+    - Error count trends over time
+    - Hook execution timing
+
+  debugging:
+    - Set RUST_LOG= to suppress debug output
+    - Check ~/.claude/logs/lychee.log for timing
+    - Check /tmp/claude_lychee_full.txt for results
+    - Manual execution: echo '{}' | ~/.claude/automation/lychee/check-links-hybrid.sh
+
+x-maintenance:
+  regular_tasks:
+    daily:
+      - None (automated execution)
+
+    weekly:
+      - Review /tmp/claude_lychee_full.txt
+      - Check error trends
+      - Update .lycheeignore for false positives
+
+    monthly:
+      - Review cache size: ls -lah ~/.claude/.lycheecache
+      - Check lychee version: lychee --version
+      - Update if new version available: brew upgrade lychee
+
+    quarterly:
+      - Review exclusion patterns effectiveness
+      - Assess blocking vs non-blocking balance
+      - Consider external URL validation (GitHub Actions)
+
+  modification_procedures:
+    adjust_exclusions:
+      file: ~/.claude/.lycheeignore
+      syntax: Regex patterns, one per line
+      test: lychee --dump to preview excluded links
+
+    adjust_timeout:
+      file: ~/.claude/.lycheerc.toml
+      parameter: timeout
+      test: Run manual validation with new timeout
+
+    disable_blocking:
+      file: ~/.claude/automation/lychee/check-links-hybrid.sh
+      change: Comment out TIER 2 section
+      test: Verify no blocking occurs
+
+x-known-limitations:
+  - Offline mode only (no external URL validation)
+  - Requires CLAUDE_FILE_PATHS for selective blocking
+  - Cache persists until max_cache_age expires
+  - No real-time feedback during long validations
+  - Cannot validate dynamically generated content
+  - Anchor validation case-sensitive
+
+x-future-enhancements:
+  - version: 0.2.0
+    features:
+      - GitHub Actions integration for external URL checking
+      - CNS integration for audio notifications on errors
+      - Metrics dashboard for link health trends
+      - Auto-fix suggestions using --suggest flag
+
+  - version: 0.3.0
+    features:
+      - Configurable blocking thresholds (error count, severity)
+      - Pre-commit hook variant
+      - Integration with git diff for changed lines only
+
+x-references:
+  probe_artifacts:
+    - /tmp/probe/lychee/CHEAT_SHEET.md
+    - /tmp/probe/lychee/INTEGRATION_RECOMMENDATION.md
+    - /tmp/probe/lychee/FEEDBACK_LOOP_ARCHITECTURE.md
+    - /tmp/probe/lychee/README.md
+
+  related_specifications:
+    - ~/.claude/specifications/cns-conversation-notification-system.yaml
+    - ~/.claude/specifications/prettier-markdown-formatting.yaml
+
+  external_documentation:
+    - https://lychee.cli.rs/
+    - https://github.com/lycheeverse/lychee
+    - https://docs.claude.com/en/docs/claude-code/hooks

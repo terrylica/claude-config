@@ -1,0 +1,565 @@
+---
+execution_checklists:
+  version: "1.0.0"
+  generated: "2025-10-23"
+  description: |
+    Complete execution checklists for workspace reorganization.
+    Covers pre-migration preparation, per-phase execution, and post-migration verification.
+
+# ==============================================================================
+# PRE-MIGRATION CHECKLIST
+# ==============================================================================
+
+pre_migration_checklist:
+  name: "Pre-Migration Preparation"
+  description: "Complete ALL items before starting any reorganization phase"
+  mandatory: true
+  estimated_duration: "30 minutes"
+
+  tasks:
+    - item: "Read all reorganization documentation"
+      details:
+        - "/specifications/workspace-reorganization.yaml"
+        - "/specifications/reorg-move-map.yaml"
+        - "/docs/standards/TOOL_ORGANIZATION.md"
+        - "/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md"
+        - "/docs/maintenance/REORGANIZATION_ROLLBACK.md"
+      status: "[ ]"
+
+    - item: "Create full workspace backup"
+      command: "/tools/emergency-backup.sh"
+      verify: "Backup file exists and is > 100 MB"
+      status: "[ ]"
+
+    - item: "Verify git working directory is clean"
+      command: "git status"
+      expected: "nothing to commit, working tree clean"
+      status: "[ ]"
+
+    - item: "Create pre-reorganization git commit"
+      command: 'git add -A && git commit -m "snapshot: pre-reorganization state $(date +%Y-%m-%d)"'
+      verify: "Commit successful"
+      status: "[ ]"
+
+    - item: "Run workspace health check (baseline)"
+      command: "/tools/bin/workspace-health-check.sh"
+      expected: "Capture baseline score and issues"
+      status: "[ ]"
+
+    - item: "Verify all documentation links valid"
+      command: "gfm-check /Users/terryli/.claude/docs/"
+      expected: "No broken links or acceptable state"
+      status: "[ ]"
+
+    - item: "Test all critical tools functional"
+      commands:
+        - "install-all-tools --help"
+        - "gfm-check --help"
+        - "/automation/cns/cns_hook_entry.sh --help"
+      expected: "All commands succeed"
+      status: "[ ]"
+
+    - item: "Verify Claude Code is closed"
+      details: "Reorganization safer with Claude Code not running"
+      status: "[ ]"
+
+    - item: "Document current state"
+      commands:
+        - "du -sh shell-snapshots/ debug/ file-history/ todos/"
+        - "find /Users/terryli/.claude -maxdepth 1 -type f -name '*.sh' -o -name '*.py'"
+        - "git log --oneline -10"
+      action: "Save output to pre-reorg-state.txt"
+      status: "[ ]"
+
+    - item: "Understand rollback procedures"
+      details: "Know how to rollback each phase"
+      reference: "/docs/maintenance/REORGANIZATION_ROLLBACK.md"
+      status: "[ ]"
+
+  completion_criteria:
+    - "All tasks checked"
+    - "Backup verified"
+    - "Git commit created"
+    - "Baseline documented"
+
+# ==============================================================================
+# PHASE 2: SAFE CLEANUP CHECKLIST
+# ==============================================================================
+
+phase_2_safe_cleanup_checklist:
+  name: "Phase 2: Safe Cleanup"
+  description: "Remove backup files, fix nested directories"
+  risk: "low"
+  estimated_duration: "30 minutes"
+  dependencies: ["pre_migration_checklist"]
+
+  tasks:
+    - item: "Complete pre-migration checklist"
+      status: "[ ]"
+
+    - item: "Create phase 2 backup point"
+      command: 'git add -A && git commit -m "checkpoint: before phase-2 safe cleanup"'
+      status: "[ ]"
+
+    - item: "Verify backup files exist in git history"
+      commands:
+        - "git log -- statusline.sh.backup"
+        - "git log -- automation/cns/cns_hook_entry.sh.backup"
+      expected: "Files have git history"
+      status: "[ ]"
+
+    - item: "Delete statusline.sh.backup"
+      command: "rm /Users/terryli/.claude/statusline.sh.backup"
+      verify: "File deleted"
+      status: "[ ]"
+
+    - item: "Delete sage-sync.original"
+      command: "rm /Users/terryli/.claude/archive/sage-sync-legacy/sage-sync.original"
+      verify: "File deleted"
+      status: "[ ]"
+
+    - item: "Delete cns_hook_entry.sh.backup"
+      command: "rm /Users/terryli/.claude/automation/cns/cns_hook_entry.sh.backup"
+      verify: "Production CNS hook exists and functional"
+      status: "[ ]"
+
+    - item: "Verify CNS automation still works"
+      command: "/Users/terryli/.claude/automation/cns/cns_hook_entry.sh --help"
+      expected: "Command succeeds"
+      status: "[ ]"
+
+    - item: "Fix nested .claude directory (if exists)"
+      commands:
+        - "mkdir -p system/"
+        - "mv .claude/settings.local.json system/settings.local.json 2>/dev/null || true"
+        - "rmdir .claude/ 2>/dev/null || true"
+      verify: "No .claude/.claude/ directory exists"
+      status: "[ ]"
+
+    - item: "Commit phase 2 changes"
+      command: 'git add -A && git commit -m "refactor(workspace): phase-2 safe cleanup - remove backups, fix nesting"'
+      status: "[ ]"
+
+    - item: "Run health check"
+      command: "/tools/bin/workspace-health-check.sh"
+      expected: "No new failures"
+      status: "[ ]"
+
+  completion_criteria:
+    - "All backup files deleted"
+    - "Nested directory fixed"
+    - "Git commit successful"
+    - "Health check passes"
+
+  rollback:
+    method: "git reset --hard HEAD~1"
+    verification: "Run health check after rollback"
+
+# ==============================================================================
+# PHASE 3: ROOT CLEANUP CHECKLIST
+# ==============================================================================
+
+phase_3_root_cleanup_checklist:
+  name: "Phase 3: Root Cleanup"
+  description: "Move root-level scripts to appropriate locations"
+  risk: "medium"
+  estimated_duration: "1 hour"
+  dependencies: ["phase_2_safe_cleanup_checklist"]
+
+  tasks:
+    - item: "Complete Phase 2 checklist"
+      status: "[ ]"
+
+    - item: "Create phase 3 backup point"
+      command: 'git add -A && git commit -m "checkpoint: before phase-3 root cleanup"'
+      status: "[ ]"
+
+    - item: "Create tool subdirectories"
+      commands:
+        - "mkdir -p /Users/terryli/.claude/tools/bin"
+        - "mkdir -p /Users/terryli/.claude/tools/config"
+        - "mkdir -p /Users/terryli/.claude/archive/legacy"
+      verify: "Directories created"
+      status: "[ ]"
+
+    - item: "Create README for tools/bin/"
+      command: "cat > /Users/terryli/.claude/tools/bin/README.md << 'EOF'\n# Executable Tool Wrappers\nSee /docs/standards/TOOL_ORGANIZATION.md\nEOF"
+      status: "[ ]"
+
+    - item: "Create README for tools/config/"
+      command: "cat > /Users/terryli/.claude/tools/config/README.md << 'EOF'\n# Tool Configuration\nSee /docs/standards/TOOL_ORGANIZATION.md\nEOF"
+      status: "[ ]"
+
+    - item: "Move install-all-tools"
+      command: "mv /Users/terryli/.claude/install-all-tools /Users/terryli/.claude/tools/bin/install-all-tools.sh"
+      verify: "File moved successfully"
+      status: "[ ]"
+
+    - item: "Update install-all-tools symlink"
+      command: "ln -sf /Users/terryli/.claude/tools/bin/install-all-tools.sh ~/.local/bin/install-all-tools"
+      verify: "Symlink updated"
+      status: "[ ]"
+
+    - item: "Test install-all-tools from new location"
+      command: "/Users/terryli/.claude/tools/bin/install-all-tools.sh --help"
+      expected: "Command succeeds"
+      status: "[ ]"
+
+    - item: "Move disable-pyright.sh"
+      command: "mv /Users/terryli/.claude/disable-pyright.sh /Users/terryli/.claude/tools/config/disable-pyright.sh"
+      verify: "File moved successfully"
+      status: "[ ]"
+
+    - item: "Move instant-sync-option.sh to archive"
+      command: "mv /Users/terryli/.claude/instant-sync-option.sh /Users/terryli/.claude/archive/legacy/instant-sync-option.sh"
+      verify: "Legacy script archived"
+      status: "[ ]"
+
+    - item: "Update documentation references"
+      details:
+        - "Check docs/setup/TEAM_SETUP.md for install-all-tools references"
+        - "Update any paths that reference old locations"
+      status: "[ ]"
+
+    - item: "Commit phase 3 changes"
+      command: 'git add -A && git commit -m "refactor(workspace): phase-3 root cleanup - move scripts to tools/"'
+      status: "[ ]"
+
+    - item: "Run health check"
+      command: "/tools/bin/workspace-health-check.sh"
+      expected: "ORG-001 check now passes (no root scripts)"
+      status: "[ ]"
+
+  completion_criteria:
+    - "All root scripts moved"
+    - "Symlinks updated and working"
+    - "Documentation updated"
+    - "Health check shows improvement"
+
+  rollback:
+    procedure: "See /docs/maintenance/REORGANIZATION_ROLLBACK.md - Phase 3"
+
+# ==============================================================================
+# PHASE 4: SYSTEM CONSOLIDATION CHECKLIST (HIGH RISK)
+# ==============================================================================
+
+phase_4_system_consolidation_checklist:
+  name: "Phase 4: System Consolidation (HIGH RISK)"
+  description: "Move runtime artifacts to /system/ directory"
+  risk: "high"
+  estimated_duration: "2 hours"
+  dependencies: ["phase_3_root_cleanup_checklist"]
+  warning: "This phase may affect Claude Code functionality. Proceed with caution."
+
+  tasks:
+    - item: "⚠️ READ WARNING: Understand risks"
+      details: "This phase moves directories Claude Code may actively use"
+      status: "[ ]"
+
+    - item: "⚠️ DECISION: Proceed or skip this phase?"
+      details: "Recommendation: SKIP unless you understand Claude Code internals"
+      decision: "[ ] PROCEED or [ ] SKIP"
+      status: "[ ]"
+
+    - item: "Create FULL backup (not just git)"
+      command: "tar -czf ~/claude-workspace-backup-$(date +%Y%m%d-%H%M).tar.gz ~/.claude/"
+      verify: "Backup file > 500 MB"
+      status: "[ ]"
+
+    - item: "Close Claude Code completely"
+      verify: "No Claude Code processes running"
+      status: "[ ]"
+
+    - item: "Create system directory"
+      command: "mkdir -p /Users/terryli/.claude/system"
+      status: "[ ]"
+
+    - item: "Move todos/ (TEST IMMEDIATELY AFTER)"
+      commands:
+        - "mv /Users/terryli/.claude/todos /Users/terryli/.claude/system/todos"
+      test: "Start Claude Code, verify task tracking works"
+      rollback_if_fails: "mv system/todos ./todos"
+      status: "[ ]"
+
+    - item: "⚠️ CRITICAL: Test Claude Code after todos/ move"
+      verification:
+        - "Claude Code starts successfully"
+        - "Task tracking works"
+        - "No error messages about missing todos"
+      proceed_only_if: "All verifications pass"
+      status: "[ ]"
+
+    - item: "Move file-history/ (TEST IMMEDIATELY AFTER)"
+      commands:
+        - "mv /Users/terryli/.claude/file-history /Users/terryli/.claude/system/file-history"
+      test: "Verify file history feature works"
+      rollback_if_fails: "mv system/file-history ./file-history"
+      status: "[ ]"
+
+    - item: "Move debug/"
+      commands:
+        - "mv /Users/terryli/.claude/debug /Users/terryli/.claude/system/debug"
+      verify: "No active logging processes broken"
+      status: "[ ]"
+
+    - item: "Consolidate history"
+      commands:
+        - "mkdir -p system/history"
+        - "mv history.jsonl system/history/session-history.jsonl 2>/dev/null || true"
+        - "mv history system/history/archive 2>/dev/null || true"
+      status: "[ ]"
+
+    - item: "Test ALL Claude Code functionality"
+      tests:
+        - "Task tracking"
+        - "File history"
+        - "Session restoration"
+        - "Debug logging"
+      status: "[ ]"
+
+    - item: "Commit phase 4 changes (only if all tests pass)"
+      command: 'git add -A && git commit -m "refactor(workspace): phase-4 system consolidation - organize runtime artifacts"'
+      status: "[ ]"
+
+  completion_criteria:
+    - "All directories moved"
+    - "Claude Code fully functional"
+    - "No errors or warnings"
+    - "Git committed"
+
+  rollback:
+    procedure: "CRITICAL - See /docs/maintenance/REORGANIZATION_ROLLBACK.md - Phase 4"
+    urgency: "IMMEDIATE if ANY issues detected"
+
+# ==============================================================================
+# PHASE 5: ARTIFACT ARCHIVAL CHECKLIST
+# ==============================================================================
+
+phase_5_artifact_archival_checklist:
+  name: "Phase 5: Artifact Archival"
+  description: "Archive old runtime artifacts with compression"
+  risk: "low"
+  estimated_duration: "1 hour"
+  dependencies: ["phase_2_safe_cleanup_checklist"]  # Can run independently
+
+  tasks:
+    - item: "Create archive directory"
+      command: "mkdir -p /Users/terryli/.claude/archive"
+      status: "[ ]"
+
+    - item: "Archive shell snapshots (> 30 days old)"
+      commands:
+        - "tar -czf archive/shell-snapshots-$(date +%Y-%m).tar.gz $(find shell-snapshots/ -type f -mtime +30)"
+      verify: "tar -tzf archive/shell-snapshots-$(date +%Y-%m).tar.gz | head"
+      status: "[ ]"
+
+    - item: "Verify shell snapshots archive"
+      command: "tar -tzf archive/shell-snapshots-$(date +%Y-%m).tar.gz > /dev/null && echo 'Valid'"
+      expected: "Output: Valid"
+      status: "[ ]"
+
+    - item: "Delete archived shell snapshots (only if verification passed)"
+      command: "find shell-snapshots/ -type f -mtime +30 -delete"
+      verify: "ls shell-snapshots/ | wc -l  # Should be fewer files"
+      status: "[ ]"
+
+    - item: "Archive debug logs (> 30 days old)"
+      commands:
+        - "tar -czf archive/debug-logs-$(date +%Y-%m).tar.gz $(find debug/ -type f -mtime +30 2>/dev/null || true)"
+      status: "[ ]"
+
+    - item: "Verify debug logs archive"
+      command: "tar -tzf archive/debug-logs-$(date +%Y-%m).tar.gz > /dev/null && echo 'Valid' || echo 'Empty or failed'"
+      status: "[ ]"
+
+    - item: "Delete archived debug logs"
+      command: "find debug/ -type f -mtime +30 -delete 2>/dev/null || true"
+      status: "[ ]"
+
+    - item: "Archive file history (> 30 days old)"
+      commands:
+        - "tar -czf archive/file-history-$(date +%Y-%m).tar.gz $(find file-history/ -type d -mindepth 1 -maxdepth 1 -mtime +30 2>/dev/null || true)"
+      status: "[ ]"
+
+    - item: "Verify file history archive"
+      command: "tar -tzf archive/file-history-$(date +%Y-%m).tar.gz > /dev/null && echo 'Valid' || echo 'Empty or failed'"
+      status: "[ ]"
+
+    - item: "⚠️ Test Claude Code file history before deleting"
+      details: "Ensure Claude Code can still access recent file history"
+      status: "[ ]"
+
+    - item: "Delete archived file history (CAUTIOUS)"
+      command: "find file-history/ -type d -mindepth 1 -maxdepth 1 -mtime +30 -exec rm -rf {} +"
+      verify: "Claude Code file history still works"
+      status: "[ ]"
+
+    - item: "Document space savings"
+      command: "du -sh shell-snapshots/ debug/ file-history/ archive/"
+      action: "Record before/after sizes"
+      status: "[ ]"
+
+    - item: "Create archive README"
+      command: "cat > archive/README.md << 'EOF'\n# Archived Runtime Artifacts\nSee /docs/maintenance/ARTIFACT_RETENTION.md\nEOF"
+      status: "[ ]"
+
+    - item: "Commit archival"
+      command: 'git add archive/ && git commit -m "chore(workspace): phase-5 archival - compress old artifacts"'
+      status: "[ ]"
+
+  completion_criteria:
+    - "Old artifacts archived and compressed"
+    - "Archives verified"
+    - "Space savings achieved"
+    - "Systems still functional"
+
+# ==============================================================================
+# POST-MIGRATION VERIFICATION CHECKLIST
+# ==============================================================================
+
+post_migration_verification_checklist:
+  name: "Post-Migration Verification"
+  description: "Comprehensive verification after reorganization"
+  mandatory: true
+  estimated_duration: "30 minutes"
+
+  tasks:
+    - item: "Run full workspace health check"
+      command: "/tools/bin/workspace-health-check.sh"
+      expected: "Score improved from 7.2/10 baseline"
+      target: "9.0/10 or higher"
+      status: "[ ]"
+
+    - item: "Verify no root-level scripts"
+      command: "find /Users/terryli/.claude -maxdepth 1 -type f \\( -name '*.sh' -o -name '*.py' \\)"
+      expected: "No files found (or only planned exceptions)"
+      status: "[ ]"
+
+    - item: "Verify no backup files"
+      command: "find /Users/terryli/.claude -type f \\( -name '*.backup' -o -name '*.original' \\) ! -path '*/archive/*'"
+      expected: "No files found"
+      status: "[ ]"
+
+    - item: "Verify tool organization"
+      checks:
+        - "tools/bin/ exists with README"
+        - "tools/config/ exists with README"
+        - "No .venv in tools/ (or planned migration)"
+      status: "[ ]"
+
+    - item: "Verify system consolidation (if Phase 4 completed)"
+      checks:
+        - "system/todos/ exists"
+        - "system/file-history/ exists"
+        - "system/debug/ exists"
+        - "system/history/ exists"
+      status: "[ ]"
+
+    - item: "Test all critical tools"
+      commands:
+        - "/tools/bin/install-all-tools.sh --help"
+        - "gfm-check --help"
+        - "/automation/cns/cns_hook_entry.sh --help"
+      expected: "All succeed"
+      status: "[ ]"
+
+    - item: "Test Claude Code functionality"
+      tests:
+        - "Start Claude Code successfully"
+        - "Task tracking works"
+        - "File history accessible"
+        - "Sessions restore"
+        - "Automation hooks execute"
+      status: "[ ]"
+
+    - item: "Verify documentation links"
+      command: "gfm-check /Users/terryli/.claude/docs/"
+      expected: "All links valid"
+      status: "[ ]"
+
+    - item: "Verify symlinks"
+      command: "find ~/.local/bin -type l -exec sh -c 'test -e {} || echo Broken: {}' \\;"
+      expected: "No broken symlinks"
+      status: "[ ]"
+
+    - item: "Check artifact sizes"
+      command: "du -sh shell-snapshots/ debug/ file-history/ todos/ archive/"
+      verify: "Artifact sizes reasonable, space savings achieved"
+      status: "[ ]"
+
+    - item: "Verify git history intact"
+      command: "git log --oneline | head -20"
+      verify: "All reorganization commits present"
+      status: "[ ]"
+
+    - item: "Document final state"
+      actions:
+        - "Run health check, save output"
+        - "Document space savings"
+        - "List any remaining issues"
+        - "Create post-reorg-state.txt"
+      status: "[ ]"
+
+  success_criteria:
+    - "Health check score ≥ 9.0/10"
+    - "No critical failures"
+    - "All tools functional"
+    - "Claude Code fully operational"
+    - "Space savings achieved"
+    - "Documentation complete"
+
+  if_failures_detected:
+    - "Document all failures"
+    - "Determine severity"
+    - "Execute rollback if critical"
+    - "Create issues in /docs/maintenance/REORGANIZATION_ISSUES.md"
+
+# ==============================================================================
+# MAINTENANCE CHECKLIST (ONGOING)
+# ==============================================================================
+
+ongoing_maintenance_checklist:
+  name: "Ongoing Maintenance"
+  description: "Monthly maintenance tasks"
+  frequency: "monthly"
+
+  tasks:
+    - item: "Run workspace health check"
+      command: "/tools/bin/workspace-health-check.sh"
+      status: "[ ]"
+
+    - item: "Archive old artifacts (> 30 days)"
+      command: "/tools/maintenance/archive-artifacts.sh  # Create this"
+      status: "[ ]"
+
+    - item: "Update tool manifest"
+      file: "/tools/tool-manifest.yaml"
+      action: "Review and update for new/removed tools"
+      status: "[ ]"
+
+    - item: "Check documentation links"
+      command: "gfm-check docs/"
+      status: "[ ]"
+
+    - item: "Review artifact sizes"
+      command: "du -sh shell-snapshots/ debug/ file-history/ archive/"
+      action: "Verify retention policies working"
+      status: "[ ]"
+
+    - item: "Update CHANGELOG"
+      action: "Document any workspace changes"
+      status: "[ ]"
+
+notes:
+  - "All checklists are in YAML for machine readability"
+  - "Can be automated with parsing tools"
+  - "Checkboxes: [ ] = pending, [x] = completed"
+  - "Always understand rollback before proceeding"
+  - "When in doubt, create a backup"
+
+related_documentation:
+  - "/specifications/workspace-reorganization.yaml"
+  - "/specifications/reorg-move-map.yaml"
+  - "/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md"
+  - "/docs/maintenance/REORGANIZATION_ROLLBACK.md"
+---

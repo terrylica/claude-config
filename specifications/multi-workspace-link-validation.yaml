@@ -1,0 +1,509 @@
+openapi: 3.1.0
+info:
+  title: Multi-Workspace Link Validation System
+  version: 2.1.0
+  description: |
+    Telegram-based approval workflow for link validation across multiple
+    concurrent Claude Code workspaces with completion notifications.
+
+    Replaces: link-validation-autofix-system.yaml (single-workspace only)
+
+    Architecture: Single process handles N workspaces via file-based routing.
+
+x-architecture:
+  overview: |
+    Phase 1: Stop Hook → Notification File → Bot → Telegram Notification
+    Phase 2: User Click → Callback → Bot → Approval File
+    Phase 3: Orchestrator → Claude CLI Execution → Capture Output
+    Phase 4: Orchestrator → Completion File → Bot → Telegram Completion
+
+  components:
+    stop_hook:
+      location: "Each workspace: .claude/automation/lychee/runtime/hook/check-links-hybrid.sh"
+      trigger: Claude Code session stop
+      output: /tmp/lychee_state/notifications/notify_{session_id}_{ws_hash}.json
+
+    telegram_bot:
+      location: ~/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py
+      watches:
+        - /tmp/lychee_state/notifications/ (for initial detection)
+        - /tmp/lychee_state/completions/ (for execution results)
+      sends:
+        - Initial notification with action buttons
+        - Completion notification with results
+      receives: Button callbacks with workspace routing
+
+    orchestrator:
+      location: ~/.claude/automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py
+      watches: /tmp/lychee_state/approvals/
+      invokes: Claude CLI in workspace-specific context
+      captures: stdout, stderr, exit_code, duration
+      emits: /tmp/lychee_state/completions/completion_{session_id}_{ws_hash}.json
+      cleanup: Consumed approval files
+
+  process_count: 1
+  workspace_limit: unlimited
+
+x-file-structure:
+  state_directory: /tmp/lychee_state/
+
+  subdirectories:
+    notifications:
+      purpose: Hook emits notification requests
+      pattern: "notify_{session_id}_{workspace_hash}.json"
+      ttl_minutes: 5
+
+    approvals:
+      purpose: User approval decisions
+      pattern: "approval_{session_id}_{workspace_hash}.json"
+      ttl_minutes: 5
+
+    completions:
+      purpose: Orchestrator emits execution results
+      pattern: "completion_{session_id}_{workspace_hash}.json"
+      ttl_minutes: 5
+      schema: "#/components/schemas/CompletionNotification"
+
+    callbacks:
+      purpose: Hash mapping for Telegram callback_data
+      pattern: "cb_{hash8}.json"
+      ttl_minutes: 5
+
+    registry:
+      purpose: Workspace metadata
+      file: registry.json
+      schema: "#/components/schemas/WorkspaceRegistry"
+
+x-slos:
+  availability:
+    target: 99.9%
+    measurement: Hook execution success rate
+    failure_modes:
+      - Bot process crash
+      - File system full
+      - Invalid JSON in state files
+
+  correctness:
+    target: 100%
+    requirements:
+      - Notifications route to correct workspace
+      - Button clicks route to correct workspace
+      - No approval processed twice
+      - No orphaned state files after 5 minutes
+
+  observability:
+    requirements:
+      - All state files logged with timestamp
+      - Workspace routing decisions logged
+      - Errors propagate to stdout/stderr
+      - No silent failures
+      - Claude CLI execution traced (PID, exit code, duration, output lengths)
+      - Completion notifications logged with status
+    logging:
+      bot_log: ~/.claude/logs/telegram-handler.log
+      orchestrator_log: ~/.claude/logs/orchestrator.log
+      format: Emoji-prefixed structured logging (🔄, ✓, 📊, 📤, ❌)
+
+  maintainability:
+    requirements:
+      - Single source of truth (this spec)
+      - All state in /tmp (no hidden files)
+      - Schema validation on all JSON
+      - Clear separation: hook → bot → orchestrator
+
+components:
+  schemas:
+    WorkspaceRegistry:
+      type: object
+      required: [version, workspaces]
+      properties:
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "2.0.0"
+        workspaces:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/WorkspaceConfig'
+
+    WorkspaceConfig:
+      type: object
+      required: [emoji, path, name]
+      properties:
+        emoji:
+          type: string
+          description: Unicode emoji for visual identification
+          example: "🔗"
+        path:
+          type: string
+          description: Absolute path to workspace directory
+          example: "/Users/terryli/.claude"
+        name:
+          type: string
+          description: Short name for display (max 8 chars)
+          example: ".claude"
+
+    NotificationRequest:
+      type: object
+      required: [workspace_path, session_id, error_count, details, timestamp]
+      properties:
+        workspace_path:
+          type: string
+          example: "/Users/terryli/.claude"
+        session_id:
+          type: string
+          format: uuid
+          example: "d1c8bbc0-7d46-42c3-a3ed-3561af8c3166"
+        error_count:
+          type: integer
+          minimum: 0
+          example: 3
+        details:
+          type: string
+          description: Human-readable error summary
+          example: "Found 3 broken fragment links in CLAUDE.md"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2025-10-24T15:30:00Z"
+
+    CallbackContext:
+      type: object
+      required: [workspace_id, workspace_path, session_id, action, timestamp]
+      properties:
+        workspace_id:
+          type: string
+          example: "lychee-autofix"
+        workspace_path:
+          type: string
+          example: "/Users/terryli/.claude"
+        session_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [auto_fix_all, review, reject]
+        timestamp:
+          type: string
+          format: date-time
+
+    ApprovalState:
+      type: object
+      required: [workspace_path, session_id, decision, timestamp]
+      properties:
+        workspace_path:
+          type: string
+        session_id:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [auto_fix_all, review, reject]
+        timestamp:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          properties:
+            workspace_hash:
+              type: string
+              pattern: '^[a-f0-9]{8}$'
+            callback_id:
+              type: string
+              pattern: '^cb_[a-f0-9]{8}$'
+
+    CompletionNotification:
+      type: object
+      required: [workspace_path, workspace_id, session_id, status, exit_code, duration_seconds, summary, timestamp]
+      properties:
+        workspace_path:
+          type: string
+          example: "/Users/terryli/.claude"
+        workspace_id:
+          type: string
+          example: "lychee-autofix"
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [success, error, timeout]
+          description: Execution outcome
+        exit_code:
+          type: integer
+          description: Process exit code (0 = success, -1 = timeout/error)
+        duration_seconds:
+          type: number
+          format: float
+          description: Execution duration in seconds
+          example: 21.7
+        summary:
+          type: string
+          description: Human-readable summary extracted from output
+          example: "Fixed 3 broken fragment links in CLAUDE.md"
+        stdout:
+          type: string
+          description: Full standard output from Claude CLI
+        stderr:
+          type: string
+          description: Full standard error from Claude CLI
+        timestamp:
+          type: string
+          format: date-time
+
+x-dependencies:
+  off_the_shelf:
+    - name: python-telegram-bot
+      version: ">=21.0"
+      purpose: Telegram bot API client
+
+    - name: watchfiles
+      version: ">=1.0.0"
+      purpose: File system event monitoring (Rust-backed)
+
+    - name: jsonschema
+      version: ">=4.0.0"
+      purpose: JSON schema validation
+
+  stdlib_only:
+    - asyncio
+    - json
+    - hashlib
+    - pathlib
+
+x-implementation-phases:
+  phase_1_foundation:
+    status: completed
+    completed_date: "2025-10-24"
+    artifacts:
+      - /Users/terryli/.claude/automation/lychee/runtime/lib/workspace_helpers.py
+      - /tmp/lychee_state/registry.json
+    tasks:
+      - Create workspace registry schema
+      - Implement hash mapping helpers
+      - Create file structure in /tmp/lychee_state
+
+  phase_2_bot:
+    status: completed
+    completed_date: "2025-10-24"
+    depends_on: phase_1_foundation
+    artifacts:
+      - /Users/terryli/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py
+    tasks:
+      - Implement notification watcher
+      - Implement Telegram message formatting with emoji
+      - Implement callback handler with routing
+
+  phase_3_orchestrator:
+    status: completed
+    completed_date: "2025-10-24"
+    depends_on: phase_2_bot
+    artifacts:
+      - /Users/terryli/.claude/automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py
+    tasks:
+      - Implement approval watcher
+      - Implement workspace validation
+      - Implement Claude CLI invocation
+
+  phase_4_hook_integration:
+    status: completed
+    completed_date: "2025-10-24"
+    depends_on: phase_3_orchestrator
+    artifacts:
+      - /Users/terryli/.claude/automation/lychee/runtime/hook/check-links-hybrid.sh (modified)
+    tasks:
+      - Update check-links-hybrid.sh to emit notifications
+      - Add workspace metadata extraction
+      - Test multi-workspace scenario
+
+  phase_5_reorganization:
+    status: completed
+    completed_date: "2025-10-24"
+    depends_on: phase_4_hook_integration
+    tasks:
+      - Reorganize files into hierarchical structure
+      - Separate runtime, setup, config, testing, docs
+      - Update all path references
+      - Archive legacy files
+
+  phase_6_completion_notifications:
+    status: completed
+    completed_date: "2025-10-24"
+    depends_on: phase_5_reorganization
+    artifacts:
+      - /tmp/lychee_state/completions/ (new directory)
+      - CompletionHandler class in multi-workspace-bot.py
+      - Enhanced logging in both bot and orchestrator
+    tasks:
+      - Design completion notification schema
+      - Create POC in /tmp/lychee_poc/ for validation
+      - Modify orchestrator to capture stdout/stderr/exit_code/duration
+      - Implement _emit_completion() method in orchestrator
+      - Add CompletionHandler class to bot
+      - Add watch_completions() watcher to bot
+      - Add detailed emoji-prefixed logging throughout
+      - Test end-to-end with real Claude CLI execution
+    testing:
+      - POC validation: 3 scenarios (success, error, timeout)
+      - End-to-end test: Button click → Claude CLI → Telegram completion
+      - Verified: 21.7s execution, status=success, proper message formatting
+
+x-migration:
+  strategy: Clean break - no backward compatibility
+  deprecated_files_removed:
+    - path: /Users/terryli/.claude/automation/lychee/auto-fix-orchestrator.py
+      reason: Single workspace only
+      removed_date: "2025-10-24"
+
+    - path: /Users/terryli/.claude/automation/lychee/telegram-approval-handler.py
+      reason: No workspace routing
+      removed_date: "2025-10-24"
+
+    - path: /Users/terryli/.claude/automation/lychee/send-hook-notification.py
+      reason: Replaced by direct file write
+      removed_date: "2025-10-24"
+
+    - path: /Users/terryli/.claude/automation/lychee/send-test-notification.py
+      reason: No longer applicable
+      removed_date: "2025-10-24"
+
+    - path: /Users/terryli/.claude/specifications/link-validation-autofix-system.yaml
+      reason: Single workspace architecture
+      removed_date: "2025-10-24"
+
+  state_file_migration:
+    old: /tmp/lychee_approval_state.json
+    new: /tmp/lychee_state/approvals/approval_{session_id}_{ws_hash}.json
+    strategy: No migration - clean break
+
+x-testing:
+  scenarios:
+    - name: Single workspace
+      workspaces: [lychee-autofix]
+      expectation: Functions as before
+
+    - name: Concurrent workspaces
+      workspaces: [lychee-autofix, project-a, project-b]
+      trigger: All stop hooks fire within 1 second
+      expectation: 3 separate Telegram messages with unique emoji
+
+    - name: Button routing
+      setup: 3 notifications pending
+      action: Click "Auto-Fix" on middle notification
+      expectation: Claude CLI runs in correct workspace only
+
+    - name: Workspace validation
+      setup: Approval with invalid workspace_path
+      expectation: Error logged, approval skipped, no CLI invocation
+
+x-observability:
+  logging:
+    format: "{timestamp} [{component}] {level}: {message}"
+    components: [hook, bot, orchestrator]
+
+  metrics:
+    - notification_emitted_total
+    - approval_processed_total
+    - routing_error_total
+    - workspace_validation_failed_total
+
+  state_inspection:
+    commands:
+      list_pending_notifications: "ls /tmp/lychee_state/notifications/"
+      list_pending_approvals: "ls /tmp/lychee_state/approvals/"
+      show_registry: "cat /tmp/lychee_state/registry.json"
+      show_approval: "cat /tmp/lychee_state/approvals/approval_*.json"
+
+x-implementation-findings:
+  callback_data_size_limit:
+    issue: Telegram callback_data has 64-byte limit
+    solution: Hash mapping (cb_{hash8}) stores full context in file
+    impact: Enables unlimited workspace routing information
+
+  path_canonicalization:
+    issue: macOS /tmp is symlink to /private/tmp
+    solution: Use Path.resolve() consistently
+    impact: Prevents hash mismatches between processes
+
+  single_process_design:
+    rationale: |
+      - Telegram doesn't allow multiple processes polling same token
+      - Lower memory footprint than per-workspace processes
+      - asyncio handles concurrent workspaces efficiently
+    result: One bot + one orchestrator serve unlimited workspaces
+
+  workspace_identification:
+    issue: User can't distinguish dozens of notifications
+    solution: Emoji prefix per workspace (🔗, 📊, 🔧, etc.)
+    impact: Instant visual recognition in Telegram
+
+  atomic_file_writes:
+    pattern: Create unique filename with session_id + workspace_hash
+    benefit: Prevents race conditions when multiple workspaces emit simultaneously
+    implementation: notify_{session_id}_{workspace_hash}.json
+
+  completion_notification_flow:
+    issue: Users had no feedback when Claude CLI finished execution
+    solution: |
+      - Orchestrator captures all output (stdout, stderr, exit_code, duration)
+      - Emits completion file to /tmp/lychee_state/completions/
+      - Bot watches completions directory
+      - Bot sends Telegram message with results (success/error/timeout)
+    impact: Full observability of background Claude CLI execution
+    telegram_message_formats:
+      success: "✅ Auto-Fix Completed" with duration and summary
+      error: "❌ Auto-Fix Failed" with exit code and error details
+      timeout: "⏱️ Auto-Fix Timeout" with 5-minute limit reached
+
+  detailed_logging_pattern:
+    rationale: Silent failures made debugging impossible
+    solution: |
+      - Emoji-prefixed structured logging throughout
+      - Line-by-line execution tracing
+      - All subprocess details logged (PID, exit code, output lengths)
+      - Errors include full stack traces
+    patterns:
+      - 🔄 = Processing started
+      - ✓ = Step completed
+      - 📊 = Metrics/statistics
+      - 📤 = Output emitted
+      - ❌ = Error occurred
+    result: Zero silent failures, full execution visibility
+
+x-changelog:
+  v2.1.0:
+    date: "2025-10-24"
+    new_features:
+      - Completion notifications after Claude CLI execution
+      - Bot watches /tmp/lychee_state/completions/ directory
+      - Telegram messages sent with execution results (success/error/timeout)
+      - Detailed emoji-prefixed logging throughout bot and orchestrator
+      - Line-by-line execution tracing with PID, exit codes, durations
+      - CompletionNotification schema with stdout/stderr capture
+    breaking_changes: None
+    backward_compatibility: Full (v2.0.0 functionality unchanged)
+    files_modified:
+      - runtime/bot/multi-workspace-bot.py (added CompletionHandler)
+      - runtime/orchestrator/multi-workspace-orchestrator.py (added output capture)
+    files_created:
+      - /tmp/lychee_state/completions/ (new state directory)
+    testing:
+      - POC validated in /tmp/lychee_poc/
+      - End-to-end test successful (21.7s execution)
+    rationale: |
+      Users had no visibility into Claude CLI execution after clicking "Auto-Fix".
+      Telegram showed "Processing..." indefinitely with no outcome feedback.
+      Completion notifications provide full observability and user confidence.
+    implementation_status: Complete (Phase 6)
+
+  v2.0.0:
+    date: "2025-10-24"
+    breaking_changes:
+      - Multi-workspace architecture (no backward compatibility)
+      - New file structure (/tmp/lychee_state/)
+      - New components (multi-workspace-bot.py, multi-workspace-orchestrator.py)
+      - Removed deprecated files (see x-migration)
+    rationale: |
+      Single workspace architecture cannot handle dozens of concurrent workspaces
+      with one Telegram account. Complete redesign required.
+    implementation_status: Complete (all phases 1-5)

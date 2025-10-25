@@ -1,0 +1,651 @@
+---
+health_check_specification:
+  version: "1.0.0"
+  generated: "2025-10-23"
+  description: |
+    Comprehensive validation suite for workspace health. Defines all checks
+    that should run to ensure workspace integrity, tool functionality, and
+    adherence to organizational standards.
+
+metadata:
+  total_checks: 42
+  categories: 8
+  automation_target: "/tools/bin/workspace-health-check.sh"
+  run_frequency: "pre-commit, monthly, after-reorganization"
+
+# ==============================================================================
+# CHECK CATEGORIES
+# ==============================================================================
+
+check_categories:
+  file_organization:
+    description: "Structural organization and anti-patterns"
+    check_count: 8
+    severity: "medium"
+
+  tool_validation:
+    description: "Tool manifest completeness and correctness"
+    check_count: 6
+    severity: "medium"
+
+  symlink_integrity:
+    description: "Symlink validity and targets"
+    check_count: 4
+    severity: "high"
+
+  hook_validation:
+    description: "Automation hook configuration and execution"
+    check_count: 5
+    severity: "high"
+
+  documentation_links:
+    description: "Markdown link integrity"
+    check_count: 3
+    severity: "low"
+
+  permission_validation:
+    description: "File permissions correctness"
+    check_count: 4
+    severity: "medium"
+
+  artifact_management:
+    description: "Runtime artifact size and retention"
+    check_count: 6
+    severity: "low"
+
+  git_health:
+    description: "Git repository health"
+    check_count: 6
+    severity: "medium"
+
+# ==============================================================================
+# FILE ORGANIZATION CHECKS
+# ==============================================================================
+
+file_organization_checks:
+  - check_id: "ORG-001"
+    name: "No root-level scripts"
+    description: "Verify no .sh or .py files in root directory"
+    severity: "medium"
+    command: |
+      find /Users/terryli/.claude -maxdepth 1 \
+        -type f \( -name "*.sh" -o -name "*.py" \) \
+        ! -name "install-all-tools"
+    success_condition: "No files found"
+    failure_action: "Move scripts to /tools/ per TOOL_ORGANIZATION.md"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+  - check_id: "ORG-002"
+    name: "No backup files in production directories"
+    description: "Verify no .backup, .original, .old files"
+    severity: "medium"
+    command: |
+      find /Users/terryli/.claude \
+        -type f \( -name "*.backup" -o -name "*.original" -o -name "*.old" \) \
+        ! -path "*/archive/*"
+    success_condition: "No files found"
+    failure_action: "Remove backup files, use git history instead"
+    reference: "/specifications/reorg-cleanup-targets.yaml"
+
+  - check_id: "ORG-003"
+    name: "No nested .claude directory"
+    description: "Verify no /.claude/.claude/ anomaly"
+    severity: "high"
+    command: |
+      test -d /Users/terryli/.claude/.claude && echo "Found" || echo "OK"
+    success_condition: "Output is 'OK'"
+    failure_action: "Move contents to /system/ and remove nested directory"
+    reference: "/specifications/reorg-move-map.yaml MOVE-005"
+
+  - check_id: "ORG-004"
+    name: "System artifacts in /system/ directory"
+    description: "Verify todos/, file-history/, debug/ in /system/"
+    severity: "medium"
+    command: |
+      test -d /Users/terryli/.claude/todos && echo "todos at root" || \
+      test -d /Users/terryli/.claude/file-history && echo "file-history at root" || \
+      test -d /Users/terryli/.claude/debug && echo "debug at root" || \
+      echo "OK"
+    success_condition: "Output is 'OK'"
+    failure_action: "Move to /system/ per reorganization plan"
+    reference: "/specifications/reorg-move-map.yaml batch_5"
+    note: "Expected after Phase 4 of reorganization"
+
+  - check_id: "ORG-005"
+    name: "Tools have proper directory structure"
+    description: "Each tool in /tools/ has README.md and tool-manifest.yaml"
+    severity: "medium"
+    command: |
+      for dir in /Users/terryli/.claude/tools/*/; do
+        if [ ! -f "$dir/README.md" ]; then
+          echo "Missing README: $dir"
+        fi
+        if [ ! -f "$dir/tool-manifest.yaml" ]; then
+          echo "Missing manifest: $dir"
+        fi
+      done
+    success_condition: "No output"
+    failure_action: "Create missing documentation per TOOL_ORGANIZATION.md"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+  - check_id: "ORG-006"
+    name: "No .venv in tool directories"
+    description: "User standard is uv, not .venv"
+    severity: "low"
+    command: |
+      find /Users/terryli/.claude/tools -type d -name ".venv"
+    success_condition: "No directories found"
+    failure_action: "Migrate to uv per user standards"
+    reference: "/CLAUDE.md - Python management"
+
+  - check_id: "ORG-007"
+    name: "Specifications are YAML or JSON"
+    description: "All files in /specifications/ are .yaml, .yml, or .json"
+    severity: "low"
+    command: |
+      find /Users/terryli/.claude/specifications -type f \
+        ! \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" -o -name "*.md" \)
+    success_condition: "No files found"
+    failure_action: "Convert to YAML or JSON, or move to docs/"
+    reference: "/specifications/workspace-reorganization.yaml"
+
+  - check_id: "ORG-008"
+    name: "Archive directory exists and has README"
+    description: "Archive directory properly documented"
+    severity: "low"
+    command: |
+      test -f /Users/terryli/.claude/archive/README.md && echo "OK" || echo "Missing"
+    success_condition: "Output is 'OK'"
+    failure_action: "Create archive/README.md explaining contents"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+# ==============================================================================
+# TOOL VALIDATION CHECKS
+# ==============================================================================
+
+tool_validation_checks:
+  - check_id: "TOOL-001"
+    name: "Tool manifest is up-to-date"
+    description: "Global tool manifest matches actual tools"
+    severity: "medium"
+    command: |
+      # Compare tools in manifest vs actual tools
+      # Implementation: parse YAML and compare to filesystem
+      echo "Manual check required"
+    success_condition: "All tools in manifest exist, all tools have entries"
+    failure_action: "Update /tools/tool-manifest.yaml"
+    reference: "/tools/tool-manifest.yaml"
+    automation: "Can be automated with yq and find"
+
+  - check_id: "TOOL-002"
+    name: "Tool executables have correct permissions"
+    description: "Scripts have 755, configs have 644"
+    severity: "medium"
+    command: |
+      find /Users/terryli/.claude/tools -type f -name "*.sh" ! -perm 755 -o \
+      find /Users/terryli/.claude/tools -type f -name "*.py" ! -perm 755
+    success_condition: "No files found"
+    failure_action: "chmod 755 on executable scripts"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md - Permissions"
+
+  - check_id: "TOOL-003"
+    name: "Tool dependencies are available"
+    description: "All tool dependencies are installed"
+    severity: "high"
+    command: |
+      # Check for: uv, git, bash, jq, prettier, etc.
+      for cmd in uv git bash jq prettier; do
+        command -v $cmd >/dev/null 2>&1 || echo "Missing: $cmd"
+      done
+    success_condition: "No output (all dependencies found)"
+    failure_action: "Install missing dependencies"
+    reference: "/tools/tool-manifest.yaml - dependencies"
+
+  - check_id: "TOOL-004"
+    name: "install-all-tools is functional"
+    description: "Main installation script works"
+    severity: "high"
+    command: |
+      /Users/terryli/.claude/install-all-tools --help >/dev/null 2>&1 && \
+        echo "OK" || echo "Failed"
+    success_condition: "Output is 'OK'"
+    failure_action: "Debug installation script"
+    reference: "/tools/tool-manifest.yaml"
+
+  - check_id: "TOOL-005"
+    name: "gfm-link-checker is functional"
+    description: "Link checker can run"
+    severity: "medium"
+    command: |
+      command -v gfm-check >/dev/null 2>&1 && echo "OK" || echo "Missing"
+    success_condition: "Output is 'OK'"
+    failure_action: "Install or repair gfm-link-checker"
+    reference: "/gfm-link-checker/docs/README.md"
+
+  - check_id: "TOOL-006"
+    name: "No orphaned tool directories"
+    description: "All tools in /tools/ are documented or intentional"
+    severity: "low"
+    command: |
+      # List all subdirectories in /tools/ and verify documented
+      echo "Manual check required"
+    success_condition: "All directories intentional"
+    failure_action: "Document or archive orphaned directories"
+    reference: "/tools/README.md"
+
+# ==============================================================================
+# SYMLINK INTEGRITY CHECKS
+# ==============================================================================
+
+symlink_integrity_checks:
+  - check_id: "SYMLINK-001"
+    name: "All symlinks are valid"
+    description: "No broken symlinks in workspace"
+    severity: "high"
+    command: |
+      find /Users/terryli/.claude -type l ! -exec test -e {} \; -print
+    success_condition: "No broken symlinks found"
+    failure_action: "Fix or remove broken symlinks"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+  - check_id: "SYMLINK-002"
+    name: "Symlinks to ~/.local/bin/ are valid"
+    description: "All expected symlinks exist and point to correct targets"
+    severity: "high"
+    command: |
+      for link in cns-notify gfm-check-direct; do
+        test -L ~/.local/bin/$link && test -e ~/.local/bin/$link && \
+          echo "$link OK" || echo "$link BROKEN"
+      done
+    success_condition: "All symlinks OK"
+    failure_action: "Recreate symlinks from /bin/ to ~/.local/bin/"
+    reference: "/tools/tool-manifest.yaml - symlink_target"
+
+  - check_id: "SYMLINK-003"
+    name: "Symlink targets are executable"
+    description: "All symlink targets have execute permissions"
+    severity: "medium"
+    command: |
+      find ~/.local/bin -type l -exec sh -c \
+        'test -x "$(readlink {})" || echo "Not executable: {}"' \;
+    success_condition: "No output"
+    failure_action: "chmod +x on symlink targets"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+  - check_id: "SYMLINK-004"
+    name: "No circular symlinks"
+    description: "Verify no symlink loops"
+    severity: "medium"
+    command: |
+      find /Users/terryli/.claude -type l -exec sh -c \
+        'readlink -f {} >/dev/null 2>&1 || echo "Circular: {}"' \;
+    success_condition: "No output"
+    failure_action: "Remove circular symlinks"
+    reference: "System integrity"
+
+# ==============================================================================
+# HOOK VALIDATION CHECKS
+# ==============================================================================
+
+hook_validation_checks:
+  - check_id: "HOOK-001"
+    name: "settings.json is valid JSON"
+    description: "Claude Code settings file is parseable"
+    severity: "high"
+    command: |
+      jq empty /Users/terryli/.claude/settings.json 2>&1 && \
+        echo "OK" || echo "Invalid JSON"
+    success_condition: "Output is 'OK'"
+    failure_action: "Fix JSON syntax errors in settings.json"
+    reference: "/settings.json"
+
+  - check_id: "HOOK-002"
+    name: "All hooks in settings.json exist"
+    description: "Hook scripts referenced in settings.json are present"
+    severity: "high"
+    command: |
+      # Extract hook paths from settings.json and verify existence
+      jq -r '.hooks.Stop[]?.command // empty' /Users/terryli/.claude/settings.json | \
+        while read -r hook; do
+          test -f "$hook" || echo "Missing: $hook"
+        done
+    success_condition: "No output"
+    failure_action: "Fix paths or create missing hook scripts"
+    reference: "/settings.json"
+
+  - check_id: "HOOK-003"
+    name: "All hooks are executable"
+    description: "Hook scripts have execute permissions"
+    severity: "high"
+    command: |
+      jq -r '.hooks.Stop[]?.command // empty' /Users/terryli/.claude/settings.json | \
+        while read -r hook; do
+          test -x "$hook" || echo "Not executable: $hook"
+        done
+    success_condition: "No output"
+    failure_action: "chmod +x on hook scripts"
+    reference: "/automation/ READMEs"
+
+  - check_id: "HOOK-004"
+    name: "CNS automation is functional"
+    description: "CNS hook entry point works"
+    severity: "high"
+    command: |
+      /Users/terryli/.claude/automation/cns/cns_hook_entry.sh --help >/dev/null 2>&1 && \
+        echo "OK" || echo "Failed"
+    success_condition: "Output is 'OK'"
+    failure_action: "Debug CNS automation"
+    reference: "/automation/cns/README.md"
+
+  - check_id: "HOOK-005"
+    name: "Prettier automation is functional"
+    description: "Prettier hook works"
+    severity: "medium"
+    command: |
+      command -v prettier >/dev/null 2>&1 && echo "OK" || echo "Missing prettier"
+    success_condition: "Output is 'OK'"
+    failure_action: "Install prettier"
+    reference: "/automation/prettier/README.md"
+
+# ==============================================================================
+# DOCUMENTATION LINK CHECKS
+# ==============================================================================
+
+documentation_link_checks:
+  - check_id: "DOC-001"
+    name: "All markdown links are valid"
+    description: "Use gfm-check to validate documentation links"
+    severity: "low"
+    command: |
+      command -v gfm-check >/dev/null 2>&1 && \
+        gfm-check /Users/terryli/.claude/docs/ || echo "gfm-check not available"
+    success_condition: "All links valid or gfm-check not available"
+    failure_action: "Fix broken links"
+    reference: "/gfm-link-checker/docs/README.md"
+
+  - check_id: "DOC-002"
+    name: "INDEX.md is up-to-date"
+    description: "Central navigation hub links are valid"
+    severity: "medium"
+    command: |
+      test -f /Users/terryli/.claude/docs/INDEX.md && echo "OK" || echo "Missing"
+    success_condition: "Output is 'OK'"
+    failure_action: "Restore or update INDEX.md"
+    reference: "/docs/INDEX.md"
+
+  - check_id: "DOC-003"
+    name: "All tool READMEs exist"
+    description: "Each tool directory has documentation"
+    severity: "medium"
+    command: |
+      for dir in /Users/terryli/.claude/tools/*/; do
+        test -f "$dir/README.md" || echo "Missing README: $dir"
+      done
+    success_condition: "No output"
+    failure_action: "Create missing READMEs"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+# ==============================================================================
+# PERMISSION VALIDATION CHECKS
+# ==============================================================================
+
+permission_validation_checks:
+  - check_id: "PERM-001"
+    name: "Executable scripts have 755"
+    description: "All .sh and .py scripts are executable"
+    severity: "medium"
+    command: |
+      find /Users/terryli/.claude/tools -type f \( -name "*.sh" -o -name "*.py" \) \
+        ! -perm 755
+    success_condition: "No files found"
+    failure_action: "chmod 755 on scripts"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+  - check_id: "PERM-002"
+    name: "Configuration files have 644"
+    description: "Config files are not executable"
+    severity: "low"
+    command: |
+      find /Users/terryli/.claude -type f \
+        \( -name "*.json" -o -name "*.yaml" -o -name "*.toml" \) \
+        -perm +111
+    success_condition: "No files found"
+    failure_action: "chmod 644 on config files"
+    reference: "/docs/standards/TOOL_ORGANIZATION.md"
+
+  - check_id: "PERM-003"
+    name: "No world-writable files"
+    description: "Security check for overly permissive files"
+    severity: "high"
+    command: |
+      find /Users/terryli/.claude -type f -perm -002 ! -path "*/tmp/*"
+    success_condition: "No files found"
+    failure_action: "Fix permissions (remove world-write)"
+    reference: "Security best practices"
+
+  - check_id: "PERM-004"
+    name: "Secrets have 600 permissions"
+    description: "Files with 'secret' or 'credential' in name are owner-only"
+    severity: "high"
+    command: |
+      find /Users/terryli/.claude -type f \
+        \( -name "*secret*" -o -name "*credential*" -o -name "*.env" \) \
+        ! -perm 600
+    success_condition: "No files found"
+    failure_action: "chmod 600 on secrets"
+    reference: "Security best practices"
+
+# ==============================================================================
+# ARTIFACT MANAGEMENT CHECKS
+# ==============================================================================
+
+artifact_management_checks:
+  - check_id: "ARTIFACT-001"
+    name: "shell-snapshots size is reasonable"
+    description: "Shell snapshots < 100 MB"
+    severity: "low"
+    command: |
+      size=$(du -sm /Users/terryli/.claude/shell-snapshots 2>/dev/null | awk '{print $1}')
+      test "$size" -lt 100 && echo "OK ($size MB)" || echo "WARNING: $size MB"
+    success_condition: "Output starts with 'OK'"
+    failure_action: "Archive old snapshots per ARTIFACT_RETENTION.md"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+  - check_id: "ARTIFACT-002"
+    name: "debug logs size is reasonable"
+    description: "Debug logs < 100 MB"
+    severity: "low"
+    command: |
+      size=$(du -sm /Users/terryli/.claude/debug 2>/dev/null | awk '{print $1}')
+      test "$size" -lt 100 && echo "OK ($size MB)" || echo "WARNING: $size MB"
+    success_condition: "Output starts with 'OK'"
+    failure_action: "Archive old debug logs"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+  - check_id: "ARTIFACT-003"
+    name: "file-history size is reasonable"
+    description: "File history < 100 MB"
+    severity: "low"
+    command: |
+      size=$(du -sm /Users/terryli/.claude/file-history 2>/dev/null | awk '{print $1}')
+      test "$size" -lt 100 && echo "OK ($size MB)" || echo "WARNING: $size MB"
+    success_condition: "Output starts with 'OK'"
+    failure_action: "Archive old file history"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+  - check_id: "ARTIFACT-004"
+    name: "Total artifact size < 250 MB"
+    description: "Combined runtime artifacts reasonable"
+    severity: "medium"
+    command: |
+      total=$(du -sm /Users/terryli/.claude/{shell-snapshots,debug,file-history,todos} 2>/dev/null | \
+        awk '{sum+=$1} END {print sum}')
+      test "$total" -lt 250 && echo "OK ($total MB)" || echo "WARNING: $total MB"
+    success_condition: "Output starts with 'OK'"
+    failure_action: "Run artifact archival per ARTIFACT_RETENTION.md"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+  - check_id: "ARTIFACT-005"
+    name: "Archive directory exists"
+    description: "Archive directory for old artifacts"
+    severity: "low"
+    command: |
+      test -d /Users/terryli/.claude/archive && echo "OK" || echo "Missing"
+    success_condition: "Output is 'OK'"
+    failure_action: "Create archive directory"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+  - check_id: "ARTIFACT-006"
+    name: "No artifacts older than 90 days"
+    description: "Very old artifacts should be archived"
+    severity: "low"
+    command: |
+      find /Users/terryli/.claude/{shell-snapshots,debug,file-history} \
+        -type f -mtime +90 2>/dev/null
+    success_condition: "No files found"
+    failure_action: "Archive files older than 90 days"
+    reference: "/docs/maintenance/ARTIFACT_RETENTION.md"
+
+# ==============================================================================
+# GIT HEALTH CHECKS
+# ==============================================================================
+
+git_health_checks:
+  - check_id: "GIT-001"
+    name: "Git repository is valid"
+    description: "Workspace is a git repository"
+    severity: "high"
+    command: |
+      git -C /Users/terryli/.claude status >/dev/null 2>&1 && \
+        echo "OK" || echo "Not a git repo"
+    success_condition: "Output is 'OK'"
+    failure_action: "Initialize git repository"
+    reference: "Version control"
+
+  - check_id: "GIT-002"
+    name: ".gitignore exists and is comprehensive"
+    description: "Git ignore file present"
+    severity: "medium"
+    command: |
+      test -f /Users/terryli/.claude/.gitignore && echo "OK" || echo "Missing"
+    success_condition: "Output is 'OK'"
+    failure_action: "Create .gitignore"
+    reference: "/.gitignore"
+
+  - check_id: "GIT-003"
+    name: "Runtime artifacts are gitignored"
+    description: "shell-snapshots, debug, file-history, todos in .gitignore"
+    severity: "medium"
+    command: |
+      for dir in shell-snapshots debug file-history todos; do
+        grep -q "$dir" /Users/terryli/.claude/.gitignore || echo "Not ignored: $dir"
+      done
+    success_condition: "No output"
+    failure_action: "Add runtime artifacts to .gitignore"
+    reference: "/.gitignore"
+
+  - check_id: "GIT-004"
+    name: "No large files in git"
+    description: "Files > 1 MB should not be in git"
+    severity: "medium"
+    command: |
+      find /Users/terryli/.claude -type f -size +1M ! -path "*/.git/*" | \
+        while read -r file; do
+          git -C /Users/terryli/.claude ls-files --error-unmatch "$file" 2>/dev/null && \
+            echo "Large file in git: $file"
+        done
+    success_condition: "No output"
+    failure_action: "Add large files to .gitignore, consider git-lfs"
+    reference: "Git best practices"
+
+  - check_id: "GIT-005"
+    name: "No uncommitted changes to critical files"
+    description: "CLAUDE.md, settings.json, critical configs are committed"
+    severity: "low"
+    command: |
+      for file in CLAUDE.md settings.json .gitignore; do
+        git -C /Users/terryli/.claude diff --quiet "$file" || \
+          echo "Uncommitted: $file"
+      done
+    success_condition: "No output or expected"
+    failure_action: "Commit changes to critical files"
+    reference: "Version control best practices"
+
+  - check_id: "GIT-006"
+    name: "Current branch is main"
+    description: "Working on expected branch"
+    severity: "info"
+    command: |
+      git -C /Users/terryli/.claude branch --show-current
+    success_condition: "Output is 'main'"
+    failure_action: "Informational - verify expected branch"
+    reference: "Git workflow"
+
+# ==============================================================================
+# AUTOMATION & REPORTING
+# ==============================================================================
+
+automation:
+  script_location: "/Users/terryli/.claude/tools/bin/workspace-health-check.sh"
+
+  run_schedule:
+    - "Before any reorganization phase"
+    - "After completing reorganization phase"
+    - "Monthly maintenance check"
+    - "Pre-commit hook (subset of critical checks)"
+    - "On-demand via command line"
+
+  output_format:
+    - "Human-readable text to stdout"
+    - "JSON format for automation (--json flag)"
+    - "Exit code: 0 = all passed, 1 = warnings, 2 = critical failures"
+
+  report_sections:
+    - "Summary: X/42 checks passed"
+    - "Failures: List of failed checks with IDs"
+    - "Warnings: Non-critical issues"
+    - "Recommendations: Suggested actions"
+
+  example_usage: |
+    # Run all checks
+    /Users/terryli/.claude/tools/bin/workspace-health-check.sh
+
+    # Run specific category
+    /Users/terryli/.claude/tools/bin/workspace-health-check.sh --category=symlink
+
+    # JSON output for automation
+    /Users/terryli/.claude/tools/bin/workspace-health-check.sh --json
+
+    # Critical checks only (for pre-commit)
+    /Users/terryli/.claude/tools/bin/workspace-health-check.sh --critical
+
+critical_check_subset:
+  description: "Subset of checks for pre-commit hook (high severity only)"
+  check_ids:
+    - "ORG-003"     # No nested .claude
+    - "SYMLINK-001" # No broken symlinks
+    - "SYMLINK-002" # Symlinks to ~/.local/bin valid
+    - "HOOK-001"    # settings.json valid JSON
+    - "HOOK-002"    # All hooks exist
+    - "HOOK-003"    # All hooks executable
+    - "HOOK-004"    # CNS functional
+    - "TOOL-003"    # Dependencies available
+    - "PERM-003"    # No world-writable files
+    - "PERM-004"    # Secrets have 600
+    - "GIT-001"     # Git repo valid
+
+notes:
+  - "This specification defines checks, implementation is separate"
+  - "Health check script should implement all checks"
+  - "Exit codes: 0=pass, 1=warnings, 2=critical failures"
+  - "JSON output enables automation integration"
+  - "Critical checks appropriate for pre-commit hooks"
+  - "Full checks appropriate for monthly maintenance"
+
+related_documentation:
+  - "/specs/workspace-reorganization.yaml" # What should be
+  - "/specs/reorg-move-map.yaml" # Migration plan
+  - "/docs/standards/TOOL_ORGANIZATION.md" # Organization standards
+  - "/docs/maintenance/ARTIFACT_RETENTION.md" # Retention policies
+  - "/tools/tool-manifest.yaml" # Tool registry
+---

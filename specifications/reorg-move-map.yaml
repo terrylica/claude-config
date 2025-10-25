@@ -1,0 +1,437 @@
+---
+move_map:
+  version: "1.0.0"
+  generated: "2025-10-23"
+  description: |
+    Complete mapping of files and directories to be moved during workspace reorganization.
+    Each entry includes current location, target location, operation type, risk level,
+    dependencies, and validation requirements.
+
+metadata:
+  total_operations: 28
+  file_moves: 16
+  directory_moves: 8
+  deletions: 4
+  high_risk: 3
+  medium_risk: 10
+  low_risk: 15
+
+batch_1_root_cleanup:
+  description: "Remove root-level scripts and move to appropriate locations"
+  risk_level: "medium"
+  estimated_duration: "30 minutes"
+  dependencies: []
+
+  operations:
+    - operation_id: "MOVE-001"
+      type: "move"
+      source: "/Users/terryli/.claude/install-all-tools"
+      target: "/Users/terryli/.claude/tools/bin/install-all-tools.sh"
+      risk: "medium"
+      reason: "Referenced by documentation and setup guides"
+      validation:
+        - "Check for hardcoded paths that reference old location"
+        - "Update documentation references"
+        - "Test execution from new location"
+      dependencies:
+        - "docs/setup/TEAM_SETUP.md may reference this"
+      rollback: "mv target back to source"
+
+    - operation_id: "MOVE-002"
+      type: "move"
+      source: "/Users/terryli/.claude/disable-pyright.sh"
+      target: "/Users/terryli/.claude/tools/config/disable-pyright.sh"
+      risk: "low"
+      reason: "Configuration utility script"
+      validation:
+        - "Test script execution"
+        - "Check if referenced in any automation"
+      dependencies: []
+      rollback: "mv target back to source"
+
+    - operation_id: "MOVE-003"
+      type: "move"
+      source: "/Users/terryli/.claude/instant-sync-option.sh"
+      target: "/Users/terryli/.claude/archive/legacy/instant-sync-option.sh"
+      risk: "low"
+      reason: "Legacy script, archive instead of delete"
+      validation:
+        - "Verify not referenced in active automation"
+      dependencies: []
+      rollback: "mv target back to source"
+
+    - operation_id: "MOVE-004"
+      type: "document_reference"
+      source: "/Users/terryli/.claude/statusline.sh"
+      target: "Keep in place but document proper usage"
+      risk: "low"
+      reason: "Actively used by ccstatusline, requires user configuration"
+      validation:
+        - "Document that this should be symlinked from user config"
+        - "Create docs/setup/statusline-setup.md"
+      note: "Don't move yet - needs user config migration strategy"
+
+batch_2_backup_cleanup:
+  description: "Remove backup files (verified via git history first)"
+  risk_level: "low"
+  estimated_duration: "15 minutes"
+  dependencies: ["git log verification"]
+
+  operations:
+    - operation_id: "DELETE-001"
+      type: "delete"
+      source: "/Users/terryli/.claude/statusline.sh.backup"
+      risk: "low"
+      reason: "Backup file should use git history instead"
+      validation:
+        - "Verify statusline.sh exists"
+        - "Check git log for history of this file"
+      dependencies: []
+      rollback: "git restore if needed"
+
+    - operation_id: "DELETE-002"
+      type: "delete"
+      source: "/Users/terryli/.claude/archive/sage-sync-legacy/sage-sync.original"
+      risk: "low"
+      reason: "Already archived, original in git history"
+      validation:
+        - "Verify in archive directory"
+        - "Check git log for history"
+      dependencies: []
+      rollback: "git restore"
+
+    - operation_id: "DELETE-003"
+      type: "delete"
+      source: "/Users/terryli/.claude/automation/cns/cns_hook_entry.sh.backup"
+      risk: "low"
+      reason: "Active automation directory should not have backups"
+      validation:
+        - "Verify cns_hook_entry.sh exists and works"
+        - "Check git log for history"
+      dependencies:
+        - "automation/cns/cns_hook_entry.sh must be functional"
+      rollback: "git restore"
+
+batch_3_nested_cleanup:
+  description: "Fix nested .claude directory anomaly"
+  risk_level: "low"
+  estimated_duration: "10 minutes"
+  dependencies: []
+
+  operations:
+    - operation_id: "MOVE-005"
+      type: "move"
+      source: "/Users/terryli/.claude/.claude/settings.local.json"
+      target: "/Users/terryli/.claude/system/settings.local.json"
+      risk: "low"
+      reason: "Nested directory is incorrect, move to system"
+      validation:
+        - "Verify settings.local.json is not referenced"
+        - "Remove empty /.claude/ directory after move"
+      dependencies: []
+      rollback: "mv back and recreate nested structure"
+
+    - operation_id: "DELETE-004"
+      type: "remove_directory"
+      source: "/Users/terryli/.claude/.claude/"
+      risk: "low"
+      reason: "Remove nested directory after moving contents"
+      validation:
+        - "Verify directory is empty"
+      dependencies: ["MOVE-005"]
+      rollback: "mkdir if needed"
+
+batch_4_history_consolidation:
+  description: "Consolidate history storage to single location"
+  risk_level: "medium"
+  estimated_duration: "20 minutes"
+  dependencies: []
+
+  operations:
+    - operation_id: "MOVE-006"
+      type: "move"
+      source: "/Users/terryli/.claude/history.jsonl"
+      target: "/Users/terryli/.claude/system/history/session-history.jsonl"
+      risk: "medium"
+      reason: "Consolidate history to system directory"
+      validation:
+        - "Verify file is not open by any process"
+        - "Check if Claude Code references this path"
+        - "Create /system/history/ if needed"
+      dependencies: []
+      rollback: "mv back to root"
+      note: "May require Claude Code configuration update"
+
+    - operation_id: "MOVE-007"
+      type: "move"
+      source: "/Users/terryli/.claude/history/"
+      target: "/Users/terryli/.claude/system/history/archive/"
+      risk: "low"
+      reason: "Move existing history directory to system"
+      validation:
+        - "Verify no active processes using files"
+      dependencies: []
+      rollback: "mv back to root"
+
+batch_5_system_artifact_consolidation:
+  description: "Move runtime artifacts to /system/ directory"
+  risk_level: "medium"
+  estimated_duration: "30 minutes"
+  dependencies: ["Claude Code may reference these paths"]
+
+  operations:
+    - operation_id: "MOVE-008"
+      type: "move"
+      source: "/Users/terryli/.claude/todos/"
+      target: "/Users/terryli/.claude/system/todos/"
+      risk: "high"
+      reason: "Runtime task tracking, actively used by Claude Code"
+      validation:
+        - "Verify Claude Code can find todos in new location"
+        - "May require configuration update"
+        - "Test task tracking after move"
+      dependencies: []
+      rollback: "mv back to root"
+      note: "HIGH RISK: May break Claude Code task tracking"
+
+    - operation_id: "MOVE-009"
+      type: "move"
+      source: "/Users/terryli/.claude/file-history/"
+      target: "/Users/terryli/.claude/system/file-history/"
+      risk: "high"
+      reason: "Runtime file version tracking (63 MB)"
+      validation:
+        - "Verify Claude Code can find file history"
+        - "May require configuration update"
+      dependencies: []
+      rollback: "mv back to root"
+      note: "HIGH RISK: May break Claude Code file history"
+
+    - operation_id: "MOVE-010"
+      type: "move"
+      source: "/Users/terryli/.claude/debug/"
+      target: "/Users/terryli/.claude/system/debug/"
+      risk: "medium"
+      reason: "Debug logs should be in system directory"
+      validation:
+        - "Verify no active logging to this directory"
+      dependencies: []
+      rollback: "mv back to root"
+
+batch_6_artifact_archival:
+  description: "Archive old runtime artifacts with compression"
+  risk_level: "low"
+  estimated_duration: "45 minutes"
+  dependencies: ["30-day age calculation"]
+
+  operations:
+    - operation_id: "ARCHIVE-001"
+      type: "archive_and_compress"
+      source: "/Users/terryli/.claude/shell-snapshots/"
+      target: "/Users/terryli/.claude/archive/shell-snapshots-2025-10.tar.gz"
+      risk: "low"
+      reason: "Archive snapshots older than 30 days (69 MB, 371 files)"
+      validation:
+        - "Calculate file ages (mtime < 30 days ago)"
+        - "Compress old files to tar.gz"
+        - "Verify compression successful"
+        - "Delete originals after verification"
+      dependencies: []
+      retention_policy: "30 days"
+      compression: "tar.gz"
+      note: "Keep files < 30 days in place"
+
+    - operation_id: "ARCHIVE-002"
+      type: "archive_and_compress"
+      source: "/Users/terryli/.claude/system/debug/" # After MOVE-010
+      target: "/Users/terryli/.claude/archive/debug-logs-2025-10.tar.gz"
+      risk: "low"
+      reason: "Archive debug logs older than 30 days (57 MB)"
+      validation:
+        - "Calculate file ages"
+        - "Compress old files"
+        - "Verify compression"
+        - "Delete originals"
+      dependencies: ["MOVE-010"]
+      retention_policy: "30 days"
+      compression: "tar.gz"
+
+    - operation_id: "ARCHIVE-003"
+      type: "archive_and_compress"
+      source: "/Users/terryli/.claude/system/file-history/" # After MOVE-009
+      target: "/Users/terryli/.claude/archive/file-history-2025-10.tar.gz"
+      risk: "low"
+      reason: "Archive file history older than 30 days (63 MB)"
+      validation:
+        - "Calculate file ages"
+        - "Compress old files"
+        - "Verify compression"
+        - "Delete originals"
+      dependencies: ["MOVE-009"]
+      retention_policy: "30 days"
+      compression: "tar.gz"
+
+batch_7_tool_directory_restructure:
+  description: "Organize tools directory with clear taxonomy"
+  risk_level: "low"
+  estimated_duration: "30 minutes"
+  dependencies: []
+  note: "Create directories but don't move tools yet - document only"
+
+  operations:
+    - operation_id: "CREATE-001"
+      type: "create_directory"
+      target: "/Users/terryli/.claude/tools/bin/"
+      risk: "low"
+      reason: "Central location for executable wrapper scripts"
+      validation:
+        - "Create directory"
+        - "Add README explaining purpose"
+      dependencies: []
+
+    - operation_id: "CREATE-002"
+      type: "create_directory"
+      target: "/Users/terryli/.claude/tools/config/"
+      risk: "low"
+      reason: "Central location for tool configurations"
+      validation:
+        - "Create directory"
+        - "Add README explaining purpose"
+      dependencies: []
+
+    - operation_id: "CREATE-003"
+      type: "create_directory"
+      target: "/Users/terryli/.claude/tools/lib/"
+      risk: "low"
+      reason: "Shared libraries for tools"
+      validation:
+        - "Create directory if not exists"
+        - "Add README explaining purpose"
+      dependencies: []
+
+    - operation_id: "DOCUMENT-001"
+      type: "create_documentation"
+      target: "/Users/terryli/.claude/tools/bin/README.md"
+      risk: "low"
+      reason: "Explain purpose of bin directory"
+      content: "Executable wrapper scripts that serve as entry points"
+      dependencies: ["CREATE-001"]
+
+    - operation_id: "DOCUMENT-002"
+      type: "create_documentation"
+      target: "/Users/terryli/.claude/tools/config/README.md"
+      risk: "low"
+      reason: "Explain purpose of config directory"
+      content: "Configuration files for workspace tools"
+      dependencies: ["CREATE-002"]
+
+batch_8_venv_migration:
+  description: "Migrate gfm-link-checker from .venv to uv"
+  risk_level: "medium"
+  estimated_duration: "20 minutes"
+  dependencies: ["uv installed"]
+  note: "Follow user standards for Python environment management"
+
+  operations:
+    - operation_id: "MIGRATE-001"
+      type: "python_env_migration"
+      source: "/Users/terryli/.claude/gfm-link-checker/.venv"
+      target: "Use uv for dependency management"
+      risk: "medium"
+      reason: "User standard is uv, not .venv"
+      validation:
+        - "Create pyproject.toml if needed"
+        - "Test gfm-link-checker with uv run"
+        - "Remove .venv after verification"
+      dependencies:
+        - "uv must be installed"
+        - "gfm-link-checker must work with uv"
+      rollback: "Restore .venv from backup"
+      note: "May require pyproject.toml creation"
+
+execution_order:
+  phase_2_safe_cleanup:
+    batches:
+      - "batch_2_backup_cleanup" # Safest - just deletes backups
+      - "batch_3_nested_cleanup" # Safe - fixes anomaly
+
+  phase_3_root_cleanup:
+    batches:
+      - "batch_1_root_cleanup" # Medium risk - moves root scripts
+      - "batch_7_tool_directory_restructure" # Low risk - creates structure
+
+  phase_4_system_consolidation:
+    batches:
+      - "batch_4_history_consolidation" # Medium risk
+      - "batch_5_system_artifact_consolidation" # HIGH RISK - Claude Code paths
+
+  phase_5_archival:
+    batches:
+      - "batch_6_artifact_archival" # Low risk - compression
+
+  phase_6_advanced:
+    batches:
+      - "batch_8_venv_migration" # Medium risk - requires testing
+    note: "Can be deferred to later date"
+
+risk_summary:
+  high_risk_operations:
+    - "MOVE-008: todos/ → system/todos/ (Claude Code dependency)"
+    - "MOVE-009: file-history/ → system/file-history/ (Claude Code dependency)"
+    - "MOVE-001: install-all-tools (documentation references)"
+
+  medium_risk_operations:
+    - "MOVE-006: history.jsonl consolidation"
+    - "MOVE-010: debug/ directory move"
+    - "MIGRATE-001: .venv to uv migration"
+
+  safe_operations:
+    - "All DELETE operations (git has backup)"
+    - "All ARCHIVE operations (compression with verification)"
+    - "All CREATE operations (new directories)"
+    - "All DOCUMENT operations (new files)"
+
+validation_gates:
+  before_batch:
+    - "Git working directory clean"
+    - "Git commit of current state"
+    - "Backup verification"
+
+  after_batch:
+    - "Symlink integrity check"
+    - "Hook validation (settings.json)"
+    - "Documentation link check (gfm-check)"
+    - "Manual functional test"
+    - "Git commit if successful"
+
+rollback_strategy:
+  immediate: "mv files back to original location"
+  git_based: "git reset --hard HEAD~1"
+  backup_based: "restore from pre-migration backup"
+  selective: "Rollback only failed operations, keep successful ones"
+
+documentation_updates_required:
+  - file: "/docs/setup/TEAM_SETUP.md"
+    reason: "May reference install-all-tools location"
+    operation: "MOVE-001"
+
+  - file: "/docs/INDEX.md"
+    reason: "Update links to match new structure"
+    operation: "All moves"
+
+  - file: "/README.md or /docs/README.md"
+    reason: "Update workspace structure documentation"
+    operation: "All structural changes"
+
+  - file: "/CLAUDE.md"
+    reason: "Update file path examples if any"
+    operation: "All moves"
+
+notes:
+  - "This map is the authoritative source for all file operations"
+  - "Operations marked 'high_risk' require extra validation"
+  - "All moves preserve git history"
+  - "Batches can be executed independently"
+  - "Conservative approach: test thoroughly at each gate"
+  - "Some operations marked 'document only' - don't execute yet"
+---

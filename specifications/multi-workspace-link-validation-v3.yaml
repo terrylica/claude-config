@@ -1,0 +1,600 @@
+openapi: 3.1.0
+info:
+  title: Multi-Workspace Link Validation System
+  version: 3.0.0
+  description: |
+    On-demand, hook-triggered link validation workflow with Telegram notifications.
+
+    Breaking Changes from v2.1.0:
+    - Bot uses on-demand polling with timeout instead of 24/7 polling
+    - Orchestrator runs one-shot instead of watching (no daemon)
+    - Hook starts processes on-demand instead of relying on launchd
+    - Auto-shutdown after idle timeout (resource efficient)
+    - PID file deduplication prevents multiple bot instances
+
+    Replaces: multi-workspace-link-validation.yaml v2.1.0
+
+x-architecture:
+  design_principle: |
+    On-Demand Execution: Processes start only when needed, auto-shutdown when idle.
+    No persistent daemons. Hook is single entry point.
+
+  overview: |
+    Session Stop → Hook (bash, 0.1s)
+                     ↓
+         [Detect broken links]
+                     ↓
+         [Check PID file - bot running?]
+                     ↓
+         [Start bot if not running]
+                     ↓
+    Bot (polling mode, 10min idle timeout)
+                     ↓
+         [Process notification files]
+                     ↓
+         [Send Telegram notification]
+                     ↓
+         [Poll for user button click]
+                     ↓
+         [Write approval file]
+                     ↓
+         [Start orchestrator]
+                     ↓
+    Orchestrator (one-shot execution)
+                     ↓
+         [Read approval file]
+                     ↓
+         [Run Claude CLI]
+                     ↓
+         [Write completion file]
+                     ↓
+         [Bot processes completion]
+                     ↓
+         [Send completion notification]
+                     ↓
+         [Orchestrator exits]
+                     ↓
+         [Bot auto-shuts down after idle]
+
+  components:
+    stop_hook:
+      location: ~/.claude/automation/lychee/runtime/hook/check-links-hybrid.sh
+      type: bash_script
+      execution: synchronous (blocking during session stop)
+      responsibilities:
+        - Run lychee validation
+        - Write notification file if errors found
+        - Start bot process if not running
+        - Exit immediately (non-blocking)
+
+    telegram_bot:
+      location: ~/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py
+      type: python_polling_process
+      startup: hook-triggered (on-demand only)
+      mode: polling (not webhook)
+      idle_timeout: 600 # 10 minutes
+      responsibilities:
+        - Poll Telegram API for updates (limited duration)
+        - Process notification files on startup
+        - Send Telegram messages with action buttons
+        - Handle button callbacks via polling
+        - Write approval files
+        - Process completion files
+        - Send completion messages
+        - Auto-shutdown after idle timeout
+      dependencies:
+        - python-telegram-bot (polling mode)
+        - jsonschema (state file validation)
+
+    orchestrator:
+      location: ~/.claude/automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py
+      type: python_one_shot
+      startup: bot-triggered (after approval file created)
+      mode: single_execution
+      responsibilities:
+        - Read approval file
+        - Invoke Claude CLI with timeout
+        - Capture output (stdout, stderr, exit_code, duration)
+        - Write completion file
+        - Exit after completion
+      dependencies:
+        - asyncio (subprocess management)
+
+x-execution-model:
+  always_on:
+    processes: []
+    note: No persistent processes - all on-demand
+
+  on_demand:
+    trigger_chain:
+      - event: session_stop
+        handler: stop_hook
+        action: run_lychee_and_start_bot
+
+      - event: notification_file_created
+        handler: bot (if running)
+        action: send_telegram_message
+
+      - event: telegram_button_click
+        handler: bot (via polling)
+        action: write_approval_and_start_orchestrator
+
+      - event: approval_file_created
+        handler: orchestrator
+        action: run_claude_cli_and_exit
+
+      - event: completion_file_created
+        handler: bot (if running)
+        action: send_completion_and_schedule_shutdown
+
+x-state-management:
+  state_directory: ~/.claude/automation/lychee/state
+
+  file_types:
+    notifications:
+      pattern: "notify_{session_id}_{workspace_hash}.json"
+      ttl_minutes: 5
+      created_by: stop_hook
+      consumed_by: bot
+
+    approvals:
+      pattern: "approval_{session_id}_{workspace_hash}.json"
+      ttl_minutes: 5
+      created_by: bot
+      consumed_by: orchestrator
+
+    completions:
+      pattern: "completion_{session_id}_{workspace_hash}.json"
+      ttl_minutes: 5
+      created_by: orchestrator
+      consumed_by: bot
+
+    callbacks:
+      pattern: "cb_{hash8}.json"
+      ttl_minutes: 5
+      created_by: bot
+      consumed_by: bot
+
+    pid_files:
+      pattern: "bot.pid"
+      purpose: Track running bot process for deduplication
+      location: ~/.claude/automation/lychee/state/
+
+    registry:
+      file: registry.json
+      purpose: workspace_metadata
+      ttl: permanent
+
+x-slos:
+  availability:
+    target: 99.9%
+    measurement: Hook execution success rate
+    failure_modes:
+      - Bot process fails to start
+      - Telegram API unreachable
+      - File system full
+      - Invalid JSON in state files
+      - Bot crashes during execution
+      - Stale PID file prevents startup
+
+  correctness:
+    target: 100%
+    requirements:
+      - No duplicate notifications sent
+      - No duplicate Claude CLI executions
+      - Notifications route to correct workspace
+      - Button clicks route to correct workspace
+      - All state files cleaned up after TTL
+      - No orphaned processes after completion
+    error_handling:
+      - All errors propagate and terminate process
+      - No fallbacks, no defaults, no silent failures
+      - No retries (fail fast principle)
+
+  observability:
+    requirements:
+      - All process starts/stops logged with PID
+      - All state file operations logged
+      - All webhook events logged
+      - Workspace routing logged
+      - Claude CLI execution traced
+      - Idle timeout warnings logged
+    logging:
+      hook_log: ~/.claude/logs/lychee.log
+      bot_log: ~/.claude/logs/telegram-handler.log
+      orchestrator_log: ~/.claude/logs/orchestrator.log
+      format: "Emoji-prefixed structured logging"
+
+  maintainability:
+    requirements:
+      - Single source of truth (this specification)
+      - All state in ~/.claude/automation/lychee/state/
+      - No hidden files, no /tmp persistence
+      - Clear separation: hook → bot → orchestrator
+      - Schema validation on all JSON
+      - Off-the-shelf libraries (no custom polling/watching)
+
+x-telegram-integration:
+  mode: polling_with_timeout
+  rationale: |
+    Webhook mode requires public HTTPS endpoint which adds complexity (ngrok,
+    tunnel services, or public server). On-demand polling is simpler:
+    - Bot starts on-demand (from hook)
+    - Bot polls for limited time (10 minutes)
+    - Bot auto-shuts down after idle timeout
+    - No external dependencies or infrastructure
+
+    Analysis:
+    - Webhooks need public URL (Telegram limitation)
+    - Localhost webhooks require tunneling (ngrok, etc.)
+    - Tunneling adds dependency and failure mode
+    - On-demand polling achieves same resource efficiency
+
+    Reference: python-telegram-bot v21.9 webhook examples require public HTTPS
+    URL for Telegram to POST updates. Not suitable for localhost execution.
+
+  polling_configuration:
+    library: python-telegram-bot (polling mode)
+    poll_interval: 1.0  # seconds
+    timeout: 10  # API request timeout
+    idle_shutdown: 600  # 10 minutes idle → auto shutdown
+    allowed_updates: ["message", "callback_query"]
+
+  startup_sequence:
+    - Bot creates PID file
+    - Bot starts polling Telegram API
+    - Bot processes any pending notification files
+    - Bot enters event loop (polling + idle timeout tracking)
+
+  shutdown_sequence:
+    - Idle timeout reached (10 minutes no activity)
+    - Stop polling
+    - Cleanup PID file
+    - Exit process
+
+x-process-lifecycle:
+  bot:
+    startup_triggers:
+      - Hook detects errors and starts bot (only trigger)
+
+    lifecycle:
+      - Check PID file for existing bot instance
+      - If bot running, skip startup (hook exits fast)
+      - If bot not running or stale PID, start new instance
+      - Create PID file with current process ID
+      - Start Telegram API polling
+      - Process pending notification files
+      - Process pending completion files
+      - Enter event loop (poll updates + idle timeout tracking)
+      - Auto-shutdown after 10min idle (no activity)
+      - Cleanup PID file on exit
+
+    deduplication:
+      - PID file location: ~/.claude/automation/lychee/state/bot.pid
+      - PID file format: Single line containing process ID (e.g., "12345")
+      - Hook checks PID file before starting bot
+      - If PID file exists, read PID and check if process alive
+      - If process alive AND is our bot, skip startup
+      - If process dead OR different process, cleanup stale PID and start new
+      - Race condition handling: PID file write is atomic (O_EXCL flag)
+      - Signal handlers ensure PID file cleanup on SIGTERM/SIGINT
+
+  orchestrator:
+    startup_triggers:
+      - Bot writes approval file and invokes orchestrator
+
+    lifecycle:
+      - Read approval file
+      - Invoke Claude CLI (5 min timeout)
+      - Capture all output
+      - Write completion file
+      - Signal bot (if running) via completion file
+      - Exit immediately after completion
+
+    execution_mode: one_shot
+    no_daemon: true
+    no_watching: true
+
+x-pid-file-deduplication:
+  overview: |
+    Prevents multiple bot instances from running simultaneously.
+    Hook must check PID file before starting bot (fast exit if already running).
+
+  file_specification:
+    location: ~/.claude/automation/lychee/state/bot.pid
+    format: Single line containing process ID (ASCII digits)
+    example: "12345\n"
+    permissions: 0644 (readable by all, writable by owner)
+
+  hook_logic:
+    description: Bash implementation in check-links-hybrid.sh
+    steps:
+      - step: 1
+        action: Check if PID file exists
+        command: "[ -f $PID_FILE ]"
+
+      - step: 2
+        action: If exists, read PID
+        command: "PID=$(cat $PID_FILE)"
+
+      - step: 3
+        action: Check if process is alive
+        command: "kill -0 $PID 2>/dev/null"
+        rationale: kill -0 checks process existence without sending signal
+
+      - step: 4
+        action: Verify it's our bot process (not different process reusing PID)
+        command: "ps -p $PID -o command= | grep -q multi-workspace-bot.py"
+        rationale: PID could be reused by different process after bot exit
+
+      - step: 5
+        action: Decision
+        if_bot_running: Exit with log message "Bot already running (PID $PID)"
+        if_bot_not_running: Remove stale PID file and start new bot
+
+    race_condition_handling: |
+      Multiple hooks could fire simultaneously (rapid session stops).
+      Bash implementation uses simple check-then-start (not atomic).
+      Race window is ~100ms (between PID check and bot start).
+      Acceptable risk: Bot startup takes ~2-3s, so second instance will
+      fail when trying to create PID file (Python handles atomically).
+
+  bot_logic:
+    description: Python implementation in multi-workspace-bot.py
+
+    startup_atomicity:
+      method: Open with O_EXCL flag (fails if file exists)
+      code: "fd = os.open(pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)"
+      behavior: Raises FileExistsError if PID file already exists
+      error_handling: Log error and exit immediately (no retry)
+
+    pid_write:
+      steps:
+        - Open PID file with O_EXCL (atomic create)
+        - Write current process ID (os.getpid())
+        - Close file descriptor
+      error_cases:
+        - FileExistsError: Another bot instance already running, exit
+        - PermissionError: State directory not writable, propagate error
+        - OSError: File system issue, propagate error
+
+    signal_handlers:
+      purpose: Ensure PID file cleanup on termination
+      signals:
+        - SIGTERM: Graceful shutdown (launchctl stop, kill)
+        - SIGINT: Keyboard interrupt (Ctrl+C)
+      handler_logic:
+        - Stop Telegram polling
+        - Remove PID file
+        - Exit with status 0
+      non_handled:
+        - SIGKILL: Cannot be caught, leaves stale PID file
+        - SIGSEGV: Process crash, leaves stale PID file
+      stale_handling: Hook's process verification (kill -0 + ps) handles stale PIDs
+
+    normal_shutdown:
+      trigger: Idle timeout reached (10 minutes no activity)
+      steps:
+        - Stop Telegram polling
+        - Remove PID file
+        - Log shutdown reason
+        - Exit with status 0
+
+  verification_algorithm:
+    purpose: Distinguish live bot from stale PID or reused PID
+
+    step1_file_check:
+      test: PID file exists
+      if_no: Start new bot
+      if_yes: Continue to step 2
+
+    step2_pid_read:
+      test: Read PID from file
+      if_error: Remove corrupted PID file, start new bot
+      if_success: Continue to step 3
+
+    step3_process_existence:
+      test: "kill -0 $PID 2>/dev/null"
+      if_not_exists: Remove stale PID file, start new bot
+      if_exists: Continue to step 4
+
+    step4_process_identity:
+      test: "ps -p $PID -o command= | grep -q multi-workspace-bot.py"
+      if_different: Remove stale PID file (PID reused), start new bot
+      if_match: Skip startup, bot already running
+
+  edge_cases:
+    case1_rapid_stops:
+      scenario: User stops 3 sessions in 1 second
+      result: 3 hooks fire simultaneously
+      behavior: First hook starts bot, others see PID file and exit
+      verification: ps command confirms only 1 bot instance running
+
+    case2_bot_crash:
+      scenario: Bot crashes (SIGSEGV, unhandled exception)
+      result: Stale PID file remains
+      behavior: Next hook detects dead process (kill -0 fails), cleans up, starts new
+      recovery_time: Immediate (next session stop triggers recovery)
+
+    case3_pid_reuse:
+      scenario: Bot exits, OS reuses PID for different process
+      result: PID file points to wrong process
+      behavior: Hook's ps check detects different command, cleans up, starts new
+      probability: Very low (macOS PID space is 99999, rarely reuses immediately)
+
+    case4_partial_write:
+      scenario: Bot killed during PID file write
+      result: Corrupted PID file (empty or non-numeric)
+      behavior: Hook's read fails, removes corrupted file, starts new
+
+    case5_filesystem_full:
+      scenario: No space to write PID file
+      result: Bot fails to start (OSError)
+      behavior: Error propagates to hook, logged to lychee.log
+      recovery: Manual (user must free space)
+
+x-dependencies:
+  required:
+    - name: python-telegram-bot
+      version: ">=21.0"
+      rationale: Off-the-shelf Telegram integration (polling mode)
+
+    - name: jsonschema
+      version: ">=4.0"
+      rationale: State file validation
+
+  removed_from_v2:
+    - name: watchfiles
+      reason: Bot no longer watches notification/completion dirs, orchestrator no longer watches approval dir
+
+  not_needed_in_v3:
+    - name: aiohttp
+      reason: Webhook mode not used (requires public HTTPS endpoint)
+
+x-migration-from-v2:
+  breaking_changes:
+    - Bot no longer runs as launchd service
+    - Orchestrator no longer runs as launchd service
+    - 24/7 Telegram polling replaced with on-demand polling (10min timeout)
+    - Filesystem watching replaced with one-shot execution
+    - PID file deduplication prevents multiple bot instances
+
+  migration_steps:
+    - Unload launchd services
+    - Remove launchd plist files
+    - Update bot to on-demand polling with idle timeout
+    - Add PID file management to bot
+    - Add signal handlers for cleanup
+    - Remove watchfiles dependency from bot and orchestrator
+    - Convert orchestrator to one-shot (read approval → run → exit)
+    - Update hook to check PID file before starting bot
+    - Test complete workflow with rapid session stops
+
+  rollback_plan:
+    - Keep v2.1.0 specification
+    - Keep v2.1.0 code tagged in git
+    - Reload launchd services from backup
+    - Revert hook to v2.1.0
+
+x-implementation-plan:
+  phase_1_analysis:
+    status: completed
+    completed_date: "2025-10-24"
+    tasks:
+      - ✅ Research python-telegram-bot polling configuration
+      - ✅ Design PID file deduplication mechanism
+      - ✅ Design bot startup from hook
+      - ✅ Design auto-shutdown with idle timeout
+      - ✅ Update specification with findings
+    findings:
+      - Webhook mode requires public HTTPS endpoint (not suitable)
+      - On-demand polling achieves same efficiency as webhooks
+      - PID file with O_EXCL provides atomic deduplication
+      - Signal handlers (SIGTERM/SIGINT) ensure cleanup
+      - Hook verification algorithm handles all edge cases
+
+  phase_2_bot_conversion:
+    status: pending
+    depends_on: phase_1_analysis
+    tasks:
+      - Remove watchfiles dependency
+      - Add PID file management (create, cleanup, signal handlers)
+      - Add idle timeout logic with activity tracking
+      - Process notification files on startup (not watching)
+      - Process completion files on startup (not watching)
+      - Add startup wrapper for hook invocation
+      - Test PID file deduplication with rapid triggers
+
+  phase_3_orchestrator_simplification:
+    status: pending
+    depends_on: phase_2_bot_conversion
+    tasks:
+      - Remove watchfiles dependency
+      - Convert to one-shot execution (read approval → run → exit)
+      - Remove periodic cleanup (no longer needed)
+      - Test direct invocation
+
+  phase_4_hook_integration:
+    status: pending
+    depends_on: phase_3_orchestrator_simplification
+    tasks:
+      - Add bot startup logic to hook
+      - Add PID file check before starting
+      - Test hook → bot → orchestrator chain
+
+  phase_5_cleanup:
+    status: pending
+    depends_on: phase_4_hook_integration
+    tasks:
+      - Unload launchd services
+      - Remove launchd plist files
+      - Remove old specifications
+      - Update all documentation
+      - Archive v2.1.0 files
+
+x-observability-requirements:
+  process_tracking:
+    - Log all process starts with PID
+    - Log all process exits with duration
+    - Log idle timeout warnings
+    - Log PID file operations
+
+  state_tracking:
+    - Log all state file creations
+    - Log all state file consumptions
+    - Log all state file expirations
+
+  telegram_tracking:
+    - Log polling start/stop
+    - Log all Telegram API poll cycles
+    - Log all incoming updates (messages, callbacks)
+    - Log idle timeout countdown
+
+  error_propagation:
+    - All errors logged with full stack trace
+    - All errors cause process termination
+    - No error suppression or recovery
+
+x-changelog:
+  v3.0.0:
+    date: "2025-10-24"
+    type: breaking_change
+    motivation: |
+      Always-on design wastes resources (CPU, memory, network).
+      Polling Telegram API 24/7 is inefficient for infrequent events.
+      On-demand execution reduces cost and complexity.
+
+    breaking_changes:
+      - Bot no longer runs as persistent daemon
+      - Orchestrator no longer watches filesystem
+      - On-demand polling with timeout replaces 24/7 polling
+      - launchd services removed
+      - PID file deduplication prevents multiple instances
+
+    new_features:
+      - Hook-triggered bot startup with PID file checking
+      - Auto-shutdown after idle timeout (10 minutes)
+      - PID file deduplication with process verification
+      - One-shot orchestrator execution (no watching)
+      - On-demand Telegram polling (not continuous)
+      - Signal handlers for clean PID file cleanup
+
+    removed_features:
+      - launchd service management
+      - Filesystem watching (watchfiles)
+      - 24/7 Telegram API polling
+      - Periodic cleanup tasks (handled by TTL)
+
+    files_affected:
+      - runtime/bot/multi-workspace-bot.py (on-demand polling)
+      - runtime/orchestrator/multi-workspace-orchestrator.py (one-shot)
+      - runtime/hook/check-links-hybrid.sh (PID checking + bot startup)
+      - config/launchd/*.plist (removed)
+      - state/bot.pid (new)
+
+    implementation_status: planned
+
+  v2.1.0:
+    date: "2025-10-24"
+    status: deprecated
+    reason: Always-on design identified as wasteful

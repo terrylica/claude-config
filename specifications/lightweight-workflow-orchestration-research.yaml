@@ -1,0 +1,1331 @@
+openapi: 3.1.1
+info:
+  title: Lightweight Event-Driven Workflow Orchestration Research
+  version: 1.0.0
+  description: |
+    Comparative analysis of lightweight event-driven architecture solutions for
+    orchestrating Claude Code CLI workflows without heavy workflow engines.
+
+    Context: Need to orchestrate Telegram bot → file watching → Claude CLI invocation → notifications
+    Currently using 2 manual Python background processes, seeking extensible multi-round workflow solution.
+
+    Requirements:
+    - No servers or orchestration engines required
+    - Lightweight deployment
+    - File-based or embedded solutions preferred
+    - Suitable for growing from 2 to ~10 workflows
+    - Python-native integration
+
+x-research-date: 2025-10-24
+x-research-sources:
+  - NATS.io official documentation and Python client
+  - Redis Streams documentation and Python libraries
+  - SQLite queue implementations (Huey, RQ, LiteQueue)
+  - Python state machine libraries (transitions, python-statemachine)
+  - Model Context Protocol (MCP) specifications
+  - Asyncio patterns and event-driven architectures
+
+components:
+  schemas:
+    ApproachComparison:
+      type: object
+      required:
+        - approach_name
+        - deployment_complexity
+        - extensibility
+        - code_simplicity
+        - architecture
+        - recommendation_score
+      properties:
+        approach_name:
+          type: string
+        deployment_complexity:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: "1=simplest, 5=most complex"
+        extensibility:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: "1=limited, 5=highly extensible"
+        code_simplicity:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: "1=simplest, 5=most complex"
+        recommendation_score:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: "Overall recommendation for 'start simple, grow to 10 workflows'"
+        pros:
+          type: array
+          items:
+            type: string
+        cons:
+          type: array
+          items:
+            type: string
+        architecture:
+          $ref: '#/components/schemas/Architecture'
+        python_libraries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PythonLibrary'
+        use_cases:
+          type: array
+          items:
+            type: string
+
+    Architecture:
+      type: object
+      properties:
+        diagram:
+          type: string
+          description: ASCII or Mermaid diagram
+        components:
+          type: array
+          items:
+            type: string
+        data_flow:
+          type: string
+        state_persistence:
+          type: string
+
+    PythonLibrary:
+      type: object
+      properties:
+        name:
+          type: string
+        pypi_package:
+          type: string
+        version:
+          type: string
+        installation:
+          type: string
+        active_maintenance:
+          type: boolean
+
+paths:
+  /approaches/sqlite-worker-pattern:
+    get:
+      summary: SQLite + Background Worker Pattern
+      description: |
+        Using SQLite as event queue with background worker processes.
+        Libraries: Huey (multi-backend), LiteQueue, persist-queue
+      responses:
+        '200':
+          description: Approach analysis
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApproachComparison'
+                  - type: object
+                    properties:
+                      approach_name:
+                        example: "SQLite + Background Worker Pattern"
+                      deployment_complexity:
+                        example: 1
+                        description: "Single SQLite file, no external services"
+                      extensibility:
+                        example: 4
+                        description: "Easy to add new task types and workers"
+                      code_simplicity:
+                        example: 2
+                        description: "Simple queue operations, familiar patterns"
+                      recommendation_score:
+                        example: 5
+                        description: "Best for starting simple and growing incrementally"
+                      pros:
+                        example:
+                          - "Zero external dependencies - just SQLite file"
+                          - "Huey supports SQLite, Redis, or in-memory backends"
+                          - "Built-in retry logic and task scheduling"
+                          - "Atomic operations and ACID guarantees"
+                          - "Easy debugging - inspect queue with sqlite3 CLI"
+                          - "Works with existing file watching (watchdog)"
+                          - "LiteQueue provides simple queue primitives"
+                          - "persist-queue survives process crashes"
+                      cons:
+                        example:
+                          - "SQLite not ideal for high-concurrency writes"
+                          - "Polling overhead if not using triggers"
+                          - "Limited built-in workflow orchestration"
+                          - "Worker process management needed"
+                          - "No distributed processing without additional work"
+                      architecture:
+                        diagram: |
+                          ```
+                          ┌─────────────────┐
+                          │  File Watcher   │
+                          │   (watchdog)    │
+                          └────────┬────────┘
+                                   │
+                                   ▼
+                          ┌─────────────────┐     ┌──────────────────┐
+                          │  Event Producer │────▶│  SQLite Queue    │
+                          │  (Telegram bot) │     │  (Huey/LiteQueue)│
+                          └─────────────────┘     └────────┬─────────┘
+                                                           │
+                                                           ▼
+                          ┌─────────────────┐     ┌──────────────────┐
+                          │ Background      │◀────│  Worker Process  │
+                          │ Claude CLI      │     │  (Huey consumer) │
+                          │ Invocation      │     └──────────────────┘
+                          └────────┬────────┘
+                                   │
+                                   ▼
+                          ┌─────────────────┐
+                          │  Notification   │
+                          │  (Telegram/Push)│
+                          └─────────────────┘
+                          ```
+                        components:
+                          - "SQLite database file for queue storage"
+                          - "Huey task decorators for job definition"
+                          - "Worker process(es) consuming from queue"
+                          - "File watcher triggering job creation"
+                          - "Telegram bot as event source"
+                        data_flow: |
+                          1. File watcher or Telegram bot detects event
+                          2. Producer enqueues task with parameters to SQLite
+                          3. Huey worker polls queue and dequeues task
+                          4. Worker invokes Claude CLI with parameters
+                          5. On completion, worker enqueues notification task
+                          6. Notification worker sends Telegram/Push message
+                        state_persistence: |
+                          SQLite tables store:
+                          - Task queue (pending, in-progress, completed)
+                          - Task results and error logs
+                          - Workflow state (can use separate table)
+                          - Schedule/cron tasks
+                      python_libraries:
+                        - name: "Huey"
+                          pypi_package: "huey"
+                          version: "2.5.0+"
+                          installation: "uv pip install huey"
+                          active_maintenance: true
+                        - name: "LiteQueue"
+                          pypi_package: "litequeue"
+                          version: "0.7+"
+                          installation: "uv pip install litequeue"
+                          active_maintenance: true
+                        - name: "persist-queue"
+                          pypi_package: "persist-queue"
+                          version: "1.0.0+"
+                          installation: "uv pip install persist-queue"
+                          active_maintenance: true
+                        - name: "watchdog"
+                          pypi_package: "watchdog"
+                          version: "4.0.0+"
+                          installation: "uv pip install watchdog"
+                          active_maintenance: true
+                      use_cases:
+                        - "File watching triggers Claude CLI analysis"
+                        - "Telegram bot commands queue processing tasks"
+                        - "Scheduled periodic workflow execution"
+                        - "Multi-step workflows with task dependencies"
+                        - "Retry failed Claude CLI invocations"
+      x-implementation-example: |
+        ```python
+        # /// script
+        # dependencies = ["huey[sqlite]"]
+        # ///
+
+        from huey import SqliteHuey
+
+        # Configure Huey with SQLite backend
+        huey = SqliteHuey(filename='/path/to/queue.db')
+
+        @huey.task()
+        def process_file_change(filepath):
+            """Task triggered by file watcher"""
+            # Invoke Claude CLI
+            result = subprocess.run(['claude', 'analyze', filepath])
+            return result.stdout
+
+        @huey.task()
+        def send_notification(message):
+            """Task to send notifications"""
+            # Send via Telegram/Pushover
+            pass
+
+        # In file watcher:
+        def on_file_modified(event):
+            process_file_change(event.src_path)
+
+        # Run worker:
+        # huey_consumer.py my_app.huey
+        ```
+      x-scaling-path: |
+        Growth path from 2 to 10 workflows:
+        1. Start: Single SQLite file, single worker process
+        2. Add workflows: New task functions with @huey.task()
+        3. Scale workers: Run multiple worker processes
+        4. Add Redis: Switch backend to Redis if concurrency needed
+        5. Task pipelines: Chain tasks with .then() or manual orchestration
+        6. Monitoring: Add task result tracking and metrics
+
+  /approaches/asyncio-native:
+    get:
+      summary: Asyncio-Native Event Bus Pattern
+      description: |
+        Pure Python asyncio with event bus pattern using asyncio.Queue
+        No external dependencies, fully embedded in Python process
+      responses:
+        '200':
+          description: Approach analysis
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApproachComparison'
+                  - type: object
+                    properties:
+                      approach_name:
+                        example: "Asyncio-Native Event Bus"
+                      deployment_complexity:
+                        example: 1
+                        description: "Pure Python, no dependencies"
+                      extensibility:
+                        example: 3
+                        description: "Requires manual event routing and handlers"
+                      code_simplicity:
+                        example: 2
+                        description: "Clean async patterns but manual wiring"
+                      recommendation_score:
+                        example: 4
+                        description: "Good for embedded workflows, manual scaling"
+                      pros:
+                        example:
+                          - "Zero dependencies - pure Python stdlib"
+                          - "Fully embedded, no external processes"
+                          - "Native async/await patterns"
+                          - "Fine-grained control over execution"
+                          - "Easy to debug and test"
+                          - "No polling overhead"
+                          - "Perfect for single-process orchestration"
+                      cons:
+                        example:
+                          - "No built-in persistence across restarts"
+                          - "Manual event routing and handler registration"
+                          - "Requires asyncio knowledge"
+                          - "No distributed processing"
+                          - "State management is manual"
+                          - "Limited built-in retry/scheduling"
+                      architecture:
+                        diagram: |
+                          ```
+                          ┌─────────────────────────────────────────┐
+                          │      Main Async Event Loop              │
+                          │                                          │
+                          │  ┌────────────┐      ┌───────────────┐ │
+                          │  │ Event Bus  │      │  Event Queue  │ │
+                          │  │ (asyncio)  │◀────▶│ (asyncio.Queue)│ │
+                          │  └─────┬──────┘      └───────────────┘ │
+                          │        │                                │
+                          │        ├──────────┬──────────┬─────────┤
+                          │        ▼          ▼          ▼         │
+                          │  ┌─────────┐ ┌────────┐ ┌──────────┐  │
+                          │  │Handler 1│ │Handler2│ │ Handler3 │  │
+                          │  │ (File)  │ │(Telegram)│ (Claude) │  │
+                          │  └─────────┘ └────────┘ └──────────┘  │
+                          └─────────────────────────────────────────┘
+
+                          Event Flow:
+                          1. File watcher → Event Bus
+                          2. Event Bus → Handler registration
+                          3. Handler → Async processing
+                          4. Handler → Emit new events
+                          ```
+                        components:
+                          - "Asyncio event loop (single process)"
+                          - "Event bus class with pub/sub pattern"
+                          - "asyncio.Queue for event buffering"
+                          - "Event handlers as async functions"
+                          - "File watcher using aiofiles/watchdog"
+                        data_flow: |
+                          1. Event emitter publishes event to bus
+                          2. Event bus routes to registered handlers
+                          3. Handlers process events asynchronously
+                          4. Handlers can emit new events (chaining)
+                          5. All coordination via asyncio primitives
+                        state_persistence: |
+                          Manual persistence options:
+                          - JSON/YAML files for workflow state
+                          - SQLite for event history (optional)
+                          - In-memory state during execution
+                          - Checkpoint files for recovery
+                      python_libraries:
+                        - name: "asyncio"
+                          pypi_package: "N/A (stdlib)"
+                          version: "3.12+"
+                          installation: "Built-in"
+                          active_maintenance: true
+                        - name: "aiofiles"
+                          pypi_package: "aiofiles"
+                          version: "24.0+"
+                          installation: "uv pip install aiofiles"
+                          active_maintenance: true
+                        - name: "watchdog"
+                          pypi_package: "watchdog"
+                          version: "4.0.0+"
+                          installation: "uv pip install watchdog"
+                          active_maintenance: true
+                      use_cases:
+                        - "Single-process workflow orchestration"
+                        - "Real-time event handling without persistence"
+                        - "Embedded workflows in larger applications"
+                        - "Prototype and MVP development"
+                        - "Low-latency event processing"
+      x-implementation-example: |
+        ```python
+        # /// script
+        # dependencies = ["aiofiles"]
+        # ///
+
+        import asyncio
+        from typing import Callable, Dict, List
+
+        class EventBus:
+            def __init__(self):
+                self.handlers: Dict[str, List[Callable]] = {}
+                self.queue = asyncio.Queue()
+
+            def subscribe(self, event_type: str, handler: Callable):
+                if event_type not in self.handlers:
+                    self.handlers[event_type] = []
+                self.handlers[event_type].append(handler)
+
+            async def publish(self, event_type: str, data: dict):
+                await self.queue.put((event_type, data))
+
+            async def process_events(self):
+                while True:
+                    event_type, data = await self.queue.get()
+                    handlers = self.handlers.get(event_type, [])
+                    # Process handlers concurrently
+                    await asyncio.gather(*[h(data) for h in handlers])
+
+        # Usage
+        bus = EventBus()
+
+        @bus.subscribe('file.changed')
+        async def handle_file_change(data):
+            filepath = data['path']
+            # Invoke Claude CLI
+            proc = await asyncio.create_subprocess_exec('claude', 'analyze', filepath)
+            await proc.wait()
+            # Emit next event
+            await bus.publish('analysis.complete', {'result': 'success'})
+
+        @bus.subscribe('analysis.complete')
+        async def send_notification(data):
+            # Send notification
+            pass
+
+        async def main():
+            # Start event processor
+            processor = asyncio.create_task(bus.process_events())
+            # Start file watcher, Telegram bot, etc.
+            await asyncio.gather(processor, other_tasks())
+        ```
+      x-scaling-path: |
+        Growth from 2 to 10 workflows:
+        1. Start: Single event bus, few handlers
+        2. Add workflows: Register new event types and handlers
+        3. Complex flows: Chain events (handler emits new events)
+        4. State tracking: Add JSON/SQLite persistence layer
+        5. Concurrency: Use semaphores to limit parallel execution
+        6. Monitoring: Add event logging and metrics collection
+
+        Limitations:
+        - Single process only
+        - No automatic retry without manual implementation
+        - Restart loses in-flight events unless checkpointed
+
+  /approaches/redis-streams:
+    get:
+      summary: Redis Streams Consumer Groups
+      description: |
+        Redis Streams with consumer groups for distributed workflow orchestration
+        Requires Redis server but provides robust message delivery guarantees
+      responses:
+        '200':
+          description: Approach analysis
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApproachComparison'
+                  - type: object
+                    properties:
+                      approach_name:
+                        example: "Redis Streams Consumer Groups"
+                      deployment_complexity:
+                        example: 3
+                        description: "Requires Redis server (but can be local)"
+                      extensibility:
+                        example: 5
+                        description: "Highly extensible with consumer groups"
+                      code_simplicity:
+                        example: 3
+                        description: "Moderate - Redis concepts to learn"
+                      recommendation_score:
+                        example: 3
+                        description: "Good if you already use Redis or need distribution"
+                      pros:
+                        example:
+                          - "Built-in consumer groups for parallel processing"
+                          - "Automatic message acknowledgment and retry"
+                          - "Stream persistence and replay capability"
+                          - "Distributed workers out of the box"
+                          - "High throughput and low latency"
+                          - "Mature Python client (redis-py)"
+                          - "Can handle complex event sourcing patterns"
+                          - "Built-in message TTL and trimming"
+                      cons:
+                        example:
+                          - "Requires Redis server (external dependency)"
+                          - "Memory-based, need persistence configuration"
+                          - "Additional deployment complexity vs SQLite"
+                          - "Learning curve for Streams concepts"
+                          - "Overkill for simple 2-workflow use case"
+                          - "Need to manage Redis lifecycle"
+                      architecture:
+                        diagram: |
+                          ```
+                          ┌─────────────────┐
+                          │  File Watcher   │
+                          └────────┬────────┘
+                                   │
+                                   ▼
+                          ┌─────────────────┐     ┌──────────────────┐
+                          │   Producer      │────▶│  Redis Streams   │
+                          │ (XADD commands) │     │  (file:events)   │
+                          └─────────────────┘     └────────┬─────────┘
+                                                           │
+                                   ┌───────────────────────┴────────────┐
+                                   ▼                                    ▼
+                          ┌──────────────────┐              ┌──────────────────┐
+                          │ Consumer Group 1 │              │ Consumer Group 2 │
+                          │  (claude-workers)│              │ (notifiers)      │
+                          └────────┬─────────┘              └────────┬─────────┘
+                                   │                                 │
+                                   ▼                                 ▼
+                          ┌──────────────────┐              ┌──────────────────┐
+                          │  Worker 1, 2, 3  │              │  Notifier 1, 2   │
+                          │  (XREADGROUP)    │              │  (XREADGROUP)    │
+                          └──────────────────┘              └──────────────────┘
+                          ```
+                        components:
+                          - "Redis server (local or remote)"
+                          - "Redis Streams per workflow type"
+                          - "Consumer groups for parallel processing"
+                          - "Worker processes with redis-py client"
+                          - "Producer components for event injection"
+                        data_flow: |
+                          1. Producer XADD to Redis Stream
+                          2. Consumer group XREADGROUP with blocking
+                          3. Worker processes message
+                          4. Worker XACK to acknowledge
+                          5. Worker XADD to next stream (chaining)
+                          6. Pending Entry List tracks unACKed messages
+                        state_persistence: |
+                          Redis Streams features:
+                          - Stream persists messages (AOF/RDB)
+                          - Consumer groups track read position
+                          - Pending Entry List (PEL) for unACKed messages
+                          - Can set MAXLEN for stream trimming
+                          - XINFO commands for monitoring
+                      python_libraries:
+                        - name: "redis"
+                          pypi_package: "redis"
+                          version: "5.0+"
+                          installation: "uv pip install redis"
+                          active_maintenance: true
+                        - name: "redis-streams"
+                          pypi_package: "redis-streams"
+                          version: "0.1.0+"
+                          installation: "uv pip install redis-streams"
+                          active_maintenance: false
+                        - name: "walrus"
+                          pypi_package: "walrus"
+                          version: "0.9+"
+                          installation: "uv pip install walrus"
+                          active_maintenance: true
+                      use_cases:
+                        - "Distributed workflow processing"
+                        - "High-throughput event processing"
+                        - "Multi-stage pipelines with parallelism"
+                        - "Event replay and debugging"
+                        - "When you already have Redis infrastructure"
+      x-implementation-example: |
+        ```python
+        # /// script
+        # dependencies = ["redis"]
+        # ///
+
+        import redis
+        import json
+
+        r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+
+        # Producer
+        def publish_file_event(filepath):
+            event = {'type': 'file.changed', 'path': filepath}
+            r.xadd('workflow:events', {'data': json.dumps(event)})
+
+        # Consumer
+        def process_events():
+            # Create consumer group
+            try:
+                r.xgroup_create('workflow:events', 'claude-workers', id='0')
+            except redis.ResponseError:
+                pass  # Group already exists
+
+            while True:
+                # Read from stream
+                messages = r.xreadgroup(
+                    'claude-workers',
+                    'worker-1',
+                    {'workflow:events': '>'},
+                    count=1,
+                    block=5000
+                )
+
+                for stream, msgs in messages:
+                    for msg_id, fields in msgs:
+                        data = json.loads(fields['data'])
+                        # Process event
+                        process_file_change(data['path'])
+                        # Acknowledge
+                        r.xack('workflow:events', 'claude-workers', msg_id)
+        ```
+      x-scaling-path: |
+        Growth from 2 to 10 workflows:
+        1. Start: Single Redis instance, single stream
+        2. Add workflows: Create new streams per workflow type
+        3. Scale workers: Add consumers to existing groups
+        4. Parallel stages: Multiple consumer groups on same stream
+        5. Complex routing: Use multiple streams with routing logic
+        6. Monitoring: XINFO commands for metrics and debugging
+
+        Deployment options:
+        - Local Redis: redis-server (Homebrew)
+        - Docker: redis:alpine container
+        - Managed: Redis Cloud, AWS ElastiCache (if cloud needed)
+
+  /approaches/state-machine-sqlite:
+    get:
+      summary: State Machine + SQLite Hybrid
+      description: |
+        Combine Python state machine library (transitions) with SQLite persistence
+        Best of both worlds - structured workflow states with durable storage
+      responses:
+        '200':
+          description: Approach analysis
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApproachComparison'
+                  - type: object
+                    properties:
+                      approach_name:
+                        example: "State Machine + SQLite Hybrid"
+                      deployment_complexity:
+                        example: 2
+                        description: "SQLite + lightweight library"
+                      extensibility:
+                        example: 4
+                        description: "Clear state transitions, easy to extend"
+                      code_simplicity:
+                        example: 3
+                        description: "Need to understand state machine concepts"
+                      recommendation_score:
+                        example: 4
+                        description: "Excellent for complex multi-step workflows"
+                      pros:
+                        example:
+                          - "Clear workflow state modeling"
+                          - "Transitions library very mature"
+                          - "Built-in state persistence to SQLite"
+                          - "Visual state diagrams (mermaid/graphviz)"
+                          - "Callback hooks at each transition"
+                          - "Easy to validate state transitions"
+                          - "Good for complex multi-step workflows"
+                          - "Async support with AsyncMachine"
+                      cons:
+                        example:
+                          - "Need to design state machines upfront"
+                          - "Less flexible than pure event-driven"
+                          - "State machine abstraction has learning curve"
+                          - "May be overkill for simple linear workflows"
+                          - "Still need separate task queue for async work"
+                      architecture:
+                        diagram: |
+                          ```
+                          ┌─────────────────────────────────────────────┐
+                          │         Workflow State Machine              │
+                          │                                              │
+                          │  ┌─────────┐    trigger   ┌──────────────┐ │
+                          │  │  IDLE   │─────────────▶│  PROCESSING  │ │
+                          │  └─────────┘              └──────┬───────┘ │
+                          │       ▲                          │         │
+                          │       │                          ▼         │
+                          │  ┌─────────┐              ┌──────────────┐ │
+                          │  │  DONE   │◀─────────────│   WAITING    │ │
+                          │  └─────────┘   complete   └──────────────┘ │
+                          │                                              │
+                          └──────────────────┬───────────────────────────┘
+                                             │
+                                             ▼
+                          ┌─────────────────────────────────────────────┐
+                          │         SQLite State Storage                 │
+                          │  - Current state per workflow instance       │
+                          │  - Transition history                        │
+                          │  - Workflow metadata and context             │
+                          └─────────────────────────────────────────────┘
+
+                          Combined with Task Queue:
+                          ┌─────────────────┐
+                          │  State Machine  │──trigger──▶ Enqueue task
+                          └─────────────────┘
+                                 ▲
+                                 │
+                          ┌──────┴──────┐
+                          │ Task Worker │──complete──▶ Transition state
+                          └─────────────┘
+                          ```
+                        components:
+                          - "transitions.Machine or AsyncMachine"
+                          - "SQLite for state persistence"
+                          - "State machine models (Python classes)"
+                          - "Transition callbacks for side effects"
+                          - "Optional: Huey for async task execution"
+                        data_flow: |
+                          1. Event triggers state transition
+                          2. State machine validates transition
+                          3. Before callback: Enqueue background task
+                          4. Transition executes, state saved to SQLite
+                          5. After callback: Update metadata
+                          6. Worker completes task, triggers next transition
+                        state_persistence: |
+                          SQLite schema:
+                          - workflows: id, type, current_state, created_at
+                          - transitions: workflow_id, from_state, to_state, timestamp
+                          - context: workflow_id, key, value (JSON)
+
+                          transitions library features:
+                          - Machine.get_state() returns current state
+                          - Can serialize/deserialize to dict
+                          - GraphMachine generates state diagrams
+                      python_libraries:
+                        - name: "transitions"
+                          pypi_package: "transitions"
+                          version: "0.9+"
+                          installation: "uv pip install transitions"
+                          active_maintenance: true
+                        - name: "python-statemachine"
+                          pypi_package: "python-statemachine"
+                          version: "2.5+"
+                          installation: "uv pip install python-statemachine"
+                          active_maintenance: true
+                        - name: "sqlalchemy"
+                          pypi_package: "sqlalchemy"
+                          version: "2.0+"
+                          installation: "uv pip install sqlalchemy"
+                          active_maintenance: true
+                      use_cases:
+                        - "Multi-step approval workflows"
+                        - "Complex state-dependent processing"
+                        - "Long-running workflows with checkpoints"
+                        - "Workflows requiring rollback capability"
+                        - "When you need visual state diagrams"
+      x-implementation-example: |
+        ```python
+        # /// script
+        # dependencies = ["transitions"]
+        # ///
+
+        from transitions import Machine
+        import sqlite3
+
+        class WorkflowModel:
+            states = ['idle', 'processing', 'waiting_notification', 'done', 'failed']
+
+            def __init__(self, workflow_id):
+                self.workflow_id = workflow_id
+                self.machine = Machine(
+                    model=self,
+                    states=WorkflowModel.states,
+                    initial='idle'
+                )
+
+                # Define transitions
+                self.machine.add_transition('start', 'idle', 'processing',
+                                          before='enqueue_task')
+                self.machine.add_transition('complete', 'processing', 'waiting_notification',
+                                          after='send_notification')
+                self.machine.add_transition('finish', 'waiting_notification', 'done')
+                self.machine.add_transition('fail', '*', 'failed')
+
+            def enqueue_task(self):
+                # Enqueue Claude CLI task to Huey
+                process_file_task.delay(self.workflow_id)
+
+            def send_notification(self):
+                # Send notification
+                pass
+
+            def persist_state(self):
+                # Save to SQLite
+                conn = sqlite3.connect('workflows.db')
+                conn.execute(
+                    'UPDATE workflows SET state = ? WHERE id = ?',
+                    (self.state, self.workflow_id)
+                )
+                conn.commit()
+
+        # Usage
+        workflow = WorkflowModel(workflow_id='abc123')
+        workflow.start()  # idle -> processing
+        workflow.persist_state()
+
+        # After task completes:
+        workflow.complete()  # processing -> waiting_notification
+        workflow.finish()    # waiting_notification -> done
+        ```
+      x-scaling-path: |
+        Growth from 2 to 10 workflows:
+        1. Start: Define 2 state machines for current workflows
+        2. Add workflows: Create new state machine classes
+        3. Shared states: Use hierarchical state machines
+        4. Complex flows: Nested states and parallel machines
+        5. Visualization: Generate state diagrams for documentation
+        6. Monitoring: Query SQLite for workflow analytics
+
+        Best combined with:
+        - Huey/Celery for async task execution
+        - watchdog for file event triggering
+        - AsyncMachine for async/await workflows
+
+  /approaches/mcp-server:
+    get:
+      summary: Model Context Protocol (MCP) Server
+      description: |
+        Use MCP server architecture for workflow state and notifications
+        Emerging standard designed for AI agent orchestration
+      responses:
+        '200':
+          description: Approach analysis
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApproachComparison'
+                  - type: object
+                    properties:
+                      approach_name:
+                        example: "Model Context Protocol (MCP) Server"
+                      deployment_complexity:
+                        example: 3
+                        description: "Need to implement MCP server, emerging standard"
+                      extensibility:
+                        example: 4
+                        description: "Designed for AI workflows, built-in notifications"
+                      code_simplicity:
+                        example: 4
+                        description: "New protocol, limited examples"
+                      recommendation_score:
+                        example: 2
+                        description: "Interesting but immature, wait for ecosystem"
+                      pros:
+                        example:
+                          - "Purpose-built for AI agent workflows"
+                          - "Built-in notification system"
+                          - "Maintains state across interactions"
+                          - "Standard protocol for Claude integration"
+                          - "Designed for multi-step workflows"
+                          - "JSON-RPC based, language agnostic"
+                          - "Future-proof as Claude Code adopts MCP"
+                      cons:
+                        example:
+                          - "Very new protocol (2024-2025)"
+                          - "Limited Python implementations"
+                          - "Documentation still evolving"
+                          - "Overkill for simple workflows"
+                          - "Need to run MCP server process"
+                          - "Ecosystem not yet mature"
+                          - "Claude Code MCP integration unclear"
+                      architecture:
+                        diagram: |
+                          ```
+                          ┌─────────────────┐
+                          │   Claude Code   │
+                          │      CLI        │
+                          └────────┬────────┘
+                                   │ JSON-RPC
+                                   ▼
+                          ┌─────────────────────────────────────┐
+                          │        MCP Server                    │
+                          │                                      │
+                          │  ┌──────────────┐  ┌─────────────┐ │
+                          │  │   Tools      │  │   Resources │ │
+                          │  │ (file_watch) │  │  (workflows)│ │
+                          │  └──────────────┘  └─────────────┘ │
+                          │                                      │
+                          │  ┌──────────────┐  ┌─────────────┐ │
+                          │  │Notifications │  │   State     │ │
+                          │  │(listChanged) │  │  Manager    │ │
+                          │  └──────────────┘  └─────────────┘ │
+                          └─────────────────────────────────────┘
+                                   │
+                                   ▼
+                          ┌─────────────────────┐
+                          │  Backend Services   │
+                          │  (Telegram, Files)  │
+                          └─────────────────────┘
+                          ```
+                        components:
+                          - "MCP server process (Python/TypeScript)"
+                          - "Tools: file watching, workflow triggers"
+                          - "Resources: workflow definitions and state"
+                          - "Notifications: state change events"
+                          - "State persistence backend (SQLite/JSON)"
+                        data_flow: |
+                          1. Claude Code connects to MCP server
+                          2. Server exposes tools (file_watch, trigger_workflow)
+                          3. Claude invokes tools via JSON-RPC
+                          4. Server maintains workflow state
+                          5. Server emits notifications on state changes
+                          6. Claude receives notifications and continues workflow
+                        state_persistence: |
+                          MCP server maintains:
+                          - Session state across interactions
+                          - Resource definitions (workflows)
+                          - Context from previous tool calls
+                          - Notification subscriptions
+
+                          Backend storage:
+                          - SQLite for workflow state
+                          - JSON files for configuration
+                          - In-memory for ephemeral state
+                      python_libraries:
+                        - name: "mcp"
+                          pypi_package: "mcp"
+                          version: "TBD"
+                          installation: "uv pip install mcp"
+                          active_maintenance: true
+                        - name: "anthropic-mcp"
+                          pypi_package: "anthropic-mcp"
+                          version: "TBD"
+                          installation: "Not yet available"
+                          active_maintenance: false
+                      use_cases:
+                        - "Claude Code native workflow orchestration"
+                        - "Multi-round AI agent interactions"
+                        - "Context-aware workflow execution"
+                        - "Future: Official Claude Code integration"
+                        - "When you need AI-specific orchestration"
+      x-implementation-status: |
+        Current state (2025-10):
+        - Protocol specification published
+        - TypeScript implementation available
+        - Python implementations emerging
+        - Claude Code MCP support unclear
+        - Limited production examples
+
+        Recommendation:
+        - Monitor for maturity
+        - Consider for future migration
+        - Not recommended for immediate use
+        - Better to start with Huey/asyncio and migrate later
+      x-future-potential: |
+        If MCP matures (6-12 months):
+        1. Official Claude Code MCP client
+        2. Workflow definitions as MCP resources
+        3. Built-in notification handling
+        4. Standard way to extend Claude CLI
+        5. Ecosystem of MCP workflow tools
+
+        Migration path from Huey/asyncio:
+        - Wrap existing task queue as MCP tools
+        - Expose workflow state as MCP resources
+        - Map task completion to MCP notifications
+        - Gradually move logic into MCP server
+
+x-recommendations:
+  immediate_start:
+    title: "Best Approach: SQLite + Huey + watchdog"
+    rationale:
+      - "Lowest deployment complexity (single SQLite file)"
+      - "Mature, battle-tested libraries"
+      - "Easy to understand and debug"
+      - "Scales from 2 to 10+ workflows smoothly"
+      - "Can upgrade to Redis backend later if needed"
+    architecture: "File watcher → Huey task queue (SQLite) → Workers → Notifications"
+    implementation_time: "1-2 days for initial setup"
+    learning_curve: "Low - familiar patterns"
+
+  alternative_1:
+    title: "Alternative: State Machine + Huey Hybrid"
+    rationale:
+      - "Best for complex multi-step workflows"
+      - "Clear state visualization"
+      - "Excellent for workflows with approval steps"
+      - "Combines structure (state machine) with async (Huey)"
+    use_when: "Workflows have complex state dependencies"
+
+  alternative_2:
+    title: "Alternative: Pure Asyncio Event Bus"
+    rationale:
+      - "Zero dependencies beyond Python stdlib"
+      - "Fastest to prototype"
+      - "Perfect for embedded workflows"
+      - "Good for learning async patterns"
+    use_when: "Single process, no persistence needed, rapid prototyping"
+
+  avoid:
+    redis_streams:
+      reason: "Requires Redis server, overkill for 2-10 workflows"
+      unless: "Already have Redis infrastructure or need distribution"
+    mcp_server:
+      reason: "Too immature, limited ecosystem"
+      revisit: "Q2-Q3 2026 when Python libraries stabilize"
+
+  growth_strategy:
+    phase_1:
+      title: "Start Simple (2 workflows)"
+      approach: "Huey + SQLite"
+      components:
+        - "Single SQLite file"
+        - "watchdog for file events"
+        - "Huey tasks for Claude CLI and notifications"
+        - "Single worker process"
+    phase_2:
+      title: "Add Workflows (3-5 workflows)"
+      changes:
+        - "More @huey.task() decorators"
+        - "Task chaining with .then()"
+        - "Separate queue names per workflow type"
+    phase_3:
+      title: "Scale Complexity (6-10 workflows)"
+      changes:
+        - "Multiple worker processes"
+        - "Add state machine layer for complex flows"
+        - "Consider Redis backend if concurrency issues"
+        - "Add monitoring and metrics"
+    phase_4:
+      title: "Future (>10 workflows or distributed)"
+      changes:
+        - "Evaluate Prefect or Temporal"
+        - "Or migrate to MCP if mature"
+        - "Or continue with Huey + Redis (proven at scale)"
+
+x-code-examples:
+  complete_minimal_example: |
+    ```python
+    # /// script
+    # dependencies = ["huey[sqlite]", "watchdog", "pyrogram"]
+    # ///
+
+    """
+    Minimal event-driven workflow orchestration for Claude Code CLI
+    Architecture: watchdog → Huey (SQLite) → Claude CLI → Notifications
+    """
+
+    import subprocess
+    from pathlib import Path
+    from huey import SqliteHuey
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+
+    # Configure Huey with SQLite backend
+    huey = SqliteHuey(filename=str(Path.home() / '.claude' / 'workflow_queue.db'))
+
+    # Define workflow tasks
+    @huey.task()
+    def analyze_file_with_claude(filepath: str) -> dict:
+        """Task: Analyze file with Claude CLI"""
+        result = subprocess.run(
+            ['claude', 'analyze', filepath],
+            capture_output=True,
+            text=True
+        )
+        return {
+            'filepath': filepath,
+            'status': 'success' if result.returncode == 0 else 'failed',
+            'output': result.stdout
+        }
+
+    @huey.task()
+    def send_telegram_notification(message: str):
+        """Task: Send notification via Telegram"""
+        # Implementation using Pyrogram
+        pass
+
+    @huey.task()
+    def workflow_file_changed(filepath: str):
+        """Workflow: File change → Claude analysis → Notification"""
+        # Chain tasks
+        result = analyze_file_with_claude(filepath)
+        if result['status'] == 'success':
+            send_telegram_notification(f"Analysis complete: {filepath}")
+
+    # File watcher integration
+    class WorkflowEventHandler(FileSystemEventHandler):
+        def on_modified(self, event):
+            if not event.is_directory and event.src_path.endswith('.md'):
+                workflow_file_changed(event.src_path)
+
+    def start_file_watcher(watch_path: str):
+        """Start watchdog file watcher"""
+        event_handler = WorkflowEventHandler()
+        observer = Observer()
+        observer.schedule(event_handler, watch_path, recursive=True)
+        observer.start()
+        return observer
+
+    # Telegram bot integration
+    @huey.task()
+    def handle_telegram_command(command: str, args: list):
+        """Task: Handle Telegram bot command"""
+        if command == 'analyze':
+            filepath = args[0]
+            workflow_file_changed(filepath)
+
+    # Main entry point
+    if __name__ == '__main__':
+        # Start file watcher
+        watch_path = str(Path.home() / '.claude' / 'docs')
+        observer = start_file_watcher(watch_path)
+
+        # Start Telegram bot (pseudo-code)
+        # bot = TelegramBot()
+        # bot.on_command('analyze', handle_telegram_command)
+
+        # Worker runs in separate process:
+        # $ huey_consumer workflow.huey
+
+        try:
+            observer.join()
+        except KeyboardInterrupt:
+            observer.stop()
+    ```
+
+  state_machine_example: |
+    ```python
+    # /// script
+    # dependencies = ["transitions", "huey[sqlite]"]
+    # ///
+
+    """
+    State machine + Huey hybrid for complex workflows
+    """
+
+    from transitions import Machine
+    import sqlite3
+    from huey import SqliteHuey
+
+    huey = SqliteHuey(filename='workflows.db')
+
+    class DocumentWorkflow:
+        """State machine for document processing workflow"""
+
+        states = [
+            'draft',
+            'analyzing',
+            'review',
+            'approved',
+            'published',
+            'rejected'
+        ]
+
+        transitions_config = [
+            {'trigger': 'submit', 'source': 'draft', 'dest': 'analyzing',
+             'before': 'enqueue_analysis'},
+            {'trigger': 'complete_analysis', 'source': 'analyzing', 'dest': 'review'},
+            {'trigger': 'approve', 'source': 'review', 'dest': 'approved',
+             'after': 'enqueue_publish'},
+            {'trigger': 'reject', 'source': 'review', 'dest': 'rejected'},
+            {'trigger': 'publish_complete', 'source': 'approved', 'dest': 'published'}
+        ]
+
+        def __init__(self, doc_id: str):
+            self.doc_id = doc_id
+            self.machine = Machine(
+                model=self,
+                states=DocumentWorkflow.states,
+                transitions=DocumentWorkflow.transitions_config,
+                initial='draft'
+            )
+            self.load_state()
+
+        def enqueue_analysis(self):
+            """Callback: Enqueue Claude CLI analysis task"""
+            analyze_document_task.delay(self.doc_id)
+
+        def enqueue_publish(self):
+            """Callback: Enqueue publishing task"""
+            publish_document_task.delay(self.doc_id)
+
+        def save_state(self):
+            """Persist state to SQLite"""
+            conn = sqlite3.connect('workflows.db')
+            conn.execute('''
+                INSERT OR REPLACE INTO workflow_state (doc_id, state, updated_at)
+                VALUES (?, ?, datetime('now'))
+            ''', (self.doc_id, self.state))
+            conn.commit()
+
+        def load_state(self):
+            """Load state from SQLite"""
+            conn = sqlite3.connect('workflows.db')
+            row = conn.execute(
+                'SELECT state FROM workflow_state WHERE doc_id = ?',
+                (self.doc_id,)
+            ).fetchone()
+            if row:
+                self.to_state(row[0])
+
+    # Huey tasks
+    @huey.task()
+    def analyze_document_task(doc_id: str):
+        # Run Claude CLI analysis
+        result = subprocess.run(['claude', 'analyze', f'docs/{doc_id}.md'])
+
+        # Advance state machine
+        workflow = DocumentWorkflow(doc_id)
+        workflow.complete_analysis()
+        workflow.save_state()
+
+    @huey.task()
+    def publish_document_task(doc_id: str):
+        # Publish document
+        pass
+
+        # Advance state machine
+        workflow = DocumentWorkflow(doc_id)
+        workflow.publish_complete()
+        workflow.save_state()
+    ```
+
+x-comparison-matrix:
+  summary: |
+    | Approach               | Deploy | Extend | Simple | Score | Best For                          |
+    |-----------------------|--------|--------|--------|-------|-----------------------------------|
+    | SQLite + Huey         | 1      | 4      | 2      | 5     | Starting simple, growing to 10    |
+    | Asyncio Event Bus     | 1      | 3      | 2      | 4     | Embedded, single-process          |
+    | Redis Streams         | 3      | 5      | 3      | 3     | Already have Redis, need scaling  |
+    | State Machine + SQLite| 2      | 4      | 3      | 4     | Complex multi-step workflows      |
+    | MCP Server            | 3      | 4      | 4      | 2     | Future, wait for maturity         |
+
+    Score: 1 = worst, 5 = best
+
+  detailed_comparison:
+    deployment:
+      sqlite_huey: "Single file, no external services"
+      asyncio: "Pure Python, no dependencies"
+      redis: "Requires Redis server (can be local)"
+      state_machine: "SQLite + library"
+      mcp: "Need MCP server process"
+
+    persistence:
+      sqlite_huey: "SQLite with ACID guarantees"
+      asyncio: "Manual (JSON/YAML files)"
+      redis: "Redis AOF/RDB, memory-based"
+      state_machine: "SQLite state tables"
+      mcp: "Backend-dependent"
+
+    distribution:
+      sqlite_huey: "Single machine (or switch to Redis)"
+      asyncio: "Single process only"
+      redis: "Multi-worker out of the box"
+      state_machine: "Single machine"
+      mcp: "Depends on implementation"
+
+    learning_curve:
+      sqlite_huey: "Low - task queue patterns familiar"
+      asyncio: "Medium - async/await knowledge needed"
+      redis: "Medium - Redis concepts"
+      state_machine: "Medium - state machine design"
+      mcp: "High - new protocol"
+
+    debugging:
+      sqlite_huey: "Excellent - sqlite3 CLI to inspect queue"
+      asyncio: "Good - Python debugger"
+      redis: "Good - Redis CLI tools"
+      state_machine: "Excellent - visual diagrams + SQL"
+      mcp: "Unknown - tooling immature"
+
+    failure_recovery:
+      sqlite_huey: "Automatic retry, persistent queue"
+      asyncio: "Manual implementation"
+      redis: "Consumer groups, PEL retry"
+      state_machine: "State rollback possible"
+      mcp: "TBD"
+
+x-decision-tree: |
+  Question 1: Do you need distributed processing across multiple machines?
+    YES → Consider Redis Streams or wait for distributed solution
+    NO  → Continue to Question 2
+
+  Question 2: Are your workflows complex with many states and conditional branches?
+    YES → State Machine + Huey hybrid
+    NO  → Continue to Question 3
+
+  Question 3: Do you need state to persist across restarts?
+    YES → SQLite + Huey (RECOMMENDED)
+    NO  → Continue to Question 4
+
+  Question 4: Is this a single-process embedded workflow?
+    YES → Asyncio Event Bus
+    NO  → SQLite + Huey (RECOMMENDED)
+
+  Question 5: Already have Redis infrastructure?
+    YES → Redis Streams is viable
+    NO  → SQLite + Huey (RECOMMENDED)
+
+x-implementation-checklist:
+  phase_1_setup:
+    - "[ ] Install Huey: uv pip install 'huey[sqlite]'"
+    - "[ ] Install watchdog: uv pip install watchdog"
+    - "[ ] Create SQLite database path: ~/.claude/workflow_queue.db"
+    - "[ ] Define initial 2 workflows as @huey.task() functions"
+    - "[ ] Set up file watcher event handler"
+    - "[ ] Test single workflow: file change → task execution"
+    - "[ ] Start Huey consumer: huey_consumer module.huey"
+
+  phase_2_integration:
+    - "[ ] Integrate Telegram bot event producer"
+    - "[ ] Add task chaining for multi-step workflows"
+    - "[ ] Implement notification tasks (Telegram/Pushover)"
+    - "[ ] Add error handling and retry logic"
+    - "[ ] Create systemd/launchd service for worker"
+    - "[ ] Set up logging and monitoring"
+
+  phase_3_expansion:
+    - "[ ] Add workflows 3-5 as new task functions"
+    - "[ ] Implement task scheduling (periodic tasks)"
+    - "[ ] Add workflow state tracking table"
+    - "[ ] Create CLI tool for queue inspection"
+    - "[ ] Document workflow definitions"
+
+  optional_enhancements:
+    - "[ ] Add state machine layer for complex workflows"
+    - "[ ] Implement workflow analytics/metrics"
+    - "[ ] Create web UI for queue monitoring"
+    - "[ ] Add workflow definition in YAML/JSON"
+    - "[ ] Evaluate Redis backend if concurrency issues"
+
+x-further-reading:
+  huey_documentation: "https://huey.readthedocs.io/en/latest/"
+  transitions_documentation: "https://github.com/pytransitions/transitions"
+  redis_streams_tutorial: "https://redis.io/docs/manual/data-types/streams/"
+  asyncio_patterns: "https://medium.com/data-science-collective/mastering-event-driven-architecture-in-python-with-asyncio-and-pub-sub-patterns-2b26db3f11c9"
+  mcp_specification: "https://modelcontextprotocol.io/docs/concepts/architecture"
+  watchdog_documentation: "https://python-watchdog.readthedocs.io/"
