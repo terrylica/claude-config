@@ -1,0 +1,409 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""
+Lychee Events Query Tool
+
+Query SQLite event store for correlation tracking and observability.
+
+Usage:
+  lychee-events --correlation-id ULID    # Show full trace
+  lychee-events --session-id UUID        # Show all events for session
+  lychee-events --workspace-id HASH      # Show all events for workspace
+  lychee-events --component hook         # Filter by component
+  lychee-events --since "2025-10-25"     # Time range filter
+  lychee-events --format json            # Output format
+
+SLO:
+- Correctness: 100% (accurate query results, no silent failures)
+- Observability: Full (all query dimensions supported)
+- Maintainability: Zero custom SQL abstraction (direct queries)
+"""
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+# Configuration
+DEFAULT_DB_PATH = Path.home() / ".claude" / "automation" / "lychee" / "state" / "events.db"
+DB_PATH = Path(os.getenv("LYCHEE_EVENTS_DB", str(DEFAULT_DB_PATH)))
+
+# ANSI color codes (optional, controlled by NO_COLOR env var)
+USE_COLOR = sys.stdout.isatty() and not os.getenv("NO_COLOR")
+
+COLORS = {
+    "reset": "\033[0m" if USE_COLOR else "",
+    "bold": "\033[1m" if USE_COLOR else "",
+    "dim": "\033[2m" if USE_COLOR else "",
+    "red": "\033[31m" if USE_COLOR else "",
+    "green": "\033[32m" if USE_COLOR else "",
+    "yellow": "\033[33m" if USE_COLOR else "",
+    "blue": "\033[34m" if USE_COLOR else "",
+    "magenta": "\033[35m" if USE_COLOR else "",
+    "cyan": "\033[36m" if USE_COLOR else "",
+}
+
+
+class EventQueryError(Exception):
+    """Base exception for event query failures."""
+    pass
+
+
+class DatabaseConnectionError(EventQueryError):
+    """Cannot connect to SQLite database."""
+    pass
+
+
+def connect_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
+    """
+    Connect to events database.
+
+    Args:
+        db_path: Optional path to database (defaults to DB_PATH)
+
+    Returns:
+        SQLite connection
+
+    Raises:
+        DatabaseConnectionError: Cannot connect to database
+    """
+    path = db_path or DB_PATH
+    if not path.exists():
+        raise DatabaseConnectionError(f"Database not found: {path}")
+
+    try:
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+        return conn
+    except sqlite3.Error as e:
+        raise DatabaseConnectionError(f"Cannot connect to {path}: {e}") from e
+
+
+def query_events(
+    conn: sqlite3.Connection,
+    correlation_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    component: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """
+    Query events with filters.
+
+    Args:
+        conn: SQLite connection
+        correlation_id: Filter by correlation ID
+        session_id: Filter by session ID
+        workspace_id: Filter by workspace ID
+        component: Filter by component
+        since: Filter by start timestamp (ISO 8601)
+        until: Filter by end timestamp (ISO 8601)
+        limit: Maximum number of results
+
+    Returns:
+        List of event dictionaries
+
+    Raises:
+        sqlite3.Error: Query failed
+    """
+    query = """
+        SELECT
+            id,
+            correlation_id,
+            workspace_id,
+            session_id,
+            component,
+            event_type,
+            timestamp,
+            metadata,
+            created_at
+        FROM session_events
+        WHERE 1=1
+    """
+    params = []
+
+    if correlation_id:
+        query += " AND correlation_id = ?"
+        params.append(correlation_id)
+
+    if session_id:
+        query += " AND session_id = ?"
+        params.append(session_id)
+
+    if workspace_id:
+        query += " AND workspace_id = ?"
+        params.append(workspace_id)
+
+    if component:
+        query += " AND component = ?"
+        params.append(component)
+
+    if since:
+        query += " AND timestamp >= ?"
+        params.append(since)
+
+    if until:
+        query += " AND timestamp <= ?"
+        params.append(until)
+
+    query += " ORDER BY id ASC"
+
+    if limit:
+        query += f" LIMIT {limit}"
+
+    try:
+        cursor = conn.execute(query, params)
+        rows = cursor.fetchall()
+
+        # Convert Row objects to dictionaries
+        events = []
+        for row in rows:
+            event = dict(row)
+            # Parse metadata JSON if present
+            if event["metadata"]:
+                try:
+                    event["metadata"] = json.loads(event["metadata"])
+                except json.JSONDecodeError:
+                    pass  # Keep as string if not valid JSON
+            events.append(event)
+
+        return events
+    except sqlite3.Error as e:
+        raise EventQueryError(f"Query failed: {e}") from e
+
+
+def format_table(events: List[Dict[str, Any]]) -> str:
+    """
+    Format events as table.
+
+    Args:
+        events: List of event dictionaries
+
+    Returns:
+        Formatted table string
+    """
+    if not events:
+        return f"{COLORS['dim']}No events found{COLORS['reset']}\n"
+
+    output = []
+
+    # Header
+    output.append(f"{COLORS['bold']}{'TIME':<8} {'COMPONENT':<12} {'EVENT_TYPE':<25} {'METADATA':<40}{COLORS['reset']}")
+    output.append(f"{COLORS['dim']}{'-' * 90}{COLORS['reset']}")
+
+    # Rows
+    for event in events:
+        # Extract time from timestamp (HH:MM:SS)
+        time_str = event["timestamp"][11:19] if len(event["timestamp"]) >= 19 else event["timestamp"][:8]
+
+        # Component color
+        component_color = {
+            "hook": COLORS["green"],
+            "bot": COLORS["blue"],
+            "orchestrator": COLORS["magenta"],
+            "claude-cli": COLORS["cyan"]
+        }.get(event["component"], COLORS["reset"])
+
+        # Format metadata preview
+        metadata = event.get("metadata", {})
+        if isinstance(metadata, dict):
+            # Show key fields
+            preview_parts = []
+            for key in ["error_count", "decision", "pid", "status", "exit_code"]:
+                if key in metadata:
+                    preview_parts.append(f"{key}={metadata[key]}")
+            metadata_str = ", ".join(preview_parts) if preview_parts else ""
+        else:
+            metadata_str = str(metadata)[:35]
+
+        output.append(
+            f"{COLORS['dim']}{time_str:<8}{COLORS['reset']} "
+            f"{component_color}{event['component']:<12}{COLORS['reset']} "
+            f"{event['event_type']:<25} "
+            f"{COLORS['dim']}{metadata_str:<40}{COLORS['reset']}"
+        )
+
+    return "\n".join(output) + "\n"
+
+
+def format_tree(events: List[Dict[str, Any]]) -> str:
+    """
+    Format events as tree (for correlation traces).
+
+    Args:
+        events: List of event dictionaries
+
+    Returns:
+        Formatted tree string
+    """
+    if not events:
+        return f"{COLORS['dim']}No events found{COLORS['reset']}\n"
+
+    output = []
+
+    # Group by correlation_id
+    traces = {}
+    for event in events:
+        corr_id = event["correlation_id"]
+        if corr_id not in traces:
+            traces[corr_id] = []
+        traces[corr_id].append(event)
+
+    for corr_id, trace_events in traces.items():
+        output.append(f"{COLORS['bold']}{COLORS['cyan']}Trace: {corr_id}{COLORS['reset']}")
+
+        for i, event in enumerate(trace_events):
+            is_last = i == len(trace_events) - 1
+            prefix = "└─" if is_last else "├─"
+
+            # Component color
+            component_color = {
+                "hook": COLORS["green"],
+                "bot": COLORS["blue"],
+                "orchestrator": COLORS["magenta"],
+            }.get(event["component"], COLORS["reset"])
+
+            # Time
+            time_str = event["timestamp"][11:19] if len(event["timestamp"]) >= 19 else event["timestamp"][:8]
+
+            output.append(
+                f"{COLORS['dim']}{prefix}{COLORS['reset']} "
+                f"{COLORS['dim']}{time_str}{COLORS['reset']} "
+                f"{component_color}{event['component']}{COLORS['reset']} "
+                f"{COLORS['bold']}{event['event_type']}{COLORS['reset']}"
+            )
+
+            # Show metadata on next line if present
+            metadata = event.get("metadata", {})
+            if isinstance(metadata, dict) and metadata:
+                indent = "   " if is_last else "│  "
+                for key, value in metadata.items():
+                    output.append(f"{COLORS['dim']}{indent}  {key}: {value}{COLORS['reset']}")
+
+        output.append("")  # Blank line between traces
+
+    return "\n".join(output)
+
+
+def format_json(events: List[Dict[str, Any]]) -> str:
+    """
+    Format events as JSON.
+
+    Args:
+        events: List of event dictionaries
+
+    Returns:
+        Formatted JSON string
+    """
+    return json.dumps(events, indent=2) + "\n"
+
+
+def main() -> int:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Query Lychee event store for correlation tracking",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Show full trace for correlation ID
+  lychee-events --correlation-id 01K8D6YR9XS8M15PYBX2924FCW
+
+  # Show all events for session
+  lychee-events --session-id test-session-456
+
+  # Show hook events from today
+  lychee-events --component hook --since "2025-10-25"
+
+  # Export all events as JSON
+  lychee-events --format json > events.json
+        """
+    )
+
+    # Filter options
+    parser.add_argument("--correlation-id", help="Filter by correlation ID (ULID)")
+    parser.add_argument("--session-id", help="Filter by session ID")
+    parser.add_argument("--workspace-id", help="Filter by workspace ID (hash)")
+    parser.add_argument("--component", help="Filter by component (hook/bot/orchestrator/claude-cli)")
+    parser.add_argument("--since", help="Filter by start timestamp (ISO 8601)")
+    parser.add_argument("--until", help="Filter by end timestamp (ISO 8601)")
+    parser.add_argument("--limit", type=int, help="Maximum number of results")
+
+    # Output options
+    parser.add_argument(
+        "--format",
+        choices=["table", "json", "tree"],
+        default="table",
+        help="Output format (default: table)"
+    )
+
+    # Database options
+    parser.add_argument(
+        "--db",
+        type=Path,
+        help=f"Path to events database (default: {DB_PATH})"
+    )
+
+    args = parser.parse_args()
+
+    # Use specified database or default
+    db_path = args.db if args.db else DB_PATH
+
+    try:
+        # Connect to database
+        conn = connect_db(db_path)
+
+        # Query events
+        events = query_events(
+            conn,
+            correlation_id=args.correlation_id,
+            session_id=args.session_id,
+            workspace_id=args.workspace_id,
+            component=args.component,
+            since=args.since,
+            until=args.until,
+            limit=args.limit
+        )
+
+        conn.close()
+
+        # Format output
+        if args.format == "json":
+            output = format_json(events)
+        elif args.format == "tree":
+            output = format_tree(events)
+        else:  # table
+            output = format_table(events)
+
+        print(output, end="")
+
+        # Summary
+        if events and args.format != "json":
+            print(f"{COLORS['dim']}Total: {len(events)} event(s){COLORS['reset']}")
+
+        return 0
+
+    except EventQueryError as e:
+        print(f"{COLORS['red']}❌ {e}{COLORS['reset']}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"{COLORS['red']}❌ Unexpected error: {type(e).__name__}: {e}{COLORS['reset']}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
