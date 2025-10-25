@@ -2,17 +2,24 @@
 
 **Single Source of Truth for Migration Execution**
 
-**Status**: 🔄 **IN PROGRESS** - Phase 1 complete, executing Phase 2
+**Status**: 🔄 **IN PROGRESS** - Phases 0-1 complete, ready for Phase 2
 **Date**: 2025-10-25
 **Current Version**: v3.0.1
 **Target Version**: v4.0.0
 
 **Phase Progress**:
 
-- ✅ Phase 0: Pre-migration validation (2025-10-25 14:30)
-- ✅ Phase 1: Create workflow registry (2025-10-25 14:45)
-- 🔄 Phase 2: Refactor hook (in progress)
-- ⏳ Phases 3-8: Pending
+- ✅ Phase 0: Pre-migration validation (14:30, actual: 20 min)
+- ✅ Phase 1: Create workflow registry (14:45, actual: 15 min)
+- ⏳ Phase 2: Refactor hook - **NEXT** (est: 3-3.5h)
+- ⏳ Phase 3: Refactor bot (est: 4h)
+- ⏳ Phase 4: Refactor orchestrator (est: 5h)
+- ⏳ Phase 5: Integration testing (est: 3h)
+- ⏳ Phase 6: Directory rename (est: 1.5h)
+- ⏳ Phase 7: Remove dual-mode (est: 2h)
+- ⏳ Phase 8: Documentation (est: 3h)
+
+**Remaining Scope**: 22h (Phases 2-8) - Multi-session execution required
 
 ---
 
@@ -588,21 +595,21 @@ Remove backward compatibility:
 
 ### Timeline Summary
 
-| Phase     | Duration | Cumulative |
-| --------- | -------- | ---------- |
-| **Fixes** | **3-4h** | **3-4h**   |
-| Phase 0   | 0.5h     | 4.5h       |
-| Phase 1   | 1.5h     | 6h         |
-| Phase 2   | 3.5h     | 9.5h       |
-| Phase 3   | 4h       | 13.5h      |
-| Phase 4   | 5h       | 18.5h      |
-| Phase 5   | 3h       | 21.5h      |
-| Phase 6   | 1.5h     | 23h        |
-| Phase 7   | 2h       | 25h        |
-| Phase 8   | 3h       | 28h        |
-| Buffer    | 5h       | **33h**    |
+| Phase     | Est    | Actual | Status      |
+| --------- | ------ | ------ | ----------- |
+| **Fixes** | 3-4h   | 2h     | ✅ Complete |
+| Phase 0   | 0.5h   | 0.3h   | ✅ Complete |
+| Phase 1   | 1.5h   | 0.25h  | ✅ Complete |
+| Phase 2   | 3.5h   | -      | ⏳ Next     |
+| Phase 3   | 4h     | -      | Pending     |
+| Phase 4   | 5h     | -      | Pending     |
+| Phase 5   | 3h     | -      | Pending     |
+| Phase 6   | 1.5h   | -      | Pending     |
+| Phase 7   | 2h     | -      | Pending     |
+| Phase 8   | 3h     | -      | Pending     |
+| Buffer    | 5h     | -      | Pending     |
 
-**Total**: 33-34 hours (4-5 days with breaks)
+**Completed**: 2.55h of 33h (7.7%) | **Remaining**: 30.45h (Phases 2-8)
 
 ### Critical Files
 
@@ -618,13 +625,99 @@ Remove backward compatibility:
 
 ---
 
-**Status**: ✅ All pre-migration fixes complete and tested (2025-10-25)
+**Status**: ✅ Phases 0-1 complete (2025-10-25)
 
-**Implementation Summary**:
+**Completed Work**:
 
-- ✅ Session duration tracking: SessionStart hook configured in settings.json
-- ✅ Workflow calculator: Helper script tested with sample data
-- ✅ OpenAPI spec: 4 changes applied (WorkflowSelection context, migration-steps, implementation-findings)
-- ✅ Migration Plan v2: 8 changes applied (timelines, durations, code updates)
+- ✅ Pre-migration fixes: All 4 fixes applied and tested
+- ✅ Phase 0: Pre-migration validation (no blockers found)
+- ✅ Phase 1: Workflow registry created (4 workflows, validated)
+- ✅ Baseline commits: 4 commits establishing v3.0.1→v4.0.0 foundation
 
-**Next Action**: Proceed to Phase 0 (Pre-Migration Validation)
+**Actual Timings** (vs estimates):
+
+- Fixes: 2h (est: 3-4h) ✅ under budget
+- Phase 0: 20min (est: 0.5h) ✅ under budget
+- Phase 1: 15min (est: 1.5h) ✅ under budget
+
+**Next Session**: Phase 2 - Refactor hook (3-3.5h estimated)
+
+---
+
+## Phase 2 Continuation Plan
+
+**Objective**: Refactor hook to emit SessionSummary (v4) while maintaining notifications (v3) - dual-mode
+
+**Prerequisites**:
+
+- ✅ SessionStart hook configured (session duration tracking)
+- ✅ calculate_workflows.py helper created
+- ✅ Workflow registry exists at state/workflows.json
+
+**Tasks** (from MIGRATION_v3_to_v4_PLAN_v2.md lines 313-458):
+
+1. Add git status extraction (5 commands: branch, modified, untracked, staged, ahead/behind)
+2. Add session duration tracking (read timestamp from SessionStart hook)
+3. Calculate available workflows (using calculate_workflows.py)
+4. Create write_session_summary() function
+5. Create state/summaries/ directory
+6. Update hook logic to emit BOTH formats (dual-mode)
+7. Test with injected summary
+
+**Key File**: `/Users/terryli/.claude/automation/lychee/runtime/hook/check-links-hybrid.sh ` (446 lines)
+
+**Expected Changes**:
+
+- Add ~80 lines for git status and duration tracking
+- Add ~40 lines for workflow calculation
+- Add ~35 lines for write_session_summary() function
+- Add ~20 lines for dual-mode emission logic
+- Total: ~175 new lines
+
+**Testing Approach**:
+
+```bash
+# 1. Run hook in test mode
+cd automation/lychee/testing
+./test-notification-emit.py
+
+# 2. Verify dual emission
+ls -la state/notifications/  # Should have old format
+ls -la state/summaries/      # Should have new format
+
+# 3. Validate summary schema
+jq . state/summaries/summary_*.json
+
+# 4. Check logs
+tail -50 logs/lychee.log
+```
+
+**Risks**:
+
+- Template rendering may fail if context fields missing
+- Duration calculation may be 0 if SessionStart hook didn't run
+- Workflow calculation may return empty array if registry invalid
+
+**Rollback**: `git revert HEAD` to undo Phase 2 changes
+
+**Commit Message Template**:
+
+```
+feat(v4): complete Phase 2 - refactor hook for dual-mode summaries
+
+Changes:
+- Add git status extraction (branch, modified, untracked, staged)
+- Add session duration tracking (via SessionStart hook timestamp)
+- Calculate available workflows (using calculate_workflows.py)
+- Create write_session_summary() function
+- Emit BOTH notification (v3) and summary (v4) formats
+
+Testing:
+✅ Dual emission verified
+✅ Summary schema validated
+✅ Git status extraction working
+✅ Duration calculation working
+
+Duration: X hours (est: 3-3.5h)
+Next: Phase 3 - Refactor bot (workflow menu)
+```
