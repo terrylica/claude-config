@@ -341,6 +341,7 @@ components:
         - correlation_id
         - session_id
         - timestamp
+        - workspace_path
       properties:
         selection_type:
           type: string
@@ -383,6 +384,20 @@ components:
           description: "How to run multiple workflows"
           default: "smart"
           example: "smart"
+
+        workspace_path:
+          type: string
+          format: path
+          description: "Workspace path from session summary (for template rendering)"
+          example: "/Users/terryli/.claude"
+
+        git_status:
+          $ref: '#/components/schemas/GitStatus'
+          description: "Git status from session summary (for template rendering)"
+
+        lychee_status:
+          $ref: '#/components/schemas/LycheeStatus'
+          description: "Lychee status from session summary (for template rendering)"
 
     WorkflowExecution:
       type: object
@@ -795,18 +810,41 @@ x-migration:
     - "Bot lifecycle behavior same (on-demand, 10-min idle)"
 
   migration-steps:
-    1: "Commit all changes in v3.0.1"
-    2: "Create workflows.json registry with lychee workflow"
-    3: "Rename directory with git mv (preserve history)"
-    4: "Update hook to emit SessionSummary (not notification)"
-    5: "Update bot to watch summaries/ (not notifications/)"
-    6: "Add workflow selection UI to bot"
-    7: "Update orchestrator to load workflows from registry"
-    8: "Test end-to-end with lychee workflow"
-    9: "Add additional workflows incrementally"
-    10: "Update all documentation to v4.0.0"
+    0: "Run pre-migration validation (no pending files, clean git, services healthy)"
+    1: "Create state/workflows.json registry with 4 initial workflows"
+    2: "Refactor hook: emit SessionSummary (dual-mode with notifications), add git status, session duration"
+    3: "Refactor bot: load registry, watch summaries/, dynamic workflow menu (dual-mode with notifications)"
+    4: "Refactor orchestrator: load registry, watch selections/, Jinja2 template rendering, smart dependencies (dual-mode with approvals)"
+    5: "Integration testing: 5 comprehensive test scenarios including correlation tracing"
+    6: "Service management & directory rename: stop services, git mv lychee→telegram-workflows, update launchd plists, restart"
+    7: "Remove dual-mode: delete old handlers, archive v3 state directories, create SQLite compatibility view"
+    8: "Documentation: update all docs to v4.0.0, create release notes, git tag v4.0.0"
 
-x-implementation-findings: []
+x-implementation-findings:
+  - finding: "Approval JSON uses 'decision' field, not 'action', includes metadata wrapper"
+    date: "2025-10-25"
+    source: "Round 1 verification"
+    impact: "Documentation corrected"
+
+  - finding: "Orchestrator launched via asyncio.create_subprocess_exec, NOT launchctl"
+    date: "2025-10-25"
+    source: "Round 1 verification"
+    impact: "Launchd services for auto-start only, not IPC"
+
+  - finding: "Hook does NOT collect git status (Phase 2 must ADD)"
+    date: "2025-10-25"
+    source: "Round 1 verification"
+    impact: "Phase 2 complexity +30min, new feature implementation required"
+
+  - finding: "Hook does NOT track session duration (Phase 2 must ADD)"
+    date: "2025-10-25"
+    source: "Round 1 verification"
+    impact: "SessionStart hook created for timestamp tracking"
+
+  - finding: "WorkflowSelection missing context for template rendering"
+    date: "2025-10-25"
+    source: "Round 2/3 verification"
+    impact: "Schema updated with workspace_path, git_status, lychee_status fields"
 
 x-slos:
   availability:
