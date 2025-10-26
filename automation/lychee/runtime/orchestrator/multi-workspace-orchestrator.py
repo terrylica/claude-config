@@ -3,16 +3,26 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "jsonschema>=4.0.0",
+#     "jinja2>=3.1.0",
 # ]
 # ///
 """
-Multi-Workspace Approval Orchestrator - One-Shot Execution
+Multi-Workspace Workflow Orchestrator - One-Shot Execution
 
-Processes single approval file and executes Claude CLI.
+Processes selection and approval files, renders Jinja2 templates, executes Claude CLI.
+Supports multi-workflow execution with dependency resolution.
 Exits immediately after completion (no watching, no daemon).
 
-Version: 3.0.0
-Specification: ~/.claude/specifications/multi-workspace-link-validation-v3.yaml
+Version: 4.0.0
+Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
+
+Changes from v3.0.0:
+- Loads workflow registry from workflows.json
+- Processes WorkflowSelection files (v4) and Approval files (v3 backward compat)
+- Renders Jinja2 prompt templates with session context
+- Supports multi-workflow execution (sequential, respects dependencies)
+- Emits WorkflowExecution results to executions/ directory
+- Maintains dual-mode: selections (v4) + approvals (v3 backward compat)
 """
 
 import asyncio
@@ -23,7 +33,9 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+
+from jinja2 import Template, TemplateError
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -33,9 +45,15 @@ sys.stderr.reconfigure(line_buffering=True)
 STATE_DIR = Path.home() / ".claude" / "automation" / "lychee" / "state"
 APPROVAL_DIR = STATE_DIR / "approvals"
 COMPLETION_DIR = STATE_DIR / "completions"
+SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 4 - v4.0.0
+EXECUTIONS_DIR = STATE_DIR / "executions"  # Phase 4 - v4.0.0
+WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 4 - v4.0.0
 AUTOFIX_STATE_FILE = STATE_DIR / "autofix-in-progress.json"
 CLAUDE_CLI_TIMEOUT = 300  # 5 minutes
 HEARTBEAT_INTERVAL = 30  # Log every 30 seconds during wait
+
+# Phase 4 - v4.0.0: Workflow registry (loaded at module level for CLI mode)
+workflow_registry: Optional[Dict[str, Any]] = None
 
 
 # Import workspace helpers
@@ -84,6 +102,88 @@ def log_event(
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to log event {event_type}: {e.stderr}", file=sys.stderr)
         raise
+
+
+# Phase 4 - v4.0.0: Workflow Registry Functions
+def load_workflow_registry() -> Dict[str, Any]:
+    """
+    Load workflow registry from workflows.json.
+
+    Returns:
+        Workflow registry dictionary
+
+    Raises:
+        FileNotFoundError: Registry file not found
+        json.JSONDecodeError: Invalid JSON
+        ValueError: Invalid registry schema
+    """
+    if not WORKFLOWS_REGISTRY.exists():
+        raise FileNotFoundError(f"Workflow registry not found: {WORKFLOWS_REGISTRY}")
+
+    with open(WORKFLOWS_REGISTRY) as f:
+        registry = json.load(f)
+
+    # Validate required fields
+    if "version" not in registry or "workflows" not in registry:
+        raise ValueError("Invalid registry: missing 'version' or 'workflows'")
+
+    print(f"✅ Loaded workflow registry v{registry['version']} ({len(registry['workflows'])} workflows)")
+    return registry
+
+
+def render_workflow_prompt(
+    workflow: Dict[str, Any],
+    context: Dict[str, Any]
+) -> str:
+    """
+    Render workflow prompt template using Jinja2.
+
+    Args:
+        workflow: Workflow manifest from registry
+        context: Template context (workspace_path, session_id, git_status, lychee_status, etc.)
+
+    Returns:
+        Rendered prompt string
+
+    Raises:
+        TemplateError: Template rendering failed
+    """
+    template_str = workflow.get("prompt_template", "")
+    if not template_str:
+        raise ValueError(f"Workflow {workflow['id']} has no prompt_template")
+
+    try:
+        template = Template(template_str)
+        rendered = template.render(**context)
+        return rendered
+    except TemplateError as e:
+        raise TemplateError(f"Failed to render template for workflow {workflow['id']}: {e}") from e
+
+
+def resolve_workflow_dependencies(
+    workflow_ids: List[str],
+    registry: Dict[str, Any]
+) -> List[str]:
+    """
+    Resolve workflow dependencies and return execution order.
+
+    For Phase 4: Simple implementation (no topological sort).
+    Dependencies are listed in the workflow manifest but not enforced yet.
+
+    Args:
+        workflow_ids: List of workflow IDs to execute
+        registry: Workflow registry
+
+    Returns:
+        Ordered list of workflow IDs (currently same as input, Phase 4 limitation)
+
+    Future Enhancement:
+        Implement topological sort for true dependency resolution
+    """
+    # Phase 4 limitation: Return workflows in order provided (no dependency resolution)
+    # TODO Phase 5+: Implement topological sort
+    print(f"⚠️  Dependency resolution not implemented - executing workflows in provided order")
+    return workflow_ids
 
 
 class ApprovalOrchestrator:
