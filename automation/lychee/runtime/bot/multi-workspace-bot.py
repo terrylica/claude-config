@@ -7,14 +7,23 @@
 # ]
 # ///
 """
-Multi-Workspace Telegram Bot - On-Demand Polling
+Multi-Workspace Telegram Bot - Workflow Orchestration
 
-Processes notification and completion files on startup.
+Processes session summaries, notifications, and completion files.
+Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 3.0.0
-Specification: ~/.claude/specifications/multi-workspace-link-validation-v3.yaml
+Version: 4.0.0
+Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
+
+Changes from v3.0.0:
+- Loads workflow registry from workflows.json
+- Scans summaries/ directory for SessionSummary files
+- Filters workflows by triggers (lychee_errors, git_modified, always)
+- Builds dynamic keyboard with available workflows
+- Handles workflow selections and creates selection files
+- Maintains dual-mode: summaries (v4) + notifications (v3 backward compat)
 """
 
 import asyncio
@@ -39,7 +48,10 @@ STATE_DIR = Path.home() / ".claude" / "automation" / "lychee" / "state"
 NOTIFICATION_DIR = STATE_DIR / "notifications"
 APPROVAL_DIR = STATE_DIR / "approvals"
 COMPLETION_DIR = STATE_DIR / "completions"
+SUMMARIES_DIR = STATE_DIR / "summaries"  # Phase 3 - v4.0.0
+SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 3 - v4.0.0
 PID_FILE = STATE_DIR / "bot.pid"
+WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -55,6 +67,9 @@ if not BOT_TOKEN or not CHAT_ID:
 # Global shutdown flag for signal handlers
 shutdown_requested = False
 last_activity_time: Optional[float] = None
+
+# Phase 3 - v4.0.0: Workflow registry
+workflow_registry: Optional[Dict[str, Any]] = None
 
 # Import workspace helpers
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
@@ -105,6 +120,77 @@ def log_event(
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to log event {event_type}: {e.stderr}", file=sys.stderr)
         raise
+
+
+# Phase 3 - v4.0.0: Workflow Registry Functions
+def load_workflow_registry() -> Dict[str, Any]:
+    """
+    Load workflow registry from workflows.json.
+
+    Returns:
+        Workflow registry dictionary
+
+    Raises:
+        FileNotFoundError: Registry file not found
+        json.JSONDecodeError: Invalid JSON
+        ValueError: Invalid registry schema
+    """
+    if not WORKFLOWS_REGISTRY.exists():
+        raise FileNotFoundError(f"Workflow registry not found: {WORKFLOWS_REGISTRY}")
+
+    with open(WORKFLOWS_REGISTRY) as f:
+        registry = json.load(f)
+
+    # Validate required fields
+    if "version" not in registry or "workflows" not in registry:
+        raise ValueError("Invalid registry: missing 'version' or 'workflows'")
+
+    print(f"✅ Loaded workflow registry v{registry['version']} ({len(registry['workflows'])} workflows)")
+    return registry
+
+
+def filter_workflows_by_triggers(summary: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """
+    Filter workflows based on trigger conditions from session summary.
+
+    Args:
+        summary: SessionSummary data
+
+    Returns:
+        List of workflow manifests that match trigger conditions
+
+    Trigger Logic:
+        - lychee_errors: true → Only if lychee_status.error_count > 0
+        - git_modified: true → Only if git_status.modified_files > 0
+        - always: true → Always available
+    """
+    if workflow_registry is None:
+        raise RuntimeError("Workflow registry not loaded")
+
+    available = []
+    lychee_errors = summary.get("lychee_status", {}).get("error_count", 0)
+    modified_files = summary.get("git_status", {}).get("modified_files", 0)
+
+    for wf_id, workflow in workflow_registry["workflows"].items():
+        triggers = workflow.get("triggers", {})
+
+        # Check lychee_errors trigger
+        if triggers.get("lychee_errors"):
+            if lychee_errors > 0:
+                available.append(workflow)
+            continue  # Skip other checks if this trigger exists
+
+        # Check git_modified trigger
+        if triggers.get("git_modified"):
+            if modified_files > 0:
+                available.append(workflow)
+            continue
+
+        # Check always trigger
+        if triggers.get("always"):
+            available.append(workflow)
+
+    return available
 
 
 # PID File Management
@@ -549,6 +635,190 @@ class CompletionHandler:
             pass
 
 
+class SummaryHandler:
+    """
+    Handles session summaries and presents workflow menu (Phase 3 - v4.0.0).
+
+    Filters workflows by triggers, builds dynamic keyboard, handles selections.
+    """
+
+    def __init__(self, bot: Bot, chat_id: int):
+        self.bot = bot
+        self.chat_id = chat_id
+
+    async def send_workflow_menu(self, summary_file: Path) -> None:
+        """
+        Send workflow menu based on session summary.
+
+        Args:
+            summary_file: Path to SessionSummary JSON
+
+        Raises:
+            All errors propagate to caller
+        """
+        try:
+            # Read and validate summary
+            summary = self._read_summary(summary_file)
+
+            # Extract metadata
+            correlation_id = summary.get("correlation_id", "unknown")
+            session_id = summary["session_id"]
+            workspace_path = Path(summary["workspace_path"])
+            workspace_hash = summary["workspace_id"]
+
+            # Log summary received event
+            log_event(
+                correlation_id,
+                workspace_hash,
+                session_id,
+                "bot",
+                "summary.received",
+                {"summary_file": summary_file.name}
+            )
+
+            # Filter available workflows
+            available_workflows = filter_workflows_by_triggers(summary)
+
+            if not available_workflows:
+                print(f"⚠️  No workflows available for session {session_id} (no triggers matched)")
+                # Don't send message if no workflows available
+                return
+
+            # Load workspace config
+            workspace_id = get_workspace_id_from_path(workspace_path)
+            registry = load_registry()
+            workspace = registry["workspaces"][workspace_id]
+            emoji = workspace["emoji"]
+            ws_name = workspace["name"]
+
+            # Format message with session context
+            lychee_status = summary.get("lychee_status", {})
+            git_status = summary.get("git_status", {})
+            duration = summary.get("duration_seconds", 0)
+
+            message = f"""{emoji} **Session Summary** - {ws_name}
+
+**Workspace**: `{workspace_path}`
+**Session**: `{session_id}`
+**Duration**: {duration}s
+
+**Git Status**:
+• Branch: `{git_status.get('branch', 'unknown')}`
+• Modified: {git_status.get('modified_files', 0)} files
+• Untracked: {git_status.get('untracked_files', 0)} files
+
+**Lychee**: {lychee_status.get('details', 'Not run')}
+
+**Available Workflows** ({len(available_workflows)}):
+"""
+
+            # Build dynamic keyboard
+            keyboard = self._build_workflow_keyboard(
+                available_workflows,
+                workspace_id,
+                workspace_path,
+                session_id,
+                correlation_id
+            )
+
+            # Send message
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+
+            print(f"📤 Sent workflow menu for {workspace_id} ({session_id}): {len(available_workflows)} workflows")
+            update_activity()
+
+            # Log summary processed event
+            log_event(
+                correlation_id,
+                workspace_hash,
+                session_id,
+                "bot",
+                "summary.processed",
+                {"workspace_id": workspace_id, "workflows_count": len(available_workflows)}
+            )
+
+        finally:
+            # Cleanup consumed summary
+            self._cleanup_summary(summary_file)
+
+    def _read_summary(self, summary_file: Path) -> Dict[str, Any]:
+        """Read and validate session summary."""
+        with summary_file.open() as f:
+            summary = json.load(f)
+
+        # Validate required fields
+        required = ["correlation_id", "workspace_path", "workspace_id", "session_id",
+                   "timestamp", "duration_seconds", "git_status", "lychee_status"]
+        missing = [f for f in required if f not in summary]
+        if missing:
+            raise ValueError(f"Missing required fields: {missing}")
+
+        return summary
+
+    def _build_workflow_keyboard(
+        self,
+        workflows: list[Dict[str, Any]],
+        workspace_id: str,
+        workspace_path: Path,
+        session_id: str,
+        correlation_id: str
+    ) -> list[list[InlineKeyboardButton]]:
+        """
+        Build dynamic workflow keyboard with custom prompt option.
+
+        Returns:
+            Telegram keyboard layout (list of button rows)
+        """
+        keyboard = []
+
+        # Add workflow buttons (2 per row for compact layout)
+        for i in range(0, len(workflows), 2):
+            row = []
+            for workflow in workflows[i:i+2]:
+                row.append(
+                    InlineKeyboardButton(
+                        f"{workflow['icon']} {workflow['name']}",
+                        callback_data=create_callback_data(
+                            workspace_id=workspace_id,
+                            workspace_path=str(workspace_path),
+                            session_id=session_id,
+                            action=f"workflow_{workflow['id']}",
+                            correlation_id=correlation_id
+                        )
+                    )
+                )
+            keyboard.append(row)
+
+        # Add custom prompt option (always available)
+        keyboard.append([
+            InlineKeyboardButton(
+                "✏️ Custom Prompt",
+                callback_data=create_callback_data(
+                    workspace_id=workspace_id,
+                    workspace_path=str(workspace_path),
+                    session_id=session_id,
+                    action="custom_prompt",
+                    correlation_id=correlation_id
+                )
+            )
+        ])
+
+        return keyboard
+
+    def _cleanup_summary(self, summary_file: Path) -> None:
+        """Delete consumed summary file."""
+        try:
+            summary_file.unlink()
+            print(f"🗑️  Consumed: {summary_file.name}")
+        except FileNotFoundError:
+            pass
+
+
 async def handle_view_details(query, workspace_path: str, session_id: str, correlation_id: str):
     """
     Handle "View Details" button click - send detailed error breakdown.
@@ -661,6 +931,107 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
     print(f"📋 Sent detailed breakdown for session {session_id}")
 
 
+async def handle_workflow_selection(
+    query,
+    workspace_id: str,
+    workspace_path: str,
+    session_id: str,
+    action: str,
+    correlation_id: str
+) -> None:
+    """
+    Handle workflow selection button click (Phase 3 - v4.0.0).
+
+    Creates WorkflowSelection file for orchestrator to process.
+
+    Args:
+        query: Telegram CallbackQuery object
+        workspace_id: Workspace identifier
+        workspace_path: Absolute path to workspace
+        session_id: Session identifier
+        action: Selected action (workflow_<id> or custom_prompt)
+        correlation_id: Correlation ID for tracing
+
+    Raises:
+        All errors propagate (fail-fast)
+    """
+    workspace_hash = compute_workspace_hash(Path(workspace_path))
+
+    # Extract workflow ID from action
+    if action == "custom_prompt":
+        # TODO Phase 4: Implement custom prompt handler
+        # For now, acknowledge and return
+        await query.edit_message_text(
+            "✏️ Custom Prompt\n\n"
+            "Custom workflow prompts will be available in Phase 4.\n"
+            "For now, please select a preset workflow.",
+            parse_mode="Markdown"
+        )
+        return
+
+    workflow_id = action.replace("workflow_", "")
+
+    # Create selection file
+    selection_file = SELECTIONS_DIR / f"selection_{session_id}_{workspace_hash}.json"
+
+    selection_state = {
+        "workspace_path": workspace_path,
+        "workspace_id": workspace_hash,
+        "session_id": session_id,
+        "workflows": [workflow_id],  # Single workflow for Phase 3 (multi-select in future)
+        "correlation_id": correlation_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "metadata": {
+            "workspace_name": workspace_id,
+            "callback_id": query.data
+        }
+    }
+
+    SELECTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    selection_file.write_text(json.dumps(selection_state, indent=2))
+
+    print(f"✅ Selection file written: {selection_file.name}")
+
+    # Log selection created event
+    log_event(
+        correlation_id,
+        workspace_hash,
+        session_id,
+        "bot",
+        "selection.created",
+        {"workflow_id": workflow_id, "selection_file": selection_file.name}
+    )
+
+    # Confirm to user
+    registry = load_registry()
+    emoji = registry["workspaces"][workspace_id]["emoji"]
+
+    # Get workflow details
+    if workflow_registry and workflow_id in workflow_registry["workflows"]:
+        workflow = workflow_registry["workflows"][workflow_id]
+        workflow_name = f"{workflow['icon']} {workflow['name']}"
+        estimated_duration = workflow.get("estimated_duration", "unknown")
+
+        await query.edit_message_text(
+            f"{emoji} **Workflow Selected**: {workflow_name}\n\n"
+            f"Workspace: `{workspace_id}`\n"
+            f"Session: `{session_id}`\n"
+            f"Estimated duration: ~{estimated_duration}s\n\n"
+            f"Orchestrator will process this workflow...",
+            parse_mode="Markdown"
+        )
+    else:
+        await query.edit_message_text(
+            f"{emoji} **Workflow Selected**: {workflow_id}\n\n"
+            f"Workspace: `{workspace_id}`\n"
+            f"Session: `{session_id}`\n\n"
+            f"Processing...",
+            parse_mode="Markdown"
+        )
+
+    print(f"✅ Workflow selected: {workflow_id} for workspace: {workspace_id}")
+
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Route callback to correct workspace.
@@ -696,7 +1067,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_activity()
         return
 
-    # Write approval state
+    # Phase 3 - v4.0.0: Handle workflow selection actions
+    if action.startswith("workflow_") or action == "custom_prompt":
+        await handle_workflow_selection(query, workspace_id, workspace_path, session_id, action, correlation_id)
+        update_activity()
+        return
+
+    # Write approval state (v3 backward compatibility)
     workspace_hash = compute_workspace_hash(Path(workspace_path))
     approval_file = APPROVAL_DIR / f"approval_{session_id}_{workspace_hash}.json"
 
@@ -817,18 +1194,29 @@ async def process_pending_completions(app: Application) -> None:
 
 
 async def periodic_file_scanner(app: Application) -> None:
-    """Periodically scan for new notification and completion files."""
+    """Periodically scan for new notification, completion, and summary files (dual-mode)."""
     global shutdown_requested
 
     print(f"📂 Periodic file scanner started (every 5s)")
 
     notification_handler = NotificationHandler(app.bot, int(CHAT_ID))
     completion_handler = CompletionHandler(app.bot, int(CHAT_ID))
+    summary_handler = SummaryHandler(app.bot, int(CHAT_ID))  # Phase 3 - v4.0.0
 
     while not shutdown_requested:
         await asyncio.sleep(5)  # Scan every 5 seconds
 
-        # Scan for new notifications
+        # Phase 3 - v4.0.0: Scan for new summaries (prioritize over notifications)
+        if SUMMARIES_DIR.exists():
+            summary_files = sorted(SUMMARIES_DIR.glob("summary_*.json"))
+            for summary_file in summary_files:
+                try:
+                    print(f"📬 Found summary: {summary_file.name}")
+                    await summary_handler.send_workflow_menu(summary_file)
+                except Exception as e:
+                    print(f"❌ Failed to process {summary_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+
+        # v3 backward compat: Scan for new notifications
         if NOTIFICATION_DIR.exists():
             notification_files = sorted(NOTIFICATION_DIR.glob("notify_*.json"))
             for notification_file in notification_files:
@@ -873,12 +1261,12 @@ async def idle_timeout_monitor() -> None:
 
 async def main() -> int:
     """Main entry point - on-demand polling with auto-shutdown."""
-    global shutdown_requested, last_activity_time
+    global shutdown_requested, last_activity_time, workflow_registry
 
     print("=" * 70)
-    print("Multi-Workspace Telegram Bot - On-Demand Mode")
+    print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 3.0.0")
+    print(f"Version: 4.0.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")
@@ -893,6 +1281,15 @@ async def main() -> int:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     print("✅ Signal handlers registered (SIGTERM, SIGINT)")
+
+    # Phase 3 - v4.0.0: Load workflow registry
+    print("\n📋 Loading workflow registry...")
+    try:
+        workflow_registry = load_workflow_registry()
+    except Exception as e:
+        print(f"❌ Failed to load workflow registry: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"   Registry path: {WORKFLOWS_REGISTRY}", file=sys.stderr)
+        return 1
 
     try:
         # Create PID file (fails if another instance running)
