@@ -89,6 +89,68 @@ workspace_hash=$(echo -n "$workspace_dir" | sha256sum | cut -c1-8)
 # Set results file path inside workspace (required for Claude CLI access)
 full_results="$workspace_dir/.lychee-results.txt"
 
+# =============================================================================
+# Extract Git Status (Phase 2 - v4.0.0)
+# =============================================================================
+
+# Change to workspace directory for git commands
+cd "$workspace_dir" 2>/dev/null || {
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Failed to cd to workspace: $workspace_dir"
+    } >> "$log_file" 2>&1
+}
+
+# Extract git information
+git_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+modified_files=$(git status --porcelain 2>/dev/null | grep -E "^( M|M )" | wc -l | tr -d ' ' || echo "0")
+untracked_files=$(git status --porcelain 2>/dev/null | grep "^??" | wc -l | tr -d ' ' || echo "0")
+staged_files=$(git status --porcelain 2>/dev/null | grep -E "^(M |A |D |R |C )" | wc -l | tr -d ' ' || echo "0")
+
+# Get ahead/behind commits (requires remote tracking branch)
+ahead_commits=0
+behind_commits=0
+if git rev-parse --abbrev-ref @{u} >/dev/null 2>&1; then
+    ahead_commits=$(git rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
+    behind_commits=$(git rev-list --count HEAD..@{u} 2>/dev/null || echo "0")
+fi
+
+# Fallback to 0 if any git command failed
+git_branch="${git_branch:-unknown}"
+modified_files="${modified_files:-0}"
+untracked_files="${untracked_files:-0}"
+staged_files="${staged_files:-0}"
+ahead_commits="${ahead_commits:-0}"
+behind_commits="${behind_commits:-0}"
+
+# =============================================================================
+# Calculate Session Duration (Phase 2 - v4.0.0)
+# =============================================================================
+
+# Read start timestamp from SessionStart hook
+TIMESTAMP_DIR="$HOME/.claude/automation/lychee/state/session_timestamps"
+timestamp_file="$TIMESTAMP_DIR/${session_id}.timestamp"
+
+if [[ -f "$timestamp_file" ]]; then
+    # Read start timestamp
+    session_start_time=$(cat "$timestamp_file" 2>/dev/null || echo "0")
+    session_end_time=$(date +%s)
+    session_duration=$((session_end_time - session_start_time))
+
+    # Clean up timestamp file
+    rm -f "$timestamp_file" 2>/dev/null || true
+
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⏱️  Session duration: ${session_duration}s (start: $session_start_time, end: $session_end_time)"
+    } >> "$log_file" 2>&1
+else
+    # Fallback: Use 0 if timestamp not found
+    session_duration=0
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Session start timestamp not found, duration set to 0"
+        echo "   → Expected file: $timestamp_file"
+    } >> "$log_file" 2>&1
+fi
+
 # ============================================================================
 # EXTENSIVE LOGGING - Natural Trigger Test
 # ============================================================================
@@ -125,6 +187,67 @@ full_results="$workspace_dir/.lychee-results.txt"
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log hook.started event" >> "$log_file" 2>&1
         exit 1
     }
+
+# =============================================================================
+# SessionSummary Writer Function (Phase 2 - v4.0.0)
+# =============================================================================
+
+write_session_summary() {
+    local summary_file="$1"
+    local lychee_ran="$2"
+    local broken_links_count="$3"
+    local results_file_path="$4"
+
+    # Calculate available workflows using helper script
+    local lib_dir="$HOME/.claude/automation/lychee/runtime/lib"
+    local state_dir="$HOME/.claude/automation/lychee/state"
+
+    available_wfs_json=$("$lib_dir/calculate_workflows.py" \
+        --error-count "$broken_links_count" \
+        --modified-files "$modified_files" \
+        --registry "$state_dir/workflows.json" 2>/dev/null || echo "[]")
+
+    # Prepare lychee status details
+    local lychee_details=""
+    if [[ "$broken_links_count" -gt 0 ]]; then
+        lychee_details="Found $broken_links_count broken link(s) in workspace"
+    else
+        lychee_details="No broken links found"
+    fi
+
+    # Write SessionSummary JSON
+    cat > "$summary_file" <<EOF
+{
+  "correlation_id": "$CORRELATION_ID",
+  "workspace_path": "$workspace_dir",
+  "workspace_id": "$workspace_hash",
+  "session_id": "$session_id",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "duration_seconds": $session_duration,
+  "git_status": {
+    "branch": "$git_branch",
+    "modified_files": $modified_files,
+    "untracked_files": $untracked_files,
+    "staged_files": $staged_files,
+    "ahead_commits": $ahead_commits,
+    "behind_commits": $behind_commits
+  },
+  "lychee_status": {
+    "ran": $lychee_ran,
+    "error_count": $broken_links_count,
+    "details": "$lychee_details",
+    "results_file": "$results_file_path"
+  },
+  "available_workflows": $available_wfs_json
+}
+EOF
+
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 SessionSummary written to: $summary_file"
+        echo "   → File size: $(ls -lh "$summary_file" 2>/dev/null | awk '{print $5}' || echo 'unknown')"
+        echo "   → Available workflows: $(echo "$available_wfs_json" | jq -r 'length' 2>/dev/null || echo 'unknown')"
+    } >> "$log_file" 2>&1
+}
 
 # =============================================================================
 # Infinite Loop Prevention
@@ -254,7 +377,36 @@ fi
             } >> "$log_file" 2>&1
         fi
 
-        # Only notify if errors found
+        # =====================================================================
+        # Phase 2 - v4.0.0: ALWAYS emit SessionSummary (dual-mode)
+        # =====================================================================
+
+        # Emit SessionSummary (v4 format) - ALWAYS, regardless of error count
+        {
+            echo ""
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 Emitting SessionSummary (v4.0.0)..."
+        } >> "$log_file" 2>&1
+
+        summary_file="$HOME/.claude/automation/lychee/state/summaries/summary_${session_id}_${workspace_hash}.json"
+        write_session_summary "$summary_file" "true" "$error_count" "$full_results"
+
+        # Log summary.created event
+        "$HOME/.claude/automation/lychee/runtime/lib/event_logger.py" \
+            "$CORRELATION_ID" \
+            "$workspace_hash" \
+            "$session_id" \
+            "hook" \
+            "summary.created" \
+            "{\"error_count\": $error_count, \"summary_file\": \"$summary_file\"}" \
+            2>> "$log_file" || {
+                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log summary.created event" >> "$log_file" 2>&1
+            }
+
+        # =====================================================================
+        # Phase 2 - v4.0.0: Maintain v3 Notification (dual-mode backward compat)
+        # =====================================================================
+
+        # Only notify if errors found (v3 behavior)
         if [[ "$error_count" -gt 0 ]]; then
             {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Errors detected → Emitting notification"
@@ -305,76 +457,121 @@ EOF
                     exit 1
                 }
 
-            # Start Telegram bot if not already running (PID file check)
-            pid_file="$HOME/.claude/automation/lychee/state/bot.pid"
-            bot_script="$HOME/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py"
-            bot_running=false
+        else
+            {
+                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ No errors found → No notification needed (v3 backward compat)"
+            } >> "$log_file" 2>&1
+        fi
+
+        # =====================================================================
+        # Phase 2 - v4.0.0: ALWAYS start bot (not just on errors)
+        # =====================================================================
+
+        # Check if Telegram bot is running
+        pid_file="$HOME/.claude/automation/lychee/state/bot.pid"
+        bot_script="$HOME/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py"
+        bot_running=false
+
+        {
+            echo ""
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 Checking if Telegram bot is running..."
+        } >> "$log_file" 2>&1
+
+        # Check if PID file exists
+        if [[ -f "$pid_file" ]]; then
+            bot_pid=$(cat "$pid_file" 2>/dev/null)
 
             {
-                echo ""
-                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 Checking if Telegram bot is running..."
+                echo "   → PID file exists: $pid_file (PID: $bot_pid)"
             } >> "$log_file" 2>&1
 
-            # Check if PID file exists
-            if [[ -f "$pid_file" ]]; then
-                bot_pid=$(cat "$pid_file" 2>/dev/null)
-
-                {
-                    echo "   → PID file exists: $pid_file (PID: $bot_pid)"
-                } >> "$log_file" 2>&1
-
-                # Check if process is alive
-                if kill -0 "$bot_pid" 2>/dev/null; then
-                    # Verify it's our bot process
-                    if ps -p "$bot_pid" -o command= | grep -q "multi-workspace-bot.py"; then
-                        bot_running=true
-                        {
-                            echo "   → ✅ Bot is running (PID: $bot_pid)"
-                        } >> "$log_file" 2>&1
-                    else
-                        {
-                            echo "   → ⚠️  PID $bot_pid is not our bot (PID reused), removing stale PID file"
-                        } >> "$log_file" 2>&1
-                        rm -f "$pid_file"
-                    fi
+            # Check if process is alive
+            if kill -0 "$bot_pid" 2>/dev/null; then
+                # Verify it's our bot process
+                if ps -p "$bot_pid" -o command= | grep -q "multi-workspace-bot.py"; then
+                    bot_running=true
+                    {
+                        echo "   → ✅ Bot is running (PID: $bot_pid)"
+                    } >> "$log_file" 2>&1
                 else
                     {
-                        echo "   → ⚠️  Process $bot_pid is dead, removing stale PID file"
+                        echo "   → ⚠️  PID $bot_pid is not our bot (PID reused), removing stale PID file"
                     } >> "$log_file" 2>&1
                     rm -f "$pid_file"
                 fi
             else
                 {
-                    echo "   → PID file does not exist"
+                    echo "   → ⚠️  Process $bot_pid is dead, removing stale PID file"
                 } >> "$log_file" 2>&1
+                rm -f "$pid_file"
             fi
-
-            # Start bot if not running
-            if [[ "$bot_running" == "false" ]]; then
-                {
-                    echo "   → 🚀 Starting Telegram bot in background..."
-                } >> "$log_file" 2>&1
-
-                # Start bot in background with Doppler secrets and output redirected to bot log
-                # Note: Doppler CLI injects secrets as environment variables
-                nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/logs/telegram-handler.log" 2>&1 &
-                new_bot_pid=$!
-
-                {
-                    echo "   → ✅ Bot started (PID: $new_bot_pid)"
-                    echo "   → Bot will auto-shutdown after 10 minutes idle"
-                } >> "$log_file" 2>&1
-            fi
-
         else
             {
-                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ No errors found → No notification needed"
+                echo "   → PID file does not exist"
+            } >> "$log_file" 2>&1
+        fi
+
+        # Start bot if not running (v4: always start, not just on errors)
+        if [[ "$bot_running" == "false" ]]; then
+            {
+                echo "   → 🚀 Starting Telegram bot in background..."
+            } >> "$log_file" 2>&1
+
+            # Start bot in background with Doppler secrets and output redirected to bot log
+            # Note: Doppler CLI injects secrets as environment variables
+            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/logs/telegram-handler.log" 2>&1 &
+            new_bot_pid=$!
+
+            {
+                echo "   → ✅ Bot started (PID: $new_bot_pid)"
+                echo "   → Bot will auto-shutdown after 10 minutes idle"
             } >> "$log_file" 2>&1
         fi
     else
+        # No markdown files found - still emit SessionSummary (v4.0.0)
         {
             echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  No markdown files found in $workspace_dir"
+            echo "   → Emitting SessionSummary with lychee_ran=false"
         } >> "$log_file" 2>&1
+
+        # Emit SessionSummary even when lychee didn't run
+        summary_file="$HOME/.claude/automation/lychee/state/summaries/summary_${session_id}_${workspace_hash}.json"
+        write_session_summary "$summary_file" "false" "0" ""
+
+        # Log summary.created event
+        "$HOME/.claude/automation/lychee/runtime/lib/event_logger.py" \
+            "$CORRELATION_ID" \
+            "$workspace_hash" \
+            "$session_id" \
+            "hook" \
+            "summary.created" \
+            "{\"error_count\": 0, \"summary_file\": \"$summary_file\", \"lychee_ran\": false}" \
+            2>> "$log_file" || {
+                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log summary.created event" >> "$log_file" 2>&1
+            }
+
+        # Start bot (even when no markdown files)
+        pid_file="$HOME/.claude/automation/lychee/state/bot.pid"
+        bot_script="$HOME/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py"
+        bot_running=false
+
+        # Check if bot running
+        if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+            bot_running=true
+        fi
+
+        # Start bot if not running
+        if [[ "$bot_running" == "false" ]]; then
+            {
+                echo "   → 🚀 Starting Telegram bot..."
+            } >> "$log_file" 2>&1
+
+            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/logs/telegram-handler.log" 2>&1 &
+
+            {
+                echo "   → ✅ Bot started (PID: $!)"
+            } >> "$log_file" 2>&1
+        fi
     fi
 
     {
