@@ -1320,6 +1320,8 @@ async def progress_poller(app: Application) -> None:
     global shutdown_requested, active_progress_updates
 
     print(f"📊 Progress poller started (every {PROGRESS_POLL_INTERVAL}s)")
+    print(f"   Progress directory: {PROGRESS_DIR}")
+    print(f"   Active tracking: {len(active_progress_updates)} workflows")
 
     while not shutdown_requested:
         await asyncio.sleep(PROGRESS_POLL_INTERVAL)
@@ -1327,17 +1329,39 @@ async def progress_poller(app: Application) -> None:
         if not PROGRESS_DIR.exists():
             continue
 
-        # Get all progress files (exclude schema.json)
-        progress_files = [
-            f for f in PROGRESS_DIR.glob("*.json")
-            if f.name != "schema.json"
-        ]
+        # Get all JSON files in progress directory
+        all_json_files = list(PROGRESS_DIR.glob("*.json"))
+
+        # Filter out schema.json
+        progress_files = [f for f in all_json_files if f.name != "schema.json"]
+
+        # Extensive logging for debugging
+        if all_json_files:
+            print(f"\n📂 Progress directory scan:")
+            print(f"   Total JSON files: {len(all_json_files)}")
+            print(f"   Files found: {[f.name for f in all_json_files]}")
+            print(f"   After filtering schema.json: {len(progress_files)} files")
+            if progress_files:
+                print(f"   Processing: {[f.name for f in progress_files]}")
 
         for progress_file in progress_files:
             try:
+                print(f"\n📊 Processing progress file: {progress_file.name}")
+
                 # Read progress data
                 with open(progress_file, "r") as f:
-                    progress = json.load(f)
+                    content = f.read()
+                    print(f"   File size: {len(content)} bytes")
+                    progress = json.load(open(progress_file, "r"))
+
+                print(f"   JSON parsed successfully")
+                print(f"   Keys in progress: {list(progress.keys())}")
+
+                # Extract required fields with detailed logging
+                if "workspace_id" not in progress:
+                    print(f"   ⚠️  Missing workspace_id field!")
+                    print(f"   Progress content: {progress}")
+                    continue
 
                 workspace_id = progress["workspace_id"]
                 session_id = progress["session_id"]
@@ -1347,12 +1371,21 @@ async def progress_poller(app: Application) -> None:
                 progress_percent = progress["progress_percent"]
                 message = progress["message"]
 
+                print(f"   ✅ Extracted fields:")
+                print(f"      workspace_id: {workspace_id}")
+                print(f"      session_id: {session_id}")
+                print(f"      workflow_id: {workflow_id}")
+                print(f"      status: {status}")
+                print(f"      stage: {stage} ({progress_percent}%)")
+
                 # Check if we're tracking this workflow
                 progress_key = (workspace_id, session_id, workflow_id)
                 if progress_key not in active_progress_updates:
+                    print(f"   ⏭️  Not tracking this workflow (no message_id registered)")
                     continue
 
                 message_id = active_progress_updates[progress_key]
+                print(f"   📝 Updating message_id: {message_id}")
 
                 # Build progress message
                 stage_emoji = {
@@ -1380,15 +1413,26 @@ async def progress_poller(app: Application) -> None:
                     text=progress_text,
                     parse_mode="Markdown"
                 )
+                print(f"   ✅ Message updated successfully")
 
                 # Clean up if completed
                 if stage == "completed":
                     print(f"   🗑️  Removing completed progress: {progress_file.name}")
                     progress_file.unlink()
                     del active_progress_updates[progress_key]
+                    print(f"   ✅ Progress tracking cleaned up")
 
+            except KeyError as e:
+                print(f"❌ Missing field in {progress_file.name}: {e}", file=sys.stderr)
+                print(f"   File content preview: {content[:500]}", file=sys.stderr)
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON parse error in {progress_file.name}: {e}", file=sys.stderr)
+                print(f"   File content: {content}", file=sys.stderr)
             except Exception as e:
                 print(f"❌ Failed to process progress {progress_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+                import traceback
+                print(f"   Full traceback:", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
 
 
 async def idle_timeout_monitor() -> None:
