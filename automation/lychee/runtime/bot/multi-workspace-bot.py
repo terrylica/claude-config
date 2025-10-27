@@ -748,8 +748,18 @@ class SummaryHandler:
 
     def _read_summary(self, summary_file: Path) -> Dict[str, Any]:
         """Read and validate session summary."""
-        with summary_file.open() as f:
-            summary = json.load(f)
+        try:
+            with summary_file.open() as f:
+                content = f.read()
+                summary = json.loads(content)
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON PARSE ERROR in {summary_file.name}:")
+            print(f"   Error: {e}")
+            print(f"   File content:")
+            for i, line in enumerate(content.split('\n'), 1):
+                marker = " <-- ERROR" if i == e.lineno else ""
+                print(f"   {i:3d}: {line}{marker}")
+            raise
 
         # Validate required fields
         required = ["correlation_id", "workspace_path", "workspace_id", "session_id",

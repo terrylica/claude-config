@@ -102,16 +102,16 @@ cd "$workspace_dir" 2>/dev/null || {
 
 # Extract git information
 git_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-modified_files=$(git status --porcelain 2>/dev/null | grep -E "^( M|M )" | wc -l | tr -d ' ' || echo "0")
-untracked_files=$(git status --porcelain 2>/dev/null | grep "^??" | wc -l | tr -d ' ' || echo "0")
-staged_files=$(git status --porcelain 2>/dev/null | grep -E "^(M |A |D |R |C )" | wc -l | tr -d ' ' || echo "0")
+modified_files=$(git status --porcelain 2>/dev/null | grep -E "^( M|M )" | wc -l | tr -d ' \n' || echo "0")
+untracked_files=$(git status --porcelain 2>/dev/null | grep "^??" | wc -l | tr -d ' \n' || echo "0")
+staged_files=$(git status --porcelain 2>/dev/null | grep -E "^(M |A |D |R |C )" | wc -l | tr -d ' \n' || echo "0")
 
 # Get ahead/behind commits (requires remote tracking branch)
 ahead_commits=0
 behind_commits=0
 if git rev-parse --abbrev-ref @{u} >/dev/null 2>&1; then
-    ahead_commits=$(git rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
-    behind_commits=$(git rev-list --count HEAD..@{u} 2>/dev/null || echo "0")
+    ahead_commits=$(git rev-list --count @{u}..HEAD 2>/dev/null | tr -d '\n' || echo "0")
+    behind_commits=$(git rev-list --count HEAD..@{u} 2>/dev/null | tr -d '\n' || echo "0")
 fi
 
 # Fallback to 0 if any git command failed
