@@ -403,11 +403,16 @@ fi
             }
 
         # =====================================================================
-        # Phase 2 - v4.0.0: Maintain v3 Notification (dual-mode backward compat)
+        # Phase 2 - v4.0.0: v3 Notification DISABLED (v4 workflow menu replaces it)
         # =====================================================================
+        # v4 SessionSummary + workflow menu provides superior UX:
+        # - Always shows (not just on errors)
+        # - Multi-workflow support (not just lychee)
+        # - More context (git status, session info)
+        # v3 notification emission disabled to prevent duplicate Telegram messages
 
-        # Only notify if errors found (v3 behavior)
-        if [[ "$error_count" -gt 0 ]]; then
+        # Only notify if errors found (v3 behavior) - DISABLED
+        if false && [[ "$error_count" -gt 0 ]]; then
             {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Errors detected → Emitting notification"
                 echo "   → Workspace hash: $workspace_hash"
