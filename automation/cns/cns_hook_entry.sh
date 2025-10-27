@@ -63,3 +63,4 @@ has_remote_client() {
 } &
 
 # Exit immediately for async performance - don't wait for background process
+exit 0
