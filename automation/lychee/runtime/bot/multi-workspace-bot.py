@@ -454,12 +454,18 @@ class CompletionHandler:
 
             print(f"   ✓ Loaded: workspace={workspace_id}, session={session_id}, status={completion.get('status')}")
 
-            # Load workspace config
+            # Load workspace config (with fallback for unregistered workspaces)
             print(f"   📋 Loading workspace registry...")
-            registry = load_registry()
-            workspace = registry["workspaces"][workspace_id]
-            emoji = workspace["emoji"]
-            print(f"   ✓ Workspace config loaded: emoji={emoji}")
+            try:
+                registry = load_registry()
+                workspace = registry["workspaces"][workspace_id]
+                emoji = workspace["emoji"]
+                print(f"   ✓ Workspace config loaded: emoji={emoji}")
+            except (FileNotFoundError, KeyError):
+                # Unregistered workspace - use defaults
+                workspace_path = Path(completion.get("workspace_path", "/unknown"))
+                emoji = "📁"
+                print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={workspace_path.name}")
 
             # Format message based on status
             print(f"   ✍️  Formatting completion message...")
