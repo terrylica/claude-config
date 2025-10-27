@@ -297,14 +297,18 @@ class NotificationHandler:
                 {"notification_file": notification_file.name, "error_count": request["error_count"]}
             )
 
-            # Load workspace config
-            workspace_id = get_workspace_id_from_path(workspace_path)
-            registry = load_registry()
-            workspace = registry["workspaces"][workspace_id]
-
-            # Format message with emoji identification
-            emoji = workspace["emoji"]
-            ws_name = workspace["name"]
+            # Load workspace config (with fallback for unregistered workspaces)
+            try:
+                workspace_id = get_workspace_id_from_path(workspace_path)
+                registry = load_registry()
+                workspace = registry["workspaces"][workspace_id]
+                emoji = workspace["emoji"]
+                ws_name = workspace["name"]
+            except (ValueError, FileNotFoundError, KeyError):
+                # Unregistered workspace - use defaults
+                workspace_id = request.get("workspace_hash", "unknown")
+                emoji = "📁"
+                ws_name = workspace_path.name
             error_count = request["error_count"]
             details = request["details"]
 
@@ -684,12 +688,18 @@ class SummaryHandler:
                 # Don't send message if no workflows available
                 return
 
-            # Load workspace config
-            workspace_id = get_workspace_id_from_path(workspace_path)
-            registry = load_registry()
-            workspace = registry["workspaces"][workspace_id]
-            emoji = workspace["emoji"]
-            ws_name = workspace["name"]
+            # Load workspace config (with fallback for unregistered workspaces)
+            try:
+                workspace_id = get_workspace_id_from_path(workspace_path)
+                registry = load_registry()
+                workspace = registry["workspaces"][workspace_id]
+                emoji = workspace["emoji"]
+                ws_name = workspace["name"]
+            except (ValueError, FileNotFoundError, KeyError):
+                # Unregistered workspace - use defaults
+                workspace_id = summary.get("workspace_id", "unknown")
+                emoji = "📁"
+                ws_name = workspace_path.name
 
             # Format message with session context
             lychee_status = summary.get("lychee_status", {})
