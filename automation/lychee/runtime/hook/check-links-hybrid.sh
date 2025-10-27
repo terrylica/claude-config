@@ -15,12 +15,16 @@
 
 set -euo pipefail
 
+# Suppress uv debug output (prevents "Stop hook error" in Claude Code CLI)
+export UV_NO_PROGRESS=1
+export RUST_LOG=error
+
 # =============================================================================
 # Configuration
 # =============================================================================
 
 config_file="$HOME/.claude/.lycheerc.toml"
-log_file="$HOME/.claude/logs/lychee.log"
+log_file="$HOME/.claude/automation/lychee/logs/lychee.log"
 # Note: Results file must be inside workspace for Claude CLI access
 full_results=""  # Will be set after workspace_dir is determined
 
@@ -524,7 +528,7 @@ EOF
 
             # Start bot in background with Doppler secrets and output redirected to bot log
             # Note: Doppler CLI injects secrets as environment variables
-            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/logs/telegram-handler.log" 2>&1 &
+            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/automation/lychee/logs/telegram-handler.log" 2>&1 &
             new_bot_pid=$!
 
             {
@@ -571,7 +575,7 @@ EOF
                 echo "   → 🚀 Starting Telegram bot..."
             } >> "$log_file" 2>&1
 
-            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/logs/telegram-handler.log" 2>&1 &
+            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/automation/lychee/logs/telegram-handler.log" 2>&1 &
 
             {
                 echo "   → ✅ Bot started (PID: $!)"
