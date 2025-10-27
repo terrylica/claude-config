@@ -33,6 +33,6 @@ cleanup_stale_hooks() {
 }
 
 # Only run if called directly (not sourced)
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    cleanup_stale_hooks
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]] || [[ -z "${BASH_SOURCE[0]:-}" ]]; then
+    cleanup_stale_hooks 2>/dev/null || true
 fi
