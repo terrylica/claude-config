@@ -39,12 +39,12 @@ PMD CPD and Semgrep detect different clone types:
 
 ### Clone Types
 
-| Type   | Description                     | PMD CPD              | Semgrep     |
-| ------ | ------------------------------- | -------------------- | ----------- |
-| Type-1 | Exact copies                    | ✅ Default           | ✅          |
-| Type-2 | Renamed identifiers             | ✅ `--ignore-*`      | ✅          |
-| Type-3 | Near-miss with variations       | ⚠️ Partial           | ✅ Patterns |
-| Type-4 | Semantic clones (same behavior) | ❌                   | ❌          |
+| Type   | Description                     | PMD CPD         | Semgrep     |
+| ------ | ------------------------------- | --------------- | ----------- |
+| Type-1 | Exact copies                    | ✅ Default      | ✅          |
+| Type-2 | Renamed identifiers             | ✅ `--ignore-*` | ✅          |
+| Type-3 | Near-miss with variations       | ⚠️ Partial      | ✅ Patterns |
+| Type-4 | Semantic clones (same behavior) | ❌              | ❌          |
 
 ---
 
@@ -80,10 +80,12 @@ pmd cpd -d . -l ecmascript --minimum-tokens 20 -f markdown > pmd-js.md
 ```
 
 **Tuning thresholds**:
+
 - New codebases: 30-50 tokens
 - Legacy codebases: 75-100 tokens (start high, lower gradually)
 
 **Exclusions**:
+
 ```bash
 pmd cpd -d . -l python --minimum-tokens 20 \
     --exclude="**/tests/**,**/node_modules/**,**/__pycache__/**" \
@@ -133,6 +135,7 @@ jq -r '.runs[0].results[] | "\(.ruleId): \(.message.text) at \(.locations[0].phy
 ```
 
 **Combine findings**:
+
 1. List PMD CPD duplications by severity (tokens/lines)
 2. List Semgrep violations by file
 3. Prioritize: Exact duplicates across files > Large within-file > Patterns
@@ -140,6 +143,7 @@ jq -r '.runs[0].results[] | "\(.ruleId): \(.message.text) at \(.locations[0].phy
 ### Phase 3: Presentation
 
 Present to user:
+
 - Total violations (PMD + Semgrep)
 - Breakdown by type (exact vs pattern)
 - Files affected
@@ -147,6 +151,7 @@ Present to user:
 - Suggested approach
 
 **Example**:
+
 ```
 DRY Audit Results:
 ==================
@@ -180,6 +185,7 @@ Proceed with refactoring? (y/n)
 ## Best Practices
 
 **DO**:
+
 - ✅ Run both PMD CPD and Semgrep (complementary coverage)
 - ✅ Start with conservative thresholds (PMD: 50 tokens)
 - ✅ Review results before refactoring
@@ -187,6 +193,7 @@ Proceed with refactoring? (y/n)
 - ✅ Commit incrementally
 
 **DON'T**:
+
 - ❌ Only use one tool (miss ~70% of violations)
 - ❌ Set thresholds too low (noise overwhelms signal)
 - ❌ Refactor without understanding context
@@ -199,6 +206,7 @@ Proceed with refactoring? (y/n)
 **Allowed Tools**: `Read, Grep, Bash, Edit, Write`
 
 **Safe Refactoring**:
+
 - Only refactor after user approval
 - Run tests before marking complete
 - Never use destructive commands
@@ -238,6 +246,7 @@ brew install semgrep  # Semgrep v1.140.0+
 **Files Tested**: 3 files (sample1.py, sample2.py, sample.js)
 
 **Results**:
+
 - PMD CPD: 9 exact duplications
 - Semgrep: 21 pattern violations
 - Total Unique: ~27 DRY violations

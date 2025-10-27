@@ -1,18 +1,7 @@
 ---
-version: 1.0.0
 name: chezmoi-workflows
-description: Natural language interface for chezmoi dotfile operations in AI-assisted workflow
-triggers:
-  - "track changes"
-  - "sync dotfiles"
-  - "check status"
-  - "push changes"
-  - "chezmoi"
-  - "dotfiles"
-dependencies: []
-platforms:
-  - macos
-  - linux
+description: Manage dotfiles with chezmoi via natural language. Use when user mentions dotfiles, config sync, chezmoi, track changes, sync dotfiles, check status, or push changes.
+allowed-tools: Read, Edit, Bash
 ---
 
 # Chezmoi Workflows
