@@ -1028,6 +1028,28 @@ async def handle_workflow_selection(
         {"workflow_id": workflow_id, "selection_file": selection_file.name}
     )
 
+    # Start orchestrator in background to process selection
+    orchestrator_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "orchestrator" / "multi-workspace-orchestrator.py"
+    print(f"🚀 Starting orchestrator: {orchestrator_script}")
+
+    try:
+        # Start orchestrator in background (one-shot execution)
+        # Propagate correlation_id via environment for distributed tracing
+        env = os.environ.copy()
+        env["CORRELATION_ID"] = correlation_id
+
+        process = await asyncio.create_subprocess_exec(
+            str(orchestrator_script),
+            str(selection_file),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env
+        )
+        print(f"   ✓ Orchestrator started (PID: {process.pid})")
+        # Don't wait for completion - orchestrator runs independently
+    except Exception as e:
+        print(f"   ❌ Failed to start orchestrator: {type(e).__name__}: {e}", file=sys.stderr)
+
     # Confirm to user
     registry = load_registry()
     emoji = registry["workspaces"][workspace_id]["emoji"]
