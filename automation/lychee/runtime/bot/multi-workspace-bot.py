@@ -41,7 +41,7 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 # Import telegram helpers for rate limiting and markdown safety
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
-from telegram_helpers import safe_edit_message, safe_send_message
+from telegram_helpers import safe_edit_message, safe_send_message, safe_edit_message_by_id
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -54,6 +54,7 @@ APPROVAL_DIR = STATE_DIR / "approvals"
 COMPLETION_DIR = STATE_DIR / "completions"
 SUMMARIES_DIR = STATE_DIR / "summaries"  # Phase 3 - v4.0.0
 SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 3 - v4.0.0
+PROGRESS_DIR = STATE_DIR / "progress"  # Phase 4 - P2 streaming progress
 PID_FILE = STATE_DIR / "bot.pid"
 WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
 
@@ -63,6 +64,10 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 IDLE_TIMEOUT_SECONDS = 1800  # 30 minutes
 POLL_INTERVAL = 1.0  # seconds
 POLL_TIMEOUT = 10  # API request timeout
+PROGRESS_POLL_INTERVAL = 2.0  # Progress updates every 2 seconds
+
+# Track active progress updates: (workspace_id, session_id, workflow_id) → message_id
+active_progress_updates: Dict[tuple, int] = {}
 
 if not BOT_TOKEN or not CHAT_ID:
     print("❌ Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
@@ -1093,6 +1098,12 @@ async def handle_workflow_selection(
 
     print(f"✅ Workflow selected: {workflow_id} for workspace: {workspace_id}")
 
+    # Track message_id for progress updates
+    message_id = query.message.message_id
+    progress_key = (workspace_id, session_id, workflow_id)
+    active_progress_updates[progress_key] = message_id
+    print(f"   📌 Tracking progress updates (message_id={message_id})")
+
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -1304,6 +1315,82 @@ async def periodic_file_scanner(app: Application) -> None:
                     print(f"❌ Failed to process {completion_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
 
 
+async def progress_poller(app: Application) -> None:
+    """Poll progress files and update Telegram messages with streaming progress."""
+    global shutdown_requested, active_progress_updates
+
+    print(f"📊 Progress poller started (every {PROGRESS_POLL_INTERVAL}s)")
+
+    while not shutdown_requested:
+        await asyncio.sleep(PROGRESS_POLL_INTERVAL)
+
+        if not PROGRESS_DIR.exists():
+            continue
+
+        # Get all progress files (exclude schema.json)
+        progress_files = [
+            f for f in PROGRESS_DIR.glob("*.json")
+            if f.name != "schema.json"
+        ]
+
+        for progress_file in progress_files:
+            try:
+                # Read progress data
+                with open(progress_file, "r") as f:
+                    progress = json.load(f)
+
+                workspace_id = progress["workspace_id"]
+                session_id = progress["session_id"]
+                workflow_id = progress["workflow_id"]
+                status = progress["status"]
+                stage = progress["stage"]
+                progress_percent = progress["progress_percent"]
+                message = progress["message"]
+
+                # Check if we're tracking this workflow
+                progress_key = (workspace_id, session_id, workflow_id)
+                if progress_key not in active_progress_updates:
+                    continue
+
+                message_id = active_progress_updates[progress_key]
+
+                # Build progress message
+                stage_emoji = {
+                    "starting": "🎬",
+                    "rendering": "📝",
+                    "executing": "⚙️",
+                    "waiting": "⏳",
+                    "completed": "✅" if status == "success" else "❌"
+                }
+                emoji = stage_emoji.get(stage, "📊")
+
+                progress_text = (
+                    f"{emoji} **Workflow Progress**\n\n"
+                    f"Workflow: `{workflow_id}`\n"
+                    f"Stage: {stage}\n"
+                    f"Progress: {progress_percent}%\n"
+                    f"Status: {message}\n"
+                )
+
+                # Update message
+                await safe_edit_message_by_id(
+                    bot=app.bot,
+                    chat_id=int(CHAT_ID),
+                    message_id=message_id,
+                    text=progress_text,
+                    parse_mode="Markdown"
+                )
+
+                # Clean up if completed
+                if stage == "completed":
+                    print(f"   🗑️  Removing completed progress: {progress_file.name}")
+                    progress_file.unlink()
+                    del active_progress_updates[progress_key]
+
+            except Exception as e:
+                print(f"❌ Failed to process progress {progress_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 async def idle_timeout_monitor() -> None:
     """Monitor idle time and request shutdown if timeout exceeded."""
     global shutdown_requested
@@ -1412,9 +1499,10 @@ async def main() -> int:
         print()
         monitor_task = asyncio.create_task(idle_timeout_monitor())
         scanner_task = asyncio.create_task(periodic_file_scanner(app))
+        progress_task = asyncio.create_task(progress_poller(app))
 
         # Event loop - wait for shutdown
-        print("\n✅ Bot running (polling for updates + scanning for files)")
+        print("\n✅ Bot running (polling for updates + scanning for files + progress updates)")
         print(f"   Auto-shutdown after {IDLE_TIMEOUT_SECONDS // 60} minutes idle")
         print("   Press Ctrl+C to stop manually")
         print()
@@ -1436,6 +1524,7 @@ async def main() -> int:
         print("\n🛑 Shutdown initiated")
         monitor_task.cancel()
         scanner_task.cancel()
+        progress_task.cancel()
 
         print("   Stopping polling...")
         await app.updater.stop()

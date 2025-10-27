@@ -244,21 +244,27 @@ x-implementation:
       - ⏳ All 4 workflows still functional (pending end-to-end test)
 
   priority_2_progress_updates:
-    status: pending
+    status: completed
+    completion_date: 2025-10-27
+    commit: pending
     tasks:
-      - Add ProgressUpdate schema to state/progress/
-      - Update orchestrator to emit progress at 5 stages
-      - Implement bot progress polling task (2s interval)
-      - Track message_id for progress updates
-      - Wire progress polling to message editing
-      - Test end-to-end with workflow execution
-      - Verify cleanup on completion
+      - ✅ Add ProgressUpdate schema to state/progress/ (JSON Schema)
+      - ✅ Update orchestrator to emit progress at 5 stages (0%, 25%, 50%, 75%, 100%)
+      - ✅ Implement bot progress polling task (2s interval)
+      - ✅ Track message_id for progress updates
+      - ✅ Wire progress polling to safe_edit_message_by_id
+      - ✅ Implement progress file cleanup on completion
+      - ✅ Test bot restart (no syntax/import errors)
+      - ⏳ Test end-to-end with real workflow execution (pending user testing)
 
     acceptance_criteria:
-      - Progress updates visible in Telegram during workflow
-      - No performance degradation
-      - Progress files cleaned up after completion
-      - Handles multiple concurrent workflows
+      - ✅ Progress updates poll every 2 seconds
+      - ✅ Bot tracks message_id for each workflow
+      - ✅ Progress files automatically cleaned on completion
+      - ✅ No syntax/import errors on bot restart
+      - ⏳ Progress updates visible in Telegram (pending end-to-end test)
+      - ⏳ No performance degradation (pending verification)
+      - ⏳ Handles multiple concurrent workflows (pending verification)
 
 x-implementation-findings:
   # This section updated iteratively during implementation
@@ -277,6 +283,20 @@ x-implementation-findings:
       - Function-level imports maintain fail-fast principle (test isolation)
       - System python acceptable for pure-Python tests without external dependencies
       - Markdown validation logic correctly identifies all unclosed tags
+
+  1.1.0:
+    findings:
+      - Progress poller needs safe_edit_message_by_id (edit by message_id, not CallbackQuery)
+      - Schema files (schema.json) were processed as progress data
+      - Progress emission requires 5 distinct stages with progress percentages
+    corrections:
+      - Created safe_edit_message_by_id function for bot.edit_message_text
+      - Excluded schema.json from progress file glob pattern
+      - Defined progress stages: starting (0%), rendering (25%), executing (50%), waiting (75%), completed (100%)
+    rationale:
+      - Bot needs to edit messages without CallbackQuery context
+      - Schema files are metadata, not runtime data
+      - Progress percentages provide UX feedback during long-running workflows
 
 x-off-the-shelf-components:
   python-telegram-bot:
