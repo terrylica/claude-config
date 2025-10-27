@@ -15,7 +15,7 @@ CALLBACK_DIR = STATE_DIR / "callbacks"
 REGISTRY_FILE = STATE_DIR / "registry.json"
 
 # TTL for state files
-STATE_TTL_MINUTES = 5
+STATE_TTL_MINUTES = 30
 
 
 def load_registry() -> Dict[str, Any]:
