@@ -187,7 +187,7 @@ fi
     "hook" \
     "hook.started" \
     "{\"workspace_path\": \"$workspace_dir\", \"pid\": $$, \"stop_hook_active\": \"$stop_hook_active\"}" \
-    2>> "$log_file" || {
+    >> /dev/null 2>> "$log_file" || {
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log hook.started event" >> "$log_file" 2>&1
         exit 1
     }
@@ -271,7 +271,7 @@ if [[ "$stop_hook_active" == "true" ]]; then
         "hook" \
         "hook.skipped_loop_prevention" \
         "{\"reason\": \"stop_hook_active=true\"}" \
-        2>> "$log_file" || true
+        >> /dev/null 2>> "$log_file" || true
 
     exit 0
 fi
@@ -296,7 +296,7 @@ if [[ -f "$autofix_state_file" ]]; then
             "hook" \
             "hook.skipped_loop_prevention" \
             "{\"reason\": \"autofix_in_progress\", \"state_age_seconds\": $state_age}" \
-            2>> "$log_file" || true
+            >> /dev/null 2>> "$log_file" || true
 
         exit 0
     else
@@ -402,7 +402,7 @@ fi
             "hook" \
             "summary.created" \
             "{\"error_count\": $error_count, \"summary_file\": \"$summary_file\"}" \
-            2>> "$log_file" || {
+            >> /dev/null 2>> "$log_file" || {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log summary.created event" >> "$log_file" 2>&1
             }
 
@@ -461,7 +461,7 @@ EOF
                 "hook" \
                 "notification.created" \
                 "{\"error_count\": $error_count, \"notification_file\": \"$notification_file\"}" \
-                2>> "$log_file" || {
+                >> /dev/null 2>> "$log_file" || {
                     echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log notification.created event" >> "$log_file" 2>&1
                     exit 1
                 }
@@ -555,7 +555,7 @@ EOF
             "hook" \
             "summary.created" \
             "{\"error_count\": 0, \"summary_file\": \"$summary_file\", \"lychee_ran\": false}" \
-            2>> "$log_file" || {
+            >> /dev/null 2>> "$log_file" || {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log summary.created event" >> "$log_file" 2>&1
             }
 
@@ -644,7 +644,7 @@ fi
     "hook" \
     "hook.completed" \
     "{}" \
-    2>> "$log_file" || {
+    >> /dev/null 2>> "$log_file" || {
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log hook.completed event" >> "$log_file" 2>&1
         exit 1
     }
