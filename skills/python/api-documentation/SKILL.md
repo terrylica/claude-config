@@ -1,6 +1,7 @@
 ---
-name: Pydantic API Documentation
+name: python-api-documentation
 description: Industry-standard Python API documentation using Pydantic v2 models with rich docstrings. Use when documenting Python packages, creating data models, generating JSON schemas, or building FastAPI applications. Includes 3-layer architecture pattern (Literal types → Pydantic models → Rich docstrings), migration steps, and AI agent discovery patterns. Eliminates documentation fragmentation by making code the single source of truth.
+allowed-tools: Read, Edit, Write
 ---
 
 # Pydantic API Documentation Skill
