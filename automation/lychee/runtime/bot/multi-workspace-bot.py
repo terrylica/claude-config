@@ -39,6 +39,10 @@ from typing import Dict, Any, Optional
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
+# Import telegram helpers for rate limiting and markdown safety
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
+from telegram_helpers import safe_edit_message, safe_send_message
+
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
@@ -376,8 +380,9 @@ Choose action:
                 ]
             ]
 
-            # Send message
-            await self.bot.send_message(
+            # Send message with rate limiting and markdown safety
+            await safe_send_message(
+                bot=self.bot,
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -472,9 +477,10 @@ class CompletionHandler:
             message = self._format_completion_message(completion, emoji)
             print(f"   ✓ Message formatted ({len(message)} chars)")
 
-            # Send message
+            # Send message with rate limiting and markdown safety
             print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
-            await self.bot.send_message(
+            await safe_send_message(
+                bot=self.bot,
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode="Markdown"
@@ -737,8 +743,9 @@ class SummaryHandler:
                 correlation_id
             )
 
-            # Send message
-            await self.bot.send_message(
+            # Send message with rate limiting and markdown safety
+            await safe_send_message(
+                bot=self.bot,
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -987,10 +994,11 @@ async def handle_workflow_selection(
     if action == "custom_prompt":
         # TODO Phase 4: Implement custom prompt handler
         # For now, acknowledge and return
-        await query.edit_message_text(
-            "✏️ Custom Prompt\n\n"
-            "Custom workflow prompts will be available in Phase 4.\n"
-            "For now, please select a preset workflow.",
+        await safe_edit_message(
+            query=query,
+            text="✏️ Custom Prompt\n\n"
+                 "Custom workflow prompts will be available in Phase 4.\n"
+                 "For now, please select a preset workflow.",
             parse_mode="Markdown"
         )
         return
@@ -1064,20 +1072,22 @@ async def handle_workflow_selection(
         workflow_name = f"{workflow['icon']} {workflow['name']}"
         estimated_duration = workflow.get("estimated_duration", "unknown")
 
-        await query.edit_message_text(
-            f"{emoji} **Workflow Selected**: {workflow_name}\n\n"
-            f"Workspace: `{workspace_id}`\n"
-            f"Session: `{session_id}`\n"
-            f"Estimated duration: ~{estimated_duration}s\n\n"
-            f"Orchestrator will process this workflow...",
+        await safe_edit_message(
+            query=query,
+            text=f"{emoji} **Workflow Selected**: {workflow_name}\n\n"
+                 f"Workspace: `{workspace_id}`\n"
+                 f"Session: `{session_id}`\n"
+                 f"Estimated duration: ~{estimated_duration}s\n\n"
+                 f"Orchestrator will process this workflow...",
             parse_mode="Markdown"
         )
     else:
-        await query.edit_message_text(
-            f"{emoji} **Workflow Selected**: {workflow_id}\n\n"
-            f"Workspace: `{workspace_id}`\n"
-            f"Session: `{session_id}`\n\n"
-            f"Processing...",
+        await safe_edit_message(
+            query=query,
+            text=f"{emoji} **Workflow Selected**: {workflow_id}\n\n"
+                 f"Workspace: `{workspace_id}`\n"
+                 f"Session: `{session_id}`\n\n"
+                 f"Processing...",
             parse_mode="Markdown"
         )
 
@@ -1102,7 +1112,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         ctx = resolve_callback_data(query.data)
     except ValueError as e:
-        await query.edit_message_text(f"❌ {e}")
+        await safe_edit_message(query=query, text=f"❌ {e}")
         return
 
     workspace_id = ctx["workspace_id"]
@@ -1187,11 +1197,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Unregistered workspace - use default emoji
         emoji = "📁"
 
-    await query.edit_message_text(
-        f"{emoji} **Action Received**: {action}\n\n"
-        f"Workspace: `{workspace_id}`\n"
-        f"Session: `{session_id}`\n\n"
-        f"Processing...",
+    await safe_edit_message(
+        query=query,
+        text=f"{emoji} **Action Received**: {action}\n\n"
+             f"Workspace: `{workspace_id}`\n"
+             f"Session: `{session_id}`\n\n"
+             f"Processing...",
         parse_mode="Markdown"
     )
 
