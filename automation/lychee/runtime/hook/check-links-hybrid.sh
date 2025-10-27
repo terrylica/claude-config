@@ -102,9 +102,9 @@ cd "$workspace_dir" 2>/dev/null || {
 
 # Extract git information
 git_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-modified_files=$(git status --porcelain 2>/dev/null | grep -E "^( M|M )" | wc -l | tr -d ' \n' || echo "0")
-untracked_files=$(git status --porcelain 2>/dev/null | grep "^??" | wc -l | tr -d ' \n' || echo "0")
-staged_files=$(git status --porcelain 2>/dev/null | grep -E "^(M |A |D |R |C )" | wc -l | tr -d ' \n' || echo "0")
+modified_files=$(git status --porcelain 2>/dev/null | { grep -E "^( M|M )" || true; } | wc -l | tr -d ' \n')
+untracked_files=$(git status --porcelain 2>/dev/null | { grep "^??" || true; } | wc -l | tr -d ' \n')
+staged_files=$(git status --porcelain 2>/dev/null | { grep -E "^(M |A |D |R |C )" || true; } | wc -l | tr -d ' \n')
 
 # Get ahead/behind commits (requires remote tracking branch)
 ahead_commits=0
