@@ -60,5 +60,7 @@
             echo "$announce_text" | festival --tts > /dev/null 2>&1
         fi
     fi
-) &
+) > /dev/null 2>&1 &
+
 # Exit immediately after spawning audio process
+exit 0
