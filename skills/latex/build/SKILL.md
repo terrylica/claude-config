@@ -1,6 +1,7 @@
 ---
-name: LaTeX Build Automation
+name: latex-build
 description: Build and compile LaTeX documents using latexmk with live preview, dependency tracking, and automatic rebuilds. Use when setting up build workflows, enabling live preview, troubleshooting compilation, or automating multi-file projects.
+allowed-tools: Read, Edit, Bash
 ---
 
 # LaTeX Build Automation Skill
