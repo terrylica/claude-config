@@ -21,6 +21,7 @@
 **Purpose**: Validate git_modified trigger, workflow filtering, template rendering
 
 **Setup**:
+
 ```bash
 # 1. Create SessionSummary
 cat > state/summaries/summary_test-scenario1_81e622b5.json <<'EOF'
@@ -90,6 +91,7 @@ EOF
 ```
 
 **Expected Results**:
+
 - ✅ Registry loaded (4 workflows)
 - ✅ Selection file read and validated
 - ✅ Template context built from summary_data
@@ -99,6 +101,7 @@ EOF
 - ✅ Selection file deleted (consumed)
 
 **SQLite Events Expected**:
+
 ```sql
 SELECT event_type, component, metadata
 FROM session_events
@@ -117,6 +120,7 @@ ORDER BY timestamp;
 ```
 
 **Validation**:
+
 ```bash
 # 1. Verify execution file exists
 test -f state/executions/execution_test-scenario1_81e622b5_prune-legacy.json && echo "PASS" || echo "FAIL"
@@ -140,6 +144,7 @@ sqlite3 state/events.db "SELECT COUNT(*) FROM session_events WHERE correlation_i
 **Purpose**: Validate lychee_errors trigger, error handling, template context
 
 **Setup**:
+
 ```bash
 # 1. Create SessionSummary with errors
 cat > state/summaries/summary_test-scenario2_81e622b5.json <<'EOF'
@@ -209,12 +214,14 @@ EOF
 ```
 
 **Expected Results**:
+
 - ✅ Template rendered with lychee_status.error_count = 5
 - ✅ Claude CLI invoked with fix-broken-links prompt
 - ✅ Execution result created
 - ✅ Full event trace in SQLite
 
 **Template Validation**:
+
 ```bash
 # Verify template includes error count in context
 jq '.lychee_status.error_count' state/summaries/summary_test-scenario2_81e622b5.json
@@ -228,6 +235,7 @@ jq '.lychee_status.error_count' state/summaries/summary_test-scenario2_81e622b5.
 **Purpose**: Validate sequential execution, multiple execution results
 
 **Setup**:
+
 ```bash
 # Create WorkflowSelection with 2 workflows
 cat > state/selections/selection_test-scenario3_81e622b5.json <<'EOF'
@@ -270,6 +278,7 @@ EOF
 ```
 
 **Expected Results**:
+
 - ✅ Workflow 1 ("fix-docstrings") executed first
 - ✅ Workflow 2 ("rename-variables") executed second
 - ✅ Two execution files created:
@@ -278,6 +287,7 @@ EOF
 - ✅ Event trace shows sequential execution
 
 **Validation**:
+
 ```bash
 # Count execution files
 ls state/executions/execution_test-scenario3_81e622b5_*.json | wc -l
@@ -303,6 +313,7 @@ ORDER BY timestamp;
 **Setup**: Use Scenario 1 data
 
 **Validation Query**:
+
 ```sql
 -- Full correlation trace
 SELECT
@@ -317,6 +328,7 @@ ORDER BY timestamp;
 ```
 
 **Expected Trace** (if hook + bot also ran):
+
 ```
 1. hook.started          | hook
 2. hook.completed        | hook
@@ -335,6 +347,7 @@ ORDER BY timestamp;
 ```
 
 **SLO Validation**:
+
 - ✅ **Observability**: 100% - All events logged with correlation_id
 - ✅ **Correctness**: 100% - All events present in trace
 
@@ -345,6 +358,7 @@ ORDER BY timestamp;
 **Purpose**: Validate v3 approval processing still works
 
 **Setup**:
+
 ```bash
 # Create v3-style approval file
 cat > state/approvals/approval_test-scenario5_81e622b5.json <<'EOF'
@@ -368,6 +382,7 @@ EOF
 ```
 
 **Expected Results**:
+
 - ✅ Orchestrator detects approval file (not selection)
 - ✅ Routes to ApprovalOrchestrator class (v3)
 - ✅ Hard-coded prompt used (not Jinja2 template)
@@ -375,6 +390,7 @@ EOF
 - ✅ Legacy event types: orchestrator.started, claude_cli.started, etc.
 
 **Validation**:
+
 ```bash
 # Verify completion file created (v3 format)
 ls state/completions/completion_test-scenario5_*.json
@@ -384,6 +400,7 @@ ls state/executions/execution_test-scenario5_*.json 2>&1 | grep "No such file"
 ```
 
 **SLO Validation**:
+
 - ✅ **Maintainability**: v3 backward compatibility preserved
 
 ---
@@ -454,12 +471,12 @@ rm -f state/executions/execution_test-scenario*.json
 
 ## SLO Validation Summary
 
-| SLO | Target | Validation Method | Status |
-|-----|--------|-------------------|--------|
-| Correctness | 100% | All workflows execute, results emitted | ✅ Manual testing |
-| Observability | 100% | Full event trace with correlation_id | ✅ SQLite queries |
-| Maintainability | SSoT | workflows.json is canonical | ✅ Code review |
-| Availability | 99% | Bot uptime during active hours | ⏸️ Production monitoring |
+| SLO             | Target | Validation Method                      | Status                   |
+| --------------- | ------ | -------------------------------------- | ------------------------ |
+| Correctness     | 100%   | All workflows execute, results emitted | ✅ Manual testing        |
+| Observability   | 100%   | Full event trace with correlation_id   | ✅ SQLite queries        |
+| Maintainability | SSoT   | workflows.json is canonical            | ✅ Code review           |
+| Availability    | 99%    | Bot uptime during active hours         | ⏸️ Production monitoring |
 
 ---
 
@@ -468,6 +485,7 @@ rm -f state/executions/execution_test-scenario*.json
 **Location**: Document results in `specifications/telegram-workflows-orchestration-v4.yaml`
 
 **Format**:
+
 ```yaml
 x-implementation-findings:
   - finding: "Phase 5 integration tests executed"

@@ -37,11 +37,11 @@ allowed-tools: Read, Grep, Bash # Optional, CLI-only feature
 
 **Field Requirements:**
 
-| Field           | Rules                                                                                                |
-| --------------- | ---------------------------------------------------------------------------------------------------- |
-| `name`          | Lowercase, hyphens, numbers only. Max 64 chars. Must be unique.                                      |
-| `description`   | State WHAT it does + WHEN to use. Max 1024 chars (CLI) or 200 (API). Include trigger keywords!       |
-| `allowed-tools` | **CLI-only**. Comma-separated list restricts available tools. Optional.                              |
+| Field           | Rules                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `name`          | Lowercase, hyphens, numbers only. Max 64 chars. Must be unique.                                |
+| `description`   | State WHAT it does + WHEN to use. Max 1024 chars (CLI) or 200 (API). Include trigger keywords! |
+| `allowed-tools` | **CLI-only**. Comma-separated list restricts available tools. Optional.                        |
 
 **Good vs Bad Descriptions:**
 

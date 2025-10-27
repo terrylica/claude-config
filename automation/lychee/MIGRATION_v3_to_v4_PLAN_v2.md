@@ -19,6 +19,7 @@
 **Phases Deferred**: 5-8 (Optional enhancements)
 
 **Key Achievements**:
+
 - ✅ Workflow registry system operational (4 workflows)
 - ✅ SessionSummary emission with git status + duration tracking
 - ✅ Dynamic workflow menu in Telegram bot
@@ -28,6 +29,7 @@
 - ✅ Full documentation and handoff guides
 
 **Deferred to Post-v4.0.0**:
+
 - Phase 5: Integration testing infrastructure documented (manual execution optional)
 - Phase 6: Directory rename (cosmetic, not functional)
 - Phase 7: Dual-mode removal (no downside to keeping)
@@ -820,6 +822,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
 **Goal**: Orchestrator loads registry, executes workflows with smart dependency resolution (dual mode)
 
 **Known Limitations** (documented, not blockers):
+
 - Dependency resolution: Not implemented (workflows execute in input order)
 - Parallel execution: Not implemented (sequential only)
 - Custom prompts: Not implemented (bot returns placeholder)
@@ -1493,12 +1496,14 @@ launchctl restart com.user.lychee.telegram-handler
 **Goal**: Update all documentation, create release artifacts
 
 **Completed**:
+
 - ✅ Migration completion report ([`MIGRATION_COMPLETE.md`](/Users/terryli/.claude/automation/lychee/MIGRATION_COMPLETE.md))
 - ✅ Phase 4 handoff documentation ([`PHASE_4_HANDOFF.md`](/Users/terryli/.claude/automation/lychee/PHASE_4_HANDOFF.md))
 - ✅ Integration test scenarios ([`tests/INTEGRATION_TESTS.md`](/Users/terryli/.claude/automation/lychee/tests/INTEGRATION_TESTS.md))
 - ✅ SSoT updated with implementation findings
 
 **Remaining** (can evolve post-release):
+
 - README update with v4 examples
 - Detailed CHANGELOG entry
 - Video walkthrough (optional)
@@ -1782,6 +1787,7 @@ Phase 1 (registry) ← 1-1.5h
 ## Next Steps (Post-Implementation)
 
 **v4.0.0 Release Finalization**:
+
 1. [ ] Create CHANGELOG.md entry for v4.0.0
 2. [ ] Create git tag `v4.0.0`
 3. [ ] Final commit and push
@@ -1789,6 +1795,7 @@ Phase 1 (registry) ← 1-1.5h
 5. [ ] Optional: Monitor production usage
 
 **Future Enhancements** (v4.1.0+):
+
 - Custom prompt UI in Telegram
 - Workflow dependency resolution
 - Parallel workflow execution

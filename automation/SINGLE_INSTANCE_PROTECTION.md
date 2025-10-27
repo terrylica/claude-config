@@ -25,6 +25,7 @@ This caused the "Stop hook error" to persist despite all fixes being in place.
 **File**: `/Users/terryli/.claude/automation/lib/single-instance.sh`
 
 **Features**:
+
 - PID file management with automatic stale cleanup
 - File locking (`flock`) for atomic operations
 - Process verification (not just PID check)
@@ -88,6 +89,7 @@ start-telegram-bot
 ```
 
 **Features**:
+
 - Automatically kills existing bot instances
 - Uses PID file: `/Users/terryli/.claude/automation/run/telegram-bot.pid`
 - Ensures clean startup every time
@@ -126,6 +128,7 @@ When bash executes a script with `bash /path/to/script.sh`, it:
 3. **Reads from inode** - NOT from the path
 
 If you edit the file:
+
 - Old process keeps reading from **old inode** 86071856
 - New processes read from **new inode** 86304987
 - Result: Old and new processes run different code!
@@ -206,6 +209,7 @@ lsof | grep "check-links-hybrid.sh"
 **Cause**: Old instances not properly killed
 
 **Fix**:
+
 ```bash
 source ~/.claude/automation/lib/single-instance.sh
 kill_all_instances "telegram-bot"
@@ -218,6 +222,7 @@ kill_all_instances "telegram-bot"
 **Cause**: PID file left behind after crash
 
 **Fix**:
+
 ```bash
 rm /Users/terryli/.claude/automation/run/telegram-bot.pid
 ```
@@ -229,6 +234,7 @@ rm /Users/terryli/.claude/automation/run/telegram-bot.pid
 **Symptom**: Fixes applied but error persists
 
 **Debugging**:
+
 ```bash
 # Find processes with old file open
 lsof | grep check-links-hybrid
@@ -277,6 +283,7 @@ Create `/Users/terryli/Library/LaunchAgents/com.terryli.telegram-bot.plist`:
 ```
 
 Load:
+
 ```bash
 launchctl load ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
 ```
