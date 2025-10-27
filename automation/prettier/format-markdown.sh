@@ -21,7 +21,7 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
             --prose-wrap preserve \
             --config "$HOME/.claude/.prettierrc" \
             {} + > /dev/null 2>&1
-} &
+} > /dev/null 2>&1 &
 
 # Exit immediately - don't wait for background process
 exit 0

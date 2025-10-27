@@ -586,7 +586,7 @@ EOF
     {
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🏁 TIER 1: Background validation complete"
     } >> "$log_file" 2>&1
-} &
+} > /dev/null 2>&1 &
 
 # =============================================================================
 # TIER 2: Modified Files Validation (Selective Blocking)
