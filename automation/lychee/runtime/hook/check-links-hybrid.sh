@@ -15,6 +15,9 @@
 
 set -euo pipefail
 
+# Cleanup stale hook processes to prevent file caching issues
+source "$HOME/.claude/automation/lib/cleanup-stale-hooks.sh" && cleanup_stale_hooks 2>/dev/null || true
+
 # Suppress uv debug output (prevents "Stop hook error" in Claude Code CLI)
 export UV_NO_PROGRESS=1
 export RUST_LOG=error
