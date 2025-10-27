@@ -1,6 +1,7 @@
 ---
-name: Doppler Credential Workflows
+name: doppler-workflows
 description: Complete credential management using Doppler CLI for PyPI tokens and AWS keys. Use when publishing Python packages, rotating AWS credentials, managing project-scoped tokens, troubleshooting authentication errors, or setting up multi-service credential strategies with Doppler.
+allowed-tools: Read, Bash
 ---
 
 # Doppler Credential Workflows Skill
