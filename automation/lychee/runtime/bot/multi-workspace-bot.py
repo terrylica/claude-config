@@ -1050,9 +1050,13 @@ async def handle_workflow_selection(
     except Exception as e:
         print(f"   ❌ Failed to start orchestrator: {type(e).__name__}: {e}", file=sys.stderr)
 
-    # Confirm to user
-    registry = load_registry()
-    emoji = registry["workspaces"][workspace_id]["emoji"]
+    # Confirm to user (with fallback for unregistered workspaces)
+    try:
+        registry = load_registry()
+        emoji = registry["workspaces"][workspace_id]["emoji"]
+    except (FileNotFoundError, KeyError):
+        # Unregistered workspace - use default emoji
+        emoji = "📁"
 
     # Get workflow details
     if workflow_registry and workflow_id in workflow_registry["workflows"]:
@@ -1175,9 +1179,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"   ❌ Failed to start orchestrator: {type(e).__name__}: {e}", file=sys.stderr)
 
-    # Confirm to user
-    registry = load_registry()
-    emoji = registry["workspaces"][workspace_id]["emoji"]
+    # Confirm to user (with fallback for unregistered workspaces)
+    try:
+        registry = load_registry()
+        emoji = registry["workspaces"][workspace_id]["emoji"]
+    except (FileNotFoundError, KeyError):
+        # Unregistered workspace - use default emoji
+        emoji = "📁"
 
     await query.edit_message_text(
         f"{emoji} **Action Received**: {action}\n\n"
