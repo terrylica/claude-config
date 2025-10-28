@@ -11,12 +11,21 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
 
 # Fire-and-forget async formatting + AI auto-commit - exit immediately
 {
-    # Step 1: Run prettier formatting
+    # Step 1: Run prettier formatting on workspace files
     find "$workspace_dir" -type f -name "*.md" \
         -not -path "*/node_modules/*" \
         -not -path "*/.git/*" \
         -not -path "*/file-history/*" \
         -not -path "*/plugins/*" \
+        -exec /Users/terryli/.nvm/versions/node/v22.17.0/bin/prettier \
+            --write \
+            --prose-wrap preserve \
+            --config "$HOME/.claude/.prettierrc" \
+            {} + 2>/dev/null
+
+    # Step 1b: Also format markdown files in /tmp (no git operations for these)
+    # Use /private/tmp on macOS since /tmp is a symlink
+    find /private/tmp -maxdepth 3 -type f -name "*.md" \
         -exec /Users/terryli/.nvm/versions/node/v22.17.0/bin/prettier \
             --write \
             --prose-wrap preserve \
