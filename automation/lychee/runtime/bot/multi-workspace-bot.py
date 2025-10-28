@@ -54,6 +54,7 @@ APPROVAL_DIR = STATE_DIR / "approvals"
 COMPLETION_DIR = STATE_DIR / "completions"
 SUMMARIES_DIR = STATE_DIR / "summaries"  # Phase 3 - v4.0.0
 SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 3 - v4.0.0
+EXECUTIONS_DIR = STATE_DIR / "executions"  # Phase 4 - WorkflowExecution results
 PROGRESS_DIR = STATE_DIR / "progress"  # Phase 4 - P2 streaming progress
 PID_FILE = STATE_DIR / "bot.pid"
 WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
@@ -652,6 +653,244 @@ class CompletionHandler:
         try:
             completion_file.unlink()
             print(f"🗑️  Consumed: {completion_file.name}")
+        except FileNotFoundError:
+            pass
+
+
+class WorkflowExecutionHandler:
+    """
+    Handles workflow execution completion notifications (Phase 4 - v4.0.0).
+
+    Sends final completion messages WITHOUT buttons after workflows complete.
+    Key distinction: Stop hook messages have workflow selection buttons,
+    execution completions show results only.
+    """
+
+    def __init__(self, bot: Bot, chat_id: int):
+        self.bot = bot
+        self.chat_id = chat_id
+
+    async def send_execution_completion(self, execution_file: Path) -> None:
+        """
+        Send Telegram execution completion message (no buttons).
+
+        Args:
+            execution_file: Path to WorkflowExecution JSON
+
+        Raises:
+            All errors propagate to caller
+        """
+        session_id = None
+        workspace_id = None
+
+        try:
+            print(f"🔄 Processing execution: {execution_file.name}")
+
+            # Read execution notification
+            print(f"   📖 Reading execution file...")
+            execution = self._read_execution(execution_file)
+            session_id = execution.get("session_id", "unknown")
+            workspace_id = execution.get("workspace_id", "unknown")
+            workflow_id = execution.get("workflow_id", "unknown")
+            workflow_name = execution.get("workflow_name", "unknown")
+
+            print(f"   ✓ Loaded: workspace={workspace_id}, session={session_id}, workflow={workflow_id}, status={execution.get('status')}")
+
+            # Load workspace config (with fallback for unregistered workspaces)
+            print(f"   📋 Loading workspace registry...")
+            try:
+                registry = load_registry()
+                workspace = registry["workspaces"][workspace_id]
+                emoji = workspace["emoji"]
+                print(f"   ✓ Workspace config loaded: emoji={emoji}")
+            except (FileNotFoundError, KeyError):
+                # Unregistered workspace - use defaults
+                workspace_path = Path(execution.get("workspace_path", "/unknown"))
+                emoji = "📁"
+                print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={workspace_path.name}")
+
+            # Format message based on status
+            print(f"   ✍️  Formatting execution message...")
+            message = self._format_execution_message(execution, emoji, workflow_name)
+            print(f"   ✓ Message formatted ({len(message)} chars)")
+
+            # Send message with rate limiting and markdown safety (NO BUTTONS)
+            print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
+            await safe_send_message(
+                bot=self.bot,
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode="Markdown"
+            )
+
+            # Send full output as document if > 500 chars (progressive disclosure)
+            status = execution["status"]
+            if status == "success" and execution.get("stdout"):
+                stdout = execution["stdout"].strip()
+                if stdout and len(stdout) > 500:
+                    print(f"   📄 Sending full output as document ({len(stdout)} chars)...")
+
+                    # Extract readable content from JSON output (if applicable)
+                    readable_content = stdout
+                    try:
+                        result_data = json.loads(stdout)
+                        if isinstance(result_data, dict) and 'result' in result_data:
+                            # Extract human-readable result from JSON
+                            readable_content = result_data['result']
+                            print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
+                        else:
+                            print(f"   ⚠️  JSON parsed but no 'result' field, using raw output")
+                    except json.JSONDecodeError:
+                        # Not JSON - use raw output as-is
+                        print(f"   ℹ️  Output is not JSON, using raw content")
+
+                    file_path = f"/tmp/workflow_report_{session_id[:8]}_{workflow_id}.txt"
+                    with open(file_path, 'w') as f:
+                        f.write(readable_content)
+
+                    await self.bot.send_document(
+                        chat_id=self.chat_id,
+                        document=open(file_path, 'rb'),
+                        filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
+                        caption=f"📄 Full workflow output\n\n{workflow_name}"
+                    )
+                    os.remove(file_path)
+                    print(f"   ✓ Document sent and temp file cleaned")
+
+            elif status == "error" and execution.get("stderr"):
+                stderr = execution["stderr"].strip()
+                if stderr and len(stderr) > 500:
+                    print(f"   📄 Sending full error log as document ({len(stderr)} chars)...")
+                    file_path = f"/tmp/workflow_error_{session_id[:8]}_{workflow_id}.txt"
+                    with open(file_path, 'w') as f:
+                        f.write(stderr)
+
+                    await self.bot.send_document(
+                        chat_id=self.chat_id,
+                        document=open(file_path, 'rb'),
+                        filename=f"workflow-error-{workflow_id}-{session_id[:8]}.txt",
+                        caption=f"❌ Full error log\n\n{workflow_name}"
+                    )
+                    os.remove(file_path)
+                    print(f"   ✓ Document sent and temp file cleaned")
+
+            print(f"📤 ✅ Sent execution completion for {workspace_id} ({session_id}): {workflow_name}")
+            update_activity()  # Track activity for idle timeout
+
+        except Exception as e:
+            error_msg = f"❌ Failed to send execution completion"
+            if workspace_id:
+                error_msg += f" for {workspace_id}"
+            if session_id:
+                error_msg += f" ({session_id})"
+            error_msg += f": {type(e).__name__}: {e}"
+            print(error_msg, file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            # Re-raise to let caller handle
+            raise
+
+        finally:
+            # Cleanup consumed execution
+            self._cleanup_execution(execution_file)
+
+    def _read_execution(self, execution_file: Path) -> Dict[str, Any]:
+        """Read and validate WorkflowExecution file."""
+        with execution_file.open() as f:
+            execution = json.load(f)
+
+        # Validate required fields
+        required = ["correlation_id", "workspace_id", "session_id", "workflow_id",
+                   "workflow_name", "status", "exit_code", "duration_seconds", "timestamp"]
+        missing = [f for f in required if f not in execution]
+        if missing:
+            raise ValueError(f"Missing required fields: {missing}")
+
+        return execution
+
+    def _format_execution_message(self, execution: Dict[str, Any], emoji: str, workflow_name: str) -> str:
+        """Format WorkflowExecution data as Telegram message (no buttons)."""
+        status = execution["status"]
+        workspace_id = execution["workspace_id"]
+        session_id = execution["session_id"]
+        duration = execution["duration_seconds"]
+        exit_code = execution["exit_code"]
+
+        # Get workflow metadata
+        metadata = execution.get("metadata", {})
+        workflow_icon = metadata.get("icon", "📋")
+        full_workflow_name = f"{workflow_icon} {workflow_name}"
+
+        # Choose emoji and title based on status
+        if status == "success":
+            status_emoji = "✅"
+            title = "Workflow Completed"
+            status_line = f"**Duration**: {duration}s"
+        elif status == "error":
+            status_emoji = "❌"
+            title = "Workflow Failed"
+            status_line = f"**Duration**: {duration}s | **Exit Code**: {exit_code}"
+        elif status == "timeout":
+            status_emoji = "⏱️"
+            title = "Workflow Timeout"
+            status_line = f"**Duration**: {duration}s (limit reached)"
+        else:
+            status_emoji = "⚠️"
+            title = "Unknown Status"
+            status_line = f"**Status**: {status}"
+
+        message = f"""{emoji} {status_emoji} **{title}**
+
+**Workflow**: {full_workflow_name}
+**Workspace**: `{workspace_id}`
+**Session**: `{session_id}`
+{status_line}
+"""
+
+        # Add stdout for success cases (progressive disclosure)
+        if status == "success" and execution.get("stdout"):
+            stdout = execution["stdout"].strip()
+            if stdout:
+                # Extract readable content from JSON (if applicable)
+                readable_content = stdout
+                try:
+                    result_data = json.loads(stdout)
+                    if isinstance(result_data, dict) and 'result' in result_data:
+                        readable_content = result_data['result']
+                except json.JSONDecodeError:
+                    pass  # Use raw output if not JSON
+
+                if len(readable_content) > 500:
+                    # Indicate full output will be sent as attachment
+                    message += f"\n**Result**: Workflow completed\n\n"
+                    message += f"[Full report will be attached below ⬇️]"
+                else:
+                    # Short output - include inline
+                    # Get first meaningful line as summary
+                    lines = [l.strip() for l in readable_content.split('\n') if l.strip()]
+                    summary = lines[0] if lines else "Completed"
+                    message += f"\n**Summary**: {summary}"
+
+        # Add stderr for error cases
+        if status == "error" and execution.get("stderr"):
+            stderr = execution["stderr"].strip()
+            if stderr:
+                if len(stderr) > 500:
+                    # Indicate full error will be sent as attachment
+                    message += f"\n\n[Full error log will be attached below ⬇️]"
+                else:
+                    # Short error - include inline
+                    error_lines = stderr.split('\n')
+                    error_preview = error_lines[0] if error_lines else stderr
+                    message += f"\n**Error**: {error_preview[:200]}"
+
+        return message
+
+    def _cleanup_execution(self, execution_file: Path) -> None:
+        """Delete consumed execution file."""
+        try:
+            execution_file.unlink()
+            print(f"🗑️  Consumed: {execution_file.name}")
         except FileNotFoundError:
             pass
 
@@ -1271,8 +1510,33 @@ async def process_pending_completions(app: Application) -> None:
             traceback.print_exc(file=sys.stderr)
 
 
+async def process_pending_executions(app: Application) -> None:
+    """Process all pending execution files on startup (no watching)."""
+    handler = WorkflowExecutionHandler(app.bot, int(CHAT_ID))
+
+    # Scan execution directory once
+    if not EXECUTIONS_DIR.exists():
+        print("📂 No execution directory found")
+        return
+
+    execution_files = sorted(EXECUTIONS_DIR.glob("execution_*.json"))
+    if not execution_files:
+        print("📂 No pending executions")
+        return
+
+    print(f"📬 Found {len(execution_files)} pending execution(s)")
+    for execution_file in execution_files:
+        try:
+            print(f"   Processing: {execution_file.name}")
+            await handler.send_execution_completion(execution_file)
+        except Exception as e:
+            print(f"   ❌ Failed to process {execution_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+
+
 async def periodic_file_scanner(app: Application) -> None:
-    """Periodically scan for new notification, completion, and summary files (dual-mode)."""
+    """Periodically scan for new notification, completion, summary, and execution files (dual-mode)."""
     global shutdown_requested
 
     print(f"📂 Periodic file scanner started (every 5s)")
@@ -1280,6 +1544,7 @@ async def periodic_file_scanner(app: Application) -> None:
     notification_handler = NotificationHandler(app.bot, int(CHAT_ID))
     completion_handler = CompletionHandler(app.bot, int(CHAT_ID))
     summary_handler = SummaryHandler(app.bot, int(CHAT_ID))  # Phase 3 - v4.0.0
+    execution_handler = WorkflowExecutionHandler(app.bot, int(CHAT_ID))  # Phase 4 - WorkflowExecution completion
 
     while not shutdown_requested:
         await asyncio.sleep(5)  # Scan every 5 seconds
@@ -1304,7 +1569,7 @@ async def periodic_file_scanner(app: Application) -> None:
                 except Exception as e:
                     print(f"❌ Failed to process {notification_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
 
-        # Scan for new completions
+        # Scan for new completions (v3 backward compat)
         if COMPLETION_DIR.exists():
             completion_files = sorted(COMPLETION_DIR.glob("completion_*.json"))
             for completion_file in completion_files:
@@ -1313,6 +1578,16 @@ async def periodic_file_scanner(app: Application) -> None:
                     await completion_handler.send_completion(completion_file)
                 except Exception as e:
                     print(f"❌ Failed to process {completion_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+
+        # Phase 4 - v4.0.0: Scan for workflow execution completions
+        if EXECUTIONS_DIR.exists():
+            execution_files = sorted(EXECUTIONS_DIR.glob("execution_*.json"))
+            for execution_file in execution_files:
+                try:
+                    print(f"📬 Found execution: {execution_file.name}")
+                    await execution_handler.send_execution_completion(execution_file)
+                except Exception as e:
+                    print(f"❌ Failed to process {execution_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 async def progress_poller(app: Application) -> None:
@@ -1537,6 +1812,7 @@ async def main() -> int:
         print("\n📂 Processing pending files...")
         await process_pending_notifications(app)
         await process_pending_completions(app)
+        await process_pending_executions(app)
         print("✅ Pending files processed")
 
         # Start background tasks
