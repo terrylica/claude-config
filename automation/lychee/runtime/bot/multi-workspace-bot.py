@@ -727,21 +727,10 @@ class WorkflowExecutionHandler:
                     print(f"   🗑️  Progress tracking cleaned up (memory only)")
 
             else:
-                # Fallback: no active progress tracking (backwards compatibility)
-                print(f"   ℹ️  No progress tracking found, using separate messages")
-
-                # Format message based on status
-                print(f"   ✍️  Formatting execution message...")
-                message = self._format_execution_message(execution, emoji, workflow_name)
-                print(f"   ✓ Message formatted ({len(message)} chars)")
-
-                # Send message (AIORateLimiter handles rate limiting automatically)
-                print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
-                await self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=message,
-                    parse_mode="Markdown"
-                )
+                # No active progress tracking - this shouldn't happen in normal operation
+                print(f"   ⚠️  WARNING: No progress tracking found for {progress_key}")
+                print(f"   Execution completion will not be sent (single-message mode requires tracking)")
+                print(f"   This may indicate the workflow selection didn't initialize tracking properly")
 
             print(f"📤 ✅ Sent execution completion for {workspace_id} ({session_id}): {workflow_name}")
             update_activity()  # Track activity for idle timeout
@@ -913,6 +902,9 @@ class SummaryHandler:
                 # Don't send message if no workflows available
                 return
 
+            # Always compute workspace hash for tracking consistency
+            workspace_hash = compute_workspace_hash(workspace_path)
+
             # Load workspace config (with fallback for unregistered workspaces)
             try:
                 workspace_id = get_workspace_id_from_path(workspace_path)
@@ -921,8 +913,8 @@ class SummaryHandler:
                 emoji = workspace["emoji"]
                 ws_name = workspace["name"]
             except (ValueError, FileNotFoundError, KeyError):
-                # Unregistered workspace - use defaults
-                workspace_id = summary.get("workspace_id", "unknown")
+                # Unregistered workspace - use hash for tracking
+                workspace_id = workspace_hash
                 emoji = "📁"
                 ws_name = workspace_path.name
 
@@ -1798,12 +1790,11 @@ async def progress_poller(app: Application) -> None:
                 )
                 print(f"   ✅ Message updated successfully")
 
-                # Clean up if completed
+                # Clean up progress file (but keep tracking for execution completion)
                 if stage == "completed":
-                    print(f"   🗑️  Removing completed progress: {progress_file.name}")
+                    print(f"   🗑️  Removing completed progress file: {progress_file.name}")
                     progress_file.unlink()
-                    del active_progress_updates[progress_key]
-                    print(f"   ✅ Progress tracking cleaned up")
+                    print(f"   ℹ️  Keeping tracking active for execution completion handler")
 
             except KeyError as e:
                 print(f"❌ Missing field in {progress_file.name}: {e}", file=sys.stderr)
