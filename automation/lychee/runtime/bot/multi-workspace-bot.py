@@ -750,21 +750,15 @@ class WorkflowExecutionHandler:
                             summary = summary[:97] + "..."
 
                 # Build git status line
-                git_status_parts = []
-                if git_modified > 0:
-                    git_status_parts.append(f"{git_modified} modified")
-                if git_staged > 0:
-                    git_status_parts.append(f"{git_staged} staged")
-                if git_untracked > 0:
-                    git_status_parts.append(f"{git_untracked} untracked")
-                git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+                # Compact git status (always show all counters)
+                git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
                 final_caption = (
                     f"{status_emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
-                    f"**Git**: {git_status_line}\n\n"
+                    f"**↯**: {git_status_line}\n\n"
                     f"**Status**: {status}\n"
                     f"**Duration**: {duration}s\n"
                     f"**Output**: {summary}"
@@ -810,9 +804,17 @@ class WorkflowExecutionHandler:
                 final_file.unlink()  # Clean up
                 print(f"   ✅ Document replaced successfully")
 
-                # Cleanup tracking
+                # Cleanup tracking (memory + file)
                 del active_progress_updates[progress_key]
-                print(f"   🗑️  Progress tracking cleaned up")
+
+                # Remove tracking file
+                tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
+                tracking_file = tracking_dir / f"{workspace_id}_{session_id}_{workflow_id}_tracking.json"
+                if tracking_file.exists():
+                    tracking_file.unlink()
+                    print(f"   🗑️  Progress tracking cleaned up (memory + file)")
+                else:
+                    print(f"   🗑️  Progress tracking cleaned up (memory only)")
 
             else:
                 # Fallback: no active progress tracking (backwards compatibility)
@@ -1109,18 +1111,13 @@ class SummaryHandler:
             if len(last_response) > 100:
                 last_response = last_response[:97] + "..."
 
-            # Build compact git status line
-            git_parts = []
+            # Build compact git status line (always show all counters)
             modified = git_status.get('modified_files', 0)
-            untracked = git_status.get('untracked_files', 0)
             staged = git_status.get('staged_files', 0)
-            if modified > 0:
-                git_parts.append(f"M:{modified}")
-            if staged > 0:
-                git_parts.append(f"S:{staged}")
-            if untracked > 0:
-                git_parts.append(f"U:{untracked}")
-            git_compact = " ".join(git_parts) if git_parts else "clean"
+            untracked = git_status.get('untracked_files', 0)
+
+            # Show all counters even when zero for clarity
+            git_compact = f"M:{modified} S:{staged} U:{untracked}"
 
             # Build message with user prompt as first line if available
             prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
@@ -1129,7 +1126,7 @@ class SummaryHandler:
 
 `{repo_display}` | `{working_dir}`
 `{session_id}` ({duration}s)
-**Git**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
+**↯**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
 
 **Lychee**: {lychee_status.get('details', 'Not run')}
 
@@ -1521,7 +1518,7 @@ async def handle_workflow_selection(
             f"**Repository**: `{repo_display}`\n"
             f"**Directory**: `{working_dir}`\n"
             f"**Branch**: `{git_branch}`\n"
-            f"**Git**: {git_status_line}\n\n"
+            f"**↯**: {git_status_line}\n\n"
             f"**Stage**: starting\n"
             f"**Progress**: 0%\n"
             f"**Status**: Starting..."
@@ -1574,7 +1571,7 @@ async def handle_workflow_selection(
             f"**Repository**: `{repo_display}`\n"
             f"**Directory**: `{working_dir}`\n"
             f"**Branch**: `{git_branch}`\n"
-            f"**Git**: {git_status_line}\n\n"
+            f"**↯**: {git_status_line}\n\n"
             f"**Stage**: starting\n"
             f"**Progress**: 0%\n"
             f"**Status**: Processing..."
@@ -1610,7 +1607,7 @@ async def handle_workflow_selection(
     repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
     working_dir = summary_data.get("working_directory", ".")
 
-    active_progress_updates[progress_key] = {
+    tracking_data = {
         "message_id": message_id,
         "workspace_id": workspace_id,
         "repository_root": repository_root,
@@ -1622,6 +1619,14 @@ async def handle_workflow_selection(
         "workflow_name": workflow_name if workflow_registry and workflow_id in workflow_registry["workflows"] else workflow_id,
         "session_id": session_id
     }
+
+    active_progress_updates[progress_key] = tracking_data
+
+    # Persist tracking data to survive bot restarts (watchexec)
+    tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
+    tracking_dir.mkdir(parents=True, exist_ok=True)
+    tracking_file = tracking_dir / f"{workspace_id}_{session_id}_{workflow_id}_tracking.json"
+    tracking_file.write_text(json.dumps(tracking_data, indent=2))
     print(f"   📌 Tracking progress updates (message_id={message_id}, branch={git_branch})")
 
 
@@ -1967,21 +1972,15 @@ async def progress_poller(app: Application) -> None:
                 emoji = stage_emoji.get(stage, "📊")
 
                 # Build git status line
-                git_status_parts = []
-                if git_modified > 0:
-                    git_status_parts.append(f"{git_modified} modified")
-                if git_staged > 0:
-                    git_status_parts.append(f"{git_staged} staged")
-                if git_untracked > 0:
-                    git_status_parts.append(f"{git_untracked} untracked")
-                git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+                # Compact git status (always show all counters)
+                git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
                 progress_caption = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
-                    f"**Git**: {git_status_line}\n\n"
+                    f"**↯**: {git_status_line}\n\n"
                     f"**Stage**: {stage}\n"
                     f"**Progress**: {progress_percent}%\n"
                     f"**Status**: {message}"
@@ -2069,6 +2068,33 @@ async def main() -> int:
         print(f"❌ Failed to load workflow registry: {type(e).__name__}: {e}", file=sys.stderr)
         print(f"   Registry path: {WORKFLOWS_REGISTRY}", file=sys.stderr)
         return 1
+
+    # Phase 4 - v4.1.0: Restore progress tracking state (survives watchexec restarts)
+    print("\n🔄 Restoring progress tracking state...")
+    tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
+    if tracking_dir.exists():
+        restored_count = 0
+        for tracking_file in tracking_dir.glob("*_tracking.json"):
+            try:
+                tracking_data = json.loads(tracking_file.read_text())
+                # Get IDs from tracking data (more reliable than filename parsing)
+                workspace_id = tracking_data["workspace_id"]
+                session_id = tracking_data["session_id"]
+                # Extract workflow_id from filename: {workspace}_{session}_{workflow}_tracking.json
+                # Session has dashes, so we need to extract carefully
+                filename_parts = tracking_file.stem.replace("_tracking", "").split("_")
+                # workspace is 8 chars, session is 36 chars with dashes (but dashes become parts)
+                # Format: 81e622b5_1986f816-c78c-4bd3-a7c4-1e993c8af65d_workflow-id
+                workflow_id = "_".join(filename_parts[6:]) if len(filename_parts) > 6 else filename_parts[-1]
+
+                progress_key = (workspace_id, session_id, workflow_id)
+                active_progress_updates[progress_key] = tracking_data
+                restored_count += 1
+            except Exception as e:
+                print(f"   ⚠️  Failed to restore {tracking_file.name}: {e}")
+        print(f"   ✅ Restored {restored_count} tracked workflow(s)")
+    else:
+        print(f"   ℹ️  No tracking state to restore")
 
     try:
         # Create PID file (fails if another instance running)
