@@ -113,6 +113,10 @@ modified_files=$(git status --porcelain 2>/dev/null | { grep -E "^( M|M )" || tr
 untracked_files=$(git status --porcelain 2>/dev/null | { grep "^??" || true; } | wc -l | tr -d ' \n')
 staged_files=$(git status --porcelain 2>/dev/null | { grep -E "^(M |A |D |R |C )" || true; } | wc -l | tr -d ' \n')
 
+# Get git porcelain output (up to 10 lines) for Telegram display
+git_porcelain_raw=$(git status --porcelain 2>/dev/null | head -10 || echo "")
+git_porcelain_json=$(echo "$git_porcelain_raw" | jq -R -s 'split("\n") | map(select(length > 0))' 2>/dev/null || echo "[]")
+
 # Get ahead/behind commits (requires remote tracking branch)
 ahead_commits=0
 behind_commits=0
@@ -237,7 +241,8 @@ write_session_summary() {
     "untracked_files": $untracked_files,
     "staged_files": $staged_files,
     "ahead_commits": $ahead_commits,
-    "behind_commits": $behind_commits
+    "behind_commits": $behind_commits,
+    "porcelain": $git_porcelain_json
   },
   "lychee_status": {
     "ran": $lychee_ran,

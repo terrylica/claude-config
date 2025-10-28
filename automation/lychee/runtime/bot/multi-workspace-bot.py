@@ -962,6 +962,13 @@ class SummaryHandler:
             git_status = summary.get("git_status", {})
             duration = summary.get("duration_seconds", 0)
 
+            # Build git porcelain display (up to 10 lines)
+            git_porcelain_lines = git_status.get('porcelain', [])
+            git_porcelain_display = ""
+            if git_porcelain_lines:
+                porcelain_text = "\n".join(git_porcelain_lines)
+                git_porcelain_display = f"\n\n```\n{porcelain_text}\n```"
+
             message = f"""{emoji} **Session Summary** - {ws_name}
 
 **Workspace**: `{workspace_path}`
@@ -971,7 +978,7 @@ class SummaryHandler:
 **Git Status**:
 • Branch: `{git_status.get('branch', 'unknown')}`
 • Modified: {git_status.get('modified_files', 0)} files
-• Untracked: {git_status.get('untracked_files', 0)} files
+• Untracked: {git_status.get('untracked_files', 0)} files{git_porcelain_display}
 
 **Lychee**: {lychee_status.get('details', 'Not run')}
 
