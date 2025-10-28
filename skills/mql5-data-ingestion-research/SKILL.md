@@ -52,6 +52,13 @@ This skill activates when you discuss:
 - CSV format for `CustomTicksReplace()` or `CustomRatesUpdate()`
 - Tick data validation before MT5 import
 
+**Cross-References**:
+
+- Official TICK documentation: `/Users/terryli/eon/mql5/mql5_articles/tick_data/official_docs/`
+  - `copy_ticks_from.md`, `copy_ticks_range.md`, `symbol_info_tick.md`
+- Research documentation: `/Users/terryli/eon/mql5/docs/tick_research/`
+  - Complete TICK content inventory, structure comparison, HTML cleanup summary
+
 **Does NOT activate for**:
 
 - Live trading operations (use validated operational skills)
@@ -256,7 +263,9 @@ mql5-data-ingestion/
 
 ## Related Skills
 
-- `mql5-article-extractor`: Extract MQL5 community code examples
+- `mql5-article-extractor`: Extract MQL5 community articles AND official Python MT5 API documentation
+  - Now includes TICK data official docs and research collection
+  - Supports both user articles and official documentation extraction
 - `python/api-documentation`: Pydantic model documentation (for exness-data-preprocess)
 
 ---

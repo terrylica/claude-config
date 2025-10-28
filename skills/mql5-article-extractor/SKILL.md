@@ -1,6 +1,6 @@
 ---
 name: mql5-article-extractor
-description: Extract trading strategy articles from mql5.com ONLY. Use when user mentions MQL5, MetaTrader, trading articles, algorithmic trading content from mql5.com. Handles article URLs, user IDs, batch extraction. NOT for other websites like Yahoo, Google, etc.
+description: Extract trading strategy articles AND official documentation from mql5.com ONLY. Handles user articles, official Python API docs, TICK data research. Use when user mentions MQL5, MetaTrader, trading articles, Python MT5 API, algorithmic trading content. NOT for other websites.
 allowed-tools: Read, Bash, Grep, Glob
 ---
 
@@ -97,6 +97,73 @@ If user says "extract mql5 articles" without specifics, prompt for:
 
 **Discovers**: All published articles for that user
 
+## Official Documentation Extraction
+
+### Mode 4: Official Docs (Single Page)
+
+**When**: User wants official MQL5/Python MetaTrader5 documentation (not user articles)
+
+**Scripts Location**: `/scripts/official_docs_extractor.py`
+
+**Command**:
+
+```bash
+cd /Users/terryli/eon/mql5
+curl -s "https://www.mql5.com/en/docs/python_metatrader5/mt5copyticksfrom_py" > page.html
+.venv/bin/python scripts/official_docs_extractor.py page.html "URL"
+```
+
+**Output**: Markdown file with source URL, HTML auto-deleted
+
+### Mode 5: Batch Official Docs
+
+**When**: User wants all Python MetaTrader5 API documentation
+
+**Scripts Location**: `/scripts/extract_all_python_docs.sh`
+
+**Command**:
+
+```bash
+cd /Users/terryli/eon/mql5
+./scripts/extract_all_python_docs.sh
+```
+
+**Result**: 32 official API function docs extracted
+
+### Key Differences from User Articles
+
+- Different HTML structure (div.docsContainer vs div.content)
+- Inline tables and code examples preserved
+- No images (documentation only)
+- Simpler file naming (function_name.md)
+- Source URLs embedded in markdown
+- HTML files auto-deleted after conversion
+
+## Data Sources
+
+### User Collections
+
+- **Primary Source**: https://www.mql5.com/en/users/29210372/publications
+- **Author**: Allan Munene Mutiiria (77 technical articles)
+- **Content Type**: MQL5 trading strategy implementations
+
+### Topic Collections
+
+#### TICK Data Research (`mql5_articles/tick_data/`)
+
+- **Official Docs**: 3 Python MetaTrader5 TICK functions
+  - `copy_ticks_from`, `copy_ticks_range`, `symbol_info_tick`
+- **User Articles**: 9 articles on TICK data handling, storage, and analysis
+- **Research Documentation**: `/docs/tick_research/` (4 files)
+
+#### Python Integration (`mql5_articles/python_integration/`)
+
+- **Official Docs**: 32 complete Python MetaTrader5 API functions
+  - Connection, account info, symbol management, historical data, orders, positions
+- **User Articles**: 15 implementation guides
+  - ML/AI integration, trading automation, data analysis, socket communication
+- **Research Documentation**: `/docs/python_research/` (1 file)
+
 ## Input Validation Workflow
 
 When user makes vague request:
@@ -169,16 +236,39 @@ All extractions go to:
 
 ```
 mql5_articles/
-├── [user_id]/              # Numeric ID or username
+├── 29210372/                 # User collections (numeric ID or username)
 │   └── article_[ID]/
 │       ├── article_[ID].md
 │       ├── metadata.json
-│       ├── images_manifest.json
 │       └── images/
+├── tick_data/                # Topic collections
+│   ├── official_docs/        # 3 Python MT5 TICK functions
+│   │   ├── copy_ticks_from.md
+│   │   ├── copy_ticks_range.md
+│   │   └── symbol_info_tick.md
+│   └── user_articles/        # 9 articles by author
+│       ├── artmedia70/article_[ID]/
+│       ├── lazymesh/article_[ID]/
+│       └── ...
+├── python_integration/       # Topic collections
+│   ├── official_docs/        # 32 MT5 Python API functions
+│   │   ├── mt5initialize_py.md
+│   │   ├── mt5copyticksfrom_py.md
+│   │   └── ...
+│   └── user_articles/        # 15 implementation articles
+│       ├── dmitrievsky/article_[ID]/
+│       ├── koshtenko/article_[ID]/
+│       └── ...
 ├── extraction_summary.json
-└── logs/
-    └── extraction.log
+└── extraction.log
 ```
+
+**Content Organization:**
+
+- **User Collections** (e.g., `29210372/`): Articles by specific authors
+- **Topic Collections** (e.g., `tick_data/`, `python_integration/`): Organized by research area
+  - `official_docs/`: Official MQL5 documentation pages
+  - `user_articles/`: Community-contributed articles by author
 
 ## Quality Verification
 
