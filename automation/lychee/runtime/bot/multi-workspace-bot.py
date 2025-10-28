@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "python-telegram-bot>=21.0",
+#     "python-telegram-bot[rate-limiter]>=21.0",
 #     "jsonschema>=4.0.0",
 # ]
 # ///
@@ -37,11 +37,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
-
-# Import telegram helpers for rate limiting and markdown safety
-sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
-from telegram_helpers import safe_edit_message, safe_send_message, safe_edit_message_by_id
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, AIORateLimiter
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -390,9 +386,8 @@ Choose action:
                 ]
             ]
 
-            # Send message with rate limiting and markdown safety
-            await safe_send_message(
-                bot=self.bot,
+            # Send message (AIORateLimiter handles rate limiting automatically)
+            await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -489,8 +484,7 @@ class CompletionHandler:
 
             # Send message with rate limiting and markdown safety
             print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
-            await safe_send_message(
-                bot=self.bot,
+            await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode="Markdown"
@@ -825,10 +819,9 @@ class WorkflowExecutionHandler:
                 message = self._format_execution_message(execution, emoji, workflow_name)
                 print(f"   ✓ Message formatted ({len(message)} chars)")
 
-                # Send message with rate limiting and markdown safety (NO BUTTONS)
+                # Send message (AIORateLimiter handles rate limiting automatically)
                 print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
-                await safe_send_message(
-                    bot=self.bot,
+                await self.bot.send_message(
                     chat_id=self.chat_id,
                     text=message,
                     parse_mode="Markdown"
@@ -1142,9 +1135,8 @@ class SummaryHandler:
                 correlation_id
             )
 
-            # Send message with rate limiting and markdown safety
-            await safe_send_message(
-                bot=self.bot,
+            # Send message (AIORateLimiter handles rate limiting automatically)
+            await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1395,8 +1387,7 @@ async def handle_workflow_selection(
     if action == "custom_prompt":
         # TODO Phase 4: Implement custom prompt handler
         # For now, acknowledge and return
-        await safe_edit_message(
-            query=query,
+        await query.edit_message_text(
             text="✏️ Custom Prompt\n\n"
                  "Custom workflow prompts will be available in Phase 4.\n"
                  "For now, please select a preset workflow.",
@@ -1648,7 +1639,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         ctx = resolve_callback_data(query.data)
     except ValueError as e:
-        await safe_edit_message(query=query, text=f"❌ {e}")
+        await query.edit_message_text(text=f"❌ {e}", parse_mode="Markdown")
         return
 
     workspace_id = ctx["workspace_id"]
@@ -1733,8 +1724,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Unregistered workspace - use default emoji
         emoji = "📁"
 
-    await safe_edit_message(
-        query=query,
+    await query.edit_message_text(
         text=f"{emoji} **Action Received**: {action}\n\n"
              f"Workspace: `{workspace_id}`\n"
              f"Session: `{session_id}`\n\n"
@@ -2104,9 +2094,21 @@ async def main() -> int:
         last_activity_time = asyncio.get_event_loop().time()
         print(f"⏱️  Activity timer initialized")
 
-        # Initialize Telegram bot
+        # Initialize Telegram bot with AIORateLimiter
         print("\n📱 Initializing Telegram bot...")
-        app = Application.builder().token(BOT_TOKEN).build()
+        rate_limiter = AIORateLimiter(
+            overall_max_rate=30,    # 30 requests/sec overall (Telegram limit)
+            overall_time_period=1,  # 1 second window
+            group_max_rate=20,      # 20 requests/min per group (Telegram limit)
+            group_time_period=60,   # 60 second window
+            max_retries=3           # Retry 3 times on RetryAfter
+        )
+        app = (
+            Application.builder()
+            .token(BOT_TOKEN)
+            .rate_limiter(rate_limiter)
+            .build()
+        )
         app.add_handler(CallbackQueryHandler(handle_callback))
 
         await app.initialize()
