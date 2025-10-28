@@ -838,6 +838,33 @@ class WorkflowOrchestrator:
             message=f"Starting workflow: {workflow_name}"
         )
 
+        # Create state file to prevent feedback loop (headless session won't trigger new workflow menu)
+        state_file_created = False
+        try:
+            AUTOFIX_STATE_FILE.write_text(json.dumps({
+                "session_id": self.session_id,
+                "workspace_path": str(workspace_path),
+                "workflow_id": workflow_id,
+                "workflow_name": workflow_name,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "orchestrator_pid": os.getpid(),
+                "correlation_id": self.correlation_id
+            }, indent=2))
+            state_file_created = True
+            print(f"   📝 Created state file to prevent feedback loop: {AUTOFIX_STATE_FILE}")
+
+            # Log state file created
+            log_event(
+                self.correlation_id,
+                self.workspace_hash,
+                self.session_id,
+                "orchestrator",
+                "state_file.created",
+                {"state_file": str(AUTOFIX_STATE_FILE), "workflow_id": workflow_id}
+            )
+        except Exception as e:
+            print(f"   ⚠️  Failed to create state file: {e}", file=sys.stderr)
+
         # Render Jinja2 template
         try:
             prompt = render_workflow_prompt(workflow, context)
@@ -958,6 +985,17 @@ class WorkflowOrchestrator:
             stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
             exit_code = process.returncode
 
+            # Extract headless session ID from JSON output
+            headless_session_id = None
+            try:
+                if stdout_text:
+                    result_json = json.loads(stdout_text)
+                    headless_session_id = result_json.get("session_id")
+                    if headless_session_id:
+                        print(f"   📋 Headless session ID: {headless_session_id}")
+            except json.JSONDecodeError:
+                print(f"   ⚠️  Could not parse JSON output to extract headless session ID")
+
             print(f"   ✓ Process completed")
             print(f"   📊 Exit code: {exit_code}")
             print(f"   📊 Stdout length: {len(stdout_text)} chars")
@@ -994,7 +1032,8 @@ class WorkflowOrchestrator:
                 stdout=stdout_text,
                 stderr=stderr_text,
                 duration=duration,
-                workflow_metadata=workflow
+                workflow_metadata=workflow,
+                headless_session_id=headless_session_id
             )
 
             # Log workflow completed
@@ -1023,6 +1062,24 @@ class WorkflowOrchestrator:
                 message=f"Workflow completed: {completion_status} (exit {exit_code})"
             )
 
+            # Remove state file (allow future workflows to trigger)
+            if state_file_created and AUTOFIX_STATE_FILE.exists():
+                try:
+                    AUTOFIX_STATE_FILE.unlink()
+                    print(f"   🗑️  Removed state file: {AUTOFIX_STATE_FILE}")
+
+                    # Log state file removed
+                    log_event(
+                        self.correlation_id,
+                        self.workspace_hash,
+                        self.session_id,
+                        "orchestrator",
+                        "state_file.removed",
+                        {"state_file": str(AUTOFIX_STATE_FILE), "workflow_id": workflow_id}
+                    )
+                except Exception as e:
+                    print(f"   ⚠️  Failed to remove state file: {e}", file=sys.stderr)
+
     async def _emit_execution_result(
         self,
         workspace_path: Path,
@@ -1033,7 +1090,8 @@ class WorkflowOrchestrator:
         stdout: str,
         stderr: str,
         duration: float,
-        workflow_metadata: Dict[str, Any]
+        workflow_metadata: Dict[str, Any],
+        headless_session_id: Optional[str] = None
     ) -> None:
         """
         Emit WorkflowExecution result file.
@@ -1048,6 +1106,7 @@ class WorkflowOrchestrator:
             stderr: Standard error
             duration: Execution duration in seconds
             workflow_metadata: Workflow manifest data
+            headless_session_id: Session ID from headless Claude CLI execution
 
         Raises:
             All errors propagate (fail-fast)
@@ -1063,6 +1122,7 @@ class WorkflowOrchestrator:
             "workspace_path": str(workspace_path),
             "workspace_id": self.workspace_hash,
             "session_id": self.session_id,
+            "headless_session_id": headless_session_id,
             "workflow_id": workflow_id,
             "workflow_name": workflow_name,
             "status": status,

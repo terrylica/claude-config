@@ -693,12 +693,20 @@ class WorkflowExecutionHandler:
                 # Compact git status (always show all counters)
                 git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
+                # Build session info (show both original + headless)
+                headless_session_id = execution.get("headless_session_id")
+                if headless_session_id:
+                    session_info = f"**Session**: `{session_id}`\n**Headless**: `{headless_session_id}`"
+                else:
+                    session_info = f"**Session**: `{session_id}`"
+
                 final_caption = (
                     f"{status_emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**↯**: {git_status_line}\n\n"
+                    f"{session_info}\n"
                     f"**Status**: {status}\n"
                     f"**Duration**: {duration}s\n"
                     f"**Output**: {summary}"
@@ -931,7 +939,11 @@ class SummaryHandler:
                 "git_status": git_status,
                 "lychee_status": lychee_status,
                 "workspace_path": str(workspace_path),
-                "duration_seconds": duration
+                "duration_seconds": duration,
+                "repository_root": repository_root,
+                "working_directory": working_dir,
+                "last_user_prompt": user_prompt,
+                "last_response": last_response
             }
             print(f"   📦 Cached summary for {cache_key}")
 
@@ -939,8 +951,13 @@ class SummaryHandler:
             git_porcelain_lines = git_status.get('porcelain', [])
             git_porcelain_display = ""
             if git_porcelain_lines:
-                porcelain_text = "\n".join(git_porcelain_lines)
-                git_porcelain_display = f"\n\n```\n{porcelain_text}\n```"
+                # Limit to first 10 lines to avoid huge messages
+                display_lines = git_porcelain_lines[:10]
+                porcelain_text = "\n".join(display_lines)
+                if len(git_porcelain_lines) > 10:
+                    porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
+                # Use plain text instead of code block to avoid markdown parsing issues
+                git_porcelain_display = f"\n{porcelain_text}"
 
             # Extract repository root and working directory (industry standard distinction)
             repository_root = summary.get("repository_root", str(workspace_path))
@@ -955,12 +972,16 @@ class SummaryHandler:
                 # Truncate if too long
                 if len(user_prompt) > 100:
                     user_prompt = user_prompt[:97] + "..."
+                # Escape markdown
+                user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
 
             # Use last Claude CLI response as title (industry standard: show what was just done)
             last_response = summary.get("last_response", "Session completed")
             # Truncate if too long, keep first line
             if len(last_response) > 100:
                 last_response = last_response[:97] + "..."
+            # Escape markdown
+            last_response = last_response.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
 
             # Build compact git status line (always show all counters)
             modified = git_status.get('modified_files', 0)
@@ -969,6 +990,10 @@ class SummaryHandler:
 
             # Show all counters even when zero for clarity
             git_compact = f"M:{modified} S:{staged} U:{untracked}"
+
+            # Escape lychee details
+            lychee_details = lychee_status.get('details', 'Not run')
+            lychee_details = lychee_details.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
 
             # Build message with user prompt as first line if available
             prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
@@ -979,7 +1004,7 @@ class SummaryHandler:
 `{session_id}` ({duration}s)
 **↯**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
 
-**Lychee**: {lychee_status.get('details', 'Not run')}
+**Lychee**: {lychee_details}
 
 **Available Workflows** ({len(available_workflows)}):
 """
@@ -1311,28 +1336,68 @@ async def handle_workflow_selection(
         workflow_name = f"{workflow['icon']} {workflow['name']}"
         estimated_duration = workflow.get("estimated_duration", "unknown")
 
-        # Extract git context for initial message
-        git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
-        git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
-        git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
-        git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
+        # Extract session context from cached summary
+        git_status = summary_data.get("git_status", {})
+        lychee_status = summary_data.get("lychee_status", {})
+
+        git_branch = git_status.get("branch", "unknown")
+        git_modified = git_status.get("modified_files", 0)
+        git_untracked = git_status.get("untracked_files", 0)
+        git_staged = git_status.get("staged_files", 0)
+        git_porcelain_lines = git_status.get('porcelain', [])
 
         # Extract repository root and working directory (industry standard)
         repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
         working_dir = summary_data.get("working_directory", ".")
         repo_display = str(repository_root).replace(str(Path.home()), "~")
 
+        # Extract user prompt and last response
+        user_prompt = summary_data.get("last_user_prompt", "")
+        if user_prompt and len(user_prompt) > 100:
+            user_prompt = user_prompt[:97] + "..."
+
+        last_response = summary_data.get("last_response", "Session completed")
+        if len(last_response) > 100:
+            last_response = last_response[:97] + "..."
+
+        duration = summary_data.get("duration_seconds", 0)
+
+        # Build git porcelain display (truncate to avoid huge messages)
+        git_porcelain_display = ""
+        if git_porcelain_lines:
+            # Limit to first 10 lines to avoid huge messages
+            display_lines = git_porcelain_lines[:10]
+            porcelain_text = "\n".join(display_lines)
+            if len(git_porcelain_lines) > 10:
+                porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
+            # Use plain text instead of code block to avoid markdown parsing issues
+            git_porcelain_display = f"\n{porcelain_text}"
+
         # Compact git status (always show all counters)
-        git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
+        git_compact = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
+
+        # Escape markdown in user_prompt and last_response
+        if user_prompt:
+            user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+        if last_response:
+            last_response = last_response.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
+        # Build message with full context
+        prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
+
+        # Escape lychee details
+        lychee_details = lychee_status.get('details', 'Not run')
+        if lychee_details:
+            lychee_details = lychee_details.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
 
         initial_message = (
-            f"⏳ **Workflow: {workflow_name}**\n\n"
-            f"**Repository**: `{repo_display}`\n"
-            f"**Directory**: `{working_dir}`\n"
-            f"**Branch**: `{git_branch}`\n"
-            f"**↯**: {git_status_line}\n\n"
-            f"**Stage**: starting\n"
-            f"**Progress**: 0%\n"
+            f"{prompt_line}{emoji} **{last_response}**\n\n"
+            f"`{repo_display}` | `{working_dir}`\n"
+            f"`{session_id}` ({duration}s)\n"
+            f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
+            f"**Lychee**: {lychee_details}\n\n"
+            f"⏳ **Workflow: {workflow_name}**\n"
+            f"**Stage**: starting | **Progress**: 0%\n"
             f"**Status**: Starting..."
         )
 
@@ -1349,30 +1414,70 @@ async def handle_workflow_selection(
         message_id = sent_message.message_id
     else:
         # Fallback for unknown workflow
-        # Extract git context for initial message
-        git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
-        git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
-        git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
-        git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
+        # Extract session context from cached summary
+        git_status = summary_data.get("git_status", {})
+        lychee_status = summary_data.get("lychee_status", {})
+
+        git_branch = git_status.get("branch", "unknown")
+        git_modified = git_status.get("modified_files", 0)
+        git_untracked = git_status.get("untracked_files", 0)
+        git_staged = git_status.get("staged_files", 0)
+        git_porcelain_lines = git_status.get('porcelain', [])
 
         # Extract repository root and working directory (industry standard)
         repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
         working_dir = summary_data.get("working_directory", ".")
         repo_display = str(repository_root).replace(str(Path.home()), "~")
 
+        # Extract user prompt and last response
+        user_prompt = summary_data.get("last_user_prompt", "")
+        if user_prompt and len(user_prompt) > 100:
+            user_prompt = user_prompt[:97] + "..."
+
+        last_response = summary_data.get("last_response", "Session completed")
+        if len(last_response) > 100:
+            last_response = last_response[:97] + "..."
+
+        duration = summary_data.get("duration_seconds", 0)
+
+        # Build git porcelain display (truncate to avoid huge messages)
+        git_porcelain_display = ""
+        if git_porcelain_lines:
+            # Limit to first 10 lines to avoid huge messages
+            display_lines = git_porcelain_lines[:10]
+            porcelain_text = "\n".join(display_lines)
+            if len(git_porcelain_lines) > 10:
+                porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
+            # Use plain text instead of code block to avoid markdown parsing issues
+            git_porcelain_display = f"\n{porcelain_text}"
+
         # Compact git status (always show all counters)
-        git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
+        git_compact = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
         workflow_name = workflow_id
 
+        # Escape markdown in user_prompt and last_response
+        if user_prompt:
+            user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+        if last_response:
+            last_response = last_response.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
+        # Build message with full context
+        prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
+
+        # Escape lychee details
+        lychee_details = lychee_status.get('details', 'Not run')
+        if lychee_details:
+            lychee_details = lychee_details.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
         initial_message = (
-            f"{emoji} **Workflow: {workflow_id}**\n\n"
-            f"**Repository**: `{repo_display}`\n"
-            f"**Directory**: `{working_dir}`\n"
-            f"**Branch**: `{git_branch}`\n"
-            f"**↯**: {git_status_line}\n\n"
-            f"**Stage**: starting\n"
-            f"**Progress**: 0%\n"
+            f"{prompt_line}{emoji} **{last_response}**\n\n"
+            f"`{repo_display}` | `{working_dir}`\n"
+            f"`{session_id}` ({duration}s)\n"
+            f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
+            f"**Lychee**: {lychee_details}\n\n"
+            f"⏳ **Workflow: {workflow_id}**\n"
+            f"**Stage**: starting | **Progress**: 0%\n"
             f"**Status**: Processing..."
         )
 
