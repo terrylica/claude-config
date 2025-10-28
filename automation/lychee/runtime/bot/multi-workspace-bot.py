@@ -1297,17 +1297,24 @@ async def handle_workflow_selection(
         env = os.environ.copy()
         env["CORRELATION_ID"] = correlation_id
 
-        process = await asyncio.create_subprocess_exec(
-            str(orchestrator_script),
-            str(selection_file),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env
-        )
-        print(f"   ✓ Orchestrator started (PID: {process.pid})")
-        # Don't wait for completion - orchestrator runs independently
+        # Redirect stdout/stderr to orchestrator log file (avoid pipe blocking)
+        log_file = Path.home() / ".claude" / "automation" / "lychee" / "logs" / "orchestrator.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(log_file, 'a') as log_fd:
+            process = await asyncio.create_subprocess_exec(
+                str(orchestrator_script),
+                str(selection_file),
+                stdout=log_fd,
+                stderr=log_fd,
+                env=env
+            )
+            print(f"   ✓ Orchestrator started (PID: {process.pid})")
+            # Don't wait for completion - orchestrator runs independently
     except Exception as e:
         print(f"   ❌ Failed to start orchestrator: {type(e).__name__}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
 
     # Confirm to user (with fallback for unregistered workspaces)
     try:
