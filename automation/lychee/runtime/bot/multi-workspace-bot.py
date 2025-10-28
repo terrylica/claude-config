@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, AIORateLimiter
 
 # Force unbuffered output
@@ -490,57 +490,6 @@ class CompletionHandler:
                 parse_mode="Markdown"
             )
 
-            # Send full output as document if > 500 chars (progressive disclosure)
-            status = completion["status"]
-            if status == "success" and completion.get("stdout"):
-                stdout = completion["stdout"].strip()
-                if stdout and len(stdout) > 500:
-                    print(f"   📄 Sending full output as document ({len(stdout)} chars)...")
-
-                    # Extract readable content from JSON output (if applicable)
-                    readable_content = stdout
-                    try:
-                        result_data = json.loads(stdout)
-                        if isinstance(result_data, dict) and 'result' in result_data:
-                            # Extract human-readable result from JSON
-                            readable_content = result_data['result']
-                            print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
-                        else:
-                            print(f"   ⚠️  JSON parsed but no 'result' field, using raw output")
-                    except json.JSONDecodeError:
-                        # Not JSON - use raw output as-is
-                        print(f"   ℹ️  Output is not JSON, using raw content")
-
-                    file_path = f"/tmp/autofix_report_{session_id[:8]}.txt"
-                    with open(file_path, 'w') as f:
-                        f.write(readable_content)
-
-                    await self.bot.send_document(
-                        chat_id=self.chat_id,
-                        document=open(file_path, 'rb'),
-                        filename=f"autofix-report-{session_id[:8]}.txt",
-                        caption="📄 Full auto-fix report\n\nReadable output from Claude CLI."
-                    )
-                    os.remove(file_path)
-                    print(f"   ✓ Document sent and temp file cleaned")
-
-            elif status == "error" and completion.get("stderr"):
-                stderr = completion["stderr"].strip()
-                if stderr and len(stderr) > 500:
-                    print(f"   📄 Sending full error log as document ({len(stderr)} chars)...")
-                    file_path = f"/tmp/autofix_error_{session_id[:8]}.txt"
-                    with open(file_path, 'w') as f:
-                        f.write(stderr)
-
-                    await self.bot.send_document(
-                        chat_id=self.chat_id,
-                        document=open(file_path, 'rb'),
-                        filename=f"autofix-error-{session_id[:8]}.txt",
-                        caption="❌ Full error log\n\nComplete stderr from Claude CLI."
-                    )
-                    os.remove(file_path)
-                    print(f"   ✓ Document sent and temp file cleaned")
-
             print(f"📤 ✅ Sent completion for {workspace_id} ({session_id})")
             update_activity()  # Track activity for idle timeout
 
@@ -612,7 +561,7 @@ class CompletionHandler:
 {summary}
 """
 
-        # Add stdout for success cases (progressive disclosure)
+        # Add stdout for success cases (truncated to avoid huge messages)
         if status == "success" and completion.get("stdout"):
             stdout = completion["stdout"].strip()
             if stdout:
@@ -625,24 +574,21 @@ class CompletionHandler:
                 except json.JSONDecodeError:
                     pass  # Use raw output if not JSON
 
+                # Truncate to 500 chars
                 if len(readable_content) > 500:
-                    # Indicate full output will be sent as attachment
-                    message += f"\n\n**Result**: Auto-fix completed\n\n"
-                    message += f"[Full report will be attached below ⬇️]"
-                else:
-                    # Short output - include inline
-                    message += f"\n**Details**:\n```\n{readable_content}\n```"
+                    readable_content = readable_content[:500] + "..."
 
-        # Add stderr for error cases
+                message += f"\n**Details**:\n```\n{readable_content}\n```"
+
+        # Add stderr for error cases (truncated to avoid huge messages)
         if status == "error" and completion.get("stderr"):
             stderr = completion["stderr"].strip()
             if stderr:
+                # Truncate to 500 chars
                 if len(stderr) > 500:
-                    # Indicate full error will be sent as attachment
-                    message += f"\n\n[Full error log will be attached below ⬇️]"
-                else:
-                    # Short error - include inline
-                    message += f"\n**Error**:\n```\n{stderr}\n```"
+                    stderr = stderr[:500] + "..."
+
+                message += f"\n**Error**:\n```\n{stderr}\n```"
 
         return message
 
@@ -758,45 +704,15 @@ class WorkflowExecutionHandler:
                     f"**Output**: {summary}"
                 )
 
-                # Prepare final document with full output
-                readable_content = ""
-                if status == "success" and execution.get("stdout"):
-                    stdout = execution["stdout"].strip()
-                    if stdout:
-                        # Extract readable content from JSON output (if applicable)
-                        try:
-                            result_data = json.loads(stdout)
-                            if isinstance(result_data, dict) and 'result' in result_data:
-                                readable_content = result_data['result']
-                                print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
-                            else:
-                                readable_content = stdout
-                        except json.JSONDecodeError:
-                            readable_content = stdout
-                elif status == "error" and execution.get("stderr"):
-                    readable_content = execution["stderr"].strip()
-
-                if not readable_content:
-                    readable_content = f"Workflow {status} with no output"
-
-                # Write final document
-                final_file = Path(f"/tmp/workflow-{workflow_id}-{session_id[:8]}.txt")
-                final_file.write_text(readable_content)
-
-                # Replace document entirely (edit_message_media)
-                print(f"   📄 Replacing document with final results ({len(readable_content)} chars)...")
-                await self.bot.edit_message_media(
+                # Update message text with final status
+                print(f"   📝 Updating message with final status...")
+                await self.bot.edit_message_text(
                     chat_id=self.chat_id,
                     message_id=message_id,
-                    media=InputMediaDocument(
-                        media=open(final_file, 'rb'),
-                        filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
-                        caption=final_caption,
-                        parse_mode="Markdown"
-                    )
+                    text=final_caption,
+                    parse_mode="Markdown"
                 )
-                final_file.unlink()  # Clean up
-                print(f"   ✅ Document replaced successfully")
+                print(f"   ✅ Message updated successfully")
 
                 # Cleanup tracking (memory + file)
                 del active_progress_updates[progress_key]
@@ -826,56 +742,6 @@ class WorkflowExecutionHandler:
                     text=message,
                     parse_mode="Markdown"
                 )
-
-                # Send full output as document if > 500 chars (progressive disclosure)
-                if status == "success" and execution.get("stdout"):
-                    stdout = execution["stdout"].strip()
-                    if stdout and len(stdout) > 500:
-                        print(f"   📄 Sending full output as document ({len(stdout)} chars)...")
-
-                        # Extract readable content from JSON output (if applicable)
-                        readable_content = stdout
-                        try:
-                            result_data = json.loads(stdout)
-                            if isinstance(result_data, dict) and 'result' in result_data:
-                                # Extract human-readable result from JSON
-                                readable_content = result_data['result']
-                                print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
-                            else:
-                                print(f"   ⚠️  JSON parsed but no 'result' field, using raw output")
-                        except json.JSONDecodeError:
-                            # Not JSON - use raw output as-is
-                            print(f"   ℹ️  Output is not JSON, using raw content")
-
-                        file_path = f"/tmp/workflow_report_{session_id[:8]}_{workflow_id}.txt"
-                        with open(file_path, 'w') as f:
-                            f.write(readable_content)
-
-                        await self.bot.send_document(
-                            chat_id=self.chat_id,
-                            document=open(file_path, 'rb'),
-                            filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
-                            caption=f"📄 Full workflow output\n\n{workflow_name}"
-                        )
-                        os.remove(file_path)
-                        print(f"   ✓ Document sent and temp file cleaned")
-
-                elif status == "error" and execution.get("stderr"):
-                    stderr = execution["stderr"].strip()
-                    if stderr and len(stderr) > 500:
-                        print(f"   📄 Sending full error log as document ({len(stderr)} chars)...")
-                        file_path = f"/tmp/workflow_error_{session_id[:8]}_{workflow_id}.txt"
-                        with open(file_path, 'w') as f:
-                            f.write(stderr)
-
-                        await self.bot.send_document(
-                            chat_id=self.chat_id,
-                            document=open(file_path, 'rb'),
-                            filename=f"workflow-error-{workflow_id}-{session_id[:8]}.txt",
-                            caption=f"❌ Full error log\n\n{workflow_name}"
-                        )
-                        os.remove(file_path)
-                        print(f"   ✓ Document sent and temp file cleaned")
 
             print(f"📤 ✅ Sent execution completion for {workspace_id} ({session_id}): {workflow_name}")
             update_activity()  # Track activity for idle timeout
@@ -950,7 +816,7 @@ class WorkflowExecutionHandler:
 {status_line}
 """
 
-        # Add stdout for success cases (progressive disclosure)
+        # Add stdout for success cases (truncated)
         if status == "success" and execution.get("stdout"):
             stdout = execution["stdout"].strip()
             if stdout:
@@ -963,29 +829,29 @@ class WorkflowExecutionHandler:
                 except json.JSONDecodeError:
                     pass  # Use raw output if not JSON
 
-                if len(readable_content) > 500:
-                    # Indicate full output will be sent as attachment
-                    message += f"\n**Result**: Workflow completed\n\n"
-                    message += f"[Full report will be attached below ⬇️]"
-                else:
-                    # Short output - include inline
-                    # Get first meaningful line as summary
-                    lines = [l.strip() for l in readable_content.split('\n') if l.strip()]
-                    summary = lines[0] if lines else "Completed"
-                    message += f"\n**Summary**: {summary}"
+                # Get first meaningful line as summary
+                lines = [l.strip() for l in readable_content.split('\n') if l.strip()]
+                summary = lines[0] if lines else "Completed"
 
-        # Add stderr for error cases
+                # Truncate if too long
+                if len(summary) > 200:
+                    summary = summary[:200] + "..."
+
+                message += f"\n**Summary**: {summary}"
+
+        # Add stderr for error cases (truncated)
         if status == "error" and execution.get("stderr"):
             stderr = execution["stderr"].strip()
             if stderr:
-                if len(stderr) > 500:
-                    # Indicate full error will be sent as attachment
-                    message += f"\n\n[Full error log will be attached below ⬇️]"
-                else:
-                    # Short error - include inline
-                    error_lines = stderr.split('\n')
-                    error_preview = error_lines[0] if error_lines else stderr
-                    message += f"\n**Error**: {error_preview[:200]}"
+                # Get first line only
+                error_lines = stderr.split('\n')
+                error_preview = error_lines[0] if error_lines else stderr
+
+                # Truncate if too long
+                if len(error_preview) > 200:
+                    error_preview = error_preview[:200] + "..."
+
+                message += f"\n**Error**: {error_preview}"
 
         return message
 
@@ -1317,40 +1183,14 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
 
     details_text = '\n'.join(details_lines)
 
-    # Send as document if > 4000 chars, otherwise inline
-    if len(details_text) > 4000:
-        file_path = f"/tmp/lychee_details_{session_id[:8]}.txt"
+    # Truncate if too long (Telegram has 4096 char limit for messages)
+    if len(details_text) > 3800:
+        details_text = details_text[:3800] + "\n\n... (truncated)"
 
-        # Format plain text for file (without markdown)
-        plain_lines = []
-        for file_path_key, errors in error_map.items():
-            short_path = file_path_key.replace(workspace_path, '').lstrip('/')
-            plain_lines.append(f"\n{short_path} ({len(errors)} errors):")
-            for error in errors:
-                url = error.get("url", "unknown")
-                status = error.get("status", {})
-                error_text = status.get("text", "Unknown error")
-                error_details = status.get("details", "")
-
-                plain_lines.append(f"  • {url}")
-                plain_lines.append(f"    {error_text}")
-                if error_details:
-                    plain_lines.append(f"    {error_details}")
-
-        with open(file_path, 'w') as f:
-            f.write('\n'.join(plain_lines))
-
-        await query.message.reply_document(
-            document=open(file_path, 'rb'),
-            filename=f"link-errors-{session_id[:8]}.txt",
-            caption="📋 Detailed error breakdown\n\nComplete list of broken links with error messages."
-        )
-        os.remove(file_path)
-    else:
-        await query.message.reply_text(
-            f"📋 **Detailed Error Breakdown**\n{details_text}",
-            parse_mode='Markdown'
-        )
+    await query.message.reply_text(
+        f"📋 **Detailed Error Breakdown**\n{details_text}",
+        parse_mode='Markdown'
+    )
 
     print(f"📋 Sent detailed breakdown for session {session_id}")
 
@@ -1479,11 +1319,7 @@ async def handle_workflow_selection(
         workflow_name = f"{workflow['icon']} {workflow['name']}"
         estimated_duration = workflow.get("estimated_duration", "unknown")
 
-        # Phase 1: Send placeholder document with initial caption
-        placeholder_file = Path(f"/tmp/workflow-{workflow_id}-starting.txt")
-        placeholder_file.write_text("🎬 Workflow starting...\n\nThis file will be updated with results.")
-
-        # Extract git context for initial caption
+        # Extract git context for initial message
         git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
         git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
         git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
@@ -1494,17 +1330,10 @@ async def handle_workflow_selection(
         working_dir = summary_data.get("working_directory", ".")
         repo_display = str(repository_root).replace(str(Path.home()), "~")
 
-        # Build git status line
-        git_status_parts = []
-        if git_modified > 0:
-            git_status_parts.append(f"{git_modified} modified")
-        if git_staged > 0:
-            git_status_parts.append(f"{git_staged} staged")
-        if git_untracked > 0:
-            git_status_parts.append(f"{git_untracked} untracked")
-        git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+        # Compact git status (always show all counters)
+        git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
-        initial_caption = (
+        initial_message = (
             f"⏳ **Workflow: {workflow_name}**\n\n"
             f"**Repository**: `{repo_display}`\n"
             f"**Directory**: `{working_dir}`\n"
@@ -1518,23 +1347,17 @@ async def handle_workflow_selection(
         # Delete the original callback message
         await query.message.delete()
 
-        # Send new document message
-        sent_message = await context.bot.send_document(
+        # Send new text message
+        sent_message = await context.bot.send_message(
             chat_id=query.message.chat_id,
-            document=open(placeholder_file, 'rb'),
-            filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
-            caption=initial_caption,
+            text=initial_message,
             parse_mode="Markdown"
         )
-        placeholder_file.unlink()  # Clean up
 
         message_id = sent_message.message_id
     else:
         # Fallback for unknown workflow
-        placeholder_file = Path(f"/tmp/workflow-{workflow_id}-starting.txt")
-        placeholder_file.write_text("🎬 Workflow starting...\n\nThis file will be updated with results.")
-
-        # Extract git context for initial caption
+        # Extract git context for initial message
         git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
         git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
         git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
@@ -1545,19 +1368,12 @@ async def handle_workflow_selection(
         working_dir = summary_data.get("working_directory", ".")
         repo_display = str(repository_root).replace(str(Path.home()), "~")
 
-        # Build git status line
-        git_status_parts = []
-        if git_modified > 0:
-            git_status_parts.append(f"{git_modified} modified")
-        if git_staged > 0:
-            git_status_parts.append(f"{git_staged} staged")
-        if git_untracked > 0:
-            git_status_parts.append(f"{git_untracked} untracked")
-        git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+        # Compact git status (always show all counters)
+        git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
         workflow_name = workflow_id
 
-        initial_caption = (
+        initial_message = (
             f"{emoji} **Workflow: {workflow_id}**\n\n"
             f"**Repository**: `{repo_display}`\n"
             f"**Directory**: `{working_dir}`\n"
@@ -1571,15 +1387,12 @@ async def handle_workflow_selection(
         # Delete the original callback message
         await query.message.delete()
 
-        # Send new document message
-        sent_message = await context.bot.send_document(
+        # Send new text message
+        sent_message = await context.bot.send_message(
             chat_id=query.message.chat_id,
-            document=open(placeholder_file, 'rb'),
-            filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
-            caption=initial_caption,
+            text=initial_message,
             parse_mode="Markdown"
         )
-        placeholder_file.unlink()  # Clean up
 
         message_id = sent_message.message_id
 
@@ -1965,7 +1778,7 @@ async def progress_poller(app: Application) -> None:
                 # Compact git status (always show all counters)
                 git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
 
-                progress_caption = (
+                progress_text = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
@@ -1976,14 +1789,14 @@ async def progress_poller(app: Application) -> None:
                     f"**Status**: {message}"
                 )
 
-                # Update caption only (document unchanged, no reupload)
-                await app.bot.edit_message_caption(
+                # Update message text
+                await app.bot.edit_message_text(
                     chat_id=int(CHAT_ID),
                     message_id=message_id,
-                    caption=progress_caption,
+                    text=progress_text,
                     parse_mode="Markdown"
                 )
-                print(f"   ✅ Caption updated successfully")
+                print(f"   ✅ Message updated successfully")
 
                 # Clean up if completed
                 if stage == "completed":
