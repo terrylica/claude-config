@@ -1,6 +1,7 @@
 ---
-name: LaTeX Environment Setup
+name: latex-setup
 description: Install and configure complete LaTeX development environment on macOS with MacTeX, Skim viewer, and SyncTeX support. Use when setting up new machine, installing LaTeX distribution, configuring PDF viewer, or troubleshooting package installations.
+allowed-tools: Read, Edit, Bash
 ---
 
 # LaTeX Environment Setup Skill

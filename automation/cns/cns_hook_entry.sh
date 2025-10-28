@@ -60,6 +60,7 @@ has_remote_client() {
 
         echo "$input_data" | "$HOME/.claude/automation/cns/conversation_handler.sh" > /dev/null 2>&1
     fi
-} &
+} > /dev/null 2>&1 &
 
 # Exit immediately for async performance - don't wait for background process
+exit 0

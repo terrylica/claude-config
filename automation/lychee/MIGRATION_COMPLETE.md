@@ -17,17 +17,17 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 
 ## Phase Completion Status
 
-| Phase | Description | Status | Duration | Commit |
-|-------|-------------|--------|----------|--------|
-| **0** | Pre-migration validation | ✅ COMPLETE | 1h | 6542cab |
-| **1** | Workflow registry creation | ✅ COMPLETE | 1h | d77f4b1 |
-| **2** | Hook refactor (summaries) | ✅ COMPLETE | 2h | c406b72 |
-| **3** | Bot refactor (workflow menu) | ✅ COMPLETE | 1.5h | 1d11055 |
-| **4** | Orchestrator refactor (Jinja2) | ✅ COMPLETE | 2h | 054f337 |
-| **5** | Integration testing | ⏸️ DEFERRED | - | - |
-| **6** | Directory rename | ⏸️ DEFERRED | - | - |
-| **7** | Remove dual-mode | ⏸️ DEFERRED | - | - |
-| **8** | Documentation/release | ✅ PARTIAL | 0.5h | (this commit) |
+| Phase | Description                    | Status      | Duration | Commit        |
+| ----- | ------------------------------ | ----------- | -------- | ------------- |
+| **0** | Pre-migration validation       | ✅ COMPLETE | 1h       | 6542cab       |
+| **1** | Workflow registry creation     | ✅ COMPLETE | 1h       | d77f4b1       |
+| **2** | Hook refactor (summaries)      | ✅ COMPLETE | 2h       | c406b72       |
+| **3** | Bot refactor (workflow menu)   | ✅ COMPLETE | 1.5h     | 1d11055       |
+| **4** | Orchestrator refactor (Jinja2) | ✅ COMPLETE | 2h       | 054f337       |
+| **5** | Integration testing            | ⏸️ DEFERRED | -        | -             |
+| **6** | Directory rename               | ⏸️ DEFERRED | -        | -             |
+| **7** | Remove dual-mode               | ⏸️ DEFERRED | -        | -             |
+| **8** | Documentation/release          | ✅ PARTIAL  | 0.5h     | (this commit) |
 
 **Total Actual Time**: ~8 hours (including documentation)
 
@@ -36,27 +36,34 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 ## What Was Delivered
 
 ### ✅ Phase 0: Pre-Migration Validation
+
 **Deliverables**:
+
 - OpenAPI 3.1.1 specification: `specifications/telegram-workflows-orchestration-v4.yaml`
 - Git baseline established (commit 6542cab)
 - Pre-migration validation script
 - Comprehensive audit findings
 
 ### ✅ Phase 1: Workflow Registry
+
 **Deliverables**:
+
 - `automation/lychee/state/workflows.json` (4 workflows)
 - JSON schema validation
 - Jinja2 template syntax validation
 - Registry versioning (v1.0.0)
 
 **Workflows**:
+
 1. `lychee-autofix` - Fix broken links (trigger: lychee_errors)
 2. `prune-legacy` - Remove legacy code (trigger: always)
 3. `fix-docstrings` - Fix docstring inconsistencies (trigger: always)
 4. `rename-variables` - Improve variable names (trigger: git_modified)
 
 ### ✅ Phase 2: Hook Refactor
+
 **Deliverables**:
+
 - `automation/lychee/runtime/hook/check-links-hybrid.sh` (+211 lines)
 - Git status extraction (branch, modified/untracked/staged, ahead/behind)
 - Session duration tracking (timestamp file integration)
@@ -68,7 +75,9 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 **Key Fix**: Bash pipefail handling - added `|| echo "0"` to grep pipelines
 
 ### ✅ Phase 3: Bot Refactor
+
 **Deliverables**:
+
 - `automation/lychee/runtime/bot/multi-workspace-bot.py` (+420 lines)
 - Workflow registry loading on startup
 - Trigger-based filtering (`lychee_errors`, `git_modified`, `always`)
@@ -79,13 +88,16 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 - Dual-mode: summaries (v4) + notifications (v3 backward compat)
 
 **Design Decisions**:
+
 - Polling pattern maintained (5s) for consistency with v3
 - No message sent if zero workflows match triggers (prevents spam)
 - Custom prompt placeholder (Phase 4+ enhancement)
 - Selection schema uses array (future multi-select support)
 
 ### ✅ Phase 4: Orchestrator Refactor
+
 **Deliverables**:
+
 - `automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py` (+1060 lines)
 - Jinja2 dependency added
 - WorkflowOrchestrator class (~425 lines)
@@ -96,11 +108,13 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 - Comprehensive handoff doc: `PHASE_4_HANDOFF.md` (350 lines)
 
 **Functions**:
+
 - `load_workflow_registry()`: Registry loading and validation
 - `render_workflow_prompt()`: Jinja2 template rendering
 - `resolve_workflow_dependencies()`: Placeholder (returns input order)
 
 **Template Context**:
+
 ```python
 {
   "workspace_path": str,
@@ -118,6 +132,7 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 ### Data Flow Transformation
 
 **v3.0.1** (Single-purpose):
+
 ```
 Session Ends → Hook checks lychee
     ↓ (if errors)
@@ -129,6 +144,7 @@ Completion → Telegram notification
 ```
 
 **v4.0.0** (Multi-workflow):
+
 ```
 Session Ends → Hook extracts git status + lychee results
     ↓ (ALWAYS)
@@ -160,14 +176,17 @@ automation/lychee/state/
 ### SQLite Event Types Added
 
 **Phase 2** (Hook):
+
 - `summary.created` - SessionSummary emitted
 
 **Phase 3** (Bot):
+
 - `summary.received` - Summary file processed
 - `summary.processed` - Workflow menu sent
 - `selection.created` - User selected workflow
 
 **Phase 4** (Orchestrator):
+
 - `selection.received` - Selection file processed
 - `workflow.started` - Workflow execution began
 - `workflow.template_rendered` - Jinja2 template rendered
@@ -178,14 +197,15 @@ automation/lychee/state/
 
 ## Code Metrics
 
-| Component | File | Lines Added | Lines Changed | Complexity |
-|-----------|------|-------------|---------------|------------|
-| Hook | `check-links-hybrid.sh` | +211 | ~50 | Medium |
-| Bot | `multi-workspace-bot.py` | +420 | ~30 | High |
-| Orchestrator | `multi-workspace-orchestrator.py` | +1060 | ~40 | High |
-| **Total** | - | **+1,691** | **~120** | - |
+| Component    | File                              | Lines Added | Lines Changed | Complexity |
+| ------------ | --------------------------------- | ----------- | ------------- | ---------- |
+| Hook         | `check-links-hybrid.sh`           | +211        | ~50           | Medium     |
+| Bot          | `multi-workspace-bot.py`          | +420        | ~30           | High       |
+| Orchestrator | `multi-workspace-orchestrator.py` | +1060       | ~40           | High       |
+| **Total**    | -                                 | **+1,691**  | **~120**      | -          |
 
 **Documentation**:
+
 - Phase 4 Handoff: 350 lines
 - Integration Tests: 400 lines
 - Migration Complete: 250 lines (this doc)
@@ -217,23 +237,27 @@ automation/lychee/state/
 ### Deferred Phases (Optional, Non-Blocking)
 
 **Phase 5: Integration Testing**
+
 - Status: Test infrastructure documented (`tests/INTEGRATION_TESTS.md`)
 - Approach: Manual injection testing (5 scenarios)
 - Decision: Skip automated execution (requires Claude CLI)
 - Rationale: Manual testing sufficient for v4.0.0 release
 
 **Phase 6: Directory Rename**
+
 - Status: Deferred to post-release
 - Risk: Service disruption, path update errors
 - Decision: Keep `automation/lychee/` name for now
 - Rationale: Rename is cosmetic, not functional
 
 **Phase 7: Remove Dual-Mode**
+
 - Status: Deferred indefinitely
 - Decision: Maintain v3 backward compatibility permanently
 - Rationale: No downside to dual-mode, improves robustness
 
 **Phase 8: Documentation**
+
 - Status: Partial completion (this doc, handoff, tests)
 - Remaining: README update, CHANGELOG, detailed examples
 - Decision: Core documentation complete, details can evolve
@@ -244,16 +268,17 @@ automation/lychee/state/
 
 ### SLO Achievement
 
-| SLO | Target | v4.0.0 Result | Validation Method |
-|-----|--------|---------------|-------------------|
-| **Correctness** | 100% | ✅ PASS | All workflows execute, results emitted |
-| **Observability** | 100% | ✅ PASS | Full event trace with correlation_id |
-| **Maintainability** | SSoT | ✅ PASS | workflows.json is canonical source |
-| **Availability** | 99% | ⏸️ TBD | Production monitoring (post-release) |
+| SLO                 | Target | v4.0.0 Result | Validation Method                      |
+| ------------------- | ------ | ------------- | -------------------------------------- |
+| **Correctness**     | 100%   | ✅ PASS       | All workflows execute, results emitted |
+| **Observability**   | 100%   | ✅ PASS       | Full event trace with correlation_id   |
+| **Maintainability** | SSoT   | ✅ PASS       | workflows.json is canonical source     |
+| **Availability**    | 99%    | ⏸️ TBD        | Production monitoring (post-release)   |
 
 ### Integration Test Readiness
 
 Test infrastructure complete:
+
 - ✅ 5 test scenarios documented
 - ✅ SQL queries for validation
 - ✅ Expected outputs defined
@@ -264,6 +289,7 @@ Test infrastructure complete:
 ### Backward Compatibility
 
 **v3 Approval Flow**: ✅ VERIFIED
+
 - Dual-mode maintained in all components
 - ApprovalOrchestrator class unchanged
 - Notification files still processed
@@ -299,14 +325,17 @@ Test infrastructure complete:
 ### Design Decisions Validated
 
 ✅ **Polling vs Watchfiles**: Polling (5s) maintained
+
 - Rationale: Consistency with v3, no new dependencies
 - Validation: Works reliably, acceptable latency
 
 ✅ **Sequential vs Parallel**: Sequential chosen
+
 - Rationale: Simpler implementation, easier debugging
 - Validation: Acceptable for small workflow counts (<5)
 
 ✅ **Dual-Mode Approach**: Maintained permanently
+
 - Rationale: Zero migration risk, backward compatibility
 - Validation: Both modes tested, no conflicts
 
@@ -342,6 +371,7 @@ Test infrastructure complete:
 ### If Issues Discovered Post-Release
 
 **Option 1: Revert to v3.0.1** (Full Rollback)
+
 ```bash
 # 1. Stop services
 launchctl unload ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
@@ -357,6 +387,7 @@ ps aux | grep multi-workspace-bot
 ```
 
 **Option 2: Disable v4 Flows** (Partial Rollback)
+
 ```bash
 # 1. Stop bot
 launchctl unload ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
@@ -370,6 +401,7 @@ launchctl load ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
 ```
 
 **Option 3: Use v3 Flow Only** (User-Level Workaround)
+
 - Ignore workflow menu in Telegram
 - Wait for v3 notification (on lychee errors only)
 - Click "Auto-Fix All" button (v3 flow)
@@ -399,13 +431,13 @@ launchctl load ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
 
 ## Related Documentation
 
-| Document | Location | Purpose |
-|----------|----------|---------|
+| Document           | Location                                                  | Purpose                        |
+| ------------------ | --------------------------------------------------------- | ------------------------------ |
 | SSoT Specification | `specifications/telegram-workflows-orchestration-v4.yaml` | OpenAPI 3.1.1 spec (canonical) |
-| Migration Plan | `MIGRATION_v3_to_v4_PLAN_v2.md` | Original migration strategy |
-| Phase 4 Handoff | `PHASE_4_HANDOFF.md` | Technical implementation guide |
-| Integration Tests | `tests/INTEGRATION_TESTS.md` | Test scenarios and validation |
-| This Document | `MIGRATION_COMPLETE.md` | Completion summary |
+| Migration Plan     | `MIGRATION_v3_to_v4_PLAN_v2.md`                           | Original migration strategy    |
+| Phase 4 Handoff    | `PHASE_4_HANDOFF.md`                                      | Technical implementation guide |
+| Integration Tests  | `tests/INTEGRATION_TESTS.md`                              | Test scenarios and validation  |
+| This Document      | `MIGRATION_COMPLETE.md`                                   | Completion summary             |
 
 ---
 
@@ -416,6 +448,7 @@ launchctl load ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
 **Documentation**: Comprehensive handoff docs enable future contributions
 
 **Success Factors**:
+
 1. OpenAPI specification as single source of truth
 2. Incremental phases with independent commits
 3. Fail-fast error handling (no silent failures)

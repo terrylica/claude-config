@@ -104,6 +104,53 @@ def log_event(
         raise
 
 
+def emit_progress(
+    workspace_id: str,
+    session_id: str,
+    workflow_id: str,
+    status: str,
+    stage: str,
+    progress_percent: int,
+    message: str
+) -> None:
+    """
+    Emit progress update to state/progress/ directory.
+
+    Args:
+        workspace_id: Workspace hash
+        session_id: Session UUID
+        workflow_id: Workflow identifier
+        status: running, completed, or error
+        stage: starting, rendering, executing, waiting, or completed
+        progress_percent: 0-100 completion percentage
+        message: Human-readable progress message (max 200 chars)
+
+    Raises:
+        All errors propagate (fail-fast)
+    """
+    progress_dir = STATE_DIR / "progress"
+    progress_file = progress_dir / f"{workspace_id}_{session_id}_{workflow_id}.json"
+
+    progress_data = {
+        "workspace_id": workspace_id,
+        "session_id": session_id,
+        "workflow_id": workflow_id,
+        "status": status,
+        "stage": stage,
+        "progress_percent": progress_percent,
+        "message": message[:200],  # Enforce max length
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+    # Write atomically (write to temp file, then rename)
+    temp_file = progress_file.with_suffix(".tmp")
+    with open(temp_file, "w") as f:
+        json.dump(progress_data, f, indent=2)
+    temp_file.rename(progress_file)
+
+    print(f"   📊 Progress: {stage} ({progress_percent}%) - {message[:50]}")
+
+
 # Phase 4 - v4.0.0: Workflow Registry Functions
 def load_workflow_registry() -> Dict[str, Any]:
     """
@@ -779,6 +826,17 @@ class WorkflowOrchestrator:
             {"workflow_id": workflow_id, "workflow_name": workflow_name}
         )
 
+        # Emit progress: starting
+        emit_progress(
+            workspace_id=self.workspace_hash,
+            session_id=self.session_id,
+            workflow_id=workflow_id,
+            status="running",
+            stage="starting",
+            progress_percent=0,
+            message=f"Starting workflow: {workflow_name}"
+        )
+
         # Render Jinja2 template
         try:
             prompt = render_workflow_prompt(workflow, context)
@@ -792,6 +850,17 @@ class WorkflowOrchestrator:
                 "orchestrator",
                 "workflow.template_rendered",
                 {"workflow_id": workflow_id, "template_length": len(prompt)}
+            )
+
+            # Emit progress: rendering
+            emit_progress(
+                workspace_id=self.workspace_hash,
+                session_id=self.session_id,
+                workflow_id=workflow_id,
+                status="running",
+                stage="rendering",
+                progress_percent=25,
+                message=f"Template rendered ({len(prompt)} chars)"
             )
 
         except TemplateError as e:
@@ -838,8 +907,30 @@ class WorkflowOrchestrator:
                 {"pid": process.pid, "workflow_id": workflow_id, "timeout_seconds": CLAUDE_CLI_TIMEOUT}
             )
 
+            # Emit progress: executing
+            emit_progress(
+                workspace_id=self.workspace_hash,
+                session_id=self.session_id,
+                workflow_id=workflow_id,
+                status="running",
+                stage="executing",
+                progress_percent=50,
+                message=f"Claude CLI executing (PID: {process.pid})"
+            )
+
             # Wait for completion (no heartbeat for workflow execution - keep it simple)
             print(f"   ⏳ Waiting for completion (timeout: {CLAUDE_CLI_TIMEOUT}s)...")
+
+            # Emit progress: waiting
+            emit_progress(
+                workspace_id=self.workspace_hash,
+                session_id=self.session_id,
+                workflow_id=workflow_id,
+                status="running",
+                stage="waiting",
+                progress_percent=75,
+                message=f"Waiting for Claude CLI completion (timeout: {CLAUDE_CLI_TIMEOUT}s)"
+            )
 
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -918,6 +1009,17 @@ class WorkflowOrchestrator:
                     "exit_code": exit_code,
                     "duration_seconds": round(duration, 1)
                 }
+            )
+
+            # Emit progress: completed
+            emit_progress(
+                workspace_id=self.workspace_hash,
+                session_id=self.session_id,
+                workflow_id=workflow_id,
+                status=completion_status,
+                stage="completed",
+                progress_percent=100,
+                message=f"Workflow completed: {completion_status} (exit {exit_code})"
             )
 
     async def _emit_execution_result(

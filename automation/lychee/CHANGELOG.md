@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Actual Duration**: ~6 hours (vs 30 hours estimated)
 
 **Phases Completed**: 0-4 (Core functionality)
+
 - Phase 0: Pre-migration validation (1h)
 - Phase 1: Workflow registry creation (1h) - Commit d77f4b1
 - Phase 2: Hook refactor with summaries (2h) - Commit c406b72
@@ -75,12 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Phase 4: Orchestrator refactor with Jinja2 (2h) - Commit 054f337
 
 **Phases Deferred**: 5-8 (Optional enhancements)
+
 - Phase 5: Integration testing infrastructure documented (manual execution deferred)
 - Phase 6: Directory rename deferred (cosmetic, not functional)
 - Phase 7: Dual-mode removal deferred (no downside to keeping)
 - Phase 8: Core documentation complete (detailed examples can evolve)
 
 **Code Metrics**:
+
 - Hook: +211 lines
 - Bot: +420 lines
 - Orchestrator: +1,060 lines
@@ -88,17 +91,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Total**: +2,691 lines
 
 **Known Limitations** (documented, not blockers):
+
 - Dependency resolution not implemented (workflows execute in input order)
 - Parallel execution not implemented (sequential only)
 - Custom prompts not implemented (bot returns placeholder)
 
 **SLOs Achieved**:
+
 - Correctness: 100% - All workflows execute, results emitted
 - Observability: 100% - Full event trace with correlation_id
 - Maintainability: SSoT - workflows.json is canonical source
 - Availability: TBD - Production monitoring post-release
 
 **Backward Compatibility**: ✅ MAINTAINED
+
 - v3 approval flow still works (ApprovalOrchestrator unchanged)
 - Notification files still processed
 - Legacy event types preserved
@@ -111,10 +117,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 See [`MIGRATION_v3_to_v4_PLAN_v2.md`](/Users/terryli/.claude/automation/lychee/MIGRATION_v3_to_v4_PLAN_v2.md) for complete migration details.
 
 **Breaking Changes**:
+
 - Hook always starts bot (not just on errors)
 - SessionSummary files required by bot (dual-mode allows gradual transition)
 
 **Non-Breaking Changes** (due to dual-mode):
+
 - Old notification/approval flow still works
 - Can use either v3 or v4 flow
 - Incremental migration possible
@@ -122,6 +130,7 @@ See [`MIGRATION_v3_to_v4_PLAN_v2.md`](/Users/terryli/.claude/automation/lychee/M
 ## [3.0.1] - 2025-10-25
 
 ### Documentation
+
 - Baseline release for v4 migration
 - Complete workflow documentation
 - Bot lifecycle analysis
@@ -133,6 +142,7 @@ See git history for earlier versions.
 ---
 
 **Versioning**: This project uses [Semantic Versioning](https://semver.org/)
+
 - Git tags are the authoritative version source
 - CHANGELOG.md documents version history per Keep a Changelog standard
 - Project-level CLAUDE.md may include temporal context for AI agents

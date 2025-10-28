@@ -1,6 +1,7 @@
 ---
-name: LaTeX Tables with tabularray
+name: latex-tables
 description: Create modern LaTeX tables with tabularray package for fixed-width columns, proper alignment, and clean syntax. Use when creating tables, formatting table layouts, working with column widths, or migrating from old tabular/tabularx packages.
+allowed-tools: Read, Edit, Bash
 ---
 
 # LaTeX Tables with tabularray Skill

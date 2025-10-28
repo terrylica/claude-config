@@ -96,6 +96,7 @@ Workflows automatically shown/hidden based on context:
 - **Tests**: 5 scenarios documented
 
 **Commits**:
+
 - `6542cab` - Phase 0: Pre-migration validation
 - `d77f4b1` - Phase 1: Workflow registry
 - `c406b72` - Phase 2: Hook refactor (summaries)
@@ -118,12 +119,12 @@ Workflows automatically shown/hidden based on context:
 
 ## SLOs Achieved
 
-| SLO | Target | v4.0.0 Result |
-|-----|--------|---------------|
-| **Correctness** | 100% | ✅ PASS - All workflows execute, results emitted |
-| **Observability** | 100% | ✅ PASS - Full event trace with correlation_id |
-| **Maintainability** | SSoT | ✅ PASS - workflows.json canonical source |
-| **Availability** | 99% | ⏸️ TBD - Production monitoring post-release |
+| SLO                 | Target | v4.0.0 Result                                    |
+| ------------------- | ------ | ------------------------------------------------ |
+| **Correctness**     | 100%   | ✅ PASS - All workflows execute, results emitted |
+| **Observability**   | 100%   | ✅ PASS - Full event trace with correlation_id   |
+| **Maintainability** | SSoT   | ✅ PASS - workflows.json canonical source        |
+| **Availability**    | 99%    | ⏸️ TBD - Production monitoring post-release      |
 
 ---
 
@@ -192,6 +193,7 @@ If issues occur, full rollback to v3.0.1 documented in `MIGRATION_COMPLETE.md` /
 **Documentation**: Comprehensive handoff docs enable future contributions
 
 **Success Factors**:
+
 1. OpenAPI specification as single source of truth
 2. Incremental phases with independent commits
 3. Fail-fast error handling (no silent failures)

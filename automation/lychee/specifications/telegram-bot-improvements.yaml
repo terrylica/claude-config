@@ -1,0 +1,325 @@
+openapi: 3.1.1
+info:
+  title: Telegram Bot Improvements - Rate Limiting and Progress Updates
+  version: 1.0.0
+  description: |
+    Machine-readable specification for telegram bot rate limiting, markdown safety,
+    and streaming progress updates.
+
+    Scope: Prevent bot bans, improve UX, maintain system stability
+
+x-version-history:
+  1.0.0:
+    date: 2025-10-27
+    changes: Initial specification
+
+x-slos:
+  availability:
+    target: 99.9%
+    measurement: Bot uptime / (uptime + downtime from crashes)
+    rationale: Bot must remain available to receive workflow completion notifications
+
+  correctness:
+    target: 100%
+    measurement: Successful message deliveries / total attempts (excluding Telegram API failures)
+    rationale: All workflow results must reach user; silent failures unacceptable
+    constraints:
+      - Telegram API errors (429, network) are not correctness violations
+      - Message content must match source (no corruption)
+
+  observability:
+    target: 100%
+    measurement: |
+      - Rate limit events logged: yes/no
+      - Markdown validation logged: yes/no
+      - Error propagation to stderr: yes/no
+    rationale: All failures must be visible for diagnosis
+
+  maintainability:
+    target: LGTM
+    measurement: |
+      - Code follows existing patterns: yes/no
+      - Dependencies minimal (use stdlib where possible): yes/no
+      - No custom retry/backoff logic (use python-telegram-bot's): yes/no
+    rationale: Reduce maintenance burden, align with framework conventions
+
+x-architecture:
+  pattern: Wrapper-based safety layer
+  rationale: |
+    Existing bot code uses direct Telegram API calls. Wrapping these calls
+    provides safety without architectural changes.
+
+  components:
+    telegram_helpers.py:
+      location: runtime/lib/telegram_helpers.py
+      purpose: Rate limit handling and markdown validation
+      dependencies:
+        - python-telegram-bot (already present)
+        - asyncio (stdlib)
+      exports:
+        - safe_edit_message()
+        - safe_send_message()
+        - ensure_valid_markdown()
+
+    multi-workspace-bot.py:
+      changes:
+        - Import telegram_helpers
+        - Replace 8 direct API calls with safe wrappers
+      affected_handlers:
+        - NotificationHandler.send_notification() (line 380)
+        - CompletionHandler.send_completion() (line 477)
+        - SummaryHandler.send_workflow_menu() (line 741)
+        - handle_workflow_selection() (lines 990, 1067, 1076)
+        - handle_callback() (lines 1105, 1190)
+
+x-constraints:
+  error_handling: Fail-fast
+  rationale: |
+    Telegram errors must propagate. Bot should crash on unrecoverable errors
+    (invalid tokens, permissions) rather than silently failing.
+    Rate limit errors (429) are recoverable and handled via exponential backoff.
+
+  dependencies: Minimize
+  rationale: |
+    Use python-telegram-bot's built-in retry mechanisms where possible.
+    Only implement custom logic where framework doesn't provide solution
+    (markdown validation, specific 429 handling).
+
+schemas:
+  components:
+    schemas:
+      RateLimitError:
+        type: object
+        description: Telegram 429 error with retry_after
+        required: [error_code, retry_after_seconds]
+        properties:
+          error_code:
+            type: integer
+            const: 429
+          retry_after_seconds:
+            type: integer
+            description: Seconds to wait before retry
+            minimum: 1
+
+      MarkdownValidationResult:
+        type: object
+        required: [original, validated, tags_closed]
+        properties:
+          original:
+            type: string
+          validated:
+            type: string
+            description: Original text with unclosed tags closed
+          tags_closed:
+            type: array
+            items:
+              type: string
+              enum: ['```', '`', '**', '*']
+
+      ProgressUpdate:
+        type: object
+        description: Workflow execution progress (P2)
+        required: [workspace_id, session_id, workflow_id, status, stage, progress_percent, message, timestamp]
+        properties:
+          workspace_id:
+            type: string
+            pattern: '^[a-f0-9]{8}$'
+          session_id:
+            type: string
+            format: uuid
+          workflow_id:
+            type: string
+            enum: [lychee-autofix, prune-legacy, fix-docstrings, rename-variables]
+          status:
+            type: string
+            enum: [running, completed, error]
+          stage:
+            type: string
+            enum: [starting, rendering, executing, waiting, completed]
+          progress_percent:
+            type: integer
+            minimum: 0
+            maximum: 100
+          message:
+            type: string
+            maxLength: 200
+          timestamp:
+            type: string
+            format: date-time
+
+paths:
+  /helpers/safe_edit_message:
+    post:
+      summary: Edit Telegram message with rate limiting
+      description: |
+        Wraps query.edit_message_text with:
+        - Markdown validation
+        - 429 retry with exponential backoff
+        - Error propagation (fail-fast)
+
+      parameters:
+        - name: query
+          in: body
+          schema:
+            type: object
+            description: Telegram CallbackQuery object
+        - name: text
+          in: body
+          required: true
+          schema:
+            type: string
+        - name: parse_mode
+          in: body
+          schema:
+            type: string
+            default: Markdown
+        - name: max_retries
+          in: body
+          schema:
+            type: integer
+            default: 3
+
+      responses:
+        '200':
+          description: Message edited successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+        '429':
+          description: Rate limit exceeded, retries exhausted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitError'
+        '400':
+          description: Telegram API error (propagated)
+
+  /helpers/ensure_valid_markdown:
+    post:
+      summary: Validate and fix markdown formatting
+      description: |
+        Closes unclosed markdown tags to prevent Telegram parse errors.
+        Handles: ``` (code blocks), ` (inline code), ** (bold), * (italic)
+
+      parameters:
+        - name: text
+          in: body
+          required: true
+          schema:
+            type: string
+
+      responses:
+        '200':
+          description: Validated markdown text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkdownValidationResult'
+
+x-implementation:
+  priority_1_rate_limiting:
+    status: completed
+    completion_date: 2025-10-27
+    commit: 5b5ee65
+    tasks:
+      - ✅ Create telegram_helpers.py module
+      - ✅ Implement safe_edit_message() with 429 handling
+      - ✅ Implement safe_send_message() with 429 handling
+      - ✅ Implement ensure_valid_markdown()
+      - ✅ Add unit tests for markdown validation (9/9 passing)
+      - ✅ Update bot.py to import and use helpers
+      - ✅ Replace 8 direct API calls with safe wrappers
+      - ✅ Test with bot restart (no errors)
+      - ⏳ Verify no regressions in existing workflows (pending real-world usage)
+
+    acceptance_criteria:
+      - ✅ Bot handles 429 errors without crashing (exponential backoff implemented)
+      - ✅ Markdown validation prevents parse errors (auto-close unclosed tags)
+      - ✅ Logs show rate limit events (stderr logging with emoji)
+      - ⏳ All 4 workflows still functional (pending end-to-end test)
+
+  priority_2_progress_updates:
+    status: completed
+    completion_date: 2025-10-27
+    commit: 0dab467
+    tasks:
+      - ✅ Add ProgressUpdate schema to state/progress/ (JSON Schema)
+      - ✅ Update orchestrator to emit progress at 5 stages (0%, 25%, 50%, 75%, 100%)
+      - ✅ Implement bot progress polling task (2s interval)
+      - ✅ Track message_id for progress updates
+      - ✅ Wire progress polling to safe_edit_message_by_id
+      - ✅ Implement progress file cleanup on completion
+      - ✅ Test bot restart (no syntax/import errors)
+      - ⏳ Test end-to-end with real workflow execution (pending user testing)
+
+    acceptance_criteria:
+      - ✅ Progress updates poll every 2 seconds
+      - ✅ Bot tracks message_id for each workflow
+      - ✅ Progress files automatically cleaned on completion
+      - ✅ No syntax/import errors on bot restart
+      - ⏳ Progress updates visible in Telegram (pending end-to-end test)
+      - ⏳ No performance degradation (pending verification)
+      - ⏳ Handles multiple concurrent workflows (pending verification)
+
+x-implementation-findings:
+  # This section updated iteratively during implementation
+  # Format: version → findings → corrections → rationale
+
+  1.0.0:
+    findings:
+      - Top-level telegram imports prevented standalone testing of markdown validation
+      - Test framework needed to handle system python vs uv environment differences
+      - Bot startup validation confirmed no import/syntax errors
+    corrections:
+      - Moved telegram imports to function level (lazy loading)
+      - Used /usr/bin/python3 directly for tests (bypasses python_wrapper alias)
+      - Fixed test expectation for nested bold/italic (both were unclosed, not just italic)
+    rationale:
+      - Function-level imports maintain fail-fast principle (test isolation)
+      - System python acceptable for pure-Python tests without external dependencies
+      - Markdown validation logic correctly identifies all unclosed tags
+
+  1.1.0:
+    findings:
+      - Progress poller needs safe_edit_message_by_id (edit by message_id, not CallbackQuery)
+      - Schema files (schema.json) were processed as progress data
+      - Progress emission requires 5 distinct stages with progress percentages
+    corrections:
+      - Created safe_edit_message_by_id function for bot.edit_message_text
+      - Excluded schema.json from progress file glob pattern
+      - Defined progress stages: starting (0%), rendering (25%), executing (50%), waiting (75%), completed (100%)
+    rationale:
+      - Bot needs to edit messages without CallbackQuery context
+      - Schema files are metadata, not runtime data
+      - Progress percentages provide UX feedback during long-running workflows
+
+x-off-the-shelf-components:
+  python-telegram-bot:
+    version: ">=21.0"
+    usage: Core Telegram API wrapper
+    rationale: Industry standard, handles connection management
+
+  asyncio:
+    version: stdlib
+    usage: Async/await for non-blocking operations
+    rationale: Python standard library, no external dependency
+
+x-pruned-outdated-plans:
+  # Track superseded documents
+  TELEGRAM_IMPROVEMENTS_PLAN.md:
+    status: superseded
+    reason: Replaced by this machine-readable spec
+    preservation: Keep for reference during P1/P2 implementation
+
+x-references:
+  research: /tmp/telegram-claude-research/
+  existing_system: /Users/terryli/.claude/automation/lychee/
+  bot: runtime/bot/multi-workspace-bot.py
+  helpers_module: runtime/lib/telegram_helpers.py
+  tests: runtime/lib/test_telegram_helpers.py
+  specification: specifications/telegram-bot-improvements.yaml

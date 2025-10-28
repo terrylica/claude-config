@@ -216,7 +216,7 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
         
         # Trigger audio notification with working directory context
         echo "$(date): Triggering notification hook with cwd: $cwd" >> /tmp/claude_cns_debug.log
-        echo "$input_data" | "$HOME/.claude/automation/cns/cns_notification_hook.sh" &
+        echo "$input_data" | "$HOME/.claude/automation/cns/cns_notification_hook.sh" > /dev/null 2>&1 &
 
         # Also send Pushover notification with rich metadata
         {
@@ -252,7 +252,7 @@ ${last_response:0:200}
                     echo "$(date): Pushover notification sent" >> /tmp/claude_cns_debug.log
                 fi
             fi
-        } &
+        } > /dev/null 2>&1 &
     else
         echo "No valid response found after $max_attempts attempts" >> /tmp/claude_cns_debug.log
     fi
@@ -261,3 +261,4 @@ else
 fi
 
 echo "$(date): CNS clipboard hook completed" >> /tmp/claude_cns_debug.log
+exit 0

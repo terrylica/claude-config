@@ -1,6 +1,7 @@
 ---
-name: Claude Code Session Recovery
+name: session-recovery
 description: Troubleshooting Claude Code session storage and resume failures. Use when experiencing "No conversations found to resume", sessions not appearing in claude -r, session files not being created, or HOME environment variable issues. Covers diagnosis commands, recovery procedures, and prevention strategies.
+allowed-tools: Read, Bash
 ---
 
 # Claude Code Session Recovery Skill

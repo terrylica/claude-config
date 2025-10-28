@@ -12,17 +12,20 @@
 ### ✅ Complete (Phases 0-3)
 
 **Phase 0: Pre-Migration Validation**
+
 - OpenAPI 3.1.1 specification: `specifications/telegram-workflows-orchestration-v4.yaml`
 - Git baseline established
 - Pre-migration validation script
 
 **Phase 1: Workflow Registry**
+
 - `automation/lychee/state/workflows.json` created
 - 4 workflows defined: lychee-autofix, prune-legacy, fix-docstrings, rename-variables
 - JSON schema validated
 - Jinja2 templates validated
 
 **Phase 2: Hook Refactor**
+
 - File: `automation/lychee/runtime/hook/check-links-hybrid.sh`
 - SessionSummary emitted on EVERY stop
 - Git status extraction (branch, modified/untracked/staged, ahead/behind)
@@ -32,6 +35,7 @@
 - SQLite logging: hook.started, hook.completed, summary.created
 
 **Phase 3: Bot Refactor**
+
 - File: `automation/lychee/runtime/bot/multi-workspace-bot.py`
 - Workflow registry loading
 - Trigger-based filtering (lychee_errors, git_modified, always)
@@ -43,6 +47,7 @@
 - SQLite logging: summary.received, summary.processed, selection.created
 
 **Phase 4: Scaffolding**
+
 - File: `automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py`
 - Jinja2 dependency added
 - Registry loading function: `load_workflow_registry()`
@@ -360,6 +365,7 @@ cd /Users/terryli/.claude/automation/lychee
 ```
 
 **Expected Output**:
+
 - Registry loaded
 - Template rendered with session context
 - Claude CLI invoked
@@ -400,11 +406,13 @@ print(prompt)
 **Decision**: Return workflows in provided order (no topological sort)
 
 **Rationale**:
+
 - Workflows in v4.0.0 have no dependencies (all `dependencies: []`)
 - Proper dependency resolution requires topological sort algorithm
 - Can be added in Phase 5+ without breaking changes
 
 **Code**:
+
 ```python
 def resolve_workflow_dependencies(workflow_ids, registry):
     # Phase 4: No-op, return input order
@@ -417,6 +425,7 @@ def resolve_workflow_dependencies(workflow_ids, registry):
 **Challenge**: Bot consumes (deletes) summary files after processing
 
 **Options**:
+
 - A. Store summary data in selection file (bot includes it)
 - B. Don't delete summary files (bot marks as processed instead)
 - C. Orchestrator fails if summary missing (require re-run from hook)
@@ -424,6 +433,7 @@ def resolve_workflow_dependencies(workflow_ids, registry):
 **Recommendation**: Option A (store in selection file)
 
 **Changes Required** (bot):
+
 ```python
 # In handle_workflow_selection()
 selection_state = {
@@ -456,13 +466,13 @@ for workflow_id in ordered_workflow_ids:
 
 **New Events for Phase 4**:
 
-| Event Type | Component | Metadata |
-|------------|-----------|----------|
-| `selection.received` | orchestrator | selection_file, workflow_ids |
-| `workflow.started` | orchestrator | workflow_id, workflow_name |
-| `workflow.template_rendered` | orchestrator | workflow_id, template_length |
-| `workflow.completed` | orchestrator | workflow_id, status, duration |
-| `execution.created` | orchestrator | execution_file, workflow_id |
+| Event Type                   | Component    | Metadata                      |
+| ---------------------------- | ------------ | ----------------------------- |
+| `selection.received`         | orchestrator | selection_file, workflow_ids  |
+| `workflow.started`           | orchestrator | workflow_id, workflow_name    |
+| `workflow.template_rendered` | orchestrator | workflow_id, template_length  |
+| `workflow.completed`         | orchestrator | workflow_id, status, duration |
+| `execution.created`          | orchestrator | execution_file, workflow_id   |
 
 **Query for End-to-End Trace**:
 
@@ -474,6 +484,7 @@ ORDER BY timestamp;
 ```
 
 **Expected Trace**:
+
 1. hook.started
 2. hook.completed
 3. summary.created
@@ -493,11 +504,11 @@ ORDER BY timestamp;
 
 **Phase 4 SLOs**:
 
-| SLO | Target | Validation Method |
-|-----|--------|-------------------|
-| Correctness | 100% | All workflows execute, results emitted |
-| Observability | 100% | All events logged with correlation_id |
-| Maintainability | Single source | workflows.json is canonical |
+| SLO             | Target        | Validation Method                      |
+| --------------- | ------------- | -------------------------------------- |
+| Correctness     | 100%          | All workflows execute, results emitted |
+| Observability   | 100%          | All events logged with correlation_id  |
+| Maintainability | Single source | workflows.json is canonical            |
 
 ---
 
@@ -526,6 +537,7 @@ less specifications/telegram-workflows-orchestration-v4.yaml
 ```
 
 **Key Files**:
+
 - SSoT: `specifications/telegram-workflows-orchestration-v4.yaml`
 - Migration Plan: `automation/lychee/MIGRATION_v3_to_v4_PLAN_v2.md`
 - Orchestrator: `automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py`
@@ -536,23 +548,28 @@ less specifications/telegram-workflows-orchestration-v4.yaml
 ## Estimated Remaining Effort
 
 **Phase 4 Core**: 2-3 hours
+
 - WorkflowOrchestrator class: 1 hour
 - Template context building: 30 min
 - Execution loop: 1 hour
 - Testing: 30 min
 
 **Phase 5 (Integration Testing)**: 2-3 hours
+
 - 5 test scenarios
 - SQLite validation
 - Documentation
 
 **Phase 6 (Rename)**: 1-1.5 hours
+
 - Stop services, git mv, update paths
 
 **Phase 7 (Cleanup)**: 1-2 hours
+
 - Remove dual-mode code
 
 **Phase 8 (Docs)**: 2-3 hours
+
 - README, CHANGELOG, release notes
 
 **Total Remaining**: ~10-15 hours
@@ -562,6 +579,7 @@ less specifications/telegram-workflows-orchestration-v4.yaml
 ## Success Criteria
 
 **Phase 4 Complete When**:
+
 - ✅ WorkflowOrchestrator processes selection files
 - ✅ Jinja2 templates render with session context
 - ✅ Claude CLI invoked for each workflow
@@ -573,6 +591,7 @@ less specifications/telegram-workflows-orchestration-v4.yaml
 - ✅ Committed and pushed
 
 **v4.0.0 Release Ready When**:
+
 - All Phases 0-8 complete
 - Integration tests pass (5 scenarios)
 - Documentation updated
