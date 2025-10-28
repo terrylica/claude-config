@@ -723,11 +723,15 @@ class WorkflowExecutionHandler:
                 tracking_context = active_progress_updates[progress_key]
                 message_id = tracking_context["message_id"]
                 git_branch = tracking_context.get("git_branch", "unknown")
-                workspace_path_str = tracking_context.get("workspace_path", "unknown")
+                repository_root = tracking_context.get("repository_root", "unknown")
+                working_dir = tracking_context.get("working_directory", ".")
                 workflow_name = tracking_context.get("workflow_name", workflow_id)
                 git_modified = tracking_context.get("git_modified", 0)
                 git_untracked = tracking_context.get("git_untracked", 0)
                 git_staged = tracking_context.get("git_staged", 0)
+
+                # Replace home directory with ~ for cleaner display
+                repo_display = str(repository_root).replace(str(Path.home()), "~")
 
                 print(f"   📝 Updating tracked message (message_id={message_id})")
 
@@ -757,7 +761,8 @@ class WorkflowExecutionHandler:
 
                 final_caption = (
                     f"{status_emoji} **Workflow: {workflow_name}**\n\n"
-                    f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+                    f"**Repository**: `{repo_display}`\n"
+                    f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**Git**: {git_status_line}\n\n"
                     f"**Status**: {status}\n"
@@ -1084,9 +1089,23 @@ class SummaryHandler:
                 porcelain_text = "\n".join(git_porcelain_lines)
                 git_porcelain_display = f"\n\n```\n{porcelain_text}\n```"
 
-            message = f"""{emoji} **Session Summary** - {ws_name}
+            # Extract repository root and working directory (industry standard distinction)
+            repository_root = summary.get("repository_root", str(workspace_path))
+            working_dir = summary.get("working_directory", ".")
 
-**Workspace**: `{workspace_path}`
+            # Replace home directory with ~ for cleaner display
+            repo_display = str(repository_root).replace(str(Path.home()), "~")
+
+            # Use last Claude CLI response as title (industry standard: show what was just done)
+            last_response = summary.get("last_response", "Session completed")
+            # Truncate if too long, keep first line
+            if len(last_response) > 100:
+                last_response = last_response[:97] + "..."
+
+            message = f"""{emoji} **{last_response}**
+
+**Repository**: `{repo_display}`
+**Directory**: `{working_dir}`
 **Session**: `{session_id}`
 **Duration**: {duration}s
 
@@ -1464,7 +1483,11 @@ async def handle_workflow_selection(
         git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
         git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
         git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
-        workspace_path_str = summary_data.get("workspace_path", workspace_path)
+
+        # Extract repository root and working directory (industry standard)
+        repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
+        working_dir = summary_data.get("working_directory", ".")
+        repo_display = str(repository_root).replace(str(Path.home()), "~")
 
         # Build git status line
         git_status_parts = []
@@ -1478,7 +1501,8 @@ async def handle_workflow_selection(
 
         initial_caption = (
             f"⏳ **Workflow: {workflow_name}**\n\n"
-            f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+            f"**Repository**: `{repo_display}`\n"
+            f"**Directory**: `{working_dir}`\n"
             f"**Branch**: `{git_branch}`\n"
             f"**Git**: {git_status_line}\n\n"
             f"**Stage**: starting\n"
@@ -1510,7 +1534,11 @@ async def handle_workflow_selection(
         git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
         git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
         git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
-        workspace_path_str = summary_data.get("workspace_path", workspace_path)
+
+        # Extract repository root and working directory (industry standard)
+        repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
+        working_dir = summary_data.get("working_directory", ".")
+        repo_display = str(repository_root).replace(str(Path.home()), "~")
 
         # Build git status line
         git_status_parts = []
@@ -1526,7 +1554,8 @@ async def handle_workflow_selection(
 
         initial_caption = (
             f"{emoji} **Workflow: {workflow_id}**\n\n"
-            f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+            f"**Repository**: `{repo_display}`\n"
+            f"**Directory**: `{working_dir}`\n"
             f"**Branch**: `{git_branch}`\n"
             f"**Git**: {git_status_line}\n\n"
             f"**Stage**: starting\n"
@@ -1559,12 +1588,16 @@ async def handle_workflow_selection(
     git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
     git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
     git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
-    workspace_path_str = summary_data.get("workspace_path", workspace_path)
+
+    # Extract repository root and working directory (industry standard)
+    repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
+    working_dir = summary_data.get("working_directory", ".")
 
     active_progress_updates[progress_key] = {
         "message_id": message_id,
         "workspace_id": workspace_id,
-        "workspace_path": workspace_path_str,
+        "repository_root": repository_root,
+        "working_directory": working_dir,
         "git_branch": git_branch,
         "git_modified": git_modified,
         "git_untracked": git_untracked,
@@ -1890,15 +1923,19 @@ async def progress_poller(app: Application) -> None:
                     print(f"   ⏭️  Not tracking this workflow (no message_id registered)")
                     continue
 
-                # Extract tracking context (message_id + workspace/git info)
+                # Extract tracking context (message_id + repository/git info)
                 tracking_context = active_progress_updates[progress_key]
                 message_id = tracking_context["message_id"]
                 git_branch = tracking_context.get("git_branch", "unknown")
-                workspace_path_str = tracking_context.get("workspace_path", "unknown")
+                repository_root = tracking_context.get("repository_root", "unknown")
+                working_dir = tracking_context.get("working_directory", ".")
                 workflow_name = tracking_context.get("workflow_name", workflow_id)
                 git_modified = tracking_context.get("git_modified", 0)
                 git_untracked = tracking_context.get("git_untracked", 0)
                 git_staged = tracking_context.get("git_staged", 0)
+
+                # Replace home directory with ~ for cleaner display
+                repo_display = str(repository_root).replace(str(Path.home()), "~")
 
                 print(f"   📝 Updating message_id: {message_id} (branch: {git_branch})")
 
@@ -1924,7 +1961,8 @@ async def progress_poller(app: Application) -> None:
 
                 progress_caption = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
-                    f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+                    f"**Repository**: `{repo_display}`\n"
+                    f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**Git**: {git_status_line}\n\n"
                     f"**Stage**: {stage}\n"

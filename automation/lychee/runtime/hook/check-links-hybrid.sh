@@ -55,7 +55,7 @@ hook_input=$(cat) || hook_input=""
 } >> "$log_file" 2>&1
 
 # Determine workspace directory with smart fallback
-# Priority: CLAUDE_WORKSPACE_DIR > cwd from JSON > $HOME/.claude
+# Get current working directory (where Claude CLI is running)
 if [[ -n "${CLAUDE_WORKSPACE_DIR:-}" ]]; then
     workspace_dir="$CLAUDE_WORKSPACE_DIR"
 elif [[ -n "$hook_input" ]]; then
@@ -66,6 +66,18 @@ elif [[ -n "$hook_input" ]]; then
 else
     # Fallback: Assume user's main Claude workspace
     workspace_dir="$HOME/.claude"
+fi
+
+# Detect git repository root (where .git lives)
+# cd to workspace_dir first to ensure git commands work correctly
+cd "$workspace_dir" || exit 1
+git_root=$(git rev-parse --show-toplevel 2>/dev/null || echo "$workspace_dir")
+
+# Calculate relative path from git root to current directory
+if [[ "$workspace_dir" == "$git_root" ]]; then
+    relative_dir="."
+else
+    relative_dir="${workspace_dir#$git_root/}"
 fi
 
 # Parse stop_hook_active flag (infinite loop prevention)
@@ -82,6 +94,47 @@ fi
 if [[ -z "${session_id:-}" ]]; then
     # Generate session ID from timestamp if not provided
     session_id="session-$(date +%Y%m%d-%H%M%S)-$$"
+fi
+
+# Extract last assistant message from transcript for Session Summary title
+last_assistant_message=""
+
+# Extract transcript_path from hook input (Claude CLI provides this)
+if [[ -n "$hook_input" ]]; then
+    transcript_file=$(echo "$hook_input" | jq -r '.transcript_path // ""' 2>/dev/null)
+else
+    transcript_file=""
+fi
+
+if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
+    echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 Found transcript: $transcript_file" >> "$log_file"
+
+    # Extract last assistant message (text block content)
+    # JSONL format: each line is a wrapper object with nested message
+    # Structure: {message: {role: "assistant", content: [...]}}
+    last_assistant_message=$(tac "$transcript_file" | \
+        jq -r '.message | select(.role == "assistant") | .content[] | select(.type == "text") | .text' 2>/dev/null | \
+        head -1 | \
+        head -c 200)  # Limit to 200 chars for title
+
+    # Extract first line only (often a summary or heading)
+    if [[ -n "$last_assistant_message" ]]; then
+        last_assistant_message=$(echo "$last_assistant_message" | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ Extracted last response: ${last_assistant_message:0:80}..." >> "$log_file"
+    else
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  No assistant text content found in transcript" >> "$log_file"
+    fi
+else
+    if [[ -n "$transcript_file" ]]; then
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Transcript not found: $transcript_file" >> "$log_file"
+    else
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  No transcript_path in hook input" >> "$log_file"
+    fi
+fi
+
+# Fallback to workspace name if no message extracted
+if [[ -z "$last_assistant_message" ]]; then
+    last_assistant_message="Session completed"
 fi
 
 # Generate or reuse correlation ID for distributed tracing
@@ -231,8 +284,11 @@ write_session_summary() {
 {
   "correlation_id": "$CORRELATION_ID",
   "workspace_path": "$workspace_dir",
+  "repository_root": "$git_root",
+  "working_directory": "$relative_dir",
   "workspace_id": "$workspace_hash",
   "session_id": "$session_id",
+  "last_response": $(echo "$last_assistant_message" | jq -R -s .),
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "duration_seconds": $session_duration,
   "git_status": {
