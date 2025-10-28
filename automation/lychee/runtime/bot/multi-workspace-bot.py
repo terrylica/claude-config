@@ -913,16 +913,19 @@ class SummaryHandler:
             # Always compute workspace hash for tracking consistency
             workspace_hash = compute_workspace_hash(workspace_path)
 
-            # Load workspace config (with fallback for unregistered workspaces)
+            # ALWAYS use workspace hash for tracking consistency
+            # (Execution files from orchestrator use hash, so tracking must too)
+            workspace_id = workspace_hash
+
+            # Load workspace config for display only (emoji, name)
             try:
-                workspace_id = get_workspace_id_from_path(workspace_path)
+                registered_id = get_workspace_id_from_path(workspace_path)
                 registry = load_registry()
-                workspace = registry["workspaces"][workspace_id]
+                workspace = registry["workspaces"][registered_id]
                 emoji = workspace["emoji"]
                 ws_name = workspace["name"]
             except (ValueError, FileNotFoundError, KeyError):
-                # Unregistered workspace - use hash for tracking
-                workspace_id = workspace_hash
+                # Unregistered workspace - use defaults
                 emoji = "📁"
                 ws_name = workspace_path.name
 
@@ -1980,15 +1983,18 @@ async def main() -> int:
                 workspace_id = tracking_data["workspace_id"]
                 session_id = tracking_data["session_id"]
                 # Extract workflow_id from filename: {workspace}_{session}_{workflow}_tracking.json
-                # Session has dashes, so we need to extract carefully
+                # UUIDs use dashes (not underscores), so split is simple:
+                # Example: 81e622b5_fb77a731-3922-4da4-bc54-4b2db9de6e40_commit-changes_tracking.json
                 filename_parts = tracking_file.stem.replace("_tracking", "").split("_")
-                # workspace is 8 chars, session is 36 chars with dashes (but dashes become parts)
-                # Format: 81e622b5_1986f816-c78c-4bd3-a7c4-1e993c8af65d_workflow-id
-                workflow_id = "_".join(filename_parts[6:]) if len(filename_parts) > 6 else filename_parts[-1]
+                # parts[0] = workspace_id (8 chars hash)
+                # parts[1] = session_id (UUID with dashes)
+                # parts[2:] = workflow_id (might contain underscores)
+                workflow_id = "_".join(filename_parts[2:])
 
                 progress_key = (workspace_id, session_id, workflow_id)
                 active_progress_updates[progress_key] = tracking_data
                 restored_count += 1
+                print(f"   ✓ Restored: {workspace_id}/{workflow_id} (msg {tracking_data['message_id']})")
             except Exception as e:
                 print(f"   ⚠️  Failed to restore {tracking_file.name}: {e}")
         print(f"   ✅ Restored {restored_count} tracked workflow(s)")
