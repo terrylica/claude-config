@@ -10,6 +10,19 @@ from jinja2 import Template, TemplateSyntaxError
 from pathlib import Path
 
 def main():
+    """Validate all Jinja2 templates in workflow registry.
+
+    Loads the workflows.json registry and validates each workflow's
+    prompt_template field for Jinja2 syntax correctness.
+
+    Returns:
+        None
+
+    Raises:
+        SystemExit: Exits with code 1 if any template validation fails.
+        FileNotFoundError: If workflows.json registry does not exist.
+        json.JSONDecodeError: If workflows.json is malformed.
+    """
     registry_path = Path(__file__).parent.parent.parent / "state" / "workflows.json"
 
     with open(registry_path) as f:
