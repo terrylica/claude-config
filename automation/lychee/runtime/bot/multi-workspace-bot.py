@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 # Import telegram helpers for rate limiting and markdown safety
@@ -713,70 +713,149 @@ class WorkflowExecutionHandler:
                 emoji = "📁"
                 print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={workspace_path.name}")
 
-            # Format message based on status
-            print(f"   ✍️  Formatting execution message...")
-            message = self._format_execution_message(execution, emoji, workflow_name)
-            print(f"   ✓ Message formatted ({len(message)} chars)")
-
-            # Send message with rate limiting and markdown safety (NO BUTTONS)
-            print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
-            await safe_send_message(
-                bot=self.bot,
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode="Markdown"
-            )
-
-            # Send full output as document if > 500 chars (progressive disclosure)
+            # Phase 3: Check if we're tracking this workflow (single-message pattern)
+            progress_key = (workspace_id, session_id, workflow_id)
             status = execution["status"]
-            if status == "success" and execution.get("stdout"):
-                stdout = execution["stdout"].strip()
-                if stdout and len(stdout) > 500:
-                    print(f"   📄 Sending full output as document ({len(stdout)} chars)...")
+            duration = execution.get("duration_seconds", 0)
 
-                    # Extract readable content from JSON output (if applicable)
-                    readable_content = stdout
-                    try:
-                        result_data = json.loads(stdout)
-                        if isinstance(result_data, dict) and 'result' in result_data:
-                            # Extract human-readable result from JSON
-                            readable_content = result_data['result']
-                            print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
-                        else:
-                            print(f"   ⚠️  JSON parsed but no 'result' field, using raw output")
-                    except json.JSONDecodeError:
-                        # Not JSON - use raw output as-is
-                        print(f"   ℹ️  Output is not JSON, using raw content")
+            if progress_key in active_progress_updates:
+                # Single-message pattern: replace document in existing progress message
+                message_id = active_progress_updates[progress_key]
+                print(f"   📝 Updating tracked message (message_id={message_id})")
 
-                    file_path = f"/tmp/workflow_report_{session_id[:8]}_{workflow_id}.txt"
-                    with open(file_path, 'w') as f:
-                        f.write(readable_content)
+                # Build final caption
+                status_emoji_map = {"success": "✅", "error": "❌", "timeout": "⏱️"}
+                status_emoji = status_emoji_map.get(status, "❓")
 
-                    await self.bot.send_document(
-                        chat_id=self.chat_id,
-                        document=open(file_path, 'rb'),
+                # Extract summary from execution
+                summary = "Workflow completed"
+                if status == "success" and execution.get("stdout"):
+                    stdout = execution["stdout"].strip()
+                    if stdout:
+                        lines = [l.strip() for l in stdout.split('\n') if l.strip()]
+                        summary = lines[0] if lines else "Workflow completed"
+                        if len(summary) > 100:
+                            summary = summary[:97] + "..."
+
+                final_caption = (
+                    f"{status_emoji} **Workflow Completed**\n\n"
+                    f"Workflow: `{workflow_id}`\n"
+                    f"Status: {status}\n"
+                    f"Duration: {duration}s\n"
+                    f"Output: {summary}"
+                )
+
+                # Prepare final document with full output
+                readable_content = ""
+                if status == "success" and execution.get("stdout"):
+                    stdout = execution["stdout"].strip()
+                    if stdout:
+                        # Extract readable content from JSON output (if applicable)
+                        try:
+                            result_data = json.loads(stdout)
+                            if isinstance(result_data, dict) and 'result' in result_data:
+                                readable_content = result_data['result']
+                                print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
+                            else:
+                                readable_content = stdout
+                        except json.JSONDecodeError:
+                            readable_content = stdout
+                elif status == "error" and execution.get("stderr"):
+                    readable_content = execution["stderr"].strip()
+
+                if not readable_content:
+                    readable_content = f"Workflow {status} with no output"
+
+                # Write final document
+                final_file = Path(f"/tmp/workflow-{workflow_id}-{session_id[:8]}.txt")
+                final_file.write_text(readable_content)
+
+                # Replace document entirely (edit_message_media)
+                print(f"   📄 Replacing document with final results ({len(readable_content)} chars)...")
+                await self.bot.edit_message_media(
+                    chat_id=self.chat_id,
+                    message_id=message_id,
+                    media=InputMediaDocument(
+                        media=open(final_file, 'rb'),
                         filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
-                        caption=f"📄 Full workflow output\n\n{workflow_name}"
+                        caption=final_caption,
+                        parse_mode="Markdown"
                     )
-                    os.remove(file_path)
-                    print(f"   ✓ Document sent and temp file cleaned")
+                )
+                final_file.unlink()  # Clean up
+                print(f"   ✅ Document replaced successfully")
 
-            elif status == "error" and execution.get("stderr"):
-                stderr = execution["stderr"].strip()
-                if stderr and len(stderr) > 500:
-                    print(f"   📄 Sending full error log as document ({len(stderr)} chars)...")
-                    file_path = f"/tmp/workflow_error_{session_id[:8]}_{workflow_id}.txt"
-                    with open(file_path, 'w') as f:
-                        f.write(stderr)
+                # Cleanup tracking
+                del active_progress_updates[progress_key]
+                print(f"   🗑️  Progress tracking cleaned up")
 
-                    await self.bot.send_document(
-                        chat_id=self.chat_id,
-                        document=open(file_path, 'rb'),
-                        filename=f"workflow-error-{workflow_id}-{session_id[:8]}.txt",
-                        caption=f"❌ Full error log\n\n{workflow_name}"
-                    )
-                    os.remove(file_path)
-                    print(f"   ✓ Document sent and temp file cleaned")
+            else:
+                # Fallback: no active progress tracking (backwards compatibility)
+                print(f"   ℹ️  No progress tracking found, using separate messages")
+
+                # Format message based on status
+                print(f"   ✍️  Formatting execution message...")
+                message = self._format_execution_message(execution, emoji, workflow_name)
+                print(f"   ✓ Message formatted ({len(message)} chars)")
+
+                # Send message with rate limiting and markdown safety (NO BUTTONS)
+                print(f"   📡 Sending to Telegram (chat_id={self.chat_id})...")
+                await safe_send_message(
+                    bot=self.bot,
+                    chat_id=self.chat_id,
+                    text=message,
+                    parse_mode="Markdown"
+                )
+
+                # Send full output as document if > 500 chars (progressive disclosure)
+                if status == "success" and execution.get("stdout"):
+                    stdout = execution["stdout"].strip()
+                    if stdout and len(stdout) > 500:
+                        print(f"   📄 Sending full output as document ({len(stdout)} chars)...")
+
+                        # Extract readable content from JSON output (if applicable)
+                        readable_content = stdout
+                        try:
+                            result_data = json.loads(stdout)
+                            if isinstance(result_data, dict) and 'result' in result_data:
+                                # Extract human-readable result from JSON
+                                readable_content = result_data['result']
+                                print(f"   ✓ Extracted readable content from JSON ({len(readable_content)} chars)")
+                            else:
+                                print(f"   ⚠️  JSON parsed but no 'result' field, using raw output")
+                        except json.JSONDecodeError:
+                            # Not JSON - use raw output as-is
+                            print(f"   ℹ️  Output is not JSON, using raw content")
+
+                        file_path = f"/tmp/workflow_report_{session_id[:8]}_{workflow_id}.txt"
+                        with open(file_path, 'w') as f:
+                            f.write(readable_content)
+
+                        await self.bot.send_document(
+                            chat_id=self.chat_id,
+                            document=open(file_path, 'rb'),
+                            filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
+                            caption=f"📄 Full workflow output\n\n{workflow_name}"
+                        )
+                        os.remove(file_path)
+                        print(f"   ✓ Document sent and temp file cleaned")
+
+                elif status == "error" and execution.get("stderr"):
+                    stderr = execution["stderr"].strip()
+                    if stderr and len(stderr) > 500:
+                        print(f"   📄 Sending full error log as document ({len(stderr)} chars)...")
+                        file_path = f"/tmp/workflow_error_{session_id[:8]}_{workflow_id}.txt"
+                        with open(file_path, 'w') as f:
+                            f.write(stderr)
+
+                        await self.bot.send_document(
+                            chat_id=self.chat_id,
+                            document=open(file_path, 'rb'),
+                            filename=f"workflow-error-{workflow_id}-{session_id[:8]}.txt",
+                            caption=f"❌ Full error log\n\n{workflow_name}"
+                        )
+                        os.remove(file_path)
+                        print(f"   ✓ Document sent and temp file cleaned")
 
             print(f"📤 ✅ Sent execution completion for {workspace_id} ({session_id}): {workflow_name}")
             update_activity()  # Track activity for idle timeout
@@ -1237,7 +1316,8 @@ async def handle_workflow_selection(
     workspace_path: str,
     session_id: str,
     action: str,
-    correlation_id: str
+    correlation_id: str,
+    context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     """
     Handle workflow selection button click (Phase 3 - v4.0.0).
@@ -1251,6 +1331,7 @@ async def handle_workflow_selection(
         session_id: Session identifier
         action: Selected action (workflow_<id> or custom_prompt)
         correlation_id: Correlation ID for tracing
+        context: Bot context for accessing bot instance
 
     Raises:
         All errors propagate (fail-fast)
@@ -1354,29 +1435,64 @@ async def handle_workflow_selection(
         workflow_name = f"{workflow['icon']} {workflow['name']}"
         estimated_duration = workflow.get("estimated_duration", "unknown")
 
-        await safe_edit_message(
-            query=query,
-            text=f"{emoji} **Workflow Selected**: {workflow_name}\n\n"
-                 f"Workspace: `{workspace_id}`\n"
-                 f"Session: `{session_id}`\n"
-                 f"Estimated duration: ~{estimated_duration}s\n\n"
-                 f"Orchestrator will process this workflow...",
+        # Phase 1: Send placeholder document with initial caption
+        placeholder_file = Path(f"/tmp/workflow-{workflow_id}-starting.txt")
+        placeholder_file.write_text("🎬 Workflow starting...\n\nThis file will be updated with results.")
+
+        initial_caption = (
+            f"⏳ **Workflow: {workflow_name}**\n\n"
+            f"Workspace: `{workspace_id}`\n"
+            f"Session: `{session_id}`\n"
+            f"Estimated duration: ~{estimated_duration}s\n\n"
+            f"Status: Starting...\n"
+            f"Progress: 0%"
+        )
+
+        # Delete the original callback message
+        await query.message.delete()
+
+        # Send new document message
+        sent_message = await context.bot.send_document(
+            chat_id=query.message.chat_id,
+            document=open(placeholder_file, 'rb'),
+            filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
+            caption=initial_caption,
             parse_mode="Markdown"
         )
+        placeholder_file.unlink()  # Clean up
+
+        message_id = sent_message.message_id
     else:
-        await safe_edit_message(
-            query=query,
-            text=f"{emoji} **Workflow Selected**: {workflow_id}\n\n"
-                 f"Workspace: `{workspace_id}`\n"
-                 f"Session: `{session_id}`\n\n"
-                 f"Processing...",
+        # Fallback for unknown workflow
+        placeholder_file = Path(f"/tmp/workflow-{workflow_id}-starting.txt")
+        placeholder_file.write_text("🎬 Workflow starting...\n\nThis file will be updated with results.")
+
+        initial_caption = (
+            f"{emoji} **Workflow: {workflow_id}**\n\n"
+            f"Workspace: `{workspace_id}`\n"
+            f"Session: `{session_id}`\n\n"
+            f"Status: Processing...\n"
+            f"Progress: 0%"
+        )
+
+        # Delete the original callback message
+        await query.message.delete()
+
+        # Send new document message
+        sent_message = await context.bot.send_document(
+            chat_id=query.message.chat_id,
+            document=open(placeholder_file, 'rb'),
+            filename=f"workflow-{workflow_id}-{session_id[:8]}.txt",
+            caption=initial_caption,
             parse_mode="Markdown"
         )
+        placeholder_file.unlink()  # Clean up
+
+        message_id = sent_message.message_id
 
     print(f"✅ Workflow selected: {workflow_id} for workspace: {workspace_id}")
 
     # Track message_id for progress updates
-    message_id = query.message.message_id
     progress_key = (workspace_id, session_id, workflow_id)
     active_progress_updates[progress_key] = message_id
     print(f"   📌 Tracking progress updates (message_id={message_id})")
@@ -1419,7 +1535,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Phase 3 - v4.0.0: Handle workflow selection actions
     if action.startswith("workflow_") or action == "custom_prompt":
-        await handle_workflow_selection(query, workspace_id, workspace_path, session_id, action, correlation_id)
+        await handle_workflow_selection(query, workspace_id, workspace_path, session_id, action, correlation_id, context)
         update_activity()
         return
 
@@ -1700,7 +1816,7 @@ async def progress_poller(app: Application) -> None:
                 message_id = active_progress_updates[progress_key]
                 print(f"   📝 Updating message_id: {message_id}")
 
-                # Build progress message
+                # Build progress caption (Phase 2: edit caption instead of text)
                 stage_emoji = {
                     "starting": "🎬",
                     "rendering": "📝",
@@ -1710,23 +1826,27 @@ async def progress_poller(app: Application) -> None:
                 }
                 emoji = stage_emoji.get(stage, "📊")
 
-                progress_text = (
-                    f"{emoji} **Workflow Progress**\n\n"
-                    f"Workflow: `{workflow_id}`\n"
+                # Get workflow name for caption
+                workflow_name = workflow_id
+                if workflow_registry and workflow_id in workflow_registry["workflows"]:
+                    workflow = workflow_registry["workflows"][workflow_id]
+                    workflow_name = f"{workflow['icon']} {workflow['name']}"
+
+                progress_caption = (
+                    f"{emoji} **Workflow: {workflow_name}**\n\n"
                     f"Stage: {stage}\n"
                     f"Progress: {progress_percent}%\n"
                     f"Status: {message}\n"
                 )
 
-                # Update message
-                await safe_edit_message_by_id(
-                    bot=app.bot,
+                # Update caption only (document unchanged, no reupload)
+                await app.bot.edit_message_caption(
                     chat_id=int(CHAT_ID),
                     message_id=message_id,
-                    text=progress_text,
+                    caption=progress_caption,
                     parse_mode="Markdown"
                 )
-                print(f"   ✅ Message updated successfully")
+                print(f"   ✅ Caption updated successfully")
 
                 # Clean up if completed
                 if stage == "completed":
