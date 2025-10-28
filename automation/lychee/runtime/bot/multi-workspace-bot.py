@@ -1096,23 +1096,40 @@ class SummaryHandler:
             # Replace home directory with ~ for cleaner display
             repo_display = str(repository_root).replace(str(Path.home()), "~")
 
+            # Extract user prompt to remind what was asked
+            user_prompt = summary.get("last_user_prompt", "")
+            if user_prompt:
+                # Truncate if too long
+                if len(user_prompt) > 100:
+                    user_prompt = user_prompt[:97] + "..."
+
             # Use last Claude CLI response as title (industry standard: show what was just done)
             last_response = summary.get("last_response", "Session completed")
             # Truncate if too long, keep first line
             if len(last_response) > 100:
                 last_response = last_response[:97] + "..."
 
-            message = f"""{emoji} **{last_response}**
+            # Build compact git status line
+            git_parts = []
+            modified = git_status.get('modified_files', 0)
+            untracked = git_status.get('untracked_files', 0)
+            staged = git_status.get('staged_files', 0)
+            if modified > 0:
+                git_parts.append(f"M:{modified}")
+            if staged > 0:
+                git_parts.append(f"S:{staged}")
+            if untracked > 0:
+                git_parts.append(f"U:{untracked}")
+            git_compact = " ".join(git_parts) if git_parts else "clean"
 
-**Repository**: `{repo_display}`
-**Directory**: `{working_dir}`
-**Session**: `{session_id}`
-**Duration**: {duration}s
+            # Build message with user prompt as first line if available
+            prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
 
-**Git Status**:
-• Branch: `{git_status.get('branch', 'unknown')}`
-• Modified: {git_status.get('modified_files', 0)} files
-• Untracked: {git_status.get('untracked_files', 0)} files{git_porcelain_display}
+            message = f"""{prompt_line}{emoji} **{last_response}**
+
+`{repo_display}` | `{working_dir}`
+`{session_id}` ({duration}s)
+**Git**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
 
 **Lychee**: {lychee_status.get('details', 'Not run')}
 

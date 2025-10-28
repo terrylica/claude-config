@@ -96,8 +96,9 @@ if [[ -z "${session_id:-}" ]]; then
     session_id="session-$(date +%Y%m%d-%H%M%S)-$$"
 fi
 
-# Extract last assistant message from transcript for Session Summary title
+# Extract last assistant and user messages from transcript for Session Summary
 last_assistant_message=""
+last_user_prompt=""
 
 # Extract transcript_path from hook input (Claude CLI provides this)
 if [[ -n "$hook_input" ]]; then
@@ -123,6 +124,21 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ Extracted last response: ${last_assistant_message:0:80}..." >> "$log_file"
     else
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  No assistant text content found in transcript" >> "$log_file"
+    fi
+
+    # Extract last user prompt (the question that triggered the response)
+    # User messages have content as string, not array: {role: "user", content: "text"}
+    last_user_prompt=$(tac "$transcript_file" | \
+        jq -r '.message | select(.role == "user") | .content' 2>/dev/null | \
+        head -1 | \
+        head -c 150)  # Limit to 150 chars
+
+    # Clean up user prompt
+    if [[ -n "$last_user_prompt" ]]; then
+        last_user_prompt=$(echo "$last_user_prompt" | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ Extracted user prompt: ${last_user_prompt:0:60}..." >> "$log_file"
+    else
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  No user prompt found in transcript" >> "$log_file"
     fi
 else
     if [[ -n "$transcript_file" ]]; then
@@ -288,6 +304,7 @@ write_session_summary() {
   "working_directory": "$relative_dir",
   "workspace_id": "$workspace_hash",
   "session_id": "$session_id",
+  "last_user_prompt": $(echo "$last_user_prompt" | jq -R -s .),
   "last_response": $(echo "$last_assistant_message" | jq -R -s .),
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "duration_seconds": $session_duration,
