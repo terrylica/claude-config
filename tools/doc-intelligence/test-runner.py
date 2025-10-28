@@ -8,6 +8,18 @@ import sys
 from pathlib import Path
 
 def run_command(cmd, description):
+    """Execute a subprocess command and display output.
+
+    Args:
+        cmd: List of command arguments to execute.
+        description: Human-readable description of the command.
+
+    Returns:
+        True if command succeeded, False if command failed.
+
+    Raises:
+        subprocess.CalledProcessError: Caught and returned as False status.
+    """
     print(f"\n{'='*60}")
     print(f"Running: {description}")
     print(f"Command: {' '.join(cmd)}")
@@ -27,6 +39,20 @@ def run_command(cmd, description):
         return False
 
 def main():
+    """Run comprehensive test suite for Documentation Intelligence Layer.
+
+    Tests the following components in sequence:
+    1. Agent registry generation via parser.py
+    2. OpenAPI specification generation
+    3. JSON schema generation
+    4. Query interface functionality
+
+    Returns:
+        None
+
+    Raises:
+        SystemExit: If agent registry generation fails (critical component).
+    """
     print("Testing Documentation Intelligence Layer")
 
     # Test if we can find agents

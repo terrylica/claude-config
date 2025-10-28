@@ -9,7 +9,15 @@ import re
 from pathlib import Path
 
 def discover_agents():
-    """Simple agent discovery demo"""
+    """Discover and parse agent markdown files from workspace.
+
+    Scans the agents directory for .md files and extracts metadata including
+    agent name, description, and available tools.
+
+    Returns:
+        List of agent dictionaries containing name, description, tools, and file path.
+        Empty list if agents directory does not exist.
+    """
     agents_dir = Path("/Users/terryli/.claude/agents")
 
     if not agents_dir.exists():
@@ -45,7 +53,20 @@ def discover_agents():
     return agents
 
 def search_agents_by_capability(query, agents):
-    """Simple capability search"""
+    """Search agents by capability query with relevance scoring.
+
+    Searches agent metadata (name, description, tools) for query matches
+    and scores results by relevance. Name matches score highest (2 points),
+    followed by description matches (1 point) and tool matches (0.5 points).
+
+    Args:
+        query: Search query string (case-insensitive).
+        agents: List of agent dictionaries from discover_agents().
+
+    Returns:
+        List of result dictionaries sorted by score (descending), each containing
+        agent data, score, and list of matching fields.
+    """
     results = []
     query_lower = query.lower()
 
@@ -79,7 +100,17 @@ def search_agents_by_capability(query, agents):
     return sorted(results, key=lambda x: x['score'], reverse=True)
 
 def generate_summary_report(agents):
-    """Generate a summary report of the documentation intelligence"""
+    """Generate summary report of discovered agents and tools.
+
+    Prints formatted report showing agent count, individual agent details,
+    and aggregated tool usage statistics.
+
+    Args:
+        agents: List of agent dictionaries from discover_agents().
+
+    Returns:
+        Dictionary containing agent_count, tool_count, and agents list.
+    """
     print("\n" + "="*60)
     print("DOCUMENTATION INTELLIGENCE LAYER SUMMARY")
     print("="*60)
