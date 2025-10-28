@@ -45,6 +45,7 @@ sys.stderr.reconfigure(line_buffering=True)
 STATE_DIR = Path.home() / ".claude" / "automation" / "lychee" / "state"
 APPROVAL_DIR = STATE_DIR / "approvals"
 COMPLETION_DIR = STATE_DIR / "completions"
+SUMMARIES_DIR = STATE_DIR / "summaries"  # Phase 4 - v4.0.0
 SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 4 - v4.0.0
 EXECUTIONS_DIR = STATE_DIR / "executions"  # Phase 4 - v4.0.0
 WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 4 - v4.0.0
