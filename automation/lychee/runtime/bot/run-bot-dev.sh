@@ -39,10 +39,11 @@ echo ""
 # --watch: directories to watch for changes
 # --ext: file extensions to monitor
 # --exec: command to run
+# Note: Use 'sh -c' wrapper to ensure doppler and uv run work correctly
 nodemon \
     --watch "$BOT_DIR" \
     --watch "$BOT_DIR/../lib" \
     --watch "$BOT_DIR/../orchestrator" \
     --ext py \
-    --exec "doppler run --project claude-config --config dev -- python" \
+    --exec "sh -c 'doppler run --project claude-config --config dev -- $0' uv run" \
     "$BOT_SCRIPT"
