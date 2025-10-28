@@ -70,6 +70,10 @@ PROGRESS_POLL_INTERVAL = 2.0  # Progress updates every 2 seconds
 # Track active progress updates: (workspace_id, session_id, workflow_id) → message_id
 active_progress_updates: Dict[tuple, int] = {}
 
+# Cache session summaries for workflow selection: (workspace_id, session_id) → summary_data
+# Needed because bot deletes summary files before user clicks workflow buttons
+summary_cache: Dict[tuple, Dict[str, Any]] = {}
+
 if not BOT_TOKEN or not CHAT_ID:
     print("❌ Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
     sys.exit(1)
@@ -962,6 +966,18 @@ class SummaryHandler:
             git_status = summary.get("git_status", {})
             duration = summary.get("duration_seconds", 0)
 
+            # Cache summary data for workflow selection (needed because we delete summary file)
+            cache_key = (workspace_id, session_id)
+            summary_cache[cache_key] = {
+                "session_id": session_id,
+                "correlation_id": correlation_id,
+                "git_status": git_status,
+                "lychee_status": lychee_status,
+                "workspace_path": str(workspace_path),
+                "duration_seconds": duration
+            }
+            print(f"   📦 Cached summary for {cache_key}")
+
             # Build git porcelain display (up to 10 lines)
             git_porcelain_lines = git_status.get('porcelain', [])
             git_porcelain_display = ""
@@ -1259,6 +1275,13 @@ async def handle_workflow_selection(
     # Create selection file
     selection_file = SELECTIONS_DIR / f"selection_{session_id}_{workspace_hash}.json"
 
+    # Retrieve cached summary data (needed for orchestrator prompt rendering)
+    cache_key = (workspace_id, session_id)
+    summary_data = summary_cache.get(cache_key)
+    if not summary_data:
+        print(f"   ⚠️  Summary not found in cache for {cache_key}, orchestrator may fail")
+        summary_data = {}
+
     selection_state = {
         "workspace_path": workspace_path,
         "workspace_id": workspace_hash,
@@ -1266,6 +1289,7 @@ async def handle_workflow_selection(
         "workflows": [workflow_id],  # Single workflow for Phase 3 (multi-select in future)
         "correlation_id": correlation_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "summary_data": summary_data,  # Include cached summary for orchestrator
         "metadata": {
             "workspace_name": workspace_id,
             "callback_id": query.data
