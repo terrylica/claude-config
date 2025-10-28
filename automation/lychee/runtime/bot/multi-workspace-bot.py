@@ -720,7 +720,15 @@ class WorkflowExecutionHandler:
 
             if progress_key in active_progress_updates:
                 # Single-message pattern: replace document in existing progress message
-                message_id = active_progress_updates[progress_key]
+                tracking_context = active_progress_updates[progress_key]
+                message_id = tracking_context["message_id"]
+                git_branch = tracking_context.get("git_branch", "unknown")
+                workspace_path_str = tracking_context.get("workspace_path", "unknown")
+                workflow_name = tracking_context.get("workflow_name", workflow_id)
+                git_modified = tracking_context.get("git_modified", 0)
+                git_untracked = tracking_context.get("git_untracked", 0)
+                git_staged = tracking_context.get("git_staged", 0)
+
                 print(f"   📝 Updating tracked message (message_id={message_id})")
 
                 # Build final caption
@@ -737,12 +745,24 @@ class WorkflowExecutionHandler:
                         if len(summary) > 100:
                             summary = summary[:97] + "..."
 
+                # Build git status line
+                git_status_parts = []
+                if git_modified > 0:
+                    git_status_parts.append(f"{git_modified} modified")
+                if git_staged > 0:
+                    git_status_parts.append(f"{git_staged} staged")
+                if git_untracked > 0:
+                    git_status_parts.append(f"{git_untracked} untracked")
+                git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+
                 final_caption = (
-                    f"{status_emoji} **Workflow Completed**\n\n"
-                    f"Workflow: `{workflow_id}`\n"
-                    f"Status: {status}\n"
-                    f"Duration: {duration}s\n"
-                    f"Output: {summary}"
+                    f"{status_emoji} **Workflow: {workflow_name}**\n\n"
+                    f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+                    f"**Branch**: `{git_branch}`\n"
+                    f"**Git**: {git_status_line}\n\n"
+                    f"**Status**: {status}\n"
+                    f"**Duration**: {duration}s\n"
+                    f"**Output**: {summary}"
                 )
 
                 # Prepare final document with full output
@@ -1439,13 +1459,31 @@ async def handle_workflow_selection(
         placeholder_file = Path(f"/tmp/workflow-{workflow_id}-starting.txt")
         placeholder_file.write_text("🎬 Workflow starting...\n\nThis file will be updated with results.")
 
+        # Extract git context for initial caption
+        git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
+        git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
+        git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
+        git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
+        workspace_path_str = summary_data.get("workspace_path", workspace_path)
+
+        # Build git status line
+        git_status_parts = []
+        if git_modified > 0:
+            git_status_parts.append(f"{git_modified} modified")
+        if git_staged > 0:
+            git_status_parts.append(f"{git_staged} staged")
+        if git_untracked > 0:
+            git_status_parts.append(f"{git_untracked} untracked")
+        git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+
         initial_caption = (
             f"⏳ **Workflow: {workflow_name}**\n\n"
-            f"Workspace: `{workspace_id}`\n"
-            f"Session: `{session_id}`\n"
-            f"Estimated duration: ~{estimated_duration}s\n\n"
-            f"Status: Starting...\n"
-            f"Progress: 0%"
+            f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+            f"**Branch**: `{git_branch}`\n"
+            f"**Git**: {git_status_line}\n\n"
+            f"**Stage**: starting\n"
+            f"**Progress**: 0%\n"
+            f"**Status**: Starting..."
         )
 
         # Delete the original callback message
@@ -1467,12 +1505,33 @@ async def handle_workflow_selection(
         placeholder_file = Path(f"/tmp/workflow-{workflow_id}-starting.txt")
         placeholder_file.write_text("🎬 Workflow starting...\n\nThis file will be updated with results.")
 
+        # Extract git context for initial caption
+        git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
+        git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
+        git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
+        git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
+        workspace_path_str = summary_data.get("workspace_path", workspace_path)
+
+        # Build git status line
+        git_status_parts = []
+        if git_modified > 0:
+            git_status_parts.append(f"{git_modified} modified")
+        if git_staged > 0:
+            git_status_parts.append(f"{git_staged} staged")
+        if git_untracked > 0:
+            git_status_parts.append(f"{git_untracked} untracked")
+        git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
+
+        workflow_name = workflow_id
+
         initial_caption = (
             f"{emoji} **Workflow: {workflow_id}**\n\n"
-            f"Workspace: `{workspace_id}`\n"
-            f"Session: `{session_id}`\n\n"
-            f"Status: Processing...\n"
-            f"Progress: 0%"
+            f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+            f"**Branch**: `{git_branch}`\n"
+            f"**Git**: {git_status_line}\n\n"
+            f"**Stage**: starting\n"
+            f"**Progress**: 0%\n"
+            f"**Status**: Processing..."
         )
 
         # Delete the original callback message
@@ -1492,10 +1551,28 @@ async def handle_workflow_selection(
 
     print(f"✅ Workflow selected: {workflow_id} for workspace: {workspace_id}")
 
-    # Track message_id for progress updates
+    # Track message_id and context for progress updates
     progress_key = (workspace_id, session_id, workflow_id)
-    active_progress_updates[progress_key] = message_id
-    print(f"   📌 Tracking progress updates (message_id={message_id})")
+
+    # Extract git context from cached summary
+    git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
+    git_modified = summary_data.get("git_status", {}).get("modified_files", 0)
+    git_untracked = summary_data.get("git_status", {}).get("untracked_files", 0)
+    git_staged = summary_data.get("git_status", {}).get("staged_files", 0)
+    workspace_path_str = summary_data.get("workspace_path", workspace_path)
+
+    active_progress_updates[progress_key] = {
+        "message_id": message_id,
+        "workspace_id": workspace_id,
+        "workspace_path": workspace_path_str,
+        "git_branch": git_branch,
+        "git_modified": git_modified,
+        "git_untracked": git_untracked,
+        "git_staged": git_staged,
+        "workflow_name": workflow_name if workflow_registry and workflow_id in workflow_registry["workflows"] else workflow_id,
+        "session_id": session_id
+    }
+    print(f"   📌 Tracking progress updates (message_id={message_id}, branch={git_branch})")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1813,8 +1890,17 @@ async def progress_poller(app: Application) -> None:
                     print(f"   ⏭️  Not tracking this workflow (no message_id registered)")
                     continue
 
-                message_id = active_progress_updates[progress_key]
-                print(f"   📝 Updating message_id: {message_id}")
+                # Extract tracking context (message_id + workspace/git info)
+                tracking_context = active_progress_updates[progress_key]
+                message_id = tracking_context["message_id"]
+                git_branch = tracking_context.get("git_branch", "unknown")
+                workspace_path_str = tracking_context.get("workspace_path", "unknown")
+                workflow_name = tracking_context.get("workflow_name", workflow_id)
+                git_modified = tracking_context.get("git_modified", 0)
+                git_untracked = tracking_context.get("git_untracked", 0)
+                git_staged = tracking_context.get("git_staged", 0)
+
+                print(f"   📝 Updating message_id: {message_id} (branch: {git_branch})")
 
                 # Build progress caption (Phase 2: edit caption instead of text)
                 stage_emoji = {
@@ -1826,17 +1912,24 @@ async def progress_poller(app: Application) -> None:
                 }
                 emoji = stage_emoji.get(stage, "📊")
 
-                # Get workflow name for caption
-                workflow_name = workflow_id
-                if workflow_registry and workflow_id in workflow_registry["workflows"]:
-                    workflow = workflow_registry["workflows"][workflow_id]
-                    workflow_name = f"{workflow['icon']} {workflow['name']}"
+                # Build git status line
+                git_status_parts = []
+                if git_modified > 0:
+                    git_status_parts.append(f"{git_modified} modified")
+                if git_staged > 0:
+                    git_status_parts.append(f"{git_staged} staged")
+                if git_untracked > 0:
+                    git_status_parts.append(f"{git_untracked} untracked")
+                git_status_line = ", ".join(git_status_parts) if git_status_parts else "clean"
 
                 progress_caption = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
-                    f"Stage: {stage}\n"
-                    f"Progress: {progress_percent}%\n"
-                    f"Status: {message}\n"
+                    f"**Workspace**: `{Path(workspace_path_str).name}`\n"
+                    f"**Branch**: `{git_branch}`\n"
+                    f"**Git**: {git_status_line}\n\n"
+                    f"**Stage**: {stage}\n"
+                    f"**Progress**: {progress_percent}%\n"
+                    f"**Status**: {message}"
                 )
 
                 # Update caption only (document unchanged, no reupload)
