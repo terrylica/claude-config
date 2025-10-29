@@ -525,9 +525,12 @@ class WorkflowExecutionHandler(BaseHandler):
                     session_info = f"**Session**: `{session_id}`"
 
                 # Build original context section (user prompt + assistant response)
+                # Escape markdown characters for Telegram display
                 original_context = ""
                 if user_prompt and last_response:
-                    original_context = f"❓ _{user_prompt}_\n{emoji} **{last_response}**\n\n"
+                    escaped_prompt = escape_markdown(user_prompt)
+                    escaped_response = escape_markdown(last_response)
+                    original_context = f"❓ _{escaped_prompt}_\n{emoji} **{escaped_response}**\n\n"
 
                 final_caption = (
                     f"{original_context}"  # Preserve original conversation context
