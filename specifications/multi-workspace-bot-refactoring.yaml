@@ -69,10 +69,53 @@ x-target-state:
     - bot_state.py (extended)
     - handlers.py
 
-x-final-summary:
+x-phase-4-5-deep-dive:
+  analysis-date: 2025-10-29
+  motivation: Further reduce main file size, improve separation of concerns
+  current-state:
+    version: 4.8.0
+    lines: 1298
+    structure:
+      handler-classes: 619
+      async-services: 190
+      main-orchestration: 489
+
+  phase-4-handler-classes:
+    target-reduction: 620
+    classes-to-extract:
+      - BaseHandler (20 lines)
+      - NotificationHandler (145 lines, 169-313)
+      - CompletionHandler (75 lines, 314-388)
+      - WorkflowExecutionHandler (169 lines, 389-557)
+      - SummaryHandler (230 lines, 558-787)
+    new-module: handler_classes.py
+    estimated-lines-after: 678
+    risk: medium-low
+    rationale: Handler classes well-encapsulated, clear interfaces
+
+  phase-5-async-services:
+    target-reduction: 190
+    functions-to-extract:
+      - periodic_file_scanner (25 lines)
+      - progress_poller (140 lines)
+      - idle_timeout_monitor (25 lines)
+    new-module: bot_services.py
+    estimated-lines-after: 488
+    risk: medium
+    rationale: Service functions have async dependencies, need careful parameter passing
+
+  final-target:
+    version: 5.0.0
+    estimated-lines: 488
+    total-reduction-from-4.8.0: 810
+    total-reduction-from-4.5.1: 1363
+    reduction-percent-from-4.5.1: 74
+    modules-total: 8
+
+x-final-summary-phases-1-3:
   completion-date: 2025-10-29
   phases-completed: 3
-  total-commits: 8
+  total-commits: 11
   github-releases: 3
   versions: [v4.6.0, v4.7.0, v4.8.0]
   cumulative-metrics:
@@ -87,7 +130,7 @@ x-final-summary:
     actual-lines: 1298
     difference: 147
     reason: Less code duplication than estimated, handlers more self-contained
-    impact: Acceptable - main file still maintainable, clear module boundaries
+    impact: Further refactoring needed (Phases 4-5 planned)
   lessons:
     - File processors more concise than estimated
     - Handler functions well-isolated, minimal extraction overhead
@@ -297,6 +340,74 @@ paths:
         target: 4.7.0
         semver-type: minor
         rationale: New utility modules (backward compatible)
+
+  /phase-4-handler-class-extraction:
+    post:
+      summary: Extract handler classes to dedicated module
+      operationId: implementPhase4
+      description: |
+        Extract BaseHandler and 4 handler classes to handler_classes.py.
+        Target: 620-line reduction, version 4.9.0.
+
+      x-tasks:
+        - module: handler_classes.py
+          extract:
+            - BaseHandler (lines 147-167)
+            - NotificationHandler (lines 169-313)
+            - CompletionHandler (lines 314-388)
+            - WorkflowExecutionHandler (lines 389-557)
+            - SummaryHandler (lines 558-787)
+          new-location: runtime/bot/handler_classes.py
+          lines: 619
+          risk: medium-low
+          rationale: Classes well-encapsulated, clear constructor dependencies
+
+      x-validation:
+        - type: import-test
+          command: python -c "from handler_classes import NotificationHandler"
+        - type: bot-startup
+          command: Check bot starts and instantiates handlers
+        - type: file-processing
+          command: Verify notification/completion/execution/summary handling
+
+      x-version:
+        current: 4.8.0
+        target: 4.9.0
+        semver-type: minor
+        rationale: Internal refactoring (backward compatible)
+
+  /phase-5-service-extraction:
+    post:
+      summary: Extract async service functions
+      operationId: implementPhase5
+      description: |
+        Extract periodic scanners and pollers to bot_services.py.
+        Target: 190-line reduction, version 5.0.0.
+
+      x-tasks:
+        - module: bot_services.py
+          extract:
+            - periodic_file_scanner (lines 953-977)
+            - progress_poller (lines 978-1117)
+            - idle_timeout_monitor (lines 1118-1142)
+          new-location: runtime/bot/bot_services.py
+          lines: 190
+          risk: medium
+          rationale: Async services with Application dependencies, need parameter passing
+
+      x-validation:
+        - type: bot-startup
+          command: Check bot starts all background services
+        - type: file-scanning
+          command: Verify periodic file scanner processes files
+        - type: progress-updates
+          command: Verify progress poller updates messages
+
+      x-version:
+        current: 4.9.0
+        target: 5.0.0
+        semver-type: major
+        rationale: Significant architectural change (8 modules, 74% reduction)
 
   /phase-3-handler-extractions:
     post:
