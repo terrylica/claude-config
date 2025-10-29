@@ -490,6 +490,10 @@ class WorkflowExecutionHandler(BaseHandler):
                 git_untracked = tracking_context.get("git_untracked", 0)
                 git_staged = tracking_context.get("git_staged", 0)
 
+                # Extract preserved context from initial workflow start message
+                user_prompt = tracking_context.get("user_prompt", "")
+                last_response = tracking_context.get("last_response", "")
+
                 # Replace home directory with ~ for cleaner display
                 repo_display = format_repo_display(repository_root)
 
@@ -520,7 +524,13 @@ class WorkflowExecutionHandler(BaseHandler):
                 else:
                     session_info = f"**Session**: `{session_id}`"
 
+                # Build original context section (user prompt + assistant response)
+                original_context = ""
+                if user_prompt and last_response:
+                    original_context = f"❓ _{user_prompt}_\n{emoji} **{last_response}**\n\n"
+
                 final_caption = (
+                    f"{original_context}"  # Preserve original conversation context
                     f"{status_emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
@@ -1168,6 +1178,10 @@ async def handle_workflow_selection(
     repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
     working_dir = summary_data.get("working_directory", ".")
 
+    # Extract user prompt and last response for message context preservation
+    user_prompt = summary_data.get("last_user_prompt", "")
+    last_response = summary_data.get("last_response", "")
+
     tracking_data = {
         "message_id": message_id,
         "workspace_id": workspace_hash,  # Use hash to match execution files
@@ -1178,7 +1192,9 @@ async def handle_workflow_selection(
         "git_untracked": git_untracked,
         "git_staged": git_staged,
         "workflow_name": workflow_name if bot_state.workflow_registry and workflow_id in bot_state.workflow_registry["workflows"] else workflow_id,
-        "session_id": session_id
+        "session_id": session_id,
+        "user_prompt": user_prompt,  # Preserve for completion message
+        "last_response": last_response  # Preserve for completion message
     }
 
     bot_state.active_progress_updates[progress_key] = tracking_data
