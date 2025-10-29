@@ -14,8 +14,14 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 4.5.1
+Version: 4.6.0
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
+
+Changes from v4.5.1:
+- Extract file validators to file_validators.py (-80 lines)
+- Extract message formatters to message_builders.py (-170 lines)
+- Extract keyboard builder to keyboard_builders.py (-50 lines)
+- Total reduction: 222 lines (12%, 1851 -> 1629)
 
 Changes from v3.0.0:
 - Loads workflow registry from workflows.json
@@ -83,6 +89,9 @@ from format_utils import (
     format_git_status_compact,
     format_repo_display,
     escape_markdown,
+    strip_markdown,
+    truncate_markdown_safe,
+    extract_conversation_from_transcript,
     get_workspace_config
 )
 from workflow_utils import (
@@ -95,7 +104,18 @@ from bot_utils import (
     cleanup_pid_file
 )
 from message_builders import (
-    build_workflow_start_message
+    build_workflow_start_message,
+    build_completion_message,
+    build_execution_message
+)
+from file_validators import (
+    validate_notification_file,
+    validate_completion_file,
+    validate_execution_file,
+    validate_summary_file
+)
+from keyboard_builders import (
+    build_workflow_keyboard
 )
 import bot_state
 from bot_state import (
@@ -196,10 +216,13 @@ class NotificationHandler(BaseHandler):
             if details_lines:
                 files_section = f"\n\nFiles affected:\n" + '\n'.join(details_lines)
 
+            # Compact session + debug log line
+            session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+
             message = f"""{emoji} **Link Validation** - {ws_name}
 
 **Workspace**: `{workspace_path}`
-**Session**: `{session_id}`
+`{session_debug_line}`
 
 {details}{files_section}
 
@@ -271,16 +294,7 @@ Choose action:
 
     def _read_notification(self, notification_file: Path) -> Dict[str, Any]:
         """Read and validate notification request."""
-        with notification_file.open() as f:
-            request = json.load(f)
-
-        # Validate required fields
-        required = ["workspace_path", "session_id", "error_count", "details", "timestamp"]
-        missing = [f for f in required if f not in request]
-        if missing:
-            raise ValueError(f"Missing required fields: {missing}")
-
-        return request
+        return validate_notification_file(notification_file)
 
 
 
@@ -351,85 +365,11 @@ class CompletionHandler(BaseHandler):
 
     def _read_completion(self, completion_file: Path) -> Dict[str, Any]:
         """Read and validate completion notification."""
-        with completion_file.open() as f:
-            completion = json.load(f)
-
-        # Validate required fields
-        required = ["workspace_id", "session_id", "status", "exit_code",
-                   "duration_seconds", "summary", "timestamp"]
-        missing = [f for f in required if f not in completion]
-        if missing:
-            raise ValueError(f"Missing required fields: {missing}")
-
-        return completion
+        return validate_completion_file(completion_file)
 
     def _format_completion_message(self, completion: Dict[str, Any], emoji: str) -> str:
         """Format completion data as Telegram message."""
-        status = completion["status"]
-        workspace_id = completion["workspace_id"]
-        session_id = completion["session_id"]
-        duration = completion["duration_seconds"]
-        summary = completion["summary"]
-        exit_code = completion["exit_code"]
-
-        # Choose emoji and title based on status
-        if status == "success":
-            status_emoji = "✅"
-            title = "Auto-Fix Completed"
-            status_line = f"**Duration**: {duration}s"
-        elif status == "error":
-            status_emoji = "❌"
-            title = "Auto-Fix Failed"
-            status_line = f"**Duration**: {duration}s | **Exit Code**: {exit_code}"
-        elif status == "timeout":
-            status_emoji = "⏱️"
-            title = "Auto-Fix Timeout"
-            status_line = f"**Duration**: {duration}s (limit reached)"
-        else:
-            status_emoji = "⚠️"
-            title = "Unknown Status"
-            status_line = f"**Status**: {status}"
-
-        message = f"""{emoji} {status_emoji} **{title}**
-
-**Workspace**: `{workspace_id}`
-**Session**: `{session_id}`
-{status_line}
-
-**Summary**:
-{summary}
-"""
-
-        # Add stdout for success cases (truncated to avoid huge messages)
-        if status == "success" and completion.get("stdout"):
-            stdout = completion["stdout"].strip()
-            if stdout:
-                # Extract readable content from JSON (if applicable)
-                readable_content = stdout
-                try:
-                    result_data = json.loads(stdout)
-                    if isinstance(result_data, dict) and 'result' in result_data:
-                        readable_content = result_data['result']
-                except json.JSONDecodeError:
-                    pass  # Use raw output if not JSON
-
-                # Truncate to 500 chars
-                if len(readable_content) > 500:
-                    readable_content = readable_content[:500] + "..."
-
-                message += f"\n**Details**:\n```\n{readable_content}\n```"
-
-        # Add stderr for error cases (truncated to avoid huge messages)
-        if status == "error" and completion.get("stderr"):
-            stderr = completion["stderr"].strip()
-            if stderr:
-                # Truncate to 500 chars
-                if len(stderr) > 500:
-                    stderr = stderr[:500] + "..."
-
-                message += f"\n**Error**:\n```\n{stderr}\n```"
-
-        return message
+        return build_completion_message(completion, emoji)
 
 
 
@@ -517,12 +457,12 @@ class WorkflowExecutionHandler(BaseHandler):
                 # Compact git status (always show all counters)
                 git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
-                # Build session info (show both original + headless)
+                # Compact session + debug log line (show both original + headless if present)
                 headless_session_id = execution.get("headless_session_id")
                 if headless_session_id:
-                    session_info = f"**Session**: `{session_id}`\n**Headless**: `{headless_session_id}`"
+                    session_debug_line = f"session={session_id} | headless={headless_session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
                 else:
-                    session_info = f"**Session**: `{session_id}`"
+                    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
                 # Build original context section (user prompt + assistant response)
                 # Escape markdown characters for Telegram display
@@ -539,7 +479,7 @@ class WorkflowExecutionHandler(BaseHandler):
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**↯**: {git_status_line}\n\n"
-                    f"{session_info}\n"
+                    f"`{session_debug_line}`\n"
                     f"**Status**: {status}\n"
                     f"**Duration**: {duration}s\n"
                     f"**Output**: {summary}"
@@ -594,95 +534,11 @@ class WorkflowExecutionHandler(BaseHandler):
 
     def _read_execution(self, execution_file: Path) -> Dict[str, Any]:
         """Read and validate WorkflowExecution file."""
-        with execution_file.open() as f:
-            execution = json.load(f)
-
-        # Validate required fields
-        required = ["correlation_id", "workspace_id", "session_id", "workflow_id",
-                   "workflow_name", "status", "exit_code", "duration_seconds", "timestamp"]
-        missing = [f for f in required if f not in execution]
-        if missing:
-            raise ValueError(f"Missing required fields: {missing}")
-
-        return execution
+        return validate_execution_file(execution_file)
 
     def _format_execution_message(self, execution: Dict[str, Any], emoji: str, workflow_name: str) -> str:
         """Format WorkflowExecution data as Telegram message (no buttons)."""
-        status = execution["status"]
-        workspace_id = execution["workspace_id"]
-        session_id = execution["session_id"]
-        duration = execution["duration_seconds"]
-        exit_code = execution["exit_code"]
-
-        # Get workflow metadata
-        metadata = execution.get("metadata", {})
-        workflow_icon = metadata.get("icon", "📋")
-        full_workflow_name = f"{workflow_icon} {workflow_name}"
-
-        # Choose emoji and title based on status
-        if status == "success":
-            status_emoji = "✅"
-            title = "Workflow Completed"
-            status_line = f"**Duration**: {duration}s"
-        elif status == "error":
-            status_emoji = "❌"
-            title = "Workflow Failed"
-            status_line = f"**Duration**: {duration}s | **Exit Code**: {exit_code}"
-        elif status == "timeout":
-            status_emoji = "⏱️"
-            title = "Workflow Timeout"
-            status_line = f"**Duration**: {duration}s (limit reached)"
-        else:
-            status_emoji = "⚠️"
-            title = "Unknown Status"
-            status_line = f"**Status**: {status}"
-
-        message = f"""{emoji} {status_emoji} **{title}**
-
-**Workflow**: {full_workflow_name}
-**Workspace**: `{workspace_id}`
-**Session**: `{session_id}`
-{status_line}
-"""
-
-        # Add stdout for success cases (truncated)
-        if status == "success" and execution.get("stdout"):
-            stdout = execution["stdout"].strip()
-            if stdout:
-                # Extract readable content from JSON (if applicable)
-                readable_content = stdout
-                try:
-                    result_data = json.loads(stdout)
-                    if isinstance(result_data, dict) and 'result' in result_data:
-                        readable_content = result_data['result']
-                except json.JSONDecodeError:
-                    pass  # Use raw output if not JSON
-
-                # Get first meaningful line as summary
-                lines = [l.strip() for l in readable_content.split('\n') if l.strip()]
-                summary = lines[0] if lines else "Completed"
-
-                # Truncate if too long
-                if len(summary) > 200:
-                    summary = summary[:200] + "..."
-
-                message += f"\n**Summary**: {summary}"
-
-        # Add stderr for error cases (truncated)
-        if status == "error" and execution.get("stderr"):
-            stderr = execution["stderr"].strip()
-            if stderr:
-                # Get first line only
-                error_lines = stderr.split('\n')
-                error_preview = error_lines[0] if error_lines else stderr
-
-                # Truncate if too long
-                if len(error_preview) > 200:
-                    error_preview = error_preview[:200] + "..."
-
-                message += f"\n**Error**: {error_preview}"
-
-        return message
+        return build_execution_message(execution, emoji, workflow_name)
 
 
 
@@ -753,9 +609,35 @@ class SummaryHandler(BaseHandler):
             repository_root = summary.get("repository_root", str(workspace_path))
             working_dir = summary.get("working_directory", ".")
 
-            # Extract user prompt and last response BEFORE caching
-            user_prompt = summary.get("last_user_prompt", "")
-            last_response = summary.get("last_response", "Session completed")
+            # Extract conversation from transcript for better context
+            # Pattern from Claude-Code-Remote adapted to use transcript files
+            transcript_path = Path(summary_file.parent.parent.parent / "projects" /
+                                   summary_file.name.replace("summary_", "").replace(".json", ".jsonl"))
+
+            print(f"   🔍 DEBUG: Transcript path derived: {transcript_path}")
+            print(f"   🔍 DEBUG: Transcript exists: {transcript_path.exists()}")
+
+            conversation = None
+            try:
+                # Attempt to extract from transcript if available
+                if transcript_path.exists():
+                    conversation = extract_conversation_from_transcript(transcript_path)
+                    user_prompt = conversation['user_prompt']
+                    last_response = conversation['assistant_response']
+
+                    # DEBUG: Log raw extraction results
+                    print(f"   📝 Extracted conversation from transcript ({conversation['message_count']} messages)")
+                    print(f"   🔍 DEBUG RAW user_prompt (len={len(user_prompt)}): {repr(user_prompt[:200])}")
+                    print(f"   🔍 DEBUG RAW last_response (len={len(last_response)}): {repr(last_response[:200])}")
+                else:
+                    # Fallback to summary fields (may be generic)
+                    user_prompt = summary.get("last_user_prompt", "")
+                    last_response = summary.get("last_response", "Session completed")
+                    print(f"   ⚠️  Transcript not found, using summary fields")
+                    print(f"   🔍 DEBUG FALLBACK user_prompt: {repr(user_prompt[:200])}")
+            except (FileNotFoundError, ValueError, KeyError) as e:
+                # Fallback on any extraction error (raise per requirements)
+                raise RuntimeError(f"Failed to extract conversation: {e}")
 
             # Cache summary data for workflow selection (needed because we delete summary file)
             cache_key = (workspace_id, session_id)
@@ -788,20 +670,24 @@ class SummaryHandler(BaseHandler):
             # Replace home directory with ~ for cleaner display
             repo_display = format_repo_display(repository_root)
 
-            # Process user prompt for display (truncate and escape)
+            # Process user prompt with markdown safety (truncate-first pattern from CCR)
             if user_prompt:
-                # Truncate if too long
-                if len(user_prompt) > 100:
-                    user_prompt = user_prompt[:97] + "..."
-                # Escape markdown
+                print(f"   🔍 DEBUG BEFORE truncate: {repr(user_prompt[:150])}")
+                user_result = truncate_markdown_safe(user_prompt, max_length=100)
+                user_prompt = user_result['text']
+                print(f"   🔍 DEBUG AFTER truncate: {repr(user_prompt[:150])}")
+                # Escape for display in italic (avoid nested markdown)
                 user_prompt = escape_markdown(user_prompt)
+                print(f"   🔍 DEBUG AFTER escape: {repr(user_prompt[:150])}")
 
-            # Process last response for display (truncate and escape)
-            # Truncate if too long, keep first line
-            if len(last_response) > 100:
-                last_response = last_response[:97] + "..."
-            # Escape markdown
-            last_response = escape_markdown(last_response)
+            # Process last response with markdown safety (truncate-first pattern from CCR)
+            # This preserves Claude's original formatting (bold, code, italic)
+            response_result = truncate_markdown_safe(last_response, max_length=100)
+            last_response = response_result['text']
+
+            # Log if tags were auto-closed (observability SLO)
+            if response_result['tags_closed']:
+                print(f"   🔧 Auto-closed markdown tags: {response_result['tags_closed']}")
 
             # Build compact git status line (always show all counters)
             modified = git_status.get('modified_files', 0)
@@ -818,10 +704,15 @@ class SummaryHandler(BaseHandler):
             # Build message with user prompt as first line if available
             prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
 
-            message = f"""{prompt_line}{emoji} **{last_response}**
+            # Compact session + debug log line
+            session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+
+            # Display response with preserved markdown (not wrapped in additional bold)
+            # This allows Claude's original **bold**, `code`, _italic_ to render
+            message = f"""{prompt_line}{emoji} {last_response}
 
 `{repo_display}` | `{working_dir}`
-`{session_id}` ({duration}s)
+`{session_debug_line}` ({duration}s)
 **↯**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
 
 **Lychee**: {lychee_details}
@@ -840,12 +731,14 @@ class SummaryHandler(BaseHandler):
             )
 
             # Send message (AIORateLimiter handles rate limiting automatically)
-            await self.bot.send_message(
+            print(f"   📡 Sending to Telegram (chat_id={self.chat_id}, message_len={len(message)} chars)...")
+            sent_message = await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
+            print(f"   ✅ Telegram API responded: message_id={sent_message.message_id}, chat_id={sent_message.chat_id}")
 
             print(f"📤 Sent workflow menu for {workspace_id} ({session_id}): {len(available_workflows)} workflows")
             update_activity()
@@ -866,27 +759,7 @@ class SummaryHandler(BaseHandler):
 
     def _read_summary(self, summary_file: Path) -> Dict[str, Any]:
         """Read and validate session summary."""
-        try:
-            with summary_file.open() as f:
-                content = f.read()
-                summary = json.loads(content)
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON PARSE ERROR in {summary_file.name}:")
-            print(f"   Error: {e}")
-            print(f"   File content:")
-            for i, line in enumerate(content.split('\n'), 1):
-                marker = " <-- ERROR" if i == e.lineno else ""
-                print(f"   {i:3d}: {line}{marker}")
-            raise
-
-        # Validate required fields
-        required = ["correlation_id", "workspace_path", "workspace_id", "session_id",
-                   "timestamp", "duration_seconds", "git_status", "lychee_status"]
-        missing = [f for f in required if f not in summary]
-        if missing:
-            raise ValueError(f"Missing required fields: {missing}")
-
-        return summary
+        return validate_summary_file(summary_file)
 
     def _build_workflow_keyboard(
         self,
@@ -896,47 +769,8 @@ class SummaryHandler(BaseHandler):
         session_id: str,
         correlation_id: str
     ) -> list[list[InlineKeyboardButton]]:
-        """
-        Build dynamic workflow keyboard with custom prompt option.
-
-        Returns:
-            Telegram keyboard layout (list of button rows)
-        """
-        keyboard = []
-
-        # Add workflow buttons (2 per row for compact layout)
-        for i in range(0, len(workflows), 2):
-            row = []
-            for workflow in workflows[i:i+2]:
-                row.append(
-                    InlineKeyboardButton(
-                        f"{workflow['icon']} {workflow['name']}",
-                        callback_data=create_callback_data(
-                            workspace_id=workspace_id,
-                            workspace_path=str(workspace_path),
-                            session_id=session_id,
-                            action=f"workflow_{workflow['id']}",
-                            correlation_id=correlation_id
-                        )
-                    )
-                )
-            keyboard.append(row)
-
-        # Add custom prompt option (always available)
-        keyboard.append([
-            InlineKeyboardButton(
-                "✏️ Custom Prompt",
-                callback_data=create_callback_data(
-                    workspace_id=workspace_id,
-                    workspace_path=str(workspace_path),
-                    session_id=session_id,
-                    action="custom_prompt",
-                    correlation_id=correlation_id
-                )
-            )
-        ])
-
-        return keyboard
+        """Build dynamic workflow keyboard with custom prompt option."""
+        return build_workflow_keyboard(workflows, workspace_id, workspace_path, session_id, correlation_id)
 
 
 async def handle_view_details(query, workspace_path: str, session_id: str, correlation_id: str):
@@ -1542,12 +1376,16 @@ async def progress_poller(app: Application) -> None:
                 # Compact git status (always show all counters)
                 git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
+                # Compact session + debug log line
+                session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+
                 progress_text = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**↯**: {git_status_line}\n\n"
+                    f"`{session_debug_line}`\n"
                     f"**Stage**: {stage}\n"
                     f"**Progress**: {progress_percent}%\n"
                     f"**Status**: {message}"
@@ -1644,7 +1482,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 4.5.1")
+    print(f"Version: 4.6.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")

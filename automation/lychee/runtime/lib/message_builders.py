@@ -4,6 +4,7 @@ Telegram message builders for bot workflows.
 Pure message formatting functions for consistent Telegram display.
 """
 
+import json
 from typing import Dict, Any
 
 # Import formatting utilities
@@ -87,13 +88,190 @@ def build_workflow_start_message(
     if lychee_details:
         lychee_details = escape_markdown(lychee_details)
 
+    # Compact session + debug log line
+    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+
     return (
         f"{prompt_line}{emoji} **{last_response}**\n\n"
         f"`{repo_display}` | `{working_dir}`\n"
-        f"`{session_id}` ({duration}s)\n"
+        f"`{session_debug_line}` ({duration}s)\n"
         f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
         f"**Lychee**: {lychee_details}\n\n"
         f"⏳ **Workflow: {workflow_name}**\n"
         f"**Stage**: starting | **Progress**: 0%\n"
         f"**Status**: Starting..."
     )
+
+
+def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
+    """
+    Format completion data as Telegram message.
+
+    Args:
+        completion: Completion data dictionary
+        emoji: Workspace emoji
+
+    Returns:
+        Formatted Telegram message with markdown
+    """
+    status = completion["status"]
+    workspace_id = completion["workspace_id"]
+    session_id = completion["session_id"]
+    duration = completion["duration_seconds"]
+    summary = completion["summary"]
+    exit_code = completion["exit_code"]
+
+    # Choose emoji and title based on status
+    if status == "success":
+        status_emoji = "✅"
+        title = "Auto-Fix Completed"
+        status_line = f"**Duration**: {duration}s"
+    elif status == "error":
+        status_emoji = "❌"
+        title = "Auto-Fix Failed"
+        status_line = f"**Duration**: {duration}s | **Exit Code**: {exit_code}"
+    elif status == "timeout":
+        status_emoji = "⏱️"
+        title = "Auto-Fix Timeout"
+        status_line = f"**Duration**: {duration}s (limit reached)"
+    else:
+        status_emoji = "⚠️"
+        title = "Unknown Status"
+        status_line = f"**Status**: {status}"
+
+    # Compact session + debug log line
+    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+
+    message = f"""{emoji} {status_emoji} **{title}**
+
+**Workspace**: `{workspace_id}`
+`{session_debug_line}`
+{status_line}
+
+**Summary**:
+{summary}
+"""
+
+    # Add stdout for success cases (truncated to avoid huge messages)
+    if status == "success" and completion.get("stdout"):
+        stdout = completion["stdout"].strip()
+        if stdout:
+            # Extract readable content from JSON (if applicable)
+            readable_content = stdout
+            try:
+                result_data = json.loads(stdout)
+                if isinstance(result_data, dict) and 'result' in result_data:
+                    readable_content = result_data['result']
+            except json.JSONDecodeError:
+                pass  # Use raw output if not JSON
+
+            # Truncate to 500 chars
+            if len(readable_content) > 500:
+                readable_content = readable_content[:500] + "..."
+
+            message += f"\n**Details**:\n```\n{readable_content}\n```"
+
+    # Add stderr for error cases (truncated to avoid huge messages)
+    if status == "error" and completion.get("stderr"):
+        stderr = completion["stderr"].strip()
+        if stderr:
+            # Truncate to 500 chars
+            if len(stderr) > 500:
+                stderr = stderr[:500] + "..."
+
+            message += f"\n**Error**:\n```\n{stderr}\n```"
+
+    return message
+
+
+def build_execution_message(execution: Dict[str, Any], emoji: str, workflow_name: str) -> str:
+    """
+    Format WorkflowExecution data as Telegram message.
+
+    Args:
+        execution: Execution data dictionary
+        emoji: Workspace emoji
+        workflow_name: Workflow display name
+
+    Returns:
+        Formatted Telegram message with markdown
+    """
+    status = execution["status"]
+    workspace_id = execution["workspace_id"]
+    session_id = execution["session_id"]
+    duration = execution["duration_seconds"]
+    exit_code = execution["exit_code"]
+
+    # Get workflow metadata
+    metadata = execution.get("metadata", {})
+    workflow_icon = metadata.get("icon", "📋")
+    full_workflow_name = f"{workflow_icon} {workflow_name}"
+
+    # Choose emoji and title based on status
+    if status == "success":
+        status_emoji = "✅"
+        title = "Workflow Completed"
+        status_line = f"**Duration**: {duration}s"
+    elif status == "error":
+        status_emoji = "❌"
+        title = "Workflow Failed"
+        status_line = f"**Duration**: {duration}s | **Exit Code**: {exit_code}"
+    elif status == "timeout":
+        status_emoji = "⏱️"
+        title = "Workflow Timeout"
+        status_line = f"**Duration**: {duration}s (limit reached)"
+    else:
+        status_emoji = "⚠️"
+        title = "Unknown Status"
+        status_line = f"**Status**: {status}"
+
+    # Debug log path
+    debug_log = f"~/.claude/debug/{session_id}.txt"
+
+    message = f"""{emoji} {status_emoji} **{title}**
+
+**Workflow**: {full_workflow_name}
+**Workspace**: `{workspace_id}`
+**Session**: `{session_id}`
+**Debug Log**: `{debug_log}`
+{status_line}
+"""
+
+    # Add stdout for success cases (truncated)
+    if status == "success" and execution.get("stdout"):
+        stdout = execution["stdout"].strip()
+        if stdout:
+            # Extract readable content from JSON (if applicable)
+            readable_content = stdout
+            try:
+                result_data = json.loads(stdout)
+                if isinstance(result_data, dict) and 'result' in result_data:
+                    readable_content = result_data['result']
+            except json.JSONDecodeError:
+                pass  # Use raw output if not JSON
+
+            # Get first meaningful line as summary
+            lines = [l.strip() for l in readable_content.split('\n') if l.strip()]
+            summary = lines[0] if lines else "Completed"
+
+            # Truncate if too long
+            if len(summary) > 200:
+                summary = summary[:200] + "..."
+
+            message += f"\n**Summary**: {summary}"
+
+    # Add stderr for error cases (truncated)
+    if status == "error" and execution.get("stderr"):
+        stderr = execution["stderr"].strip()
+        if stderr:
+            # Get first line only
+            error_lines = stderr.split('\n')
+            error_preview = error_lines[0] if error_lines else stderr
+
+            # Truncate if too long
+            if len(error_preview) > 200:
+                error_preview = error_preview[:200] + "..."
+
+            message += f"\n**Error**: {error_preview}"
+
+    return message

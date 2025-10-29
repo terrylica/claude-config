@@ -1,0 +1,249 @@
+openapi: 3.1.1
+info:
+  title: Multi-Workspace Bot Refactoring Plan
+  version: 1.0.0
+  description: |
+    Single source of truth for refactoring multi-workspace-bot.py from 1,851 lines
+    to <1,200 lines through systematic extraction of reusable modules.
+
+    Objectives: Reduce file size by 38%, improve maintainability, enable testing,
+    minimize regression risk through phased extraction.
+
+x-slos:
+  availability:
+    target: 100%
+    metric: Bot remains operational during all refactoring phases
+    measurement: Bot starts successfully, processes all file types
+
+  correctness:
+    target: 100%
+    metric: Zero behavioral changes in bot operations
+    measurement: All messages formatted identically, all files processed correctly
+
+  observability:
+    target: 100%
+    metric: All extracted modules traceable in logs
+    measurement: Import statements visible in startup logs, error traces show module names
+
+  maintainability:
+    target: High
+    metric: No module exceeds 500 lines, clear separation of concerns
+    measurement: Line count per file, module dependency graph
+
+x-off-the-shelf-tools:
+  - name: Python standard library
+    purpose: JSON, pathlib, typing - no custom parsers
+  - name: git
+    purpose: Version tagging, release management
+  - name: gh (GitHub CLI)
+    purpose: GitHub release creation
+  - name: git-cliff
+    purpose: Changelog generation from commits
+
+x-current-state:
+  version: 4.5.1
+  file: /Users/terryli/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py
+  lines: 1851
+  handlers: 4
+  async-functions: 11
+  helper-functions: 5
+  recent-refactoring:
+    - commit: b50a2af
+      description: Extract bot state, utilities, and message builders
+    - commit: 334c538
+      description: Extract formatting and workflow utilities
+    - commit: 5156a61
+      description: Extract shared utilities and consolidate handler base class
+
+x-target-state:
+  version: 4.8.0
+  lines: 1151
+  reduction: 700
+  reduction-percent: 38
+  new-modules: 3
+
+x-implementation-findings:
+  v1.0.0:
+    date: 2025-10-29
+    analysis:
+      total-lines: 1851
+      extractable-code:
+        file-validators: 80
+        message-formatters: 170
+        keyboard-builder: 50
+        file-processors: 100
+        progress-tracking: 40
+        handler-functions: 260
+      total-extractable: 700
+
+paths:
+  /phase-1-safe-extractions:
+    post:
+      summary: Extract pure functions with zero side effects
+      operationId: implementPhase1
+      description: |
+        Extract file validators, message formatters, keyboard builder.
+        Target: 300 line reduction, version 4.6.0.
+
+      x-tasks:
+        - module: file_validators.py
+          extract:
+            - _read_notification (lines 278-289)
+            - _read_completion (lines 358-370)
+            - _read_execution (lines 604-616)
+            - _read_summary (lines 917-939)
+          new-function: validate_json_file
+          lines: 80
+          risk: very-low
+          rationale: Pure JSON validation, no state, no side effects
+
+        - module: message_builders.py
+          extract:
+            - _format_completion_message (lines 372-441)
+            - _format_execution_message (lines 618-698)
+          existing-file: true
+          lines: 170
+          risk: very-low
+          rationale: Pure string formatting, no state, existing module pattern
+
+        - module: keyboard_builders.py
+          extract:
+            - _build_workflow_keyboard (lines 941-989)
+          new-function: build_workflow_keyboard
+          lines: 50
+          risk: low
+          rationale: Pure function, clear inputs/outputs, no async
+
+      x-validation:
+        - type: import-test
+          command: python -c "from file_validators import validate_json_file"
+        - type: function-test
+          command: python -m pytest tests/test_file_validators.py
+        - type: integration-test
+          command: ./runtime/bot/multi-workspace-bot.py --help
+        - type: bot-startup
+          command: Check bot starts without errors
+
+      x-version:
+        current: 4.5.1
+        target: 4.6.0
+        semver-type: minor
+        rationale: New internal modules (backward compatible)
+
+  /phase-2-utility-extractions:
+    post:
+      summary: Extract file processing utilities and progress tracking
+      operationId: implementPhase2
+      description: |
+        Extract file processors, progress tracking persistence.
+        Target: 140 line reduction, version 4.7.0.
+
+      x-tasks:
+        - module: file_processors.py
+          extract:
+            - _process_pending_files (lines 1373-1415)
+            - _scan_and_process (lines 1444-1471)
+          new-functions:
+            - process_pending_files_generic
+            - scan_directory_for_files
+          lines: 100
+          risk: medium-low
+          rationale: Async context but well-isolated, generic pattern
+
+        - module: bot_state.py
+          extract:
+            - _restore_progress_tracking (lines 1658-1694)
+          existing-file: true
+          new-function: restore_progress_tracking
+          lines: 40
+          risk: low
+          rationale: Single responsibility, existing module
+
+      x-validation:
+        - type: import-test
+          command: python -c "from file_processors import process_pending_files_generic"
+        - type: bot-startup
+          command: Check bot starts and loads tracking state
+        - type: file-processing
+          command: Check pending files processed on startup
+
+      x-version:
+        current: 4.6.0
+        target: 4.7.0
+        semver-type: minor
+        rationale: New utility modules (backward compatible)
+
+  /phase-3-handler-extractions:
+    post:
+      summary: Extract handler action functions
+      operationId: implementPhase3
+      description: |
+        Extract large handler functions to separate module.
+        Target: 260 line reduction, version 4.8.0.
+
+      x-tasks:
+        - module: handlers.py
+          extract:
+            - handle_view_details (lines 992-1076)
+            - handle_workflow_selection (lines 1078-1260)
+          new-location: runtime/bot/handlers.py
+          lines: 260
+          risk: medium
+          rationale: More dependencies, async context, bot state manipulation
+
+      x-validation:
+        - type: callback-handling
+          command: Test view details button
+        - type: workflow-selection
+          command: Test workflow selection flow
+        - type: message-tracking
+          command: Verify progress tracking initialized
+
+      x-version:
+        current: 4.7.0
+        target: 4.8.0
+        semver-type: minor
+        rationale: Internal refactoring (backward compatible)
+
+components:
+  schemas:
+    ValidationResult:
+      type: object
+      properties:
+        file_path:
+          type: string
+        valid:
+          type: boolean
+        data:
+          type: object
+        errors:
+          type: array
+          items:
+            type: string
+      required:
+        - file_path
+        - valid
+
+    RefactoringPhase:
+      type: object
+      properties:
+        phase:
+          type: integer
+          minimum: 1
+          maximum: 3
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+        lines_extracted:
+          type: integer
+        modules_created:
+          type: array
+          items:
+            type: string
+        validation_passed:
+          type: boolean
+      required:
+        - phase
+        - version
+        - lines_extracted
+        - validation_passed
