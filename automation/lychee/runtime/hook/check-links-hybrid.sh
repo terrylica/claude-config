@@ -422,11 +422,13 @@ fi
         } >> "$log_file" 2>&1
 
         # Run lychee with markdown format for human readability
+        # Capture exit code to detect crashes
+        lychee_exit_code=0
         env RUST_LOG= lychee \
             --config "$config_file" \
             --format markdown \
             $markdown_files \
-            > "$full_results" 2>&1 || true
+            > "$full_results" 2>&1 || lychee_exit_code=$?
 
         # Generate JSON output for programmatic parsing (progressive disclosure)
         json_results="${full_results%.txt}.json"
@@ -438,15 +440,43 @@ fi
 
         # Log completion with timestamp and summary
         {
-            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✓ Lychee validation completed"
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✓ Lychee validation completed (exit code: $lychee_exit_code)"
             echo "   → Results written to: $full_results"
             echo "   → Summary line:"
             tail -1 "$full_results" 2>/dev/null || echo "     (No summary line found)"
         } >> "$log_file" 2>&1
 
-        # Emit notification request for multi-workspace bot
+        # =====================================================================
+        # Robust Error Detection (handles crashes, malformed output, errors)
+        # =====================================================================
+
         # Extract error count from lychee results (look for "🚫 Errors" line)
         error_count=$(grep '🚫 Errors' "$full_results" | grep -oE '[0-9]+' | head -1 || echo "0")
+
+        # Detect lychee crashes or malformed output (missing summary line)
+        has_summary_line=$(grep -c '🚫 Errors\|✅ Successful\|Summary' "$full_results" 2>/dev/null || echo "0")
+        has_error_stacktrace=$(grep -c '^Error:\|Stack backtrace:\|\[ERROR\]' "$full_results" 2>/dev/null || echo "0")
+
+        # If lychee crashed (non-zero exit, no summary, has stacktrace), count as 1+ errors
+        if [[ $lychee_exit_code -ne 0 ]] || [[ $has_summary_line -eq 0 ]] || [[ $has_error_stacktrace -gt 0 ]]; then
+            if [[ $error_count -eq 0 ]]; then
+                # Count actual [ERROR] lines or default to 1
+                error_lines=$(grep -c '^\[ERROR\]' "$full_results" 2>/dev/null || echo "0")
+                if [[ $error_lines -gt 0 ]]; then
+                    error_count=$error_lines
+                else
+                    error_count=1  # At least one error (lychee crash)
+                fi
+
+                {
+                    echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Lychee crash/malformed output detected!"
+                    echo "   → Exit code: $lychee_exit_code"
+                    echo "   → Has summary line: $has_summary_line"
+                    echo "   → Has error stacktrace: $has_error_stacktrace"
+                    echo "   → Detected errors: $error_count"
+                } >> "$log_file" 2>&1
+            fi
+        fi
 
         {
             echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📊 Error count extracted: $error_count"
