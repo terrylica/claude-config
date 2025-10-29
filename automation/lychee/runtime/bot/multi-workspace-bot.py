@@ -14,14 +14,18 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 4.6.0
+Version: 4.7.0
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
 
+Changes from v4.6.0:
+- Extract file processors to file_processors.py (-60 lines)
+- Extract progress tracking to bot_state.py (-40 lines)
+- Total reduction: 72 lines (4%, 1629 -> 1557)
+
 Changes from v4.5.1:
-- Extract file validators to file_validators.py (-80 lines)
-- Extract message formatters to message_builders.py (-170 lines)
-- Extract keyboard builder to keyboard_builders.py (-50 lines)
-- Total reduction: 222 lines (12%, 1851 -> 1629)
+- Phase 1: Extract file validators, message formatters, keyboard builder (-222 lines)
+- Phase 2: Extract file processors, progress tracking (-72 lines)
+- Total reduction: 294 lines (16%, 1851 -> 1557)
 
 Changes from v3.0.0:
 - Loads workflow registry from workflows.json
@@ -117,10 +121,15 @@ from file_validators import (
 from keyboard_builders import (
     build_workflow_keyboard
 )
+from file_processors import (
+    process_pending_files,
+    scan_and_process
+)
 import bot_state
 from bot_state import (
     update_activity,
-    get_idle_time
+    get_idle_time,
+    restore_progress_tracking
 )
 
 
@@ -1162,40 +1171,8 @@ async def _process_pending_files(
     file_type: str,
     app: Application
 ) -> None:
-    """
-    Generic processor for pending files on startup.
-
-    Args:
-        directory: Directory to scan
-        file_pattern: Glob pattern for files (e.g., "notify_*.json")
-        handler_class: Handler class to instantiate
-        handler_method: Method name to call on handler
-        file_type: Human-readable file type for logging
-        app: Telegram Application instance
-    """
-    handler = handler_class(app.bot, int(CHAT_ID))
-
-    # Check if directory exists
-    if not directory.exists():
-        print(f"📂 No {file_type} directory found")
-        return
-
-    # Scan for files
-    files = sorted(directory.glob(file_pattern))
-    if not files:
-        print(f"📂 No pending {file_type}s")
-        return
-
-    print(f"📬 Found {len(files)} pending {file_type}(s)")
-    for file in files:
-        try:
-            print(f"   Processing: {file.name}")
-            # Call handler method dynamically
-            await getattr(handler, handler_method)(file)
-        except Exception as e:
-            print(f"   ❌ Failed to process {file.name}: {type(e).__name__}: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+    """Generic processor for pending files on startup."""
+    await process_pending_files(directory, file_pattern, handler_class, handler_method, file_type, app, int(CHAT_ID))
 
 
 async def process_pending_notifications(app: Application) -> None:
@@ -1232,26 +1209,8 @@ async def _scan_and_process(
     handler_method: str,
     file_type: str
 ) -> None:
-    """
-    Scan directory for files and process with handler.
-
-    Args:
-        directory: Directory to scan
-        file_pattern: Glob pattern for files
-        handler: Handler instance
-        handler_method: Method name to call
-        file_type: File type name for logging
-    """
-    if not directory.exists():
-        return
-
-    files = sorted(directory.glob(file_pattern))
-    for file in files:
-        try:
-            print(f"📬 Found {file_type}: {file.name}")
-            await getattr(handler, handler_method)(file)
-        except Exception as e:
-            print(f"❌ Failed to process {file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+    """Scan directory for files and process with handler."""
+    await scan_and_process(directory, file_pattern, handler, handler_method, file_type)
 
 
 async def periodic_file_scanner(app: Application) -> None:
@@ -1440,41 +1399,8 @@ async def idle_timeout_monitor() -> None:
 
 
 def _restore_progress_tracking() -> None:
-    """
-    Restore progress tracking state from disk (survives watchexec restarts).
-
-    Reads tracking JSON files and populates bot_state.active_progress_updates dictionary.
-    """
-    print("\n🔄 Restoring progress tracking state...")
-
-    if not TRACKING_DIR.exists():
-        print(f"   ℹ️  No tracking state to restore")
-        return
-
-    restored_count = 0
-    for tracking_file in TRACKING_DIR.glob("*_tracking.json"):
-        try:
-            tracking_data = json.loads(tracking_file.read_text())
-            # Get IDs from tracking data (more reliable than filename parsing)
-            workspace_id = tracking_data["workspace_id"]
-            session_id = tracking_data["session_id"]
-            # Extract workflow_id from filename: {workspace}_{session}_{workflow}_tracking.json
-            # UUIDs use dashes (not underscores), so split is simple:
-            # Example: 81e622b5_fb77a731-3922-4da4-bc54-4b2db9de6e40_commit-changes_tracking.json
-            filename_parts = tracking_file.stem.replace("_tracking", "").split("_")
-            # parts[0] = workspace_id (8 chars hash)
-            # parts[1] = session_id (UUID with dashes)
-            # parts[2:] = workflow_id (might contain underscores)
-            workflow_id = "_".join(filename_parts[2:])
-
-            progress_key = (workspace_id, session_id, workflow_id)
-            bot_state.active_progress_updates[progress_key] = tracking_data
-            restored_count += 1
-            print(f"   ✓ Restored: {workspace_id}/{workflow_id} (msg {tracking_data['message_id']})")
-        except Exception as e:
-            print(f"   ⚠️  Failed to restore {tracking_file.name}: {e}")
-
-    print(f"   ✅ Restored {restored_count} tracked workflow(s)")
+    """Restore progress tracking state from disk (survives watchexec restarts)."""
+    restore_progress_tracking(TRACKING_DIR)
 
 
 async def main() -> int:
@@ -1482,7 +1408,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 4.6.0")
+    print(f"Version: 4.7.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")
