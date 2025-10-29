@@ -93,6 +93,16 @@ from workspace_helpers import (
     cleanup_expired_files,
     STATE_TTL_MINUTES
 )
+from format_utils import (
+    format_git_status_compact,
+    format_repo_display,
+    escape_markdown,
+    get_workspace_config
+)
+from workflow_utils import (
+    load_workflow_registry,
+    filter_workflows_by_triggers
+)
 
 
 # Event Logging
@@ -131,77 +141,6 @@ def log_event(
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to log event {event_type}: {e.stderr}", file=sys.stderr)
         raise
-
-
-# Phase 3 - v4.0.0: Workflow Registry Functions
-def load_workflow_registry() -> Dict[str, Any]:
-    """
-    Load workflow registry from workflows.json.
-
-    Returns:
-        Workflow registry dictionary
-
-    Raises:
-        FileNotFoundError: Registry file not found
-        json.JSONDecodeError: Invalid JSON
-        ValueError: Invalid registry schema
-    """
-    if not WORKFLOWS_REGISTRY.exists():
-        raise FileNotFoundError(f"Workflow registry not found: {WORKFLOWS_REGISTRY}")
-
-    with open(WORKFLOWS_REGISTRY) as f:
-        registry = json.load(f)
-
-    # Validate required fields
-    if "version" not in registry or "workflows" not in registry:
-        raise ValueError("Invalid registry: missing 'version' or 'workflows'")
-
-    print(f"✅ Loaded workflow registry v{registry['version']} ({len(registry['workflows'])} workflows)")
-    return registry
-
-
-def filter_workflows_by_triggers(summary: Dict[str, Any]) -> list[Dict[str, Any]]:
-    """
-    Filter workflows based on trigger conditions from session summary.
-
-    Args:
-        summary: SessionSummary data
-
-    Returns:
-        List of workflow manifests that match trigger conditions
-
-    Trigger Logic:
-        - lychee_errors: true → Only if lychee_status.error_count > 0
-        - git_modified: true → Only if git_status.modified_files > 0
-        - always: true → Always available
-    """
-    if workflow_registry is None:
-        raise RuntimeError("Workflow registry not loaded")
-
-    available = []
-    lychee_errors = summary.get("lychee_status", {}).get("error_count", 0)
-    modified_files = summary.get("git_status", {}).get("modified_files", 0)
-
-    for wf_id, workflow in workflow_registry["workflows"].items():
-        triggers = workflow.get("triggers", {})
-
-        # Check lychee_errors trigger
-        if triggers.get("lychee_errors"):
-            if lychee_errors > 0:
-                available.append(workflow)
-            continue  # Skip other checks if this trigger exists
-
-        # Check git_modified trigger
-        if triggers.get("git_modified"):
-            if modified_files > 0:
-                available.append(workflow)
-            continue
-
-        # Check always trigger
-        if triggers.get("always"):
-            available.append(workflow)
-
-    return available
 
 
 # PID File Management
@@ -269,105 +208,6 @@ def get_idle_time() -> float:
     if last_activity_time is None:
         return 0.0
     return asyncio.get_event_loop().time() - last_activity_time
-
-
-def format_git_status_compact(modified: int, staged: int, untracked: int) -> str:
-    """
-    Format compact git status line.
-
-    Args:
-        modified: Count of modified files
-        staged: Count of staged files
-        untracked: Count of untracked files
-
-    Returns:
-        Formatted status string (e.g., "M:2 S:0 U:1")
-    """
-    return f"M:{modified} S:{staged} U:{untracked}"
-
-
-def format_repo_display(path: str) -> str:
-    """
-    Format repository path with home directory as tilde.
-
-    Args:
-        path: Absolute path to repository
-
-    Returns:
-        Path with home directory replaced by ~
-    """
-    return str(path).replace(str(Path.home()), "~")
-
-
-def escape_markdown(text: str) -> str:
-    """
-    Escape special characters for Telegram markdown.
-
-    Args:
-        text: Text to escape
-
-    Returns:
-        Text with markdown characters escaped
-    """
-    return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-
-
-def get_workspace_config(
-    workspace_id: Optional[str] = None,
-    workspace_path: Optional[Path] = None,
-    include_name: bool = False,
-    verbose: bool = False
-) -> Dict[str, str]:
-    """
-    Load workspace configuration with fallback for unregistered workspaces.
-
-    Args:
-        workspace_id: Workspace identifier (registry name or hash)
-        workspace_path: Workspace path (used to derive ID if workspace_id not provided)
-        include_name: Whether to include workspace name in result
-        verbose: Whether to print debug logging
-
-    Returns:
-        Dictionary with 'emoji' (and optionally 'name' if include_name=True)
-
-    Raises:
-        ValueError: If neither workspace_id nor workspace_path provided
-    """
-    if verbose:
-        print(f"   📋 Loading workspace registry...")
-
-    # Default fallback values
-    emoji = "📁"
-    ws_name = workspace_path.name if workspace_path else "unknown"
-
-    try:
-        # Get workspace_id if not provided
-        if workspace_id is None:
-            if workspace_path is None:
-                raise ValueError("Either workspace_id or workspace_path must be provided")
-            workspace_id = get_workspace_id_from_path(workspace_path)
-
-        # Load registry
-        registry = load_registry()
-        workspace = registry["workspaces"][workspace_id]
-        emoji = workspace["emoji"]
-
-        if include_name:
-            ws_name = workspace["name"]
-
-        if verbose:
-            print(f"   ✓ Workspace config loaded: emoji={emoji}")
-
-    except (ValueError, FileNotFoundError, KeyError):
-        # Unregistered workspace - use defaults
-        if verbose:
-            print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={ws_name}")
-
-    result = {"emoji": emoji}
-    if include_name:
-        result["name"] = ws_name
-
-    return result
 
 
 class BaseHandler:
@@ -970,7 +810,7 @@ class SummaryHandler(BaseHandler):
             )
 
             # Filter available workflows
-            available_workflows = filter_workflows_by_triggers(summary)
+            available_workflows = filter_workflows_by_triggers(workflow_registry, summary)
 
             if not available_workflows:
                 print(f"⚠️  No workflows available for session {session_id} (no triggers matched)")
@@ -1997,7 +1837,7 @@ async def main() -> int:
     # Phase 3 - v4.0.0: Load workflow registry
     print("\n📋 Loading workflow registry...")
     try:
-        workflow_registry = load_workflow_registry()
+        workflow_registry = load_workflow_registry(WORKFLOWS_REGISTRY)
     except Exception as e:
         print(f"❌ Failed to load workflow registry: {type(e).__name__}: {e}", file=sys.stderr)
         print(f"   Registry path: {WORKFLOWS_REGISTRY}", file=sys.stderr)
