@@ -52,6 +52,7 @@ SUMMARIES_DIR = STATE_DIR / "summaries"  # Phase 3 - v4.0.0
 SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 3 - v4.0.0
 EXECUTIONS_DIR = STATE_DIR / "executions"  # Phase 4 - WorkflowExecution results
 PROGRESS_DIR = STATE_DIR / "progress"  # Phase 4 - P2 streaming progress
+TRACKING_DIR = STATE_DIR / "tracking"  # Phase 4 - Progress tracking persistence
 PID_FILE = STATE_DIR / "bot.pid"
 WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
 
@@ -270,12 +271,129 @@ def get_idle_time() -> float:
     return asyncio.get_event_loop().time() - last_activity_time
 
 
-class NotificationHandler:
-    """Handles notification requests from any workspace."""
+def format_git_status_compact(modified: int, staged: int, untracked: int) -> str:
+    """
+    Format compact git status line.
+
+    Args:
+        modified: Count of modified files
+        staged: Count of staged files
+        untracked: Count of untracked files
+
+    Returns:
+        Formatted status string (e.g., "M:2 S:0 U:1")
+    """
+    return f"M:{modified} S:{staged} U:{untracked}"
+
+
+def format_repo_display(path: str) -> str:
+    """
+    Format repository path with home directory as tilde.
+
+    Args:
+        path: Absolute path to repository
+
+    Returns:
+        Path with home directory replaced by ~
+    """
+    return str(path).replace(str(Path.home()), "~")
+
+
+def escape_markdown(text: str) -> str:
+    """
+    Escape special characters for Telegram markdown.
+
+    Args:
+        text: Text to escape
+
+    Returns:
+        Text with markdown characters escaped
+    """
+    return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
+
+def get_workspace_config(
+    workspace_id: Optional[str] = None,
+    workspace_path: Optional[Path] = None,
+    include_name: bool = False,
+    verbose: bool = False
+) -> Dict[str, str]:
+    """
+    Load workspace configuration with fallback for unregistered workspaces.
+
+    Args:
+        workspace_id: Workspace identifier (registry name or hash)
+        workspace_path: Workspace path (used to derive ID if workspace_id not provided)
+        include_name: Whether to include workspace name in result
+        verbose: Whether to print debug logging
+
+    Returns:
+        Dictionary with 'emoji' (and optionally 'name' if include_name=True)
+
+    Raises:
+        ValueError: If neither workspace_id nor workspace_path provided
+    """
+    if verbose:
+        print(f"   📋 Loading workspace registry...")
+
+    # Default fallback values
+    emoji = "📁"
+    ws_name = workspace_path.name if workspace_path else "unknown"
+
+    try:
+        # Get workspace_id if not provided
+        if workspace_id is None:
+            if workspace_path is None:
+                raise ValueError("Either workspace_id or workspace_path must be provided")
+            workspace_id = get_workspace_id_from_path(workspace_path)
+
+        # Load registry
+        registry = load_registry()
+        workspace = registry["workspaces"][workspace_id]
+        emoji = workspace["emoji"]
+
+        if include_name:
+            ws_name = workspace["name"]
+
+        if verbose:
+            print(f"   ✓ Workspace config loaded: emoji={emoji}")
+
+    except (ValueError, FileNotFoundError, KeyError):
+        # Unregistered workspace - use defaults
+        if verbose:
+            print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={ws_name}")
+
+    result = {"emoji": emoji}
+    if include_name:
+        result["name"] = ws_name
+
+    return result
+
+
+class BaseHandler:
+    """Base class for all file-based handlers with shared functionality."""
 
     def __init__(self, bot: Bot, chat_id: int):
         self.bot = bot
         self.chat_id = chat_id
+
+    def _cleanup_file(self, file_path: Path, file_type: str = "file") -> None:
+        """
+        Delete consumed file.
+
+        Args:
+            file_path: Path to file to delete
+            file_type: Human-readable file type for logging
+        """
+        try:
+            file_path.unlink()
+            print(f"🗑️  Consumed: {file_path.name}")
+        except FileNotFoundError:
+            pass
+
+
+class NotificationHandler(BaseHandler):
+    """Handles notification requests from any workspace."""
 
     async def send_notification(self, notification_file: Path) -> None:
         """
@@ -308,17 +426,16 @@ class NotificationHandler:
             )
 
             # Load workspace config (with fallback for unregistered workspaces)
+            config = get_workspace_config(workspace_path=workspace_path, include_name=True)
+            emoji = config["emoji"]
+            ws_name = config["name"]
+
+            # Fallback workspace_id if not in registry
             try:
                 workspace_id = get_workspace_id_from_path(workspace_path)
-                registry = load_registry()
-                workspace = registry["workspaces"][workspace_id]
-                emoji = workspace["emoji"]
-                ws_name = workspace["name"]
             except (ValueError, FileNotFoundError, KeyError):
-                # Unregistered workspace - use defaults
                 workspace_id = request.get("workspace_hash", "unknown")
-                emoji = "📁"
-                ws_name = workspace_path.name
+
             error_count = request["error_count"]
             details = request["details"]
 
@@ -409,7 +526,7 @@ Choose action:
 
         finally:
             # Cleanup consumed notification
-            self._cleanup_notification(notification_file)
+            self._cleanup_file(notification_file)
 
     def _read_notification(self, notification_file: Path) -> Dict[str, Any]:
         """Read and validate notification request."""
@@ -424,21 +541,10 @@ Choose action:
 
         return request
 
-    def _cleanup_notification(self, notification_file: Path) -> None:
-        """Delete consumed notification file."""
-        try:
-            notification_file.unlink()
-            print(f"🗑️  Consumed: {notification_file.name}")
-        except FileNotFoundError:
-            pass
 
 
-class CompletionHandler:
+class CompletionHandler(BaseHandler):
     """Handles completion notifications from orchestrator."""
-
-    def __init__(self, bot: Bot, chat_id: int):
-        self.bot = bot
-        self.chat_id = chat_id
 
     async def send_completion(self, completion_file: Path) -> None:
         """
@@ -465,17 +571,9 @@ class CompletionHandler:
             print(f"   ✓ Loaded: workspace={workspace_id}, session={session_id}, status={completion.get('status')}")
 
             # Load workspace config (with fallback for unregistered workspaces)
-            print(f"   📋 Loading workspace registry...")
-            try:
-                registry = load_registry()
-                workspace = registry["workspaces"][workspace_id]
-                emoji = workspace["emoji"]
-                print(f"   ✓ Workspace config loaded: emoji={emoji}")
-            except (FileNotFoundError, KeyError):
-                # Unregistered workspace - use defaults
-                workspace_path = Path(completion.get("workspace_path", "/unknown"))
-                emoji = "📁"
-                print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={workspace_path.name}")
+            workspace_path = Path(completion.get("workspace_path", "/unknown"))
+            config = get_workspace_config(workspace_id=workspace_id, workspace_path=workspace_path, verbose=True)
+            emoji = config["emoji"]
 
             # Format message based on status
             print(f"   ✍️  Formatting completion message...")
@@ -508,7 +606,7 @@ class CompletionHandler:
 
         finally:
             # Cleanup consumed completion
-            self._cleanup_completion(completion_file)
+            self._cleanup_file(completion_file)
 
     def _read_completion(self, completion_file: Path) -> Dict[str, Any]:
         """Read and validate completion notification."""
@@ -592,16 +690,9 @@ class CompletionHandler:
 
         return message
 
-    def _cleanup_completion(self, completion_file: Path) -> None:
-        """Delete consumed completion file."""
-        try:
-            completion_file.unlink()
-            print(f"🗑️  Consumed: {completion_file.name}")
-        except FileNotFoundError:
-            pass
 
 
-class WorkflowExecutionHandler:
+class WorkflowExecutionHandler(BaseHandler):
     """
     Handles workflow execution completion notifications (Phase 4 - v4.0.0).
 
@@ -609,10 +700,6 @@ class WorkflowExecutionHandler:
     Key distinction: Stop hook messages have workflow selection buttons,
     execution completions show results only.
     """
-
-    def __init__(self, bot: Bot, chat_id: int):
-        self.bot = bot
-        self.chat_id = chat_id
 
     async def send_execution_completion(self, execution_file: Path) -> None:
         """
@@ -641,17 +728,9 @@ class WorkflowExecutionHandler:
             print(f"   ✓ Loaded: workspace={workspace_id}, session={session_id}, workflow={workflow_id}, status={execution.get('status')}")
 
             # Load workspace config (with fallback for unregistered workspaces)
-            print(f"   📋 Loading workspace registry...")
-            try:
-                registry = load_registry()
-                workspace = registry["workspaces"][workspace_id]
-                emoji = workspace["emoji"]
-                print(f"   ✓ Workspace config loaded: emoji={emoji}")
-            except (FileNotFoundError, KeyError):
-                # Unregistered workspace - use defaults
-                workspace_path = Path(execution.get("workspace_path", "/unknown"))
-                emoji = "📁"
-                print(f"   ⚠️  Workspace not in registry, using defaults: emoji={emoji}, path={workspace_path.name}")
+            workspace_path = Path(execution.get("workspace_path", "/unknown"))
+            config = get_workspace_config(workspace_id=workspace_id, workspace_path=workspace_path, verbose=True)
+            emoji = config["emoji"]
 
             # Phase 3: Check if we're tracking this workflow (single-message pattern)
             progress_key = (workspace_id, session_id, workflow_id)
@@ -671,7 +750,7 @@ class WorkflowExecutionHandler:
                 git_staged = tracking_context.get("git_staged", 0)
 
                 # Replace home directory with ~ for cleaner display
-                repo_display = str(repository_root).replace(str(Path.home()), "~")
+                repo_display = format_repo_display(repository_root)
 
                 print(f"   📝 Updating tracked message (message_id={message_id})")
 
@@ -691,7 +770,7 @@ class WorkflowExecutionHandler:
 
                 # Build git status line
                 # Compact git status (always show all counters)
-                git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
+                git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
                 # Build session info (show both original + headless)
                 headless_session_id = execution.get("headless_session_id")
@@ -726,8 +805,7 @@ class WorkflowExecutionHandler:
                 del active_progress_updates[progress_key]
 
                 # Remove tracking file
-                tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
-                tracking_file = tracking_dir / f"{workspace_id}_{session_id}_{workflow_id}_tracking.json"
+                tracking_file = TRACKING_DIR / f"{workspace_id}_{session_id}_{workflow_id}_tracking.json"
                 if tracking_file.exists():
                     tracking_file.unlink()
                     print(f"   🗑️  Progress tracking cleaned up (memory + file)")
@@ -758,7 +836,7 @@ class WorkflowExecutionHandler:
 
         finally:
             # Cleanup consumed execution
-            self._cleanup_execution(execution_file)
+            self._cleanup_file(execution_file)
 
     def _read_execution(self, execution_file: Path) -> Dict[str, Any]:
         """Read and validate WorkflowExecution file."""
@@ -852,25 +930,14 @@ class WorkflowExecutionHandler:
 
         return message
 
-    def _cleanup_execution(self, execution_file: Path) -> None:
-        """Delete consumed execution file."""
-        try:
-            execution_file.unlink()
-            print(f"🗑️  Consumed: {execution_file.name}")
-        except FileNotFoundError:
-            pass
 
 
-class SummaryHandler:
+class SummaryHandler(BaseHandler):
     """
     Handles session summaries and presents workflow menu (Phase 3 - v4.0.0).
 
     Filters workflows by triggers, builds dynamic keyboard, handles selections.
     """
-
-    def __init__(self, bot: Bot, chat_id: int):
-        self.bot = bot
-        self.chat_id = chat_id
 
     async def send_workflow_menu(self, summary_file: Path) -> None:
         """
@@ -919,16 +986,9 @@ class SummaryHandler:
             print(f"   🔍 DEBUG: workspace_hash={workspace_hash}, workspace_id={workspace_id}")
 
             # Load workspace config for display only (emoji, name)
-            try:
-                registered_id = get_workspace_id_from_path(workspace_path)
-                registry = load_registry()
-                workspace = registry["workspaces"][registered_id]
-                emoji = workspace["emoji"]
-                ws_name = workspace["name"]
-            except (ValueError, FileNotFoundError, KeyError):
-                # Unregistered workspace - use defaults
-                emoji = "📁"
-                ws_name = workspace_path.name
+            config = get_workspace_config(workspace_path=workspace_path, include_name=True)
+            emoji = config["emoji"]
+            ws_name = config["name"]
 
             # Format message with session context
             lychee_status = summary.get("lychee_status", {})
@@ -972,7 +1032,7 @@ class SummaryHandler:
                 git_porcelain_display = f"\n```\n{porcelain_text}\n```"
 
             # Replace home directory with ~ for cleaner display
-            repo_display = str(repository_root).replace(str(Path.home()), "~")
+            repo_display = format_repo_display(repository_root)
 
             # Process user prompt for display (truncate and escape)
             if user_prompt:
@@ -980,14 +1040,14 @@ class SummaryHandler:
                 if len(user_prompt) > 100:
                     user_prompt = user_prompt[:97] + "..."
                 # Escape markdown
-                user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+                user_prompt = escape_markdown(user_prompt)
 
             # Process last response for display (truncate and escape)
             # Truncate if too long, keep first line
             if len(last_response) > 100:
                 last_response = last_response[:97] + "..."
             # Escape markdown
-            last_response = last_response.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+            last_response = escape_markdown(last_response)
 
             # Build compact git status line (always show all counters)
             modified = git_status.get('modified_files', 0)
@@ -995,11 +1055,11 @@ class SummaryHandler:
             untracked = git_status.get('untracked_files', 0)
 
             # Show all counters even when zero for clarity
-            git_compact = f"M:{modified} S:{staged} U:{untracked}"
+            git_compact = format_git_status_compact(modified, staged, untracked)
 
             # Escape lychee details
             lychee_details = lychee_status.get('details', 'Not run')
-            lychee_details = lychee_details.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+            lychee_details = escape_markdown(lychee_details)
 
             # Build message with user prompt as first line if available
             prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
@@ -1048,7 +1108,7 @@ class SummaryHandler:
 
         finally:
             # Cleanup consumed summary
-            self._cleanup_summary(summary_file)
+            self._cleanup_file(summary_file)
 
     def _read_summary(self, summary_file: Path) -> Dict[str, Any]:
         """Read and validate session summary."""
@@ -1124,13 +1184,89 @@ class SummaryHandler:
 
         return keyboard
 
-    def _cleanup_summary(self, summary_file: Path) -> None:
-        """Delete consumed summary file."""
-        try:
-            summary_file.unlink()
-            print(f"🗑️  Consumed: {summary_file.name}")
-        except FileNotFoundError:
-            pass
+
+def _build_workflow_start_message(
+    emoji: str,
+    workflow_name: str,
+    session_id: str,
+    summary_data: Dict[str, Any],
+    workspace_path: str
+) -> str:
+    """
+    Build initial workflow start message with full context.
+
+    Args:
+        emoji: Workspace emoji
+        workflow_name: Workflow display name
+        session_id: Session identifier
+        summary_data: Cached session summary
+        workspace_path: Workspace path
+
+    Returns:
+        Formatted Telegram message
+    """
+    # Extract session context from cached summary
+    git_status = summary_data.get("git_status", {})
+    lychee_status = summary_data.get("lychee_status", {})
+
+    git_branch = git_status.get("branch", "unknown")
+    git_modified = git_status.get("modified_files", 0)
+    git_untracked = git_status.get("untracked_files", 0)
+    git_staged = git_status.get("staged_files", 0)
+    git_porcelain_lines = git_status.get('porcelain', [])
+
+    # Extract repository root and working directory
+    repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
+    working_dir = summary_data.get("working_directory", ".")
+    repo_display = format_repo_display(repository_root)
+
+    # Extract and truncate user prompt and last response
+    user_prompt = summary_data.get("last_user_prompt", "")
+    if user_prompt and len(user_prompt) > 100:
+        user_prompt = user_prompt[:97] + "..."
+
+    last_response = summary_data.get("last_response", "Session completed")
+    if len(last_response) > 100:
+        last_response = last_response[:97] + "..."
+
+    duration = summary_data.get("duration_seconds", 0)
+
+    # Build git porcelain display (truncate to avoid huge messages)
+    git_porcelain_display = ""
+    if git_porcelain_lines:
+        display_lines = git_porcelain_lines[:10]
+        porcelain_text = "\n".join(display_lines)
+        if len(git_porcelain_lines) > 10:
+            porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
+        git_porcelain_display = f"\n{porcelain_text}"
+
+    # Compact git status
+    git_compact = format_git_status_compact(git_modified, git_staged, git_untracked)
+
+    # Escape markdown in user_prompt and last_response
+    if user_prompt:
+        user_prompt = escape_markdown(user_prompt)
+    if last_response:
+        last_response = escape_markdown(last_response)
+
+    # Build message with full context
+    prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
+
+    # Escape lychee details
+    lychee_details = lychee_status.get('details', 'Not run')
+    if lychee_details:
+        lychee_details = escape_markdown(lychee_details)
+
+    return (
+        f"{prompt_line}{emoji} **{last_response}**\n\n"
+        f"`{repo_display}` | `{working_dir}`\n"
+        f"`{session_id}` ({duration}s)\n"
+        f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
+        f"**Lychee**: {lychee_details}\n\n"
+        f"⏳ **Workflow: {workflow_name}**\n"
+        f"**Stage**: starting | **Progress**: 0%\n"
+        f"**Status**: Starting..."
+    )
 
 
 async def handle_view_details(query, workspace_path: str, session_id: str, correlation_id: str):
@@ -1330,175 +1466,34 @@ async def handle_workflow_selection(
         traceback.print_exc(file=sys.stderr)
 
     # Confirm to user (with fallback for unregistered workspaces)
-    try:
-        registry = load_registry()
-        emoji = registry["workspaces"][workspace_id]["emoji"]
-    except (FileNotFoundError, KeyError):
-        # Unregistered workspace - use default emoji
-        emoji = "📁"
+    config = get_workspace_config(workspace_id=workspace_id)
+    emoji = config["emoji"]
 
-    # Get workflow details
+    # Get workflow details and build confirmation message
     if workflow_registry and workflow_id in workflow_registry["workflows"]:
         workflow = workflow_registry["workflows"][workflow_id]
         workflow_name = f"{workflow['icon']} {workflow['name']}"
-        estimated_duration = workflow.get("estimated_duration", "unknown")
-
-        # Extract session context from cached summary
-        git_status = summary_data.get("git_status", {})
-        lychee_status = summary_data.get("lychee_status", {})
-
-        git_branch = git_status.get("branch", "unknown")
-        git_modified = git_status.get("modified_files", 0)
-        git_untracked = git_status.get("untracked_files", 0)
-        git_staged = git_status.get("staged_files", 0)
-        git_porcelain_lines = git_status.get('porcelain', [])
-
-        # Extract repository root and working directory (industry standard)
-        repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
-        working_dir = summary_data.get("working_directory", ".")
-        repo_display = str(repository_root).replace(str(Path.home()), "~")
-
-        # Extract user prompt and last response
-        user_prompt = summary_data.get("last_user_prompt", "")
-        if user_prompt and len(user_prompt) > 100:
-            user_prompt = user_prompt[:97] + "..."
-
-        last_response = summary_data.get("last_response", "Session completed")
-        if len(last_response) > 100:
-            last_response = last_response[:97] + "..."
-
-        duration = summary_data.get("duration_seconds", 0)
-
-        # Build git porcelain display (truncate to avoid huge messages)
-        git_porcelain_display = ""
-        if git_porcelain_lines:
-            # Limit to first 10 lines to avoid huge messages
-            display_lines = git_porcelain_lines[:10]
-            porcelain_text = "\n".join(display_lines)
-            if len(git_porcelain_lines) > 10:
-                porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
-            # Use plain text instead of code block to avoid markdown parsing issues
-            git_porcelain_display = f"\n{porcelain_text}"
-
-        # Compact git status (always show all counters)
-        git_compact = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
-
-        # Escape markdown in user_prompt and last_response
-        if user_prompt:
-            user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-        if last_response:
-            last_response = last_response.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-
-        # Build message with full context
-        prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
-
-        # Escape lychee details
-        lychee_details = lychee_status.get('details', 'Not run')
-        if lychee_details:
-            lychee_details = lychee_details.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-
-        initial_message = (
-            f"{prompt_line}{emoji} **{last_response}**\n\n"
-            f"`{repo_display}` | `{working_dir}`\n"
-            f"`{session_id}` ({duration}s)\n"
-            f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
-            f"**Lychee**: {lychee_details}\n\n"
-            f"⏳ **Workflow: {workflow_name}**\n"
-            f"**Stage**: starting | **Progress**: 0%\n"
-            f"**Status**: Starting..."
-        )
-
-        # Delete the original callback message
-        await query.message.delete()
-
-        # Send new text message
-        sent_message = await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=initial_message,
-            parse_mode="Markdown"
-        )
-
-        message_id = sent_message.message_id
     else:
         # Fallback for unknown workflow
-        # Extract session context from cached summary
-        git_status = summary_data.get("git_status", {})
-        lychee_status = summary_data.get("lychee_status", {})
-
-        git_branch = git_status.get("branch", "unknown")
-        git_modified = git_status.get("modified_files", 0)
-        git_untracked = git_status.get("untracked_files", 0)
-        git_staged = git_status.get("staged_files", 0)
-        git_porcelain_lines = git_status.get('porcelain', [])
-
-        # Extract repository root and working directory (industry standard)
-        repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
-        working_dir = summary_data.get("working_directory", ".")
-        repo_display = str(repository_root).replace(str(Path.home()), "~")
-
-        # Extract user prompt and last response
-        user_prompt = summary_data.get("last_user_prompt", "")
-        if user_prompt and len(user_prompt) > 100:
-            user_prompt = user_prompt[:97] + "..."
-
-        last_response = summary_data.get("last_response", "Session completed")
-        if len(last_response) > 100:
-            last_response = last_response[:97] + "..."
-
-        duration = summary_data.get("duration_seconds", 0)
-
-        # Build git porcelain display (truncate to avoid huge messages)
-        git_porcelain_display = ""
-        if git_porcelain_lines:
-            # Limit to first 10 lines to avoid huge messages
-            display_lines = git_porcelain_lines[:10]
-            porcelain_text = "\n".join(display_lines)
-            if len(git_porcelain_lines) > 10:
-                porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
-            # Use plain text instead of code block to avoid markdown parsing issues
-            git_porcelain_display = f"\n{porcelain_text}"
-
-        # Compact git status (always show all counters)
-        git_compact = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
-
         workflow_name = workflow_id
 
-        # Escape markdown in user_prompt and last_response
-        if user_prompt:
-            user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-        if last_response:
-            last_response = last_response.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+    # Build initial workflow message
+    initial_message = _build_workflow_start_message(
+        emoji=emoji,
+        workflow_name=workflow_name,
+        session_id=session_id,
+        summary_data=summary_data,
+        workspace_path=workspace_path
+    )
 
-        # Build message with full context
-        prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
-
-        # Escape lychee details
-        lychee_details = lychee_status.get('details', 'Not run')
-        if lychee_details:
-            lychee_details = lychee_details.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-
-        initial_message = (
-            f"{prompt_line}{emoji} **{last_response}**\n\n"
-            f"`{repo_display}` | `{working_dir}`\n"
-            f"`{session_id}` ({duration}s)\n"
-            f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
-            f"**Lychee**: {lychee_details}\n\n"
-            f"⏳ **Workflow: {workflow_id}**\n"
-            f"**Stage**: starting | **Progress**: 0%\n"
-            f"**Status**: Processing..."
-        )
-
-        # Delete the original callback message
-        await query.message.delete()
-
-        # Send new text message
-        sent_message = await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=initial_message,
-            parse_mode="Markdown"
-        )
-
-        message_id = sent_message.message_id
+    # Delete the original callback message and send new tracking message
+    await query.message.delete()
+    sent_message = await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=initial_message,
+        parse_mode="Markdown"
+    )
+    message_id = sent_message.message_id
 
     print(f"✅ Workflow selected: {workflow_id} for workspace: {workspace_id}")
 
@@ -1532,9 +1527,8 @@ async def handle_workflow_selection(
     active_progress_updates[progress_key] = tracking_data
 
     # Persist tracking data to survive bot restarts (watchexec)
-    tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
-    tracking_dir.mkdir(parents=True, exist_ok=True)
-    tracking_file = tracking_dir / f"{workspace_hash}_{session_id}_{workflow_id}_tracking.json"  # Use hash in filename
+    TRACKING_DIR.mkdir(parents=True, exist_ok=True)
+    tracking_file = TRACKING_DIR / f"{workspace_hash}_{session_id}_{workflow_id}_tracking.json"  # Use hash in filename
     tracking_file.write_text(json.dumps(tracking_data, indent=2))
     print(f"   📌 Tracking progress updates (message_id={message_id}, branch={git_branch})")
 
@@ -1635,12 +1629,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"   ❌ Failed to start orchestrator: {type(e).__name__}: {e}", file=sys.stderr)
 
     # Confirm to user (with fallback for unregistered workspaces)
-    try:
-        registry = load_registry()
-        emoji = registry["workspaces"][workspace_id]["emoji"]
-    except (FileNotFoundError, KeyError):
-        # Unregistered workspace - use default emoji
-        emoji = "📁"
+    config = get_workspace_config(workspace_id=workspace_id)
+    emoji = config["emoji"]
 
     await query.edit_message_text(
         text=f"{emoji} **Action Received**: {action}\n\n"
@@ -1654,79 +1644,104 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_activity()  # Track activity for idle timeout
 
 
-async def process_pending_notifications(app: Application) -> None:
-    """Process all pending notification files on startup (no watching)."""
-    handler = NotificationHandler(app.bot, int(CHAT_ID))
+async def _process_pending_files(
+    directory: Path,
+    file_pattern: str,
+    handler_class: type,
+    handler_method: str,
+    file_type: str,
+    app: Application
+) -> None:
+    """
+    Generic processor for pending files on startup.
 
-    # Scan notification directory once
-    if not NOTIFICATION_DIR.exists():
-        print("📂 No notification directory found")
+    Args:
+        directory: Directory to scan
+        file_pattern: Glob pattern for files (e.g., "notify_*.json")
+        handler_class: Handler class to instantiate
+        handler_method: Method name to call on handler
+        file_type: Human-readable file type for logging
+        app: Telegram Application instance
+    """
+    handler = handler_class(app.bot, int(CHAT_ID))
+
+    # Check if directory exists
+    if not directory.exists():
+        print(f"📂 No {file_type} directory found")
         return
 
-    notification_files = sorted(NOTIFICATION_DIR.glob("notify_*.json"))
-    if not notification_files:
-        print("📂 No pending notifications")
+    # Scan for files
+    files = sorted(directory.glob(file_pattern))
+    if not files:
+        print(f"📂 No pending {file_type}s")
         return
 
-    print(f"📬 Found {len(notification_files)} pending notification(s)")
-    for notification_file in notification_files:
+    print(f"📬 Found {len(files)} pending {file_type}(s)")
+    for file in files:
         try:
-            print(f"   Processing: {notification_file.name}")
-            await handler.send_notification(notification_file)
+            print(f"   Processing: {file.name}")
+            # Call handler method dynamically
+            await getattr(handler, handler_method)(file)
         except Exception as e:
-            print(f"   ❌ Failed to process {notification_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"   ❌ Failed to process {file.name}: {type(e).__name__}: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
+
+
+async def process_pending_notifications(app: Application) -> None:
+    """Process all pending notification files on startup."""
+    await _process_pending_files(
+        NOTIFICATION_DIR, "notify_*.json",
+        NotificationHandler, "send_notification",
+        "notification", app
+    )
 
 
 async def process_pending_completions(app: Application) -> None:
-    """Process all pending completion files on startup (no watching)."""
-    handler = CompletionHandler(app.bot, int(CHAT_ID))
-
-    # Scan completion directory once
-    if not COMPLETION_DIR.exists():
-        print("📂 No completion directory found")
-        return
-
-    completion_files = sorted(COMPLETION_DIR.glob("completion_*.json"))
-    if not completion_files:
-        print("📂 No pending completions")
-        return
-
-    print(f"📬 Found {len(completion_files)} pending completion(s)")
-    for completion_file in completion_files:
-        try:
-            print(f"   Processing: {completion_file.name}")
-            await handler.send_completion(completion_file)
-        except Exception as e:
-            print(f"   ❌ Failed to process {completion_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+    """Process all pending completion files on startup."""
+    await _process_pending_files(
+        COMPLETION_DIR, "completion_*.json",
+        CompletionHandler, "send_completion",
+        "completion", app
+    )
 
 
 async def process_pending_executions(app: Application) -> None:
-    """Process all pending execution files on startup (no watching)."""
-    handler = WorkflowExecutionHandler(app.bot, int(CHAT_ID))
+    """Process all pending execution files on startup."""
+    await _process_pending_files(
+        EXECUTIONS_DIR, "execution_*.json",
+        WorkflowExecutionHandler, "send_execution_completion",
+        "execution", app
+    )
 
-    # Scan execution directory once
-    if not EXECUTIONS_DIR.exists():
-        print("📂 No execution directory found")
+
+async def _scan_and_process(
+    directory: Path,
+    file_pattern: str,
+    handler,
+    handler_method: str,
+    file_type: str
+) -> None:
+    """
+    Scan directory for files and process with handler.
+
+    Args:
+        directory: Directory to scan
+        file_pattern: Glob pattern for files
+        handler: Handler instance
+        handler_method: Method name to call
+        file_type: File type name for logging
+    """
+    if not directory.exists():
         return
 
-    execution_files = sorted(EXECUTIONS_DIR.glob("execution_*.json"))
-    if not execution_files:
-        print("📂 No pending executions")
-        return
-
-    print(f"📬 Found {len(execution_files)} pending execution(s)")
-    for execution_file in execution_files:
+    files = sorted(directory.glob(file_pattern))
+    for file in files:
         try:
-            print(f"   Processing: {execution_file.name}")
-            await handler.send_execution_completion(execution_file)
+            print(f"📬 Found {file_type}: {file.name}")
+            await getattr(handler, handler_method)(file)
         except Exception as e:
-            print(f"   ❌ Failed to process {execution_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+            print(f"❌ Failed to process {file.name}: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 async def periodic_file_scanner(app: Application) -> None:
@@ -1744,44 +1759,16 @@ async def periodic_file_scanner(app: Application) -> None:
         await asyncio.sleep(5)  # Scan every 5 seconds
 
         # Phase 3 - v4.0.0: Scan for new summaries (prioritize over notifications)
-        if SUMMARIES_DIR.exists():
-            summary_files = sorted(SUMMARIES_DIR.glob("summary_*.json"))
-            for summary_file in summary_files:
-                try:
-                    print(f"📬 Found summary: {summary_file.name}")
-                    await summary_handler.send_workflow_menu(summary_file)
-                except Exception as e:
-                    print(f"❌ Failed to process {summary_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+        await _scan_and_process(SUMMARIES_DIR, "summary_*.json", summary_handler, "send_workflow_menu", "summary")
 
         # v3 backward compat: Scan for new notifications
-        if NOTIFICATION_DIR.exists():
-            notification_files = sorted(NOTIFICATION_DIR.glob("notify_*.json"))
-            for notification_file in notification_files:
-                try:
-                    print(f"📬 Found notification: {notification_file.name}")
-                    await notification_handler.send_notification(notification_file)
-                except Exception as e:
-                    print(f"❌ Failed to process {notification_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+        await _scan_and_process(NOTIFICATION_DIR, "notify_*.json", notification_handler, "send_notification", "notification")
 
         # Scan for new completions (v3 backward compat)
-        if COMPLETION_DIR.exists():
-            completion_files = sorted(COMPLETION_DIR.glob("completion_*.json"))
-            for completion_file in completion_files:
-                try:
-                    print(f"📬 Found completion: {completion_file.name}")
-                    await completion_handler.send_completion(completion_file)
-                except Exception as e:
-                    print(f"❌ Failed to process {completion_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+        await _scan_and_process(COMPLETION_DIR, "completion_*.json", completion_handler, "send_completion", "completion")
 
         # Phase 4 - v4.0.0: Scan for workflow execution completions
-        if EXECUTIONS_DIR.exists():
-            execution_files = sorted(EXECUTIONS_DIR.glob("execution_*.json"))
-            for execution_file in execution_files:
-                try:
-                    print(f"📬 Found execution: {execution_file.name}")
-                    await execution_handler.send_execution_completion(execution_file)
-                except Exception as e:
-                    print(f"❌ Failed to process {execution_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
+        await _scan_and_process(EXECUTIONS_DIR, "execution_*.json", execution_handler, "send_execution_completion", "execution")
 
 
 async def progress_poller(app: Application) -> None:
@@ -1865,7 +1852,7 @@ async def progress_poller(app: Application) -> None:
                 git_staged = tracking_context.get("git_staged", 0)
 
                 # Replace home directory with ~ for cleaner display
-                repo_display = str(repository_root).replace(str(Path.home()), "~")
+                repo_display = format_repo_display(repository_root)
 
                 print(f"   📝 Updating message_id: {message_id} (branch: {git_branch})")
 
@@ -1881,7 +1868,7 @@ async def progress_poller(app: Application) -> None:
 
                 # Build git status line
                 # Compact git status (always show all counters)
-                git_status_line = f"M:{git_modified} S:{git_staged} U:{git_untracked}"
+                git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
                 progress_text = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
@@ -1944,6 +1931,46 @@ async def idle_timeout_monitor() -> None:
             print(f"⏱️  Idle: {idle_time:.0f}s, auto-shutdown in {remaining:.0f}s")
 
 
+def _restore_progress_tracking() -> None:
+    """
+    Restore progress tracking state from disk (survives watchexec restarts).
+
+    Reads tracking JSON files and populates active_progress_updates dictionary.
+    """
+    global active_progress_updates
+
+    print("\n🔄 Restoring progress tracking state...")
+
+    if not TRACKING_DIR.exists():
+        print(f"   ℹ️  No tracking state to restore")
+        return
+
+    restored_count = 0
+    for tracking_file in TRACKING_DIR.glob("*_tracking.json"):
+        try:
+            tracking_data = json.loads(tracking_file.read_text())
+            # Get IDs from tracking data (more reliable than filename parsing)
+            workspace_id = tracking_data["workspace_id"]
+            session_id = tracking_data["session_id"]
+            # Extract workflow_id from filename: {workspace}_{session}_{workflow}_tracking.json
+            # UUIDs use dashes (not underscores), so split is simple:
+            # Example: 81e622b5_fb77a731-3922-4da4-bc54-4b2db9de6e40_commit-changes_tracking.json
+            filename_parts = tracking_file.stem.replace("_tracking", "").split("_")
+            # parts[0] = workspace_id (8 chars hash)
+            # parts[1] = session_id (UUID with dashes)
+            # parts[2:] = workflow_id (might contain underscores)
+            workflow_id = "_".join(filename_parts[2:])
+
+            progress_key = (workspace_id, session_id, workflow_id)
+            active_progress_updates[progress_key] = tracking_data
+            restored_count += 1
+            print(f"   ✓ Restored: {workspace_id}/{workflow_id} (msg {tracking_data['message_id']})")
+        except Exception as e:
+            print(f"   ⚠️  Failed to restore {tracking_file.name}: {e}")
+
+    print(f"   ✅ Restored {restored_count} tracked workflow(s)")
+
+
 async def main() -> int:
     """Main entry point - on-demand polling with auto-shutdown."""
     global shutdown_requested, last_activity_time, workflow_registry
@@ -1977,34 +2004,7 @@ async def main() -> int:
         return 1
 
     # Phase 4 - v4.1.0: Restore progress tracking state (survives watchexec restarts)
-    print("\n🔄 Restoring progress tracking state...")
-    tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
-    if tracking_dir.exists():
-        restored_count = 0
-        for tracking_file in tracking_dir.glob("*_tracking.json"):
-            try:
-                tracking_data = json.loads(tracking_file.read_text())
-                # Get IDs from tracking data (more reliable than filename parsing)
-                workspace_id = tracking_data["workspace_id"]
-                session_id = tracking_data["session_id"]
-                # Extract workflow_id from filename: {workspace}_{session}_{workflow}_tracking.json
-                # UUIDs use dashes (not underscores), so split is simple:
-                # Example: 81e622b5_fb77a731-3922-4da4-bc54-4b2db9de6e40_commit-changes_tracking.json
-                filename_parts = tracking_file.stem.replace("_tracking", "").split("_")
-                # parts[0] = workspace_id (8 chars hash)
-                # parts[1] = session_id (UUID with dashes)
-                # parts[2:] = workflow_id (might contain underscores)
-                workflow_id = "_".join(filename_parts[2:])
-
-                progress_key = (workspace_id, session_id, workflow_id)
-                active_progress_updates[progress_key] = tracking_data
-                restored_count += 1
-                print(f"   ✓ Restored: {workspace_id}/{workflow_id} (msg {tracking_data['message_id']})")
-            except Exception as e:
-                print(f"   ⚠️  Failed to restore {tracking_file.name}: {e}")
-        print(f"   ✅ Restored {restored_count} tracked workflow(s)")
-    else:
-        print(f"   ℹ️  No tracking state to restore")
+    _restore_progress_tracking()
 
     try:
         # Create PID file (fails if another instance running)
