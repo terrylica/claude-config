@@ -711,7 +711,7 @@ class SummaryHandler(BaseHandler):
             )
 
             # Filter available workflows
-            available_workflows = filter_workflows_by_triggers(workflow_registry, summary)
+            available_workflows = filter_workflows_by_triggers(bot_state.workflow_registry, summary)
 
             if not available_workflows:
                 print(f"⚠️  No workflows available for session {session_id} (no triggers matched)")
