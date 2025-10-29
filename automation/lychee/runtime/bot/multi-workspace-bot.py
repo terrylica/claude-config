@@ -14,19 +14,20 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 4.9.0
+Version: 5.0.0
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
 
-Changes from v4.8.0:
-- Extract handler classes to handler_classes.py (-636 lines)
-- Total reduction: 636 lines (49%, 1298 -> 662)
+Changes from v4.9.0:
+- Extract async services to bot_services.py (-183 lines)
+- Total reduction: 183 lines (28%, 662 -> 479)
 
 Changes from v4.5.1:
 - Phase 1: Extract file validators, message formatters, keyboard builder (-222 lines)
 - Phase 2: Extract file processors, progress tracking (-72 lines)
 - Phase 3: Extract handler functions (-259 lines)
 - Phase 4: Extract handler classes (-636 lines)
-- Total reduction: 1189 lines (64%, 1851 -> 662)
+- Phase 5: Extract async services (-183 lines)
+- Total reduction: 1372 lines (74%, 1851 -> 479)
 
 Changes from v3.0.0:
 - Loads workflow registry from workflows.json
@@ -135,6 +136,11 @@ from handler_classes import (
     CompletionHandler,
     WorkflowExecutionHandler,
     SummaryHandler
+)
+from bot_services import (
+    periodic_file_scanner,
+    progress_poller,
+    idle_timeout_monitor
 )
 import bot_state
 from bot_state import (
@@ -304,200 +310,7 @@ async def process_pending_executions(app: Application) -> None:
     )
 
 
-async def _scan_and_process(
-    directory: Path,
-    file_pattern: str,
-    handler,
-    handler_method: str,
-    file_type: str
-) -> None:
-    """Scan directory for files and process with handler."""
-    await scan_and_process(directory, file_pattern, handler, handler_method, file_type)
-
-
-async def periodic_file_scanner(app: Application) -> None:
-    """Periodically scan for new notification, completion, summary, and execution files (dual-mode)."""
-    print(f"📂 Periodic file scanner started (every 5s)")
-
-    notification_handler = NotificationHandler(app.bot, int(CHAT_ID))
-    completion_handler = CompletionHandler(app.bot, int(CHAT_ID))
-    summary_handler = SummaryHandler(app.bot, int(CHAT_ID))  # Phase 3 - v4.0.0
-    execution_handler = WorkflowExecutionHandler(app.bot, int(CHAT_ID))  # Phase 4 - WorkflowExecution completion
-
-    while not bot_state.shutdown_requested:
-        await asyncio.sleep(5)  # Scan every 5 seconds
-
-        # Phase 3 - v4.0.0: Scan for new summaries (prioritize over notifications)
-        await _scan_and_process(SUMMARIES_DIR, "summary_*.json", summary_handler, "send_workflow_menu", "summary")
-
-        # v3 backward compat: Scan for new notifications
-        await _scan_and_process(NOTIFICATION_DIR, "notify_*.json", notification_handler, "send_notification", "notification")
-
-        # Scan for new completions (v3 backward compat)
-        await _scan_and_process(COMPLETION_DIR, "completion_*.json", completion_handler, "send_completion", "completion")
-
-        # Phase 4 - v4.0.0: Scan for workflow execution completions
-        await _scan_and_process(EXECUTIONS_DIR, "execution_*.json", execution_handler, "send_execution_completion", "execution")
-
-
-async def progress_poller(app: Application) -> None:
-    """Poll progress files and update Telegram messages with streaming progress."""
-    print(f"📊 Progress poller started (every {PROGRESS_POLL_INTERVAL}s)")
-    print(f"   Progress directory: {PROGRESS_DIR}")
-    print(f"   Active tracking: {len(bot_state.active_progress_updates)} workflows")
-
-    while not bot_state.shutdown_requested:
-        await asyncio.sleep(PROGRESS_POLL_INTERVAL)
-
-        if not PROGRESS_DIR.exists():
-            continue
-
-        # Get all JSON files in progress directory
-        all_json_files = list(PROGRESS_DIR.glob("*.json"))
-
-        # Filter out schema.json
-        progress_files = [f for f in all_json_files if f.name != "schema.json"]
-
-        # Extensive logging for debugging
-        if all_json_files:
-            print(f"\n📂 Progress directory scan:")
-            print(f"   Total JSON files: {len(all_json_files)}")
-            print(f"   Files found: {[f.name for f in all_json_files]}")
-            print(f"   After filtering schema.json: {len(progress_files)} files")
-            if progress_files:
-                print(f"   Processing: {[f.name for f in progress_files]}")
-
-        for progress_file in progress_files:
-            try:
-                print(f"\n📊 Processing progress file: {progress_file.name}")
-
-                # Read progress data
-                with open(progress_file, "r") as f:
-                    content = f.read()
-                    print(f"   File size: {len(content)} bytes")
-                    progress = json.load(open(progress_file, "r"))
-
-                print(f"   JSON parsed successfully")
-                print(f"   Keys in progress: {list(progress.keys())}")
-
-                # Extract required fields with detailed logging
-                if "workspace_id" not in progress:
-                    print(f"   ⚠️  Missing workspace_id field!")
-                    print(f"   Progress content: {progress}")
-                    continue
-
-                workspace_id = progress["workspace_id"]
-                session_id = progress["session_id"]
-                workflow_id = progress["workflow_id"]
-                status = progress["status"]
-                stage = progress["stage"]
-                progress_percent = progress["progress_percent"]
-                message = progress["message"]
-
-                print(f"   ✅ Extracted fields:")
-                print(f"      workspace_id: {workspace_id}")
-                print(f"      session_id: {session_id}")
-                print(f"      workflow_id: {workflow_id}")
-                print(f"      status: {status}")
-                print(f"      stage: {stage} ({progress_percent}%)")
-
-                # Check if we're tracking this workflow
-                progress_key = (workspace_id, session_id, workflow_id)
-                if progress_key not in bot_state.active_progress_updates:
-                    print(f"   ⏭️  Not tracking this workflow (no message_id registered)")
-                    continue
-
-                # Extract tracking context (message_id + repository/git info)
-                tracking_context = bot_state.active_progress_updates[progress_key]
-                message_id = tracking_context["message_id"]
-                git_branch = tracking_context.get("git_branch", "unknown")
-                repository_root = tracking_context.get("repository_root", "unknown")
-                working_dir = tracking_context.get("working_directory", ".")
-                workflow_name = tracking_context.get("workflow_name", workflow_id)
-                git_modified = tracking_context.get("git_modified", 0)
-                git_untracked = tracking_context.get("git_untracked", 0)
-                git_staged = tracking_context.get("git_staged", 0)
-
-                # Replace home directory with ~ for cleaner display
-                repo_display = format_repo_display(repository_root)
-
-                print(f"   📝 Updating message_id: {message_id} (branch: {git_branch})")
-
-                # Build progress caption (Phase 2: edit caption instead of text)
-                stage_emoji = {
-                    "starting": "🎬",
-                    "rendering": "📝",
-                    "executing": "⚙️",
-                    "waiting": "⏳",
-                    "completed": "✅" if status == "success" else "❌"
-                }
-                emoji = stage_emoji.get(stage, "📊")
-
-                # Build git status line
-                # Compact git status (always show all counters)
-                git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
-
-                # Compact session + debug log line
-                session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
-
-                progress_text = (
-                    f"{emoji} **Workflow: {workflow_name}**\n\n"
-                    f"**Repository**: `{repo_display}`\n"
-                    f"**Directory**: `{working_dir}`\n"
-                    f"**Branch**: `{git_branch}`\n"
-                    f"**↯**: {git_status_line}\n\n"
-                    f"`{session_debug_line}`\n"
-                    f"**Stage**: {stage}\n"
-                    f"**Progress**: {progress_percent}%\n"
-                    f"**Status**: {message}"
-                )
-
-                # Update message text
-                await app.bot.edit_message_text(
-                    chat_id=int(CHAT_ID),
-                    message_id=message_id,
-                    text=progress_text,
-                    parse_mode="Markdown"
-                )
-                print(f"   ✅ Message updated successfully")
-
-                # Clean up progress file (but keep tracking for execution completion)
-                if stage == "completed":
-                    print(f"   🗑️  Removing completed progress file: {progress_file.name}")
-                    progress_file.unlink()
-                    print(f"   ℹ️  Keeping tracking active for execution completion handler")
-
-            except KeyError as e:
-                print(f"❌ Missing field in {progress_file.name}: {e}", file=sys.stderr)
-                print(f"   File content preview: {content[:500]}", file=sys.stderr)
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON parse error in {progress_file.name}: {e}", file=sys.stderr)
-                print(f"   File content: {content}", file=sys.stderr)
-            except Exception as e:
-                print(f"❌ Failed to process progress {progress_file.name}: {type(e).__name__}: {e}", file=sys.stderr)
-                import traceback
-                print(f"   Full traceback:", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-
-
-async def idle_timeout_monitor() -> None:
-    """Monitor idle time and request shutdown if timeout exceeded."""
-    print(f"⏱️  Idle timeout monitor started ({IDLE_TIMEOUT_SECONDS}s)")
-
-    while not bot_state.shutdown_requested:
-        await asyncio.sleep(30)  # Check every 30 seconds
-
-        idle_time = get_idle_time()
-        if idle_time >= IDLE_TIMEOUT_SECONDS:
-            print(f"\n⏱️  Idle timeout reached ({idle_time:.0f}s >= {IDLE_TIMEOUT_SECONDS}s)")
-            print("   Shutting down...")
-            bot_state.shutdown_requested = True
-            break
-
-        # Log progress every 5 minutes
-        if int(idle_time) % 300 == 0 and idle_time > 0:
-            remaining = IDLE_TIMEOUT_SECONDS - idle_time
-            print(f"⏱️  Idle: {idle_time:.0f}s, auto-shutdown in {remaining:.0f}s")
+# Async service functions moved to bot_services.py
 
 
 def _restore_progress_tracking() -> None:
@@ -510,7 +323,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 4.9.0")
+    print(f"Version: 5.0.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")
@@ -603,9 +416,11 @@ async def main() -> int:
 
         # Start background tasks
         print()
-        monitor_task = asyncio.create_task(idle_timeout_monitor())
-        scanner_task = asyncio.create_task(periodic_file_scanner(app))
-        progress_task = asyncio.create_task(progress_poller(app))
+        monitor_task = asyncio.create_task(idle_timeout_monitor(IDLE_TIMEOUT_SECONDS))
+        scanner_task = asyncio.create_task(periodic_file_scanner(
+            app, NOTIFICATION_DIR, COMPLETION_DIR, SUMMARIES_DIR, EXECUTIONS_DIR, int(CHAT_ID)
+        ))
+        progress_task = asyncio.create_task(progress_poller(app, PROGRESS_DIR, int(CHAT_ID), PROGRESS_POLL_INTERVAL))
 
         # Event loop - wait for shutdown
         print("\n✅ Bot running (polling for updates + scanning for files + progress updates)")
