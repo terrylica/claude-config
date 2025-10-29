@@ -1,3 +1,12 @@
+## [4.8.0] - 2025-10-29
+
+### 🚜 Refactor
+
+- *(bot)* Extract handler functions to dedicated module (Phase 3)
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v4.7.0
 ## [4.7.0] - 2025-10-29
 
 ### 🚜 Refactor
