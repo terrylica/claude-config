@@ -5,6 +5,16 @@ All notable changes to the Telegram Workflows Orchestration System will be docum
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.1] - 2025-10-28
+
+### Fixed
+
+- **Markdown Escaping in Workflow Completion** - Fixed workflow completion messages not escaping markdown special characters in user_prompt and last_response fields
+  - Added `escape_markdown()` calls before building original_context section in `WorkflowExecutionHandler`
+  - Prevents markdown parsing errors when user prompts or assistant responses contain `[`, `*`, `_`, or `` ` `` characters
+  - Maintains consistency with workflow menu and workflow start messages which already escape these fields
+  - Example: User prompt containing `[` now displays correctly instead of showing escaped form `\[`
+
 ## [4.5.0] - 2025-10-28
 
 ### Fixed

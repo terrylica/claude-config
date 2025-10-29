@@ -14,7 +14,7 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 4.0.0
+Version: 4.5.1
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
 
 Changes from v3.0.0:
@@ -1644,7 +1644,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 4.0.0")
+    print(f"Version: 4.5.1")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")
