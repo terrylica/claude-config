@@ -64,25 +64,11 @@ POLL_INTERVAL = 1.0  # seconds
 POLL_TIMEOUT = 10  # API request timeout
 PROGRESS_POLL_INTERVAL = 2.0  # Progress updates every 2 seconds
 
-# Track active progress updates: (workspace_id, session_id, workflow_id) → message_id
-active_progress_updates: Dict[tuple, int] = {}
-
-# Cache session summaries for workflow selection: (workspace_id, session_id) → summary_data
-# Needed because bot deletes summary files before user clicks workflow buttons
-summary_cache: Dict[tuple, Dict[str, Any]] = {}
-
 if not BOT_TOKEN or not CHAT_ID:
     print("❌ Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
     sys.exit(1)
 
-# Global shutdown flag for signal handlers
-shutdown_requested = False
-last_activity_time: Optional[float] = None
-
-# Phase 3 - v4.0.0: Workflow registry
-workflow_registry: Optional[Dict[str, Any]] = None
-
-# Import workspace helpers
+# Import workspace helpers and state management
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 from workspace_helpers import (
     load_registry,
@@ -103,111 +89,26 @@ from workflow_utils import (
     load_workflow_registry,
     filter_workflows_by_triggers
 )
-
-
-# Event Logging
-def log_event(
-    correlation_id: str,
-    workspace_id: str,
-    session_id: str,
-    component: str,
-    event_type: str,
-    metadata: Optional[Dict[str, Any]] = None
-) -> None:
-    """
-    Log event to SQLite event store via event_logger.py.
-
-    Args:
-        correlation_id: ULID for request tracing
-        workspace_id: Workspace hash or ULID
-        session_id: Claude Code session UUID
-        component: Component name (bot)
-        event_type: Event type (e.g., notification.received)
-        metadata: Event-specific data
-
-    Raises:
-        subprocess.CalledProcessError: Event logging failed
-    """
-    event_logger = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "lib" / "event_logger.py"
-    metadata_json = json.dumps(metadata) if metadata else "{}"
-
-    try:
-        subprocess.run(
-            [str(event_logger), correlation_id, workspace_id, session_id, component, event_type, metadata_json],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to log event {event_type}: {e.stderr}", file=sys.stderr)
-        raise
-
-
-# PID File Management
-def create_pid_file() -> None:
-    """
-    Create PID file atomically.
-
-    Raises:
-        FileExistsError: Another bot instance is already running
-        OSError: File system error
-    """
-    try:
-        # Atomic create with O_EXCL (fails if file exists)
-        fd = os.open(str(PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        try:
-            os.write(fd, f"{os.getpid()}\n".encode())
-            print(f"✅ Created PID file: {PID_FILE} (PID: {os.getpid()})")
-        finally:
-            os.close(fd)
-    except FileExistsError:
-        print(f"❌ PID file already exists: {PID_FILE}", file=sys.stderr)
-        print(f"   Another bot instance is likely running", file=sys.stderr)
-        raise
-    except Exception as e:
-        print(f"❌ Failed to create PID file: {type(e).__name__}: {e}", file=sys.stderr)
-        raise
-
-
-def cleanup_pid_file() -> None:
-    """Remove PID file if it exists and belongs to this process."""
-    try:
-        if PID_FILE.exists():
-            # Verify PID file contains our PID before removing
-            try:
-                stored_pid = int(PID_FILE.read_text().strip())
-                if stored_pid == os.getpid():
-                    PID_FILE.unlink()
-                    print(f"🗑️  Removed PID file: {PID_FILE}")
-                else:
-                    print(f"⚠️  PID file belongs to different process ({stored_pid}), not removing", file=sys.stderr)
-            except (ValueError, OSError) as e:
-                # Corrupted PID file, remove it anyway
-                PID_FILE.unlink()
-                print(f"🗑️  Removed corrupted PID file: {e}")
-    except Exception as e:
-        print(f"⚠️  Failed to cleanup PID file: {type(e).__name__}: {e}", file=sys.stderr)
+from bot_utils import (
+    log_event,
+    create_pid_file,
+    cleanup_pid_file
+)
+from message_builders import (
+    build_workflow_start_message
+)
+import bot_state
+from bot_state import (
+    update_activity,
+    get_idle_time
+)
 
 
 def signal_handler(signum: int, frame) -> None:
     """Handle termination signals."""
-    global shutdown_requested
     sig_name = signal.Signals(signum).name
     print(f"\n🛑 Received {sig_name}, shutting down...")
-    shutdown_requested = True
-
-
-def update_activity() -> None:
-    """Update last activity timestamp."""
-    global last_activity_time
-    last_activity_time = asyncio.get_event_loop().time()
-
-
-def get_idle_time() -> float:
-    """Get seconds since last activity."""
-    if last_activity_time is None:
-        return 0.0
-    return asyncio.get_event_loop().time() - last_activity_time
+    bot_state.shutdown_requested = True
 
 
 class BaseHandler:
@@ -577,9 +478,9 @@ class WorkflowExecutionHandler(BaseHandler):
             status = execution["status"]
             duration = execution.get("duration_seconds", 0)
 
-            if progress_key in active_progress_updates:
+            if progress_key in bot_state.active_progress_updates:
                 # Single-message pattern: replace document in existing progress message
-                tracking_context = active_progress_updates[progress_key]
+                tracking_context = bot_state.active_progress_updates[progress_key]
                 message_id = tracking_context["message_id"]
                 git_branch = tracking_context.get("git_branch", "unknown")
                 repository_root = tracking_context.get("repository_root", "unknown")
@@ -642,7 +543,7 @@ class WorkflowExecutionHandler(BaseHandler):
                 print(f"   ✅ Message updated successfully")
 
                 # Cleanup tracking (memory + file)
-                del active_progress_updates[progress_key]
+                del bot_state.active_progress_updates[progress_key]
 
                 # Remove tracking file
                 tracking_file = TRACKING_DIR / f"{workspace_id}_{session_id}_{workflow_id}_tracking.json"
@@ -845,7 +746,7 @@ class SummaryHandler(BaseHandler):
 
             # Cache summary data for workflow selection (needed because we delete summary file)
             cache_key = (workspace_id, session_id)
-            summary_cache[cache_key] = {
+            bot_state.summary_cache[cache_key] = {
                 "session_id": session_id,
                 "correlation_id": correlation_id,
                 "git_status": git_status,
@@ -1025,90 +926,6 @@ class SummaryHandler(BaseHandler):
         return keyboard
 
 
-def _build_workflow_start_message(
-    emoji: str,
-    workflow_name: str,
-    session_id: str,
-    summary_data: Dict[str, Any],
-    workspace_path: str
-) -> str:
-    """
-    Build initial workflow start message with full context.
-
-    Args:
-        emoji: Workspace emoji
-        workflow_name: Workflow display name
-        session_id: Session identifier
-        summary_data: Cached session summary
-        workspace_path: Workspace path
-
-    Returns:
-        Formatted Telegram message
-    """
-    # Extract session context from cached summary
-    git_status = summary_data.get("git_status", {})
-    lychee_status = summary_data.get("lychee_status", {})
-
-    git_branch = git_status.get("branch", "unknown")
-    git_modified = git_status.get("modified_files", 0)
-    git_untracked = git_status.get("untracked_files", 0)
-    git_staged = git_status.get("staged_files", 0)
-    git_porcelain_lines = git_status.get('porcelain', [])
-
-    # Extract repository root and working directory
-    repository_root = summary_data.get("repository_root", summary_data.get("workspace_path", workspace_path))
-    working_dir = summary_data.get("working_directory", ".")
-    repo_display = format_repo_display(repository_root)
-
-    # Extract and truncate user prompt and last response
-    user_prompt = summary_data.get("last_user_prompt", "")
-    if user_prompt and len(user_prompt) > 100:
-        user_prompt = user_prompt[:97] + "..."
-
-    last_response = summary_data.get("last_response", "Session completed")
-    if len(last_response) > 100:
-        last_response = last_response[:97] + "..."
-
-    duration = summary_data.get("duration_seconds", 0)
-
-    # Build git porcelain display (truncate to avoid huge messages)
-    git_porcelain_display = ""
-    if git_porcelain_lines:
-        display_lines = git_porcelain_lines[:10]
-        porcelain_text = "\n".join(display_lines)
-        if len(git_porcelain_lines) > 10:
-            porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
-        git_porcelain_display = f"\n{porcelain_text}"
-
-    # Compact git status
-    git_compact = format_git_status_compact(git_modified, git_staged, git_untracked)
-
-    # Escape markdown in user_prompt and last_response
-    if user_prompt:
-        user_prompt = escape_markdown(user_prompt)
-    if last_response:
-        last_response = escape_markdown(last_response)
-
-    # Build message with full context
-    prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
-
-    # Escape lychee details
-    lychee_details = lychee_status.get('details', 'Not run')
-    if lychee_details:
-        lychee_details = escape_markdown(lychee_details)
-
-    return (
-        f"{prompt_line}{emoji} **{last_response}**\n\n"
-        f"`{repo_display}` | `{working_dir}`\n"
-        f"`{session_id}` ({duration}s)\n"
-        f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
-        f"**Lychee**: {lychee_details}\n\n"
-        f"⏳ **Workflow: {workflow_name}**\n"
-        f"**Stage**: starting | **Progress**: 0%\n"
-        f"**Status**: Starting..."
-    )
-
-
 async def handle_view_details(query, workspace_path: str, session_id: str, correlation_id: str):
     """
     Handle "View Details" button click - send detailed error breakdown.
@@ -1242,7 +1059,7 @@ async def handle_workflow_selection(
 
     # Retrieve cached summary data (needed for orchestrator prompt rendering)
     cache_key = (workspace_id, session_id)
-    summary_data = summary_cache.get(cache_key)
+    summary_data = bot_state.summary_cache.get(cache_key)
     if not summary_data:
         print(f"   ⚠️  Summary not found in cache for {cache_key}, orchestrator may fail")
         summary_data = {}
@@ -1310,15 +1127,15 @@ async def handle_workflow_selection(
     emoji = config["emoji"]
 
     # Get workflow details and build confirmation message
-    if workflow_registry and workflow_id in workflow_registry["workflows"]:
-        workflow = workflow_registry["workflows"][workflow_id]
+    if bot_state.workflow_registry and workflow_id in bot_state.workflow_registry["workflows"]:
+        workflow = bot_state.workflow_registry["workflows"][workflow_id]
         workflow_name = f"{workflow['icon']} {workflow['name']}"
     else:
         # Fallback for unknown workflow
         workflow_name = workflow_id
 
     # Build initial workflow message
-    initial_message = _build_workflow_start_message(
+    initial_message = build_workflow_start_message(
         emoji=emoji,
         workflow_name=workflow_name,
         session_id=session_id,
@@ -1360,11 +1177,11 @@ async def handle_workflow_selection(
         "git_modified": git_modified,
         "git_untracked": git_untracked,
         "git_staged": git_staged,
-        "workflow_name": workflow_name if workflow_registry and workflow_id in workflow_registry["workflows"] else workflow_id,
+        "workflow_name": workflow_name if bot_state.workflow_registry and workflow_id in bot_state.workflow_registry["workflows"] else workflow_id,
         "session_id": session_id
     }
 
-    active_progress_updates[progress_key] = tracking_data
+    bot_state.active_progress_updates[progress_key] = tracking_data
 
     # Persist tracking data to survive bot restarts (watchexec)
     TRACKING_DIR.mkdir(parents=True, exist_ok=True)
@@ -1586,8 +1403,6 @@ async def _scan_and_process(
 
 async def periodic_file_scanner(app: Application) -> None:
     """Periodically scan for new notification, completion, summary, and execution files (dual-mode)."""
-    global shutdown_requested
-
     print(f"📂 Periodic file scanner started (every 5s)")
 
     notification_handler = NotificationHandler(app.bot, int(CHAT_ID))
@@ -1595,7 +1410,7 @@ async def periodic_file_scanner(app: Application) -> None:
     summary_handler = SummaryHandler(app.bot, int(CHAT_ID))  # Phase 3 - v4.0.0
     execution_handler = WorkflowExecutionHandler(app.bot, int(CHAT_ID))  # Phase 4 - WorkflowExecution completion
 
-    while not shutdown_requested:
+    while not bot_state.shutdown_requested:
         await asyncio.sleep(5)  # Scan every 5 seconds
 
         # Phase 3 - v4.0.0: Scan for new summaries (prioritize over notifications)
@@ -1613,13 +1428,11 @@ async def periodic_file_scanner(app: Application) -> None:
 
 async def progress_poller(app: Application) -> None:
     """Poll progress files and update Telegram messages with streaming progress."""
-    global shutdown_requested, active_progress_updates
-
     print(f"📊 Progress poller started (every {PROGRESS_POLL_INTERVAL}s)")
     print(f"   Progress directory: {PROGRESS_DIR}")
-    print(f"   Active tracking: {len(active_progress_updates)} workflows")
+    print(f"   Active tracking: {len(bot_state.active_progress_updates)} workflows")
 
-    while not shutdown_requested:
+    while not bot_state.shutdown_requested:
         await asyncio.sleep(PROGRESS_POLL_INTERVAL)
 
         if not PROGRESS_DIR.exists():
@@ -1676,12 +1489,12 @@ async def progress_poller(app: Application) -> None:
 
                 # Check if we're tracking this workflow
                 progress_key = (workspace_id, session_id, workflow_id)
-                if progress_key not in active_progress_updates:
+                if progress_key not in bot_state.active_progress_updates:
                     print(f"   ⏭️  Not tracking this workflow (no message_id registered)")
                     continue
 
                 # Extract tracking context (message_id + repository/git info)
-                tracking_context = active_progress_updates[progress_key]
+                tracking_context = bot_state.active_progress_updates[progress_key]
                 message_id = tracking_context["message_id"]
                 git_branch = tracking_context.get("git_branch", "unknown")
                 repository_root = tracking_context.get("repository_root", "unknown")
@@ -1751,18 +1564,16 @@ async def progress_poller(app: Application) -> None:
 
 async def idle_timeout_monitor() -> None:
     """Monitor idle time and request shutdown if timeout exceeded."""
-    global shutdown_requested
-
     print(f"⏱️  Idle timeout monitor started ({IDLE_TIMEOUT_SECONDS}s)")
 
-    while not shutdown_requested:
+    while not bot_state.shutdown_requested:
         await asyncio.sleep(30)  # Check every 30 seconds
 
         idle_time = get_idle_time()
         if idle_time >= IDLE_TIMEOUT_SECONDS:
             print(f"\n⏱️  Idle timeout reached ({idle_time:.0f}s >= {IDLE_TIMEOUT_SECONDS}s)")
             print("   Shutting down...")
-            shutdown_requested = True
+            bot_state.shutdown_requested = True
             break
 
         # Log progress every 5 minutes
@@ -1775,10 +1586,8 @@ def _restore_progress_tracking() -> None:
     """
     Restore progress tracking state from disk (survives watchexec restarts).
 
-    Reads tracking JSON files and populates active_progress_updates dictionary.
+    Reads tracking JSON files and populates bot_state.active_progress_updates dictionary.
     """
-    global active_progress_updates
-
     print("\n🔄 Restoring progress tracking state...")
 
     if not TRACKING_DIR.exists():
@@ -1802,7 +1611,7 @@ def _restore_progress_tracking() -> None:
             workflow_id = "_".join(filename_parts[2:])
 
             progress_key = (workspace_id, session_id, workflow_id)
-            active_progress_updates[progress_key] = tracking_data
+            bot_state.active_progress_updates[progress_key] = tracking_data
             restored_count += 1
             print(f"   ✓ Restored: {workspace_id}/{workflow_id} (msg {tracking_data['message_id']})")
         except Exception as e:
@@ -1813,8 +1622,6 @@ def _restore_progress_tracking() -> None:
 
 async def main() -> int:
     """Main entry point - on-demand polling with auto-shutdown."""
-    global shutdown_requested, last_activity_time, workflow_registry
-
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
@@ -1837,7 +1644,7 @@ async def main() -> int:
     # Phase 3 - v4.0.0: Load workflow registry
     print("\n📋 Loading workflow registry...")
     try:
-        workflow_registry = load_workflow_registry(WORKFLOWS_REGISTRY)
+        bot_state.workflow_registry = load_workflow_registry(WORKFLOWS_REGISTRY)
     except Exception as e:
         print(f"❌ Failed to load workflow registry: {type(e).__name__}: {e}", file=sys.stderr)
         print(f"   Registry path: {WORKFLOWS_REGISTRY}", file=sys.stderr)
@@ -1848,10 +1655,10 @@ async def main() -> int:
 
     try:
         # Create PID file (fails if another instance running)
-        create_pid_file()
+        create_pid_file(PID_FILE)
 
         # Initialize activity tracking
-        last_activity_time = asyncio.get_event_loop().time()
+        bot_state.last_activity_time = asyncio.get_event_loop().time()
         print(f"⏱️  Activity timer initialized")
 
         # Initialize Telegram bot with AIORateLimiter
@@ -1921,7 +1728,7 @@ async def main() -> int:
         print("   Press Ctrl+C to stop manually")
         print()
 
-        while not shutdown_requested:
+        while not bot_state.shutdown_requested:
             await asyncio.sleep(1)
 
         # Log bot shutdown event
@@ -1964,7 +1771,7 @@ async def main() -> int:
         return 1
     finally:
         # Always cleanup PID file
-        cleanup_pid_file()
+        cleanup_pid_file(PID_FILE)
 
 
 if __name__ == "__main__":
