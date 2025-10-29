@@ -1499,7 +1499,8 @@ async def handle_workflow_selection(
     print(f"✅ Workflow selected: {workflow_id} for workspace: {workspace_id}")
 
     # Track message_id and context for progress updates
-    progress_key = (workspace_id, session_id, workflow_id)
+    # MUST use workspace_hash to match execution files from orchestrator
+    progress_key = (workspace_hash, session_id, workflow_id)
 
     # Extract git context from cached summary
     git_branch = summary_data.get("git_status", {}).get("branch", "unknown")
@@ -1513,7 +1514,7 @@ async def handle_workflow_selection(
 
     tracking_data = {
         "message_id": message_id,
-        "workspace_id": workspace_id,
+        "workspace_id": workspace_hash,  # Use hash to match execution files
         "repository_root": repository_root,
         "working_directory": working_dir,
         "git_branch": git_branch,
@@ -1529,7 +1530,7 @@ async def handle_workflow_selection(
     # Persist tracking data to survive bot restarts (watchexec)
     tracking_dir = Path.home() / ".claude/automation/lychee/state/tracking"
     tracking_dir.mkdir(parents=True, exist_ok=True)
-    tracking_file = tracking_dir / f"{workspace_id}_{session_id}_{workflow_id}_tracking.json"
+    tracking_file = tracking_dir / f"{workspace_hash}_{session_id}_{workflow_id}_tracking.json"  # Use hash in filename
     tracking_file.write_text(json.dumps(tracking_data, indent=2))
     print(f"   📌 Tracking progress updates (message_id={message_id}, branch={git_branch})")
 
