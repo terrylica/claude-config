@@ -1,3 +1,12 @@
+## [4.7.0] - 2025-10-29
+
+### 🚜 Refactor
+
+- *(bot)* Extract file processors and progress tracking (Phase 2)
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v4.6.0
 ## [4.6.0] - 2025-10-29
 
 ### 🚜 Refactor
