@@ -5,6 +5,30 @@ All notable changes to the Telegram Workflows Orchestration System will be docum
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] - 2025-10-28
+
+### Fixed
+
+- **CRITICAL: Workspace ID Mismatch Bug** - Fixed duplicate message issue where workflow progress updates created new messages instead of updating existing ones
+  - Root cause: Callbacks stored registry names (`lychee-autofix`) while tracking used workspace hashes (`81e622b5`)
+  - Resolution: Enforced workspace hash consistency throughout callback creation and tracking (line 918)
+  - Impact: Single-message dynamic updates now work correctly - workflow progress updates the same message
+- **Variable Ordering Bug** - Fixed `UnboundLocalError` where `repository_root`, `working_dir`, `user_prompt`, `last_response` were used before definition
+  - Reorganized variable extraction to define all variables before cache creation
+  - Prevents bot crashes when processing session summaries
+
+### Changed
+
+- **Message Formatting** - Removed document attachments, using inline text messages with truncation for cleaner Telegram display
+- **Git Porcelain Display** - Wrapped git status output in code blocks for proper formatting (prevents markdown parsing issues)
+- **Progress Tracking** - Enhanced lifecycle management and error handling for workflow execution tracking
+- **Session Context Display** - Improved repository root and working directory display in workflow menus
+
+### Added
+
+- **Debug Logging** - Added workspace_hash/workspace_id trace logging for troubleshooting tracking issues
+- **Headless Session Tracking** - Orchestrator now extracts and displays headless session IDs in completion messages
+
 ## [4.0.0] - 2025-10-26
 
 ### Added
