@@ -916,6 +916,7 @@ class SummaryHandler:
             # ALWAYS use workspace hash for tracking consistency
             # (Execution files from orchestrator use hash, so tracking must too)
             workspace_id = workspace_hash
+            print(f"   🔍 DEBUG: workspace_hash={workspace_hash}, workspace_id={workspace_id}")
 
             # Load workspace config for display only (emoji, name)
             try:
@@ -933,6 +934,14 @@ class SummaryHandler:
             lychee_status = summary.get("lychee_status", {})
             git_status = summary.get("git_status", {})
             duration = summary.get("duration_seconds", 0)
+
+            # Extract repository root and working directory (industry standard distinction)
+            repository_root = summary.get("repository_root", str(workspace_path))
+            working_dir = summary.get("working_directory", ".")
+
+            # Extract user prompt and last response BEFORE caching
+            user_prompt = summary.get("last_user_prompt", "")
+            last_response = summary.get("last_response", "Session completed")
 
             # Cache summary data for workflow selection (needed because we delete summary file)
             cache_key = (workspace_id, session_id)
@@ -959,18 +968,13 @@ class SummaryHandler:
                 porcelain_text = "\n".join(display_lines)
                 if len(git_porcelain_lines) > 10:
                     porcelain_text += f"\n... and {len(git_porcelain_lines) - 10} more"
-                # Use plain text instead of code block to avoid markdown parsing issues
-                git_porcelain_display = f"\n{porcelain_text}"
-
-            # Extract repository root and working directory (industry standard distinction)
-            repository_root = summary.get("repository_root", str(workspace_path))
-            working_dir = summary.get("working_directory", ".")
+                # Wrap in code block for proper formatting
+                git_porcelain_display = f"\n```\n{porcelain_text}\n```"
 
             # Replace home directory with ~ for cleaner display
             repo_display = str(repository_root).replace(str(Path.home()), "~")
 
-            # Extract user prompt to remind what was asked
-            user_prompt = summary.get("last_user_prompt", "")
+            # Process user prompt for display (truncate and escape)
             if user_prompt:
                 # Truncate if too long
                 if len(user_prompt) > 100:
@@ -978,8 +982,7 @@ class SummaryHandler:
                 # Escape markdown
                 user_prompt = user_prompt.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
 
-            # Use last Claude CLI response as title (industry standard: show what was just done)
-            last_response = summary.get("last_response", "Session completed")
+            # Process last response for display (truncate and escape)
             # Truncate if too long, keep first line
             if len(last_response) > 100:
                 last_response = last_response[:97] + "..."
@@ -1013,6 +1016,7 @@ class SummaryHandler:
 """
 
             # Build dynamic keyboard
+            print(f"   🔍 DEBUG: Before _build_workflow_keyboard, workspace_id={workspace_id}")
             keyboard = self._build_workflow_keyboard(
                 available_workflows,
                 workspace_id,
