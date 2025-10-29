@@ -912,6 +912,7 @@ class WorkflowOrchestrator:
         exit_code = 0
         stdout_text = ""
         stderr_text = ""
+        headless_session_id = None
 
         try:
             print(f"   🔧 Starting Claude CLI...")
