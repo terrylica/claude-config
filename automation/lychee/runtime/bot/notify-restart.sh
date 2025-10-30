@@ -41,19 +41,27 @@ if [[ -f "$WATCHEXEC_INFO_FILE" ]]; then
         # Build file change summary
         if [[ -n "$WRITTEN_PATH" ]]; then
             CHANGED_FILES="Modified: $(basename "$WRITTEN_PATH")"
+            TRIGGER_PATH="$WRITTEN_PATH"
         elif [[ -n "$CREATED_PATH" ]]; then
             CHANGED_FILES="Created: $(basename "$CREATED_PATH")"
+            TRIGGER_PATH="$CREATED_PATH"
         elif [[ -n "$REMOVED_PATH" ]]; then
             CHANGED_FILES="Deleted: $(basename "$REMOVED_PATH")"
+            TRIGGER_PATH="$REMOVED_PATH"
         elif [[ -n "$COMMON_PATH" ]]; then
             CHANGED_FILES="Changed: $(basename "$COMMON_PATH")"
+            TRIGGER_PATH="$COMMON_PATH"
+        else
+            # No file detected - show generic watchexec restart
+            CHANGED_FILES="Watchexec detected change (file not identified)"
+            TRIGGER_PATH="(file detection failed - check within 30s window)"
         fi
 
         # Escape markdown special characters in file paths
-        COMMON_PATH_ESCAPED=$(echo "$COMMON_PATH" | sed 's/[_*`\[]/\\&/g')
+        TRIGGER_PATH_ESCAPED=$(echo "$TRIGGER_PATH" | sed 's/[_*`\[]/\\&/g')
 
         WATCHEXEC_DETAILS="
-**Trigger**: \`$COMMON_PATH_ESCAPED\`
+**Trigger**: \`$TRIGGER_PATH_ESCAPED\`
 **Action**: $CHANGED_FILES"
     else
         WATCHEXEC_DETAILS="
@@ -108,6 +116,39 @@ MESSAGE="$EMOJI **Telegram Bot $STATUS**
 **Exit Code**: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO
 
 _Monitoring: watchexec_"
+
+# Save message to persistent file for debugging
+MESSAGE_ARCHIVE_DIR="/Users/terryli/.claude/automation/lychee/logs/notification-archive"
+mkdir -p "$MESSAGE_ARCHIVE_DIR"
+MESSAGE_ARCHIVE_FILE="$MESSAGE_ARCHIVE_DIR/$(date '+%Y%m%d-%H%M%S')-$REASON-$PID.txt"
+
+cat > "$MESSAGE_ARCHIVE_FILE" <<ARCHIVE_EOF
+========================================================================
+Notification Archive
+========================================================================
+Timestamp: $TIMESTAMP
+Reason: $REASON
+Exit Code: $EXIT_CODE
+Host: $HOSTNAME_SHORT
+PID: $PID
+
+--- TELEGRAM MESSAGE ---
+$MESSAGE
+
+--- VARIABLES ---
+WATCHEXEC_DETAILS: ${WATCHEXEC_DETAILS:-<empty>}
+CRASH_INFO: ${CRASH_INFO:-<empty>}
+CHANGED_FILES: ${CHANGED_FILES:-<empty>}
+
+--- WATCHEXEC INFO FILE ---
+$(cat "$WATCHEXEC_INFO_FILE" 2>/dev/null || echo "Not available")
+
+--- CRASH CONTEXT FILE ---
+$(cat "$CRASH_CONTEXT_FILE" 2>/dev/null || echo "Not available")
+========================================================================
+ARCHIVE_EOF
+
+echo "📝 Message archived: $MESSAGE_ARCHIVE_FILE"
 
 # Send to Telegram
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then

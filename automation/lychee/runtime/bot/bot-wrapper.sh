@@ -15,15 +15,43 @@ FIRST_RUN_MARKER="/tmp/bot_first_run"
 WATCHEXEC_INFO_FILE="/tmp/watchexec_info_$$.json"
 
 # Detect changed file first (before creating JSON)
+# Find most recently modified Python file (within last minute)
 CHANGED_FILE=""
-RECENT_CHANGE=$(find /Users/terryli/.claude/automation/lychee/runtime/{bot,lib,orchestrator} \
-    -name "*.py" -type f -mtime -10s 2>/dev/null | head -1)
-if [[ -n "$RECENT_CHANGE" ]]; then
-    CHANGED_FILE=$(basename "$RECENT_CHANGE")
-    RECENT_CHANGE_FULL="$RECENT_CHANGE"
-    echo "📝 Detected file change: $CHANGED_FILE"
+RECENT_CHANGE_FULL=""
+
+# Get current time in seconds since epoch
+NOW=$(date +%s)
+
+# Find most recently modified .py file in watched directories
+MOST_RECENT_FILE=""
+MOST_RECENT_TIME=0
+
+for dir in /Users/terryli/.claude/automation/lychee/runtime/{bot,lib,orchestrator}; do
+    if [[ -d "$dir" ]]; then
+        while IFS= read -r file; do
+            if [[ -f "$file" ]]; then
+                # Get file modification time
+                FILE_MTIME=$(stat -f %m "$file" 2>/dev/null || echo "0")
+                AGE=$((NOW - FILE_MTIME))
+
+                # If file was modified in last 60 seconds and is newer than current best
+                if [[ $AGE -lt 60 ]] && [[ $FILE_MTIME -gt $MOST_RECENT_TIME ]]; then
+                    MOST_RECENT_FILE="$file"
+                    MOST_RECENT_TIME=$FILE_MTIME
+                    echo "📝 Found recently modified file: $(basename "$file") (${AGE}s ago)"
+                fi
+            fi
+        done < <(find "$dir" -name "*.py" -type f 2>/dev/null)
+    fi
+done
+
+if [[ -n "$MOST_RECENT_FILE" ]]; then
+    CHANGED_FILE=$(basename "$MOST_RECENT_FILE")
+    RECENT_CHANGE_FULL="$MOST_RECENT_FILE"
+    AGE=$((NOW - MOST_RECENT_TIME))
+    echo "✅ Detected file change: $CHANGED_FILE (${AGE}s ago, path: $RECENT_CHANGE_FULL)"
 else
-    RECENT_CHANGE_FULL=""
+    echo "⚠️  No recently modified files detected (checked last 60s)"
 fi
 
 # Create diagnostic info JSON
