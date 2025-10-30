@@ -5,7 +5,7 @@
 **Created**: 2025-10-23
 **Approach**: Conservative, documentation-first, phased execution
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -29,22 +29,22 @@ This guide provides **step-by-step instructions** for executing the workspace re
 - Automated health checks
 - Comprehensive documentation
 
-______________________________________________________________________
+---
 
 ## Quick Reference
 
-| Phase                             | Risk    | Duration | Deliverable                   |
-| --------------------------------- | ------- | -------- | ----------------------------- |
-| **Phase 1: Documentation**        | Minimal | 8h       | Complete specs & docs         |
-| **Phase 2: Safe Cleanup**         | Low     | 2h       | Remove backups, fix anomalies |
-| **Phase 3: Root Cleanup**         | Medium  | 3h       | Move root scripts             |
-| **Phase 4: System Consolidation** | Medium  | 4h       | Organize system artifacts     |
-| **Phase 5: Archival**             | Low     | 2h       | Archive old artifacts         |
-| **Phase 6: Advanced (Optional)**  | Medium  | 3h       | uv migration, etc.            |
+| Phase | Risk | Duration | Deliverable |
+| --- | --- | --- | --- |
+| **Phase 1: Documentation** | Minimal | 8h | Complete specs & docs |
+| **Phase 2: Safe Cleanup** | Low | 2h | Remove backups, fix anomalies |
+| **Phase 3: Root Cleanup** | Medium | 3h | Move root scripts |
+| **Phase 4: System Consolidation** | Medium | 4h | Organize system artifacts |
+| **Phase 5: Archival** | Low | 2h | Archive old artifacts |
+| **Phase 6: Advanced (Optional)** | Medium | 3h | uv migration, etc. |
 
 **Total Duration**: 22 hours (can be done incrementally)
 
-______________________________________________________________________
+---
 
 ## Phase 1: Documentation & Specification (COMPLETED)
 
@@ -69,7 +69,7 @@ ______________________________________________________________________
 
 Review all documentation before proceeding to Phase 2.
 
-______________________________________________________________________
+---
 
 ## Phase 2: Safe Cleanup
 
@@ -84,13 +84,11 @@ Execute `/specifications/reorg-execution-checklists.yaml` → `pre_migration_che
 ###Operations
 
 1. **Delete backup files** (after git verification):
-
    - `/statusline.sh.backup`
    - `/archive/sage-sync-legacy/sage-sync.original`
    - `/automation/cns/cns_hook_entry.sh.backup`
 
 1. **Fix nested directory**:
-
    - Move `/.claude/settings.local.json` → `/system/settings.local.json`
    - Remove empty `/.claude/` directory
 
@@ -133,7 +131,7 @@ git commit -m "refactor(workspace): phase-2 safe cleanup - remove backups, fix n
 git reset --hard HEAD~1
 ```
 
-______________________________________________________________________
+---
 
 ## Phase 3: Root Cleanup
 
@@ -144,12 +142,10 @@ ______________________________________________________________________
 ### Operations
 
 1. **Create tool subdirectories**:
-
    - `/tools/bin/`
    - `/tools/config/`
 
 1. **Move root scripts**:
-
    - `/install-all-tools` → `/tools/bin/install-all-tools.sh`
    - `/disable-pyright.sh` → `/tools/config/disable-pyright.sh`
    - `/instant-sync-option.sh` → `/archive/legacy/instant-sync-option.sh`
@@ -201,7 +197,7 @@ git commit -m "refactor(workspace): phase-3 root cleanup - move scripts to tools
 
 See `/docs/maintenance/REORGANIZATION_ROLLBACK.md` → Phase 3
 
-______________________________________________________________________
+---
 
 ## Phase 4: System Consolidation ⚠️ HIGH RISK
 
@@ -263,7 +259,7 @@ git commit -m "refactor(workspace): phase-4 system consolidation - organize runt
 
 See `/docs/maintenance/REORGANIZATION_ROLLBACK.md` → Phase 4 (CRITICAL section)
 
-______________________________________________________________________
+---
 
 ## Phase 5: Artifact Archival
 
@@ -307,7 +303,7 @@ git commit -m "chore(workspace): phase-5 archival - compress old artifacts"
 du -sh shell-snapshots/ debug/ file-history/ archive/
 ```
 
-______________________________________________________________________
+---
 
 ## Phase 6: Advanced (Optional)
 
@@ -325,7 +321,7 @@ ______________________________________________________________________
 
 **Skip this phase initially**. Focus on Phases 1-5 first. Revisit Phase 6 after validating reorganization success.
 
-______________________________________________________________________
+---
 
 ## Post-Reorganization
 
@@ -367,7 +363,7 @@ gfm-check docs/
 - Monthly artifact archival
 - Update documentation as needed
 
-______________________________________________________________________
+---
 
 ## Maintenance
 
@@ -386,7 +382,6 @@ ______________________________________________________________________
    ```
 
 1. **Tool Manifest Update**:
-
    - Review `/tools/tool-manifest.yaml`
    - Update for any new/removed tools
 
@@ -400,7 +395,7 @@ ______________________________________________________________________
 
 See `/docs/maintenance/ARTIFACT_RETENTION.md` for automation details.
 
-______________________________________________________________________
+---
 
 ## Troubleshooting
 
@@ -413,7 +408,7 @@ ______________________________________________________________________
 
 See `/docs/maintenance/REORGANIZATION_ROLLBACK.md` for detailed troubleshooting.
 
-______________________________________________________________________
+---
 
 ## Success Criteria
 
@@ -430,7 +425,7 @@ After reorganization, verify:
 - [ ] Space recovery achieved (~150-200 MB)
 - [ ] Monitoring and maintenance automated
 
-______________________________________________________________________
+---
 
 ## Reference
 
@@ -460,7 +455,7 @@ git reset --hard HEAD~1
 /tools/rollback-restore.sh --backup=/path/to/backup.tar.gz
 ```
 
-______________________________________________________________________
+---
 
 **Status**: Ready for phased execution
 **Next Step**: Review all documentation, then execute Phase 2

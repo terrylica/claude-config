@@ -3,7 +3,7 @@
 **Date**: 2025-10-27
 **Purpose**: Identify all Telegram-related code, specifications, and potential cleanup targets
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -17,7 +17,7 @@ ______________________________________________________________________
 1. ✅ **Archive properly organized** - deprecated code clearly separated
 1. ⚠️ **Markdown documentation duplicated** - TELEGRAM_IMPROVEMENTS_PLAN.md superseded by YAML spec
 
-______________________________________________________________________
+---
 
 ## 1. Active Runtime Code (Properly Organized)
 
@@ -46,7 +46,7 @@ ______________________________________________________________________
 
 **Status**: ✅ Well-organized, no cleanup needed
 
-______________________________________________________________________
+---
 
 ## 2. Specifications (SCATTERED - CONSOLIDATION NEEDED)
 
@@ -71,7 +71,7 @@ telegram-bot-improvements.yaml                 (NEW, v1.1.0, P1+P2 SSoT)
 - ⚠️ **MOVE** the two global YAML specs into `automation/lychee/specifications/`
 - Update all references in code/docs
 
-______________________________________________________________________
+---
 
 ## 3. State Files (Active)
 
@@ -88,7 +88,7 @@ events.db                                      (SQLite event store)
 
 **Status**: ✅ Properly located, no cleanup needed
 
-______________________________________________________________________
+---
 
 ## 4. Setup Scripts (Active)
 
@@ -105,7 +105,7 @@ ______________________________________________________________________
 
 **Status**: ✅ Properly organized
 
-______________________________________________________________________
+---
 
 ## 5. Logs (SCATTERED - CONSOLIDATION NEEDED)
 
@@ -124,7 +124,7 @@ telegram-handler.error.log                     (1.9MB, Oct 24)
 - ⚠️ **MOVE** telegram logs from global `/logs/` to `automation/lychee/logs/`
 - Update bot logging configuration
 
-______________________________________________________________________
+---
 
 ## 6. Archive (Properly Organized)
 
@@ -140,7 +140,7 @@ ______________________________________________________________________
 
 **Status**: ✅ Properly archived, no cleanup needed
 
-______________________________________________________________________
+---
 
 ## 7. Documentation (DUPLICATION - CLEANUP NEEDED)
 
@@ -166,7 +166,7 @@ automation/lychee/README.md                        (Main README)
 - ⚠️ **PRUNE** `TELEGRAM_IMPROVEMENTS_PLAN.md` - superseded by SSoT YAML spec
 - Update it to reference `specifications/telegram-bot-improvements.yaml` instead
 
-______________________________________________________________________
+---
 
 ## 8. Testing
 
@@ -180,7 +180,7 @@ inject-results.sh                              (Result injection)
 
 **Status**: ✅ Properly organized
 
-______________________________________________________________________
+---
 
 ## 9. Configuration
 
@@ -194,7 +194,7 @@ ______________________________________________________________________
 
 **Status**: ✅ No telegram-specific config issues
 
-______________________________________________________________________
+---
 
 ## Consolidation Plan
 
@@ -208,7 +208,6 @@ ______________________________________________________________________
    ```
 
 1. **Prune superseded markdown**
-
    - Update `TELEGRAM_IMPROVEMENTS_PLAN.md` to reference SSoT YAML
    - Or delete if fully superseded
 
@@ -223,11 +222,9 @@ ______________________________________________________________________
 ### MEDIUM PRIORITY
 
 4. **Update bot logging paths**
-
    - Change log file paths in bot to use `automation/lychee/logs/`
 
 1. **Remove backup file**
-
    - Delete `multi-workspace-bot.py.backup` after confirming P1+P2 stability
 
 ### LOW PRIORITY
@@ -235,7 +232,7 @@ ______________________________________________________________________
 6. **Verify archive completeness**
    - Confirm no active code accidentally in `archive/`
 
-______________________________________________________________________
+---
 
 ## Outside Lychee Folder
 
@@ -247,7 +244,7 @@ ______________________________________________________________________
 
 **Status**: Only specifications and logs need consolidation
 
-______________________________________________________________________
+---
 
 ## Dangling/Forgotten Components
 
@@ -265,7 +262,7 @@ ______________________________________________________________________
 1. Logs in global `/logs/` instead of lychee
 1. Markdown docs duplicate YAML specs
 
-______________________________________________________________________
+---
 
 ## Implementation Checklist
 
@@ -291,7 +288,7 @@ ______________________________________________________________________
 - [ ] Remove `multi-workspace-bot.py.backup`
 - [ ] Prune outdated markdown docs if fully superseded
 
-______________________________________________________________________
+---
 
 ## Conclusion
 

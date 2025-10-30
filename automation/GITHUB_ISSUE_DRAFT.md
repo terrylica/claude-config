@@ -268,7 +268,7 @@ Error message "Hook output does not start with {" suggests Claude Code expects *
 1. Is this related to the v2.0.17+ hook display regression (#9602)?
 1. Can you reproduce with minimal test hook shown above?
 
-______________________________________________________________________
+---
 
 **Report Date**: 2025-10-27
 **Reproducibility**: 100% (consistent across all sessions)

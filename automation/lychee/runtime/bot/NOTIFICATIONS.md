@@ -40,11 +40,11 @@ Sends notifications to both Telegram and Pushover.
 
 **Notification Types**:
 
-| Reason        | Emoji | Priority | Description                  |
-| ------------- | ----- | -------- | ---------------------------- |
-| `startup`     | 🚀    | normal   | Initial bot start            |
-| `code_change` | 🔄    | normal   | Automatic reload (watchexec) |
-| `crash`       | 💥    | high     | Unexpected termination       |
+| Reason | Emoji | Priority | Description |
+| --- | --- | --- | --- |
+| `startup` | 🚀 | normal | Initial bot start |
+| `code_change` | 🔄 | normal | Automatic reload (watchexec) |
+| `crash` | 💥 | high | Unexpected termination |
 
 **Location**: `/Users/terryli/.claude/automation/lychee/runtime/bot/notify-restart.sh`
 

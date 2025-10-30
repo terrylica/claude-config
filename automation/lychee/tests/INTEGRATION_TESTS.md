@@ -4,7 +4,7 @@
 **Date**: 2025-10-26
 **Version**: v4.0.0
 
-______________________________________________________________________
+---
 
 ## Test Philosophy
 
@@ -12,7 +12,7 @@ ______________________________________________________________________
 **Rationale**: Real Claude CLI execution required, observability via SQLite
 **Validation**: End-to-end correlation tracking, file existence, event logs
 
-______________________________________________________________________
+---
 
 ## Test Scenarios
 
@@ -137,7 +137,7 @@ sqlite3 state/events.db "SELECT COUNT(*) FROM session_events WHERE correlation_i
 # Expected: >= 8
 ```
 
-______________________________________________________________________
+---
 
 ### Scenario 2: Session with Lychee Errors
 
@@ -228,7 +228,7 @@ jq '.lychee_status.error_count' state/summaries/summary_test-scenario2_81e622b5.
 # Expected: 5
 ```
 
-______________________________________________________________________
+---
 
 ### Scenario 3: Multi-Workflow Selection
 
@@ -304,7 +304,7 @@ ORDER BY timestamp;
 # Expected: fix-docstrings before rename-variables
 ```
 
-______________________________________________________________________
+---
 
 ### Scenario 4: SQLite Correlation Tracking End-to-End
 
@@ -351,7 +351,7 @@ ORDER BY timestamp;
 - ✅ **Observability**: 100% - All events logged with correlation_id
 - ✅ **Correctness**: 100% - All events present in trace
 
-______________________________________________________________________
+---
 
 ### Scenario 5: Dual-Mode (v3 Approval Backward Compatibility)
 
@@ -403,7 +403,7 @@ ls state/executions/execution_test-scenario5_*.json 2>&1 | grep "No such file"
 
 - ✅ **Maintainability**: v3 backward compatibility preserved
 
-______________________________________________________________________
+---
 
 ## Test Execution Checklist
 
@@ -418,7 +418,7 @@ ______________________________________________________________________
 - [ ] Document any failures in SSoT
 - [ ] Clean up test data after validation
 
-______________________________________________________________________
+---
 
 ## Manual Test Commands
 
@@ -457,7 +457,7 @@ rm -f state/approvals/approval_test-scenario*.json
 rm -f state/executions/execution_test-scenario*.json
 ```
 
-______________________________________________________________________
+---
 
 ## Known Limitations (Phase 4)
 
@@ -467,18 +467,18 @@ ______________________________________________________________________
 
 **Impact**: None for current workflows (no dependencies defined)
 
-______________________________________________________________________
+---
 
 ## SLO Validation Summary
 
-| SLO             | Target | Validation Method                      | Status                   |
-| --------------- | ------ | -------------------------------------- | ------------------------ |
-| Correctness     | 100%   | All workflows execute, results emitted | ✅ Manual testing        |
-| Observability   | 100%   | Full event trace with correlation_id   | ✅ SQLite queries        |
-| Maintainability | SSoT   | workflows.json is canonical            | ✅ Code review           |
-| Availability    | 99%    | Bot uptime during active hours         | ⏸️ Production monitoring |
+| SLO | Target | Validation Method | Status |
+| --- | --- | --- | --- |
+| Correctness | 100% | All workflows execute, results emitted | ✅ Manual testing |
+| Observability | 100% | Full event trace with correlation_id | ✅ SQLite queries |
+| Maintainability | SSoT | workflows.json is canonical | ✅ Code review |
+| Availability | 99% | Bot uptime during active hours | ⏸️ Production monitoring |
 
-______________________________________________________________________
+---
 
 ## Test Results Documentation
 
@@ -500,7 +500,7 @@ x-implementation-findings:
     validation: "All scenarios passed, SLOs met"
 ```
 
-______________________________________________________________________
+---
 
 ## Future Enhancements (Post-v4.0.0)
 
@@ -512,7 +512,7 @@ ______________________________________________________________________
 
 **Priority**: LOW (manual testing sufficient for v4.0.0)
 
-______________________________________________________________________
+---
 
 ## References
 

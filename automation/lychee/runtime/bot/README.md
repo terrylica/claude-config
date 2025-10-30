@@ -65,12 +65,12 @@ cd /Users/terryli/.claude/automation/lychee/runtime/bot
 
 ### Comparison with Alternatives
 
-| Tool          | Language | .gitignore | Debouncing | Cross-Platform | Speed        |
-| ------------- | -------- | ---------- | ---------- | -------------- | ------------ |
-| **watchexec** | Rust     | ✅ Auto    | ✅ 50ms    | ✅ Yes         | ⚡ Very Fast |
-| watchfiles    | Rust+Py  | ❌ Manual  | ✅ Yes     | ✅ Yes         | ⚡ Fast      |
-| nodemon       | Node.js  | ❌ Manual  | ✅ Yes     | ✅ Yes         | 🐌 Slower    |
-| entr          | C        | ❌ None    | ❌ No      | ⚠️ Unix only   | ⚡ Fast      |
+| Tool | Language | .gitignore | Debouncing | Cross-Platform | Speed |
+| --- | --- | --- | --- | --- | --- |
+| **watchexec** | Rust | ✅ Auto | ✅ 50ms | ✅ Yes | ⚡ Very Fast |
+| watchfiles | Rust+Py | ❌ Manual | ✅ Yes | ✅ Yes | ⚡ Fast |
+| nodemon | Node.js | ❌ Manual | ✅ Yes | ✅ Yes | 🐌 Slower |
+| entr | C | ❌ None | ❌ No | ⚠️ Unix only | ⚡ Fast |
 
 ### Why watchexec Won (2025 State-of-the-Art)
 
@@ -314,10 +314,10 @@ Current: v4.1.0 (watchexec auto-reload + launchd production setup)
 
 ### Development vs Production
 
-| Environment     | Auto-Reload | Tool      | When to Use                        |
-| --------------- | ----------- | --------- | ---------------------------------- |
-| **Development** | ✅ Enabled  | watchexec | Your local machine, active coding  |
-| **Production**  | ❌ Disabled | launchd   | Always-on service, stable releases |
+| Environment | Auto-Reload | Tool | When to Use |
+| --- | --- | --- | --- |
+| **Development** | ✅ Enabled | watchexec | Your local machine, active coding |
+| **Production** | ❌ Disabled | launchd | Always-on service, stable releases |
 
 ### Why Auto-Reload in Development?
 

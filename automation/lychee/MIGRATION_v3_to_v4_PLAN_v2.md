@@ -10,7 +10,7 @@
 **Completion Report**: [`MIGRATION_COMPLETE.md`](/Users/terryli/.claude/automation/lychee/MIGRATION_COMPLETE.md)
 **Integration Tests**: [`tests/INTEGRATION_TESTS.md`](/Users/terryli/.claude/automation/lychee/tests/INTEGRATION_TESTS.md)
 
-______________________________________________________________________
+---
 
 ## Implementation Summary
 
@@ -37,7 +37,7 @@ ______________________________________________________________________
 
 **Status**: Ready for v4.0.0 release tag
 
-______________________________________________________________________
+---
 
 ## Changes from v1
 
@@ -53,7 +53,7 @@ ______________________________________________________________________
 
 **Timeline Adjusted**: 10.5h → 30h total (25.5h base + 4.5h buffer, 3-day execution recommended)
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -71,7 +71,7 @@ ______________________________________________________________________
 
 **Risk Level**: MEDIUM (with proper execution of this plan)
 
-______________________________________________________________________
+---
 
 ## Pre-Migration Requirements
 
@@ -162,7 +162,7 @@ else
 fi
 ```
 
-______________________________________________________________________
+---
 
 ## Migration Phases (Revised)
 
@@ -182,7 +182,7 @@ ______________________________________________________________________
 
 **Next**: Create git tag before Phase 1
 
-______________________________________________________________________
+---
 
 ### Phase 1: Create Workflow Registry ✅ COMPLETE
 
@@ -204,7 +204,6 @@ ______________________________________________________________________
    ```
 
 1. **Populate Registry** with 5 workflows:
-
    - `lychee-autofix` (migrate from v3 hardcoded logic)
    - `prune-legacy` (remove unused code)
    - `fix-docstrings` (standardize docs)
@@ -341,7 +340,7 @@ git checkout state/workflows.json  # If committed
 
 **Commit Point**: `git commit -m "feat(v4): add workflow registry with 4 initial workflows"`
 
-______________________________________________________________________
+---
 
 ### Phase 2: Refactor Hook (Dual-Mode Session Summaries) ✅ COMPLETE
 
@@ -539,7 +538,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
 
 **Commit Point**: `git commit -m "feat(v4): hook emits session summaries in dual mode"`
 
-______________________________________________________________________
+---
 
 ### Phase 3: Refactor Bot (Workflow Menu UI) ✅ COMPLETE
 
@@ -810,7 +809,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
 
 **Commit Point**: `git commit -m "feat(v4): bot loads registry and displays workflow menu"`
 
-______________________________________________________________________
+---
 
 ### Phase 4: Refactor Orchestrator (Workflow Execution) ✅ COMPLETE
 
@@ -1062,7 +1061,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type LIKE 'execu
 
 **Commit Point**: `git commit -m "feat(v4): orchestrator executes workflows from registry"`
 
-______________________________________________________________________
+---
 
 ### Phase 5: Integration Testing ⏸️ DEFERRED
 
@@ -1177,7 +1176,7 @@ ORDER BY timestamp;
 
 **Resolution**: Fix issues before proceeding to Phase 6
 
-______________________________________________________________________
+---
 
 ### Phase 6: Service Management & Directory Rename ⏸️ DEFERRED
 
@@ -1347,7 +1346,7 @@ launchctl start com.user.lychee.telegram-handler
 
 **Commit Point**: Rename committed, services running with new paths
 
-______________________________________________________________________
+---
 
 ### Phase 7: Remove Dual Mode & Cleanup ⏸️ DEFERRED
 
@@ -1488,7 +1487,7 @@ launchctl restart com.user.lychee.telegram-handler
 
 **Commit Point**: v4.0.0 finalized, no backward compatibility
 
-______________________________________________________________________
+---
 
 ### Phase 8: Documentation & Release ✅ PARTIAL
 
@@ -1515,7 +1514,6 @@ ______________________________________________________________________
 #### Tasks
 
 1. **Update README.md**
-
    - Change version: 3.0.1 → 4.0.0
    - Update directory structure diagram
    - Update state files table (summaries, selections, executions)
@@ -1523,21 +1521,18 @@ ______________________________________________________________________
    - Update process model: "Workflow-driven orchestration"
 
 1. **Update COMPLETE_WORKFLOW.md**
-
    - Add session summary phase
    - Document workflow menu UI
    - Show multi-workflow execution
    - Update event types
 
 1. **Update CONTRIBUTING.md**
-
    - Add workflow plugin guide
    - Document registry schema
    - Update file paths
    - Add template validation steps
 
 1. **Create New Documentation**
-
    - `WORKFLOW_PLUGIN_GUIDE.md`: How to add new workflows
    - `MIGRATION_v3_to_v4.md`: Complete migration guide (this document)
    - `docs/WORKFLOW_REGISTRY.md`: Registry schema reference
@@ -1599,7 +1594,7 @@ ______________________________________________________________________
 
 **Commit Point**: `git commit -m "docs: update all documentation to v4.0.0"`
 
-______________________________________________________________________
+---
 
 ## Post-Migration Verification
 
@@ -1660,7 +1655,7 @@ jq '.workflows | length' state/workflows.json  # Should match workflow count
 grep -r "lychee-autofix" runtime/ | wc -l  # Should be 0 (only in registry)
 ```
 
-______________________________________________________________________
+---
 
 ## Rollback Procedures
 
@@ -1708,18 +1703,18 @@ launchctl start com.user.lychee.telegram-handler
 
 ### Phase-Specific Rollback
 
-| Phase | Rollback Command                                              |
-| ----- | ------------------------------------------------------------- |
-| 1     | `rm state/workflows.json`                                     |
-| 2     | `git checkout runtime/hook/; rm -rf state/summaries`          |
-| 3     | `git checkout runtime/bot/; rm -rf state/selections`          |
-| 4     | `git checkout runtime/orchestrator/; rm -rf state/executions` |
-| 5     | Fix failing tests, don't rollback                             |
-| 6     | `git mv telegram-workflows lychee; restart services`          |
-| 7     | `git revert HEAD`                                             |
-| 8     | `git revert HEAD` (docs only)                                 |
+| Phase | Rollback Command |
+| --- | --- |
+| 1 | `rm state/workflows.json` |
+| 2 | `git checkout runtime/hook/; rm -rf state/summaries` |
+| 3 | `git checkout runtime/bot/; rm -rf state/selections` |
+| 4 | `git checkout runtime/orchestrator/; rm -rf state/executions` |
+| 5 | Fix failing tests, don't rollback |
+| 6 | `git mv telegram-workflows lychee; restart services` |
+| 7 | `git revert HEAD` |
+| 8 | `git revert HEAD` (docs only) |
 
-______________________________________________________________________
+---
 
 ## Timeline & Dependencies
 
@@ -1745,18 +1740,18 @@ Phase 1 (registry) ← 1-1.5h
 
 ### Timeline
 
-| Phase                      | Duration | Cumulative |
-| -------------------------- | -------- | ---------- |
-| Phase 0: Preparation       | 2h       | 2h ✅      |
-| Phase 1: Registry          | 1.5h     | 3.5h       |
-| Phase 2: Hook              | 3.5h     | 7h         |
-| Phase 3: Bot               | 4h       | 11h        |
-| Phase 4: Orchestrator      | 5h       | 16h        |
-| Phase 5: Testing           | 3h       | 19h        |
-| Phase 6: Rename + Services | 1.5h     | 20.5h      |
-| Phase 7: Cleanup           | 2h       | 22.5h      |
-| Phase 8: Documentation     | 3h       | 25.5h      |
-| **Buffer (issues)**        | 4.5h     | **30h**    |
+| Phase | Duration | Cumulative |
+| --- | --- | --- |
+| Phase 0: Preparation | 2h | 2h ✅ |
+| Phase 1: Registry | 1.5h | 3.5h |
+| Phase 2: Hook | 3.5h | 7h |
+| Phase 3: Bot | 4h | 11h |
+| Phase 4: Orchestrator | 5h | 16h |
+| Phase 5: Testing | 3h | 19h |
+| Phase 6: Rename + Services | 1.5h | 20.5h |
+| Phase 7: Cleanup | 2h | 22.5h |
+| Phase 8: Documentation | 3h | 25.5h |
+| **Buffer (issues)** | 4.5h | **30h** |
 
 **Realistic Estimate**: 2-3 days (allowing for breaks, debugging, careful testing)
 
@@ -1766,22 +1761,22 @@ Phase 1 (registry) ← 1-1.5h
 - **Day 2**: Phases 5-6 (testing + rename)
 - **Day 3**: Phases 7-8 (cleanup + docs)
 
-______________________________________________________________________
+---
 
 ## Risk Assessment
 
 ### Risk Matrix
 
-| Phase | Risk   | Impact | Mitigation                        |
-| ----- | ------ | ------ | --------------------------------- |
-| 1     | LOW    | LOW    | JSON validation before commit     |
-| 2     | MEDIUM | MEDIUM | Dual mode, test after completion  |
-| 3     | HIGH   | HIGH   | Dual mode, test extensively       |
-| 4     | HIGH   | HIGH   | Dual mode, template validation    |
-| 5     | MEDIUM | HIGH   | Comprehensive test scenarios      |
-| 6     | MEDIUM | HIGH   | Service management, git mv        |
-| 7     | LOW    | MEDIUM | Keep archives, test after removal |
-| 8     | LOW    | LOW    | Documentation only                |
+| Phase | Risk | Impact | Mitigation |
+| --- | --- | --- | --- |
+| 1 | LOW | LOW | JSON validation before commit |
+| 2 | MEDIUM | MEDIUM | Dual mode, test after completion |
+| 3 | HIGH | HIGH | Dual mode, test extensively |
+| 4 | HIGH | HIGH | Dual mode, template validation |
+| 5 | MEDIUM | HIGH | Comprehensive test scenarios |
+| 6 | MEDIUM | HIGH | Service management, git mv |
+| 7 | LOW | MEDIUM | Keep archives, test after removal |
+| 8 | LOW | LOW | Documentation only |
 
 ### Critical Success Factors
 
@@ -1791,7 +1786,7 @@ ______________________________________________________________________
 1. ✅ Service management prevents downtime
 1. ✅ Git tags enable quick rollback
 
-______________________________________________________________________
+---
 
 ## Next Steps (Post-Implementation)
 
@@ -1813,6 +1808,6 @@ ______________________________________________________________________
 
 **Status**: ✅ **MIGRATION COMPLETE** - Phases 0-4 delivered, v4.0.0 ready for release
 
-______________________________________________________________________
+---
 
 **Migration Plan v2.1** - Implementation complete, reflects actual results

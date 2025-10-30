@@ -167,7 +167,6 @@ gpu-sync-from
    ```
 
 1. **Configure Shared GitHub Repository**:
-
    - Both instances commit to different branches
    - Regular merge/rebase operations for synchronization
 
@@ -241,7 +240,7 @@ gpu-tmux         # Connect with persistent tmux session
 - **Git LFS**: For large model files or datasets
 - **Compression**: Enable SSH compression for slow connections
 
-______________________________________________________________________
+---
 
 **Status**: Implementation ready - waiting for GPU workstation to come online\
 **Next Action**: Test connection and implement Strategy 2 for immediate TiRex validation\

@@ -8,7 +8,7 @@
 - Current implementation: `/Users/terryli/.claude/automation/lychee/runtime/lib/bot_utils.py:52-117`
 - Race condition fix: v5.1.1 stale PID detection
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -22,7 +22,7 @@ ______________________________________________________________________
 1. ❌ **python-daemon + PIDLockFile** - Deprecated, known bugs with stale locks
 1. ❌ **pid package (trbs/pid)** - Abandoned since July 2020, no Python 3.9+ support
 
-______________________________________________________________________
+---
 
 ## Problem Statement
 
@@ -35,7 +35,7 @@ Our custom PID file management in `bot_utils.py` handles:
 
 **Question**: Is there a well-maintained OSS tool that handles this idiomatically?
 
-______________________________________________________________________
+---
 
 ## Research Findings
 
@@ -74,7 +74,7 @@ except psutil.NoSuchProcess:
 - Handles zombie processes correctly
 - Provides process state (running, sleeping, zombie, etc.)
 - No false positives from PID reuse
-- Can verify it's actually *our* process by checking cmdline
+- Can verify it's actually _our_ process by checking cmdline
 
 **Pattern for PID file management with psutil**:
 
@@ -146,7 +146,7 @@ def create_pid_file_with_psutil(pid_file_path: Path) -> None:
 1. **No manual cleanup needed**: Lock is tied to file descriptor, not file existence
 1. **Cross-platform**: Works on macOS and Linux
 
-______________________________________________________________________
+---
 
 ### 2. **supervisord** (Overkill but worth knowing)
 
@@ -187,7 +187,7 @@ stderr_logfile=/Users/terryli/.claude/automation/lychee/logs/bot-stderr.log
 - Need web UI for monitoring
 - Want automatic restarts without custom code
 
-______________________________________________________________________
+---
 
 ### 3. **systemd** (Production Linux only)
 
@@ -232,7 +232,7 @@ WantedBy=multi-user.target
 - Need system integration (logging, resource limits, security)
 - Want automatic start on boot
 
-______________________________________________________________________
+---
 
 ### 4. **python-daemon + PIDLockFile** (Deprecated, avoid)
 
@@ -269,7 +269,7 @@ with context:
     main()
 ```
 
-______________________________________________________________________
+---
 
 ### 5. **pid package (trbs/pid)** (Abandoned, avoid)
 
@@ -290,7 +290,7 @@ ______________________________________________________________________
 - Had decorator/context manager API
 - Now superseded by psutil + custom fcntl
 
-______________________________________________________________________
+---
 
 ## Recommendations
 
@@ -336,7 +336,7 @@ if psutil.pid_exists(stored_pid):
 # ///
 ```
 
-______________________________________________________________________
+---
 
 ### For Production Deployments
 
@@ -349,7 +349,7 @@ ______________________________________________________________________
 - Better resource management
 - Standard practice for production services
 
-______________________________________________________________________
+---
 
 ### If We Need Full Process Supervision
 
@@ -362,7 +362,7 @@ ______________________________________________________________________
 - Want centralized logging
 - Automatic restart policies
 
-______________________________________________________________________
+---
 
 ## Implementation Plan
 
@@ -382,7 +382,7 @@ ______________________________________________________________________
 
 **Effort**: 15 minutes
 
-______________________________________________________________________
+---
 
 ### Phase 2: Add fcntl locking (Medium effort, high reliability)
 
@@ -401,7 +401,7 @@ ______________________________________________________________________
 
 **Effort**: 30-60 minutes
 
-______________________________________________________________________
+---
 
 ### Phase 3: Consider supervisord for production (Future)
 
@@ -415,20 +415,20 @@ ______________________________________________________________________
 
 **Effort**: Research + testing (2-4 hours)
 
-______________________________________________________________________
+---
 
 ## Comparison Table
 
-| Tool              | Maintained  | Python Ver | PID Files   | Auto-Cleanup | Cross-Platform     | Use Case            |
-| ----------------- | ----------- | ---------- | ----------- | ------------ | ------------------ | ------------------- |
-| **psutil**        | ✅ 2024     | 3.6-3.12+  | Manual      | Via fcntl    | ✅ macOS/Linux/Win | Process monitoring  |
-| **supervisord**   | ✅ v4.3.0   | 3.4+       | ❌ No need  | ✅ Built-in  | ✅ Unix-like       | Process supervision |
-| **systemd**       | ✅ OS-level | N/A        | Optional    | ✅ Built-in  | ⚠️ Linux only      | Production services |
-| **python-daemon** | ⚠️ Bugs     | 3.6+       | Yes (buggy) | ⚠️ Broken    | ✅ Unix-like       | Legacy daemons      |
-| **pid package**   | ❌ 2020     | 3.8 max    | Yes         | Via fcntl    | ✅ Unix-like       | Abandoned           |
-| **Our custom**    | ✅ Now      | 3.12+      | Yes         | Manual       | ✅ macOS/Linux     | Current approach    |
+| Tool | Maintained | Python Ver | PID Files | Auto-Cleanup | Cross-Platform | Use Case |
+| --- | --- | --- | --- | --- | --- | --- |
+| **psutil** | ✅ 2024 | 3.6-3.12+ | Manual | Via fcntl | ✅ macOS/Linux/Win | Process monitoring |
+| **supervisord** | ✅ v4.3.0 | 3.4+ | ❌ No need | ✅ Built-in | ✅ Unix-like | Process supervision |
+| **systemd** | ✅ OS-level | N/A | Optional | ✅ Built-in | ⚠️ Linux only | Production services |
+| **python-daemon** | ⚠️ Bugs | 3.6+ | Yes (buggy) | ⚠️ Broken | ✅ Unix-like | Legacy daemons |
+| **pid package** | ❌ 2020 | 3.8 max | Yes | Via fcntl | ✅ Unix-like | Abandoned |
+| **Our custom** | ✅ Now | 3.12+ | Yes | Manual | ✅ macOS/Linux | Current approach |
 
-______________________________________________________________________
+---
 
 ## Code Examples
 
@@ -480,7 +480,7 @@ def create_pid_file(pid_file_path: Path) -> None:
 
 **Benefit**: Prevents PID reuse edge case where new unrelated process has same PID
 
-______________________________________________________________________
+---
 
 ### Example 2: Full fcntl Integration (Robust Solution)
 
@@ -575,7 +575,7 @@ def cleanup_pid_file(pid_file_path: Path) -> None:
 
 **Trade-off**: Must keep fd open (stored in global variable)
 
-______________________________________________________________________
+---
 
 ## Lessons Learned
 
@@ -589,15 +589,12 @@ ______________________________________________________________________
 ### What We Could Improve
 
 1. ⚠️ **PID reuse edge case** - A new unrelated process could have same PID
-
    - **Solution**: Use `psutil` to verify cmdline
 
 1. ⚠️ **Manual lock management** - O_EXCL doesn't auto-cleanup on crash
-
    - **Solution**: Use `fcntl` for kernel-level locking
 
 1. ⚠️ **Zombie process detection** - `os.kill(pid, 0)` returns True for zombies
-
    - **Solution**: Use `psutil.Process(pid).status()` to check state
 
 ### Industry Best Practices
@@ -607,7 +604,7 @@ ______________________________________________________________________
 1. **Prefer established tools** - psutil is ubiquitous for a reason
 1. **Avoid reinventing the wheel** - PID file management is a solved problem
 
-______________________________________________________________________
+---
 
 ## References
 
@@ -616,7 +613,7 @@ ______________________________________________________________________
 - **PEP 3143** (python-daemon): https://peps.python.org/pep-3143/
 - **fcntl module**: https://docs.python.org/3/library/fcntl.html
 
-______________________________________________________________________
+---
 
 ## Next Steps
 
@@ -627,6 +624,6 @@ ______________________________________________________________________
 1. 🔮 **Evaluate fcntl migration** (optional, 1 hour)
 1. 🔮 **Consider supervisord for production** (future)
 
-______________________________________________________________________
+---
 
 **Conclusion**: Our custom implementation is 95% correct. Adding psutil (15 min effort) makes it 100% robust. The fcntl approach is an optional enhancement for even more reliability, but not strictly necessary for our use case.

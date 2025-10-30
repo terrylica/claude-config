@@ -12,6 +12,6 @@
 
 - Version 2.8.0 → 2.9.0
 
-______________________________________________________________________
+---
 
 **Full Changelog**: https://github.com/Eon-Labs/rangebar/compare/v2.8.0...v2.9.0

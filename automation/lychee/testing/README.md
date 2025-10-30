@@ -4,7 +4,7 @@
 
 **⚠️ DEVELOPMENT ONLY** - Do not run in production environments
 
-______________________________________________________________________
+---
 
 ## Scripts
 
@@ -27,7 +27,7 @@ cd /Users/terryli/.claude/automation/lychee/testing
 
 **Expected outcome**: Telegram notification appears with broken link count
 
-______________________________________________________________________
+---
 
 ### test-notification-emit.py
 
@@ -48,7 +48,7 @@ uv run test-notification-emit.py
 
 **Expected outcome**: Telegram notification with test workspace data
 
-______________________________________________________________________
+---
 
 ### test-headless-invocation.py
 
@@ -69,7 +69,7 @@ uv run test-headless-invocation.py
 
 **Expected outcome**: Console output showing bot logic execution
 
-______________________________________________________________________
+---
 
 ## Testing Workflow
 
@@ -138,7 +138,7 @@ EOF
 # Expected: Orchestrator spawns, invokes Claude CLI
 ```
 
-______________________________________________________________________
+---
 
 ## State Cleanup
 
@@ -158,7 +158,7 @@ rm ../state/completions/completion_test_*.json
 find ../state/callbacks -name "*.json" -mtime +30 -delete
 ```
 
-______________________________________________________________________
+---
 
 ## Debugging
 
@@ -201,7 +201,7 @@ sqlite3 ../state/events.db ".schema session_events"
 sqlite3 ../state/events.db "SELECT * FROM session_events ORDER BY timestamp DESC LIMIT 10;"
 ```
 
-______________________________________________________________________
+---
 
 ## SLOs for Testing
 
@@ -215,7 +215,7 @@ ______________________________________________________________________
 - **Target**: 100% - Test events logged to event store
 - **Validation**: Query events.db after running tests
 
-______________________________________________________________________
+---
 
 ## Adding New Tests
 
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     main()
 ```
 
-______________________________________________________________________
+---
 
 ## References
 

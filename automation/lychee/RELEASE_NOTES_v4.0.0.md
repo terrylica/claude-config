@@ -4,7 +4,7 @@
 **Type**: Major Release
 **Migration**: v3.0.1 → v4.0.0
 
-______________________________________________________________________
+---
 
 ## Overview
 
@@ -12,7 +12,7 @@ Telegram Workflows Orchestration v4.0.0 transforms the single-purpose lychee lin
 
 **Key Achievement**: Workflow registry system with dynamic menu, Jinja2 template rendering, and comprehensive observability.
 
-______________________________________________________________________
+---
 
 ## What's New
 
@@ -74,7 +74,7 @@ Workflows automatically shown/hidden based on context:
 - `state/selections/` - WorkflowSelection files from bot
 - `state/executions/` - WorkflowExecution results from orchestrator
 
-______________________________________________________________________
+---
 
 ## Backward Compatibility
 
@@ -86,7 +86,7 @@ ______________________________________________________________________
 - Legacy event types still logged
 - Incremental migration possible
 
-______________________________________________________________________
+---
 
 ## Implementation Stats
 
@@ -103,7 +103,7 @@ ______________________________________________________________________
 - `1d11055` - Phase 3: Bot refactor (workflow menu)
 - `054f337` - Phase 4: Orchestrator refactor (Jinja2)
 
-______________________________________________________________________
+---
 
 ## Known Limitations
 
@@ -115,18 +115,18 @@ ______________________________________________________________________
 
 **Impact**: None for current workflows (no dependencies defined)
 
-______________________________________________________________________
+---
 
 ## SLOs Achieved
 
-| SLO                 | Target | v4.0.0 Result                                    |
-| ------------------- | ------ | ------------------------------------------------ |
-| **Correctness**     | 100%   | ✅ PASS - All workflows execute, results emitted |
-| **Observability**   | 100%   | ✅ PASS - Full event trace with correlation_id   |
-| **Maintainability** | SSoT   | ✅ PASS - workflows.json canonical source        |
-| **Availability**    | 99%    | ⏸️ TBD - Production monitoring post-release      |
+| SLO | Target | v4.0.0 Result |
+| --- | --- | --- |
+| **Correctness** | 100% | ✅ PASS - All workflows execute, results emitted |
+| **Observability** | 100% | ✅ PASS - Full event trace with correlation_id |
+| **Maintainability** | SSoT | ✅ PASS - workflows.json canonical source |
+| **Availability** | 99% | ⏸️ TBD - Production monitoring post-release |
 
-______________________________________________________________________
+---
 
 ## Migration Guide
 
@@ -149,7 +149,7 @@ ______________________________________________________________________
 
 If issues occur, full rollback to v3.0.1 documented in `MIGRATION_COMPLETE.md` /Users/terryli/.claude/automation/lychee/MIGRATION_COMPLETE.md
 
-______________________________________________________________________
+---
 
 ## Documentation
 
@@ -159,7 +159,7 @@ ______________________________________________________________________
 - **Changelog**: [`CHANGELOG.md`](/Users/terryli/.claude/automation/lychee/CHANGELOG.md)
 - **SSoT Specification**: [`specifications/telegram-workflows-orchestration-v4.yaml`](/Users/terryli/.claude/specifications/telegram-workflows-orchestration-v4.yaml)
 
-______________________________________________________________________
+---
 
 ## Future Roadmap
 
@@ -184,7 +184,7 @@ ______________________________________________________________________
 - Multi-user support
 - Workflow marketplace
 
-______________________________________________________________________
+---
 
 ## Credits
 
@@ -200,7 +200,7 @@ ______________________________________________________________________
 1. Comprehensive SQLite event logging
 1. Backward compatibility maintained throughout
 
-______________________________________________________________________
+---
 
 ## Support
 
@@ -208,7 +208,7 @@ ______________________________________________________________________
 - **Documentation**: See `automation/lychee/` directory
 - **Integration Tests**: Manual test commands in `tests/INTEGRATION_TESTS.md`
 
-______________________________________________________________________
+---
 
 **Version**: 4.0.0
 **Status**: ✅ READY FOR PRODUCTION

@@ -6,7 +6,7 @@
 **Version**: 1.0.0
 **Related Tags**: v0.2.0-stop-hook-error-fixed, v0.2.1-cns-output-fix
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -16,7 +16,7 @@ This document surveys industry-standard tools and frameworks for automated shell
 1. **Automated Testing** - BATS-core + Custom output validation
 1. **Git Hook Automation** - pre-commit framework (enforce checks before commits)
 
-______________________________________________________________________
+---
 
 ## 1. Static Analysis: ShellCheck
 
@@ -67,7 +67,7 @@ ShellCheck **will NOT** detect:
 
 **Recommendation**: Use ShellCheck for general shell script quality, but supplement with custom output testing.
 
-______________________________________________________________________
+---
 
 ## 2. Automated Testing Frameworks
 
@@ -151,7 +151,7 @@ testHookOutputIsEmpty() {
 
 shUnit2 is more familiar to developers with xUnit experience, but BATS-core has better TAP integration for CI/CD. Choose based on team preference.
 
-______________________________________________________________________
+---
 
 ## 3. Git Hook Automation: pre-commit Framework
 
@@ -173,13 +173,13 @@ ______________________________________________________________________
 
 ### Why pre-commit > Husky for Our Use Case
 
-| Feature                | pre-commit              | Husky                 |
-| ---------------------- | ----------------------- | --------------------- |
-| **Platform**           | Python (cross-platform) | Node.js/npm required  |
-| **Multi-language**     | Native support          | Limited               |
-| **Shell script focus** | Excellent               | JavaScript-focused    |
-| **Maturity**           | Mature, stable          | Younger ecosystem     |
-| **Our stack**          | Python (uv), Shell      | No Node.js dependency |
+| Feature | pre-commit | Husky |
+| --- | --- | --- |
+| **Platform** | Python (cross-platform) | Node.js/npm required |
+| **Multi-language** | Native support | Limited |
+| **Shell script focus** | Excellent | JavaScript-focused |
+| **Maturity** | Mature, stable | Younger ecosystem |
+| **Our stack** | Python (uv), Shell | No Node.js dependency |
 
 **Decision**: Use **pre-commit** since we already use Python (uv) and have no Node.js requirement.
 
@@ -281,7 +281,7 @@ pre-commit run --all-files
 pre-commit run
 ```
 
-______________________________________________________________________
+---
 
 ## 4. Continuous Integration (CI/CD)
 
@@ -316,14 +316,13 @@ jobs:
           automation/testing/validate-hook-output.sh
 ```
 
-______________________________________________________________________
+---
 
 ## 5. Recommendations Summary
 
 ### Tier 1: Immediate Implementation (High Priority)
 
 1. **Create custom hook output validator** (like `/tmp/test-all-hooks.sh` we already created)
-
    - Location: `/Users/terryli/.claude/automation/testing/validate-hook-output.sh`
    - Purpose: Detect output leaks before they cause errors
    - Effort: 30 minutes
@@ -340,14 +339,12 @@ ______________________________________________________________________
 ### Tier 2: Short-term Implementation (Medium Priority)
 
 3. **Set up pre-commit framework**
-
    - Install via `uv tool install pre-commit`
    - Create `.pre-commit-config.yaml` (see example above)
    - Run `pre-commit install`
    - Effort: 1 hour
 
 1. **Add BATS test suite**
-
    - Install: `brew install bats-core`
    - Create `automation/testing/hooks.bats`
    - Run: `bats automation/testing/hooks.bats`
@@ -356,18 +353,16 @@ ______________________________________________________________________
 ### Tier 3: Long-term Implementation (Lower Priority)
 
 5. **GitHub Actions CI/CD** (if using GitHub)
-
    - Create `.github/workflows/hook-validation.yml`
    - Automate on every push/PR
    - Effort: 1 hour
 
 1. **Editor Integration**
-
    - Install ShellCheck plugin for Helix/VS Code/etc.
    - Get real-time feedback while editing
    - Effort: 15 minutes
 
-______________________________________________________________________
+---
 
 ## 6. Testing Strategy for Output Redirection Issues
 
@@ -396,7 +391,7 @@ This is exactly what our `/tmp/test-all-hooks.sh` does, and should be:
 1. Integrated with pre-commit framework
 1. Run before every commit to hook files
 
-______________________________________________________________________
+---
 
 ## 7. Alternative Tools Considered
 
@@ -418,7 +413,7 @@ ______________________________________________________________________
 **Purpose**: Prevent secrets in commits
 **Verdict**: Not relevant for output redirection, but **recommended** for general security.
 
-______________________________________________________________________
+---
 
 ## 8. Implementation Roadmap
 
@@ -449,7 +444,7 @@ ______________________________________________________________________
 - [ ] Test on CI environment
 - [ ] Document CI setup
 
-______________________________________________________________________
+---
 
 ## 9. Maintenance
 
@@ -469,21 +464,21 @@ To prevent the "Stop hook error" from recurring:
 1. **ShellCheck** catches general shell issues
 1. **Documentation** (this file) preserves institutional knowledge
 
-______________________________________________________________________
+---
 
 ## 10. Cost-Benefit Analysis
 
-| Solution                | Setup Time | Ongoing Maintenance | Benefit                    | ROI        |
-| ----------------------- | ---------- | ------------------- | -------------------------- | ---------- |
-| Custom output validator | 30 min     | Near-zero           | High - Catches exact issue | ⭐⭐⭐⭐⭐ |
-| ShellCheck              | 5 min      | Zero                | Medium - General quality   | ⭐⭐⭐⭐⭐ |
-| pre-commit framework    | 1 hour     | 5 min/month         | High - Automation          | ⭐⭐⭐⭐   |
-| BATS test suite         | 2 hours    | Low                 | Medium - Regression tests  | ⭐⭐⭐     |
-| GitHub Actions CI/CD    | 1 hour     | Near-zero           | Medium - Auto-validation   | ⭐⭐⭐     |
+| Solution | Setup Time | Ongoing Maintenance | Benefit | ROI |
+| --- | --- | --- | --- | --- |
+| Custom output validator | 30 min | Near-zero | High - Catches exact issue | ⭐⭐⭐⭐⭐ |
+| ShellCheck | 5 min | Zero | Medium - General quality | ⭐⭐⭐⭐⭐ |
+| pre-commit framework | 1 hour | 5 min/month | High - Automation | ⭐⭐⭐⭐ |
+| BATS test suite | 2 hours | Low | Medium - Regression tests | ⭐⭐⭐ |
+| GitHub Actions CI/CD | 1 hour | Near-zero | Medium - Auto-validation | ⭐⭐⭐ |
 
 **Recommendation**: Implement Tiers 1 and 2 (custom validator, ShellCheck, pre-commit). Tier 3 is optional.
 
-______________________________________________________________________
+---
 
 ## 11. References
 
@@ -494,7 +489,7 @@ ______________________________________________________________________
 - ShellCheck pre-commit: https://github.com/koalaman/shellcheck-precommit
 - "Effortless Code Quality: The Ultimate Pre-Commit Hooks Guide for 2025": https://gatlenculp.medium.com/effortless-code-quality-the-ultimate-pre-commit-hooks-guide-for-2025-57ca501d9835
 
-______________________________________________________________________
+---
 
 ## Appendix A: Root Cause Pattern
 
@@ -525,7 +520,7 @@ output=$(echo '{}' | hook_script 2>&1)
 [[ -z "$output" ]] || echo "FAIL"
 ```
 
-______________________________________________________________________
+---
 
 **Document Version**: 1.0.0
 **Last Updated**: 2025-10-27

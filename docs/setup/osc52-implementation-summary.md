@@ -112,19 +112,16 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ### New Files
 
 1. **`~/.local/bin/xclip`** (remote Linux)
-
    - xclip-compatible wrapper
    - Emits OSC 52 to stderr
    - Handles tmux detection and wrapping
 
 1. **`~/.claude/docs/setup/ssh-clipboard-osc52.md`**
-
    - Complete setup guide
    - Testing procedures
    - Troubleshooting tips
 
 1. **`~/.claude/docs/setup/osc52-deep-dive.md`**
-
    - Technical deep dive
    - Protocol details
    - Architecture diagrams
@@ -133,18 +130,15 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ### Modified Files
 
 1. **`~/.zshrc`** (remote Linux)
-
    - Added `osc52-copy()` function
    - Added `pbcopy` alias for interactive use
 
 1. **`~/.claude/CLAUDE.md`**
-
    - Added "SSH Clipboard Integration (OSC 52)" section
    - Concise reference with links to detailed docs
    - Emphasized critical `>&2` vs `/dev/tty` detail
 
 1. **`~/.claude/docs/setup/terminal-setup.md`**
-
    - Added reference to OSC 52 setup
    - Quick setup instructions
 
@@ -386,7 +380,7 @@ Remove any one → solution breaks.
 
 Same architecture applies to all clipboard tools—just need to match CLI interface.
 
-______________________________________________________________________
+---
 
 ## Bottom Line
 

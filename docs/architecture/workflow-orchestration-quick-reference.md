@@ -4,7 +4,7 @@
 **Full Research**: [`workflow-orchestration-comparison.md`](/Users/terryli/.claude/docs/architecture/workflow-orchestration-comparison.md)
 **Specification**: [`lightweight-workflow-orchestration-research.yaml`](/Users/terryli/.claude/specifications/lightweight-workflow-orchestration-research.yaml)
 
-______________________________________________________________________
+---
 
 ## TL;DR - Use SQLite + Huey
 
@@ -18,19 +18,19 @@ mkdir -p ~/.claude/workflows
 
 **Why**: Zero deployment complexity, scales from 2 to 10+ workflows, easy debugging
 
-______________________________________________________________________
+---
 
 ## 5-Approach Comparison
 
-| Approach               | Deploy     | Extend     | Simple   | Score | Use When                       |
-| ---------------------- | ---------- | ---------- | -------- | ----- | ------------------------------ |
-| **SQLite + Huey**      | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐   | ⭐⭐⭐⭐ | **5** | **Starting simple, growing**   |
-| Asyncio Event Bus      | ⭐⭐⭐⭐⭐ | ⭐⭐⭐     | ⭐⭐⭐⭐ | 4     | Embedded, single-process       |
-| State Machine + SQLite | ⭐⭐⭐⭐   | ⭐⭐⭐⭐   | ⭐⭐⭐   | 4     | Complex multi-step workflows   |
-| Redis Streams          | ⭐⭐       | ⭐⭐⭐⭐⭐ | ⭐⭐⭐   | 3     | Already have Redis, need scale |
-| MCP Server             | ⭐⭐       | ⭐⭐⭐⭐   | ⭐⭐     | 2     | **Wait until 2026**            |
+| Approach | Deploy | Extend | Simple | Score | Use When |
+| --- | --- | --- | --- | --- | --- |
+| **SQLite + Huey** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | **5** | **Starting simple, growing** |
+| Asyncio Event Bus | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | 4 | Embedded, single-process |
+| State Machine + SQLite | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | 4 | Complex multi-step workflows |
+| Redis Streams | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | 3 | Already have Redis, need scale |
+| MCP Server | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ | 2 | **Wait until 2026** |
 
-______________________________________________________________________
+---
 
 ## Minimal Implementation (SQLite + Huey)
 
@@ -75,7 +75,7 @@ observer.start()
 # huey_consumer module.huey
 ```
 
-______________________________________________________________________
+---
 
 ## Architecture Diagram
 
@@ -110,7 +110,7 @@ ______________________________________________________________________
                     └──────────────┘
 ```
 
-______________________________________________________________________
+---
 
 ## Decision Tree
 
@@ -128,7 +128,7 @@ Already have Redis? → YES → Redis Streams viable
                     → NO  → SQLite + Huey ⭐
 ```
 
-______________________________________________________________________
+---
 
 ## Growth Strategy
 
@@ -155,7 +155,7 @@ ______________________________________________________________________
 - Evaluate Prefect/Temporal
 - Or continue with Huey + Redis (proven)
 
-______________________________________________________________________
+---
 
 ## Key Commands
 
@@ -173,7 +173,7 @@ sqlite3 ~/.claude/workflows/queue.db "SELECT * FROM task_queue;"
 tail -f /tmp/huey.log
 ```
 
-______________________________________________________________________
+---
 
 ## Python Libraries
 
@@ -198,7 +198,7 @@ ______________________________________________________________________
 - `redis` - Requires Redis server (unless already have)
 - `mcp` - Too immature (check 2026)
 
-______________________________________________________________________
+---
 
 ## Common Patterns
 
@@ -237,7 +237,7 @@ def periodic_workflow():
     pass
 ```
 
-______________________________________________________________________
+---
 
 ## Debugging Tips
 
@@ -263,7 +263,7 @@ result = analyze_file.call_local('/path/to/file.md')
 huey_consumer module.huey --verbose --logfile=/tmp/huey.log
 ```
 
-______________________________________________________________________
+---
 
 ## When NOT to Use These Approaches
 
@@ -281,7 +281,7 @@ ______________________________________________________________________
 - File watching + CLI invocation patterns
 - Lightweight, embedded workflows
 
-______________________________________________________________________
+---
 
 ## Additional Resources
 
@@ -291,7 +291,7 @@ ______________________________________________________________________
 - Transitions Docs: https://github.com/pytransitions/transitions
 - Watchdog Docs: https://python-watchdog.readthedocs.io/
 
-______________________________________________________________________
+---
 
 **Updated**: 2025-10-24
 **Recommendation**: Start with SQLite + Huey, add state machine layer if workflows become complex

@@ -226,7 +226,7 @@ sage_predictions = ensemble_combine(
 )
 ```
 
-______________________________________________________________________
+---
 
 **Status**: Ready for immediate implementation\
 **Recommended**: Start with Jupyter tunneling (15-minute setup)\

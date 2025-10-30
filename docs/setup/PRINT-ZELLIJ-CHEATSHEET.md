@@ -59,7 +59,7 @@ Print the PDF and:
 - Add to a binder with other documentation
 - Share with team members
 
-______________________________________________________________________
+---
 
 ## Alternative: Quick Terminal Reference
 
@@ -73,7 +73,7 @@ cat ~/.claude/docs/setup/zellij-cheatsheet.md | less
 glow ~/.claude/docs/setup/zellij-cheatsheet.md
 ```
 
-______________________________________________________________________
+---
 
 **File Location**: `~/.claude/docs/setup/zellij-cheatsheet.md`
 **Related Documentation**: `~/.claude/docs/setup/zellij-session-recovery.md`

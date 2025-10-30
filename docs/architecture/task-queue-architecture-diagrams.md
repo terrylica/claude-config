@@ -99,7 +99,7 @@
 1. **File System Clutter**: JSON files accumulate, require manual cleanup
 1. **No Visibility**: Can't query queue depth, task status, or history
 
-______________________________________________________________________
+---
 
 ## Proposed SQLite Queue Architecture
 
@@ -223,7 +223,7 @@ ______________________________________________________________________
 1. **Clean Storage**: Single database file, automatic WAL management
 1. **Full Visibility**: SQL queries for monitoring, debugging, analytics
 
-______________________________________________________________________
+---
 
 ## Event-Driven Architecture (Zero Latency)
 
@@ -321,7 +321,7 @@ observer.schedule(
 observer.start()
 ```
 
-______________________________________________________________________
+---
 
 ## Data Flow Comparison
 
@@ -377,7 +377,7 @@ Stop Hook → SQLite INSERT (2ms)
 Total latency: <100ms (excluding task processing)
 ```
 
-______________________________________________________________________
+---
 
 ## SQLite Schema Design
 
@@ -431,7 +431,7 @@ CREATE INDEX IF NOT EXISTS idx_task_enqueued ON task_queue(enqueued_at);
 PRAGMA journal_mode=WAL;
 ```
 
-______________________________________________________________________
+---
 
 ## Migration Strategy Visual
 
@@ -476,22 +476,22 @@ Phase 3: Queue Only (cleanup)
                     [Delete legacy file-based code]
 ```
 
-______________________________________________________________________
+---
 
 ## Performance Benchmarks (Estimated)
 
-| Operation              | File-Based                 | SQLite Queue             | Improvement          |
-| ---------------------- | -------------------------- | ------------------------ | -------------------- |
-| **Enqueue**            | 5ms (write JSON)           | 2ms (INSERT)             | **2.5x faster**      |
-| **Dequeue**            | 2500ms avg (polling)       | 500ms avg (polling)      | **5x faster**        |
-| **Dequeue**            | 2500ms avg (polling)       | \<100ms (event-driven)   | **25x faster**       |
-| **Concurrent writers** | Conflicts (manual locking) | Safe (SQLite ACID)       | **∞ improvement**    |
-| **Concurrent readers** | N × file reads             | 1 × SELECT               | **N×/1 improvement** |
-| **Crash recovery**     | Manual file cleanup        | Automatic (AckQueue)     | **∞ improvement**    |
-| **Deduplication**      | Hash check (O(n))          | UNIQUE constraint (O(1)) | **N× improvement**   |
-| **Queue depth query**  | len(glob()) = O(n)         | SELECT COUNT(\*) = O(1)  | **N× improvement**   |
+| Operation | File-Based | SQLite Queue | Improvement |
+| --- | --- | --- | --- |
+| **Enqueue** | 5ms (write JSON) | 2ms (INSERT) | **2.5x faster** |
+| **Dequeue** | 2500ms avg (polling) | 500ms avg (polling) | **5x faster** |
+| **Dequeue** | 2500ms avg (polling) | \<100ms (event-driven) | **25x faster** |
+| **Concurrent writers** | Conflicts (manual locking) | Safe (SQLite ACID) | **∞ improvement** |
+| **Concurrent readers** | N × file reads | 1 × SELECT | **N×/1 improvement** |
+| **Crash recovery** | Manual file cleanup | Automatic (AckQueue) | **∞ improvement** |
+| **Deduplication** | Hash check (O(n)) | UNIQUE constraint (O(1)) | **N× improvement** |
+| **Queue depth query** | len(glob()) = O(n) | SELECT COUNT(\*) = O(1) | **N× improvement** |
 
-______________________________________________________________________
+---
 
 ## Monitoring & Observability
 
@@ -533,7 +533,7 @@ WHERE status = 'in_progress'
   AND started_at < datetime('now', '-5 minutes');
 ```
 
-______________________________________________________________________
+---
 
 ## References
 

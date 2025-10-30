@@ -218,7 +218,7 @@ Each piece essential for the solution to work.
 1. Check stderr isn't being redirected: `2>/dev/null` would break it
 1. Consult deep dive doc for debugging techniques
 
-______________________________________________________________________
+---
 
 ## Summary for Future Reference 📌
 

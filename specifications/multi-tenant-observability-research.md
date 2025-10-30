@@ -4,7 +4,7 @@
 **Target**: Python 3.12+ multi-workspace session tracking system
 **Focus**: Lightweight, SQLite-based, offline-capable solutions
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -18,26 +18,25 @@ For multi-workspace Claude Code session tracking with queryability, the recommen
 
 This hybrid approach provides enterprise-grade observability without cloud dependencies or heavyweight tools.
 
-______________________________________________________________________
+---
 
 ## 1. Structured Logging Libraries Comparison
 
 ### Feature Comparison Matrix
 
-| Library                | Stars    | Last Updated  | Context Injection       | JSON Output    | Async Support | Performance | Ease of Use |
-| ---------------------- | -------- | ------------- | ----------------------- | -------------- | ------------- | ----------- | ----------- |
-| **structlog**          | 3.5K+    | Active (2024) | `bind()`, `contextvars` | Native         | Yes           | Fast        | Medium      |
-| **loguru**             | 19K+     | Active (2024) | `bind()`, `opt()`       | Native         | Yes           | Fastest     | Easiest     |
-| **python-json-logger** | 1.6K+    | Active (2024) | Manual                  | Native         | Yes           | Fast        | Easy        |
-| **eliot**              | 900+     | Active (2023) | Action trees            | Native         | Limited       | Medium      | Complex     |
-| **standard logging**   | Built-in | Active        | Manual                  | Via formatters | Yes           | Baseline    | Medium      |
+| Library | Stars | Last Updated | Context Injection | JSON Output | Async Support | Performance | Ease of Use |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **structlog** | 3.5K+ | Active (2024) | `bind()`, `contextvars` | Native | Yes | Fast | Medium |
+| **loguru** | 19K+ | Active (2024) | `bind()`, `opt()` | Native | Yes | Fastest | Easiest |
+| **python-json-logger** | 1.6K+ | Active (2024) | Manual | Native | Yes | Fast | Easy |
+| **eliot** | 900+ | Active (2023) | Action trees | Native | Limited | Medium | Complex |
+| **standard logging** | Built-in | Active | Manual | Via formatters | Yes | Baseline | Medium |
 
 ### Detailed Analysis
 
 #### **structlog** (Recommended)
 
 - **Strengths**:
-
   - Native `contextvars` support (Python 3.7+)
   - Flexible processor pipeline (filtering, formatting, routing)
   - Thread-safe and async-safe context binding
@@ -85,7 +84,6 @@ def start_session(workspace_path: str, session_id: str):
 #### **loguru** (Alternative)
 
 - **Strengths**:
-
   - Simplest API ("stupidly simple")
   - Automatic rotation, retention, compression
   - Colored console output
@@ -116,13 +114,11 @@ session_logger.info("session_started")
 #### **python-json-logger** (Lightweight Option)
 
 - **Strengths**:
-
   - Drop-in replacement for standard logging
   - Minimal learning curve
   - Integrates with existing logging infrastructure
 
 - **Limitations**:
-
   - Manual context management
   - No built-in `contextvars` support
 
@@ -131,7 +127,6 @@ session_logger.info("session_started")
 #### **eliot** (Specialized)
 
 - **Strengths**:
-
   - Unique action tree model for causal chains
   - Excellent for complex workflow tracing
   - Built-in parent/child action relationships
@@ -147,7 +142,6 @@ with start_action(action_type="session_lifecycle", workspace="/path"):
 ```
 
 - **Limitations**:
-
   - No log levels (everything is structured messages)
   - Steeper learning curve
   - Less popular (smaller community)
@@ -164,20 +158,20 @@ with start_action(action_type="session_lifecycle", workspace="/path"):
 - Type hints and modern Python patterns
 - Can mix with standard logging (compatibility layer)
 
-______________________________________________________________________
+---
 
 ## 2. Local Observability Systems Evaluation
 
 ### Comparison Matrix
 
-| Tool                       | Storage Backend | Query Language | Setup Complexity | Offline Mode     | Python SDK | Use Case            |
-| -------------------------- | --------------- | -------------- | ---------------- | ---------------- | ---------- | ------------------- |
-| **Custom SQLite**          | SQLite          | SQL + FTS5     | Low              | Native           | Built-in   | Session tracking    |
-| **eventsourcing**          | SQLite/Postgres | Python API     | Low              | Native           | Native     | Event sourcing      |
-| **OpenTelemetry + Custom** | SQLite (custom) | SQL            | Medium           | Native           | Official   | Full observability  |
-| **Jaeger**                 | Cassandra/ES    | UI + API       | High             | No (memory only) | Yes        | Distributed tracing |
-| **Zipkin**                 | MySQL/ES        | UI + API       | Medium           | Partial          | Yes        | Distributed tracing |
-| **Tempo**                  | Local FS        | LogQL          | Medium           | Yes              | Via OTel   | Traces only         |
+| Tool | Storage Backend | Query Language | Setup Complexity | Offline Mode | Python SDK | Use Case |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Custom SQLite** | SQLite | SQL + FTS5 | Low | Native | Built-in | Session tracking |
+| **eventsourcing** | SQLite/Postgres | Python API | Low | Native | Native | Event sourcing |
+| **OpenTelemetry + Custom** | SQLite (custom) | SQL | Medium | Native | Official | Full observability |
+| **Jaeger** | Cassandra/ES | UI + API | High | No (memory only) | Yes | Distributed tracing |
+| **Zipkin** | MySQL/ES | UI + API | Medium | Partial | Yes | Distributed tracing |
+| **Tempo** | Local FS | LogQL | Medium | Yes | Via OTel | Traces only |
 
 ### Detailed Analysis
 
@@ -414,7 +408,6 @@ class SessionStore:
 ```
 
 - **Strengths**:
-
   - Zero dependencies (SQLite built into Python)
   - Full SQL query power
   - FTS5 for text search
@@ -423,7 +416,6 @@ class SessionStore:
   - Simple migration path from file-based system
 
 - **Performance**:
-
   - Write: ~800-1800 inserts/ms (WAL mode)
   - Read: Sub-millisecond for indexed queries
   - FTS5: Fast enough for millions of events
@@ -431,7 +423,6 @@ class SessionStore:
 #### **eventsourcing Library**
 
 - **Strengths**:
-
   - Built-in SQLite support
   - Aggregate/event model fits session lifecycle
   - Application-level encryption
@@ -516,7 +507,6 @@ app.end_session(session_id)
 ```
 
 - **Limitations**:
-
   - Querying requires retrieving full aggregates (not optimized for reporting)
   - Learning curve for event sourcing concepts
   - Overkill for simple session tracking
@@ -605,14 +595,12 @@ with tracer.start_as_current_span("session_lifecycle") as session_span:
 ```
 
 - **Strengths**:
-
   - Industry-standard instrumentation
   - Rich ecosystem (auto-instrumentation for libraries)
   - Vendor-neutral
   - Future-proof (can switch backends later)
 
 - **Limitations**:
-
   - More complex setup
   - No official SQLite exporter (custom code required)
   - Heavier weight for simple use cases
@@ -622,7 +610,6 @@ with tracer.start_as_current_span("session_lifecycle") as session_span:
 #### **Jaeger/Zipkin** (Not Recommended)
 
 - **Why Not**:
-
   - No SQLite backend support
   - Requires external services (Cassandra, Elasticsearch)
   - Memory-only mode loses data on restart
@@ -644,7 +631,7 @@ with tracer.start_as_current_span("session_lifecycle") as session_span:
 
 **Migration Complexity**: Low (2-3 hours to implement basic schema and wrapper)
 
-______________________________________________________________________
+---
 
 ## 3. Session Tracking Patterns
 
@@ -804,22 +791,18 @@ async def main():
 #### **Context Variables Best Practices**
 
 1. **Always use `ContextVar` for multi-tenant data**
-
    - Never use global variables or thread-locals for workspace/session IDs
    - `contextvars` work correctly with both threads and async
 
 1. **Clear context at request boundaries**
-
    - Use `contextvars.copy_context()` to isolate contexts
    - Reset tokens in `__exit__` to prevent leaks
 
 1. **Propagate to subprocesses via environment**
-
    - `contextvars` don't cross process boundaries
    - Use environment variables for subprocess communication
 
 1. **Watch for async gotchas**
-
    - Context is copied when task is created, not when awaited
    - Be careful with background tasks (may lose context)
 
@@ -877,7 +860,7 @@ class SessionContext:
         return self
 ```
 
-______________________________________________________________________
+---
 
 ## 4. Multi-Tenancy Patterns
 
@@ -951,7 +934,7 @@ def auto_session_context(func):
     return wrapper
 ```
 
-______________________________________________________________________
+---
 
 ## 5. Architecture Diagram
 
@@ -1022,7 +1005,7 @@ contextvars prevent accidental cross-workspace access
 Correlation IDs enable cross-workspace analytics (opt-in)
 ```
 
-______________________________________________________________________
+---
 
 ## 6. Migration Path from File-Based System
 
@@ -1111,14 +1094,14 @@ def migrate_file_sessions(file_dir: str, db_path: str):
 
 ### Migration Complexity: **Low to Medium**
 
-| Aspect                    | Complexity | Time Estimate | Risk             |
-| ------------------------- | ---------- | ------------- | ---------------- |
-| Schema creation           | Low        | 1 hour        | Minimal          |
-| Dual-write implementation | Low        | 2 hours       | Low              |
-| Historical data import    | Medium     | 2 hours       | Low (idempotent) |
-| Query interface           | Medium     | 4 hours       | Minimal          |
-| Testing                   | Medium     | 4 hours       | Low              |
-| **Total**                 | **Medium** | **13 hours**  | **Low**          |
+| Aspect | Complexity | Time Estimate | Risk |
+| --- | --- | --- | --- |
+| Schema creation | Low | 1 hour | Minimal |
+| Dual-write implementation | Low | 2 hours | Low |
+| Historical data import | Medium | 2 hours | Low (idempotent) |
+| Query interface | Medium | 4 hours | Minimal |
+| Testing | Medium | 4 hours | Low |
+| **Total** | **Medium** | **13 hours** | **Low** |
 
 **Risk Mitigation**:
 
@@ -1126,7 +1109,7 @@ def migrate_file_sessions(file_dir: str, db_path: str):
 - SQLite writes are atomic (no partial data)
 - Can rebuild SQLite from files if corruption occurs
 
-______________________________________________________________________
+---
 
 ## 7. Code Examples
 
@@ -1489,7 +1472,7 @@ stats = query.workspace_stats("/Users/terryli/.claude", days=7)
 print(f"Stats: {stats}")
 ```
 
-______________________________________________________________________
+---
 
 ## 8. Performance Characteristics
 
@@ -1516,17 +1499,17 @@ def optimize_sqlite_for_writes(conn: sqlite3.Connection):
 
 ### Query Performance
 
-| Query Type                    | Rows | Index             | Time    |
-| ----------------------------- | ---- | ----------------- | ------- |
-| Active sessions (1 workspace) | 10K  | workspace_path    | \<1ms   |
-| Time range query              | 100K | started_at        | 2-5ms   |
-| Session hierarchy (3 levels)  | 1K   | parent_session_id | \<2ms   |
-| FTS search (events)           | 1M   | FTS5              | 10-50ms |
-| JSON extract search           | 1M   | None              | 500ms+  |
+| Query Type | Rows | Index | Time |
+| --- | --- | --- | --- |
+| Active sessions (1 workspace) | 10K | workspace_path | \<1ms |
+| Time range query | 100K | started_at | 2-5ms |
+| Session hierarchy (3 levels) | 1K | parent_session_id | \<2ms |
+| FTS search (events) | 1M | FTS5 | 10-50ms |
+| JSON extract search | 1M | None | 500ms+ |
 
 **Recommendation**: Use FTS5 for text search, avoid `json_extract` in hot paths
 
-______________________________________________________________________
+---
 
 ## 9. Production Recommendations
 
@@ -1575,21 +1558,21 @@ def health_check(store: SessionStore) -> Dict:
     }
 ```
 
-______________________________________________________________________
+---
 
 ## 10. Alternative Approaches Considered
 
 ### Rejected Options
 
-| Approach                   | Why Rejected                                                    |
-| -------------------------- | --------------------------------------------------------------- |
-| **JSON files per session** | Current system - no queryability, no relationships              |
-| **Jaeger/Zipkin**          | Requires external services, no SQLite backend, overkill         |
-| **PostgreSQL**             | Heavyweight, requires server process, external dependency       |
-| **DuckDB**                 | Excellent for analytics but unnecessary for operational queries |
-| **Redis**                  | Requires server, no persistence guarantees, expensive queries   |
-| **MongoDB**                | Requires server, overkill for structured session data           |
-| **Elasticsearch**          | Heavyweight, JVM dependency, complex setup                      |
+| Approach | Why Rejected |
+| --- | --- |
+| **JSON files per session** | Current system - no queryability, no relationships |
+| **Jaeger/Zipkin** | Requires external services, no SQLite backend, overkill |
+| **PostgreSQL** | Heavyweight, requires server process, external dependency |
+| **DuckDB** | Excellent for analytics but unnecessary for operational queries |
+| **Redis** | Requires server, no persistence guarantees, expensive queries |
+| **MongoDB** | Requires server, overkill for structured session data |
+| **Elasticsearch** | Heavyweight, JVM dependency, complex setup |
 
 ### Why Not Full Event Sourcing?
 
@@ -1606,26 +1589,23 @@ The `eventsourcing` library is powerful but adds complexity:
 - Need time-travel queries (state at point in time)
 - Need event versioning (schema evolution)
 
-______________________________________________________________________
+---
 
 ## 11. Future Extensibility
 
 ### Upgrade Paths
 
 1. **Add OpenTelemetry instrumentation** (Week 4-5)
-
    - Keep SQLite as local store
    - Add OTel spans for distributed tracing
    - Export to Jaeger/Tempo if needed for complex debugging
 
 1. **Multi-machine sync** (Month 2-3)
-
    - Use SQLite as local cache
    - Add sync layer (e.g., `git` for session DB, `rsync`, or custom)
    - Conflict resolution for concurrent sessions
 
 1. **Advanced analytics** (Month 3-4)
-
    - Export SQLite to DuckDB for OLAP queries
    - Build dashboards (Grafana + SQLite plugin)
    - ML on session patterns (duration prediction, failure analysis)
@@ -1666,7 +1646,7 @@ with session_context(
     pass
 ```
 
-______________________________________________________________________
+---
 
 ## 12. Implementation Timeline
 
@@ -1700,7 +1680,7 @@ ______________________________________________________________________
 
 **Total Effort**: 2-3 weeks (with testing and migration)
 
-______________________________________________________________________
+---
 
 ## References
 
@@ -1725,7 +1705,7 @@ ______________________________________________________________________
 - [InfoQ - Tenant Isolation in Python](https://www.infoq.com/articles/serverless-tenant-isolation/)
 - [Charles Leifer - SQLite FTS](https://charlesleifer.com/blog/using-sqlite-full-text-search-with-python/)
 
-______________________________________________________________________
+---
 
 ## Conclusion
 

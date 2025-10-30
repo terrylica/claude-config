@@ -5,13 +5,13 @@
 **Created**: 2025-10-23
 **Purpose**: Safety procedures for rolling back failed reorganization operations
 
-______________________________________________________________________
+---
 
 ## Overview
 
 This document provides **step-by-step rollback procedures** for each phase of workspace reorganization. Every reorganization operation must have a defined, tested rollback strategy before execution.
 
-______________________________________________________________________
+---
 
 ## Rollback Principles
 
@@ -51,7 +51,7 @@ git reset --hard <commit-hash>
 /tools/rollback-restore.sh --backup=/path/to/backup.tar.gz
 ```
 
-______________________________________________________________________
+---
 
 ## Phase-by-Phase Rollback
 
@@ -80,7 +80,7 @@ ______________________________________________________________________
 
 **Validation**: Verify all backup files restored
 
-______________________________________________________________________
+---
 
 ### Phase 3: Root Cleanup (Move Scripts)
 
@@ -111,7 +111,7 @@ ______________________________________________________________________
 
 **Validation**: All scripts work from original locations
 
-______________________________________________________________________
+---
 
 ### Phase 4: System Consolidation (HIGH RISK)
 
@@ -133,7 +133,6 @@ ______________________________________________________________________
    ```
 
 1. **Verify Claude Code configuration**:
-
    - Check if Claude Code can find todos/
    - Verify file history works
    - Test session functionality
@@ -152,7 +151,7 @@ ______________________________________________________________________
 - [ ] File history accessible
 - [ ] Sessions restore properly
 
-______________________________________________________________________
+---
 
 ### Phase 5: Artifact Archival
 
@@ -183,14 +182,13 @@ ______________________________________________________________________
    ```
 
 1. **Test systems**:
-
    - Claude Code file history
    - Debug logging
    - Session recovery
 
 **Validation**: All extracted files accessible and functional
 
-______________________________________________________________________
+---
 
 ### Phase 6: Advanced (uv migration)
 
@@ -221,7 +219,7 @@ ______________________________________________________________________
 
 **Validation**: gfm-link-checker works with .venv
 
-______________________________________________________________________
+---
 
 ## Emergency Procedures
 
@@ -261,7 +259,7 @@ ______________________________________________________________________
    /tools/bin/workspace-health-check.sh
    ```
 
-______________________________________________________________________
+---
 
 ### Backup-Based Recovery
 
@@ -301,7 +299,7 @@ ______________________________________________________________________
    /tools/bin/workspace-health-check.sh
    ```
 
-______________________________________________________________________
+---
 
 ## Validation Checklist
 
@@ -317,7 +315,7 @@ After any rollback, verify:
 - [ ] No broken symlinks
 - [ ] Workspace health check passes
 
-______________________________________________________________________
+---
 
 ## Prevention
 
@@ -345,7 +343,7 @@ Before **any** reorganization operation:
 1. **Document issues**: Note any problems encountered
 1. **Wait before cleanup**: Keep backups for 30 days
 
-______________________________________________________________________
+---
 
 ## Troubleshooting
 
@@ -389,7 +387,7 @@ ______________________________________________________________________
 1. Check what files were in .gitignore
 1. Extract selectively from emergency backup
 
-______________________________________________________________________
+---
 
 ## Related Documentation
 
@@ -399,6 +397,6 @@ ______________________________________________________________________
 - [Health Check Specification](/specifications/workspace-health-check.yaml)
 - [Migration Guide](/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md)
 
-______________________________________________________________________
+---
 
 **Remember**: Conservative approach. When in doubt, don't proceed. A slow, careful reorganization is better than a fast, broken one.

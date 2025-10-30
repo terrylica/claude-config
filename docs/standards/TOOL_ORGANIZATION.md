@@ -5,13 +5,13 @@
 **Created**: 2025-10-23
 **Purpose**: Define clear taxonomy and organization rules for tools, scripts, and utilities in the workspace
 
-______________________________________________________________________
+---
 
 ## Overview
 
 This document establishes the **single source of truth** for organizing executable code, tools, and utilities in the `~/.claude/` workspace. Following these standards prevents organizational drift and ensures maintainability.
 
-______________________________________________________________________
+---
 
 ## Directory Taxonomy
 
@@ -44,7 +44,7 @@ Is it a functional script?
        Examples: cns-notify, gfm-check-direct
 ```
 
-______________________________________________________________________
+---
 
 ## Directory Purposes
 
@@ -81,7 +81,6 @@ ______________________________________________________________________
 **Requirements for Tool Directories**:
 
 1. **README.md** (Required) - Must include:
-
    - Purpose (one sentence)
    - Usage instructions
    - Dependencies
@@ -109,7 +108,7 @@ ______________________________________________________________________
 - `/tools/git-cliff/` - Changelog generator
 - `/tools/notifications/` - Notification utilities
 
-______________________________________________________________________
+---
 
 ### `/automation/` - Event-Driven Automation
 
@@ -145,7 +144,7 @@ ______________________________________________________________________
 - `/automation/cns/cns_hook_entry.sh` - Runs on Stop hook
 - `/automation/prettier/format-markdown.sh` - Runs on Stop hook
 
-______________________________________________________________________
+---
 
 ### `/bin/` - Minimal System Integration
 
@@ -172,19 +171,19 @@ ______________________________________________________________________
 - Notification system wrappers
 - Shell function loaders
 
-______________________________________________________________________
+---
 
 ## Script Standards
 
 ### Naming Conventions
 
-| Type           | Convention                                   | Example                    |
-| -------------- | -------------------------------------------- | -------------------------- |
-| Directories    | `kebab-case`                                 | `/tools/doc-intelligence/` |
-| Shell scripts  | `kebab-case.sh`                              | `install-all-tools.sh`     |
-| Python scripts | `kebab-case.py`                              | `workspace-cleanup.py`     |
-| Documentation  | `SCREAMING_SNAKE_CASE.md` or `kebab-case.md` | `TOOL_ORGANIZATION.md`     |
-| Specifications | `kebab-case.yaml`                            | `tool-manifest.yaml`       |
+| Type | Convention | Example |
+| --- | --- | --- |
+| Directories | `kebab-case` | `/tools/doc-intelligence/` |
+| Shell scripts | `kebab-case.sh` | `install-all-tools.sh` |
+| Python scripts | `kebab-case.py` | `workspace-cleanup.py` |
+| Documentation | `SCREAMING_SNAKE_CASE.md` or `kebab-case.md` | `TOOL_ORGANIZATION.md` |
+| Specifications | `kebab-case.yaml` | `tool-manifest.yaml` |
 
 ### Script Header Template
 
@@ -227,12 +226,12 @@ from pathlib import Path
 
 ### File Permissions
 
-| Type                | Permissions         | Rationale                         |
-| ------------------- | ------------------- | --------------------------------- |
-| Executable scripts  | `755` (`rwxr-xr-x`) | Owner can modify, all can execute |
-| Library scripts     | `644` (`rw-r--r--`) | Sourced, not executed directly    |
-| Configuration files | `644` (`rw-r--r--`) | Read-only for non-owner           |
-| Secrets/credentials | `600` (`rw-------`) | Owner only                        |
+| Type | Permissions | Rationale |
+| --- | --- | --- |
+| Executable scripts | `755` (`rwxr-xr-x`) | Owner can modify, all can execute |
+| Library scripts | `644` (`rw-r--r--`) | Sourced, not executed directly |
+| Configuration files | `644` (`rw-r--r--`) | Read-only for non-owner |
+| Secrets/credentials | `600` (`rw-------`) | Owner only |
 
 Set permissions:
 
@@ -242,7 +241,7 @@ chmod 644 config-file.yaml
 chmod 600 secret-file.env
 ```
 
-______________________________________________________________________
+---
 
 ## Tool Development Workflow
 
@@ -279,7 +278,6 @@ ______________________________________________________________________
    ````
 
    ## Dependencies
-
    - List dependencies here
 
    ## Installation
@@ -316,7 +314,7 @@ ______________________________________________________________________
 
 1. **Document**: Update `/docs/INDEX.md` if user-facing
 
-______________________________________________________________________
+---
 
 ## File Organization Anti-Patterns
 
@@ -336,7 +334,7 @@ ______________________________________________________________________
 /tools/config/some-utility.sh    # Good: purpose clear
 ```
 
-______________________________________________________________________
+---
 
 ❌ **Backup files in production**:
 
@@ -352,7 +350,7 @@ git log script.sh          # View history
 git show HEAD~1:script.sh  # View previous version
 ```
 
-______________________________________________________________________
+---
 
 ❌ **Scripts without documentation**:
 
@@ -370,7 +368,7 @@ ______________________________________________________________________
 └── run.sh                 # Implementation
 ```
 
-______________________________________________________________________
+---
 
 ❌ **Virtual environments in source tree**:
 
@@ -384,7 +382,7 @@ ______________________________________________________________________
 uv run --active python -m some_tool
 ```
 
-______________________________________________________________________
+---
 
 ## Tool Discovery & Registry
 
@@ -426,7 +424,7 @@ tools:
 - Record last verification date
 - Used by installation scripts
 
-______________________________________________________________________
+---
 
 ## Integration with User Standards
 
@@ -448,7 +446,7 @@ ln -sf /Users/terryli/.claude/tools/bin/install-all-tools.sh \
 /Users/terryli/.claude/tools/bin/some-tool.sh --work-dir "$PWD"
 ```
 
-______________________________________________________________________
+---
 
 ## Validation & Health Checks
 
@@ -457,32 +455,27 @@ ______________________________________________________________________
 Create `/tools/bin/workspace-health-check.sh` to validate:
 
 1. **Tool Manifest Completeness**:
-
    - Every tool in `/tools/` has `README.md`
    - Every tool in `/tools/` has `tool-manifest.yaml`
    - Global manifest up to date
 
 1. **Executable Permissions**:
-
    - Scripts have correct permissions (755 for executable)
    - No scripts in wrong locations
 
 1. **Symlink Integrity**:
-
    - All symlinks in `~/.local/bin/` valid
    - Point to existing files
 
 1. **Documentation Links**:
-
    - All markdown links valid (via `gfm-check`)
 
 1. **No Anti-Patterns**:
-
    - No backup files in production directories
    - No root-level scripts
    - No `.venv` in tool directories
 
-______________________________________________________________________
+---
 
 ## Migration Path
 
@@ -496,20 +489,20 @@ For existing workspace, follow phased migration in `/specifications/reorg-move-m
 
 See `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md` for detailed migration guide.
 
-______________________________________________________________________
+---
 
 ## Quick Reference
 
 ### Where Should I Put...?
 
-| Type                  | Location                | Example                    |
-| --------------------- | ----------------------- | -------------------------- |
-| Installation script   | `/tools/bin/`           | `install-all-tools.sh`     |
-| Configuration utility | `/tools/config/`        | `disable-pyright.sh`       |
-| Automation hook       | `/automation/{system}/` | `cns_hook_entry.sh`        |
-| Standalone tool       | `/tools/{tool-name}/`   | `/tools/doc-intelligence/` |
-| Shared library        | `/tools/lib/`           | `common.sh`                |
-| System integration    | `/bin/` (avoid)         | `cns-notify`               |
+| Type | Location | Example |
+| --- | --- | --- |
+| Installation script | `/tools/bin/` | `install-all-tools.sh` |
+| Configuration utility | `/tools/config/` | `disable-pyright.sh` |
+| Automation hook | `/automation/{system}/` | `cns_hook_entry.sh` |
+| Standalone tool | `/tools/{tool-name}/` | `/tools/doc-intelligence/` |
+| Shared library | `/tools/lib/` | `common.sh` |
+| System integration | `/bin/` (avoid) | `cns-notify` |
 
 ### Required Files for Tools
 
@@ -518,7 +511,7 @@ ______________________________________________________________________
 - ⚠️ `tests/` - Strongly recommended
 - ⚠️ `config/` - If tool has configuration
 
-______________________________________________________________________
+---
 
 ## Related Documentation
 
@@ -527,7 +520,7 @@ ______________________________________________________________________
 - [Architecture Overview](/docs/architecture/ARCHITECTURE.md) - Overall workspace design
 - [Artifact Retention Policy](/docs/maintenance/ARTIFACT_RETENTION.md) - Runtime artifact management
 
-______________________________________________________________________
+---
 
 **Status**: Proposed standard for workspace reorganization
 **Next Steps**: Review and implement via phased migration

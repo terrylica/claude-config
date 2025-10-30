@@ -218,7 +218,7 @@ work-local   # For local development
 work-remote  # For GPU validation work
 ```
 
-______________________________________________________________________
+---
 
 **Status**: Ready for seamless background synchronization\
 **Performance**: Optimal (ZeroTier using direct local network)\

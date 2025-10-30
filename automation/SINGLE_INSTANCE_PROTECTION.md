@@ -4,7 +4,7 @@
 **Created**: 2025-10-27
 **Purpose**: Prevent multiple process instances and file caching issues
 
-______________________________________________________________________
+---
 
 ## The Problem
 
@@ -16,7 +16,7 @@ We encountered critical production issues:
 
 This caused the "Stop hook error" to persist despite all fixes being in place.
 
-______________________________________________________________________
+---
 
 ## The Solution
 
@@ -94,7 +94,7 @@ start-telegram-bot
 - Uses PID file: `/Users/terryli/.claude/automation/run/telegram-bot.pid`
 - Ensures clean startup every time
 
-______________________________________________________________________
+---
 
 ## Integration Status
 
@@ -115,7 +115,7 @@ ______________________________________________________________________
 1. **Monitoring** - Alert if PID file cleanup happens frequently
 1. **Metrics** - Track process age distribution
 
-______________________________________________________________________
+---
 
 ## File Caching Explanation
 
@@ -152,7 +152,7 @@ Current file: Oct 27 14:43
 - If a hook process lives > 1 hour, it's definitely stale
 - Balance between safety (don't kill active hooks) and freshness
 
-______________________________________________________________________
+---
 
 ## Testing
 
@@ -198,7 +198,7 @@ lsof | grep "check-links-hybrid.sh"
 # Should show only recent processes or none
 ```
 
-______________________________________________________________________
+---
 
 ## Troubleshooting
 
@@ -246,7 +246,7 @@ ps -p <PID> -o pid,lstart,command
 pkill -9 -f "check-links-hybrid"
 ```
 
-______________________________________________________________________
+---
 
 ## Future Enhancements
 
@@ -326,7 +326,7 @@ RestartSec=10
 WantedBy=default.target
 ```
 
-______________________________________________________________________
+---
 
 ## References
 
@@ -335,7 +335,7 @@ ______________________________________________________________________
 - **Bash traps**: https://tldp.org/LDP/Bash-Beginners-Guide/html/sect_12_02.html
 - **Process verification**: Prevents PID reuse issues (PID wraps at 99999 on macOS)
 
-______________________________________________________________________
+---
 
 **Document Version**: 1.0.0
 **Last Updated**: 2025-10-27

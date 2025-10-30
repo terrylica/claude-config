@@ -4,7 +4,7 @@
 **Context**: Multi-process Python systems with bash hooks, async Python bots, orchestrators, and CLI subprocesses
 **Goal**: Trace requests across process boundaries, detect circular dependencies, enable lightweight loop prevention
 
-______________________________________________________________________
+---
 
 ## Executive Summary
 
@@ -17,7 +17,7 @@ This research evaluates correlation ID standards, propagation mechanisms, and ci
 - **Python's graphlib** provides built-in cycle detection
 - **Idempotency tokens** prevent loops better than circuit breakers alone
 
-______________________________________________________________________
+---
 
 ## 1. Correlation ID Standards Comparison
 
@@ -52,7 +52,7 @@ traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
 
 **Use Case**: Best for systems that integrate with APM tools or distributed tracing platforms
 
-______________________________________________________________________
+---
 
 ### 1.2 OpenTelemetry Format
 
@@ -84,7 +84,7 @@ span_id_hex = f'{span_id:016x}'    # 16 characters
 
 **Use Case**: Python-heavy systems with telemetry requirements
 
-______________________________________________________________________
+---
 
 ### 1.3 UUID v4 (Random)
 
@@ -128,7 +128,7 @@ correlation_id = str(uuid.uuid4())
 
 **Use Case**: Simple correlation without time-ordering requirements
 
-______________________________________________________________________
+---
 
 ### 1.4 ULID (Universally Unique Lexicographically Sortable Identifier)
 
@@ -182,7 +182,7 @@ ulid_value = (timestamp_ms << 80) | random_bits
 
 **Use Case**: **RECOMMENDED** for request tracing with temporal ordering
 
-______________________________________________________________________
+---
 
 ### 1.5 Snowflake ID (Twitter's Design)
 
@@ -213,26 +213,26 @@ ______________________________________________________________________
 
 **Use Case**: High-throughput distributed systems with coordinated machines
 
-______________________________________________________________________
+---
 
 ### 1.6 Comparison Matrix
 
-| Feature                   | W3C Trace Context | UUID v4            | ULID               | Snowflake                      |
-| ------------------------- | ----------------- | ------------------ | ------------------ | ------------------------------ |
-| **Size**                  | 128-bit (32 hex)  | 128-bit (36 chars) | 128-bit (26 chars) | 64-bit (19 digits)             |
-| **Sortable**              | No                | No                 | **Yes**            | **Yes**                        |
-| **Timestamp**             | No                | No                 | **Yes** (48-bit)   | **Yes** (41-bit)               |
-| **Collision Resistance**  | High (2^128)      | High (2^122)       | High (2^80/ms)     | Medium (requires coordination) |
-| **Bash Generation**       | Complex           | **Easy** (uuidgen) | Medium             | Hard                           |
-| **Python Generation**     | Easy (OTel SDK)   | **Easy** (stdlib)  | Easy (library)     | Medium                         |
-| **String Length**         | 55 chars (full)   | 36 chars           | **26 chars**       | 19 digits                      |
-| **Parent-Child Tracking** | **Built-in**      | No                 | No                 | No                             |
-| **Machine ID**            | No                | No                 | No                 | **Yes** (10-bit)               |
-| **URL-Safe**              | No (hyphens)      | No (hyphens)       | **Yes**            | **Yes**                        |
+| Feature | W3C Trace Context | UUID v4 | ULID | Snowflake |
+| --- | --- | --- | --- | --- |
+| **Size** | 128-bit (32 hex) | 128-bit (36 chars) | 128-bit (26 chars) | 64-bit (19 digits) |
+| **Sortable** | No | No | **Yes** | **Yes** |
+| **Timestamp** | No | No | **Yes** (48-bit) | **Yes** (41-bit) |
+| **Collision Resistance** | High (2^128) | High (2^122) | High (2^80/ms) | Medium (requires coordination) |
+| **Bash Generation** | Complex | **Easy** (uuidgen) | Medium | Hard |
+| **Python Generation** | Easy (OTel SDK) | **Easy** (stdlib) | Easy (library) | Medium |
+| **String Length** | 55 chars (full) | 36 chars | **26 chars** | 19 digits |
+| **Parent-Child Tracking** | **Built-in** | No | No | No |
+| **Machine ID** | No | No | No | **Yes** (10-bit) |
+| **URL-Safe** | No (hyphens) | No (hyphens) | **Yes** | **Yes** |
 
 **Recommendation**: **ULID** for correlation IDs (sortable, compact, easy generation) + **W3C Trace Context format** for parent-child tracking
 
-______________________________________________________________________
+---
 
 ## 2. Cross-Process ID Propagation Mechanisms
 
@@ -291,7 +291,7 @@ subprocess.run(['some_command'], env=child_env)
 - Create new span ID per process: `PARENT_SPAN_ID` + new `SPAN_ID`
 - Clean namespace: `TRACE_*` prefix for all tracing variables
 
-______________________________________________________________________
+---
 
 ### 2.2 Command-Line Arguments
 
@@ -337,7 +337,7 @@ subprocess.run([
 
 **Use Case**: One-shot scripts, debugging scenarios
 
-______________________________________________________________________
+---
 
 ### 2.3 File-Based Passing (JSON Metadata)
 
@@ -395,7 +395,7 @@ correlation_id = trace_context['correlation_id']
 
 **Use Case**: Complex trace context with metadata
 
-______________________________________________________________________
+---
 
 ### 2.4 stdin/stdout Protocols
 
@@ -432,7 +432,7 @@ correlation_id = trace_context['correlation_id']
 
 **Use Case**: Pipeline-style architectures (Unix philosophy)
 
-______________________________________________________________________
+---
 
 ### 2.5 Unix Domain Sockets
 
@@ -469,21 +469,21 @@ client.send(b'{"correlation_id": "..."}')
 
 **Use Case**: Long-running daemon coordination
 
-______________________________________________________________________
+---
 
 ### 2.6 Propagation Mechanism Comparison
 
-| Mechanism                 | Overhead    | Bash Support  | Bidirectional | Complexity | Recommended         |
-| ------------------------- | ----------- | ------------- | ------------- | ---------- | ------------------- |
-| **Environment Variables** | **Minimal** | **Excellent** | No            | **Low**    | **YES**             |
-| Command-Line Args         | Minimal     | Excellent     | No            | Low        | For debugging       |
-| File-Based (JSON)         | Medium      | Good          | Yes           | Medium     | For complex context |
-| stdin/stdout              | Low         | Good          | No            | Medium     | For pipelines       |
-| Unix Sockets              | Low         | Poor          | **Yes**       | **High**   | For daemons         |
+| Mechanism | Overhead | Bash Support | Bidirectional | Complexity | Recommended |
+| --- | --- | --- | --- | --- | --- |
+| **Environment Variables** | **Minimal** | **Excellent** | No | **Low** | **YES** |
+| Command-Line Args | Minimal | Excellent | No | Low | For debugging |
+| File-Based (JSON) | Medium | Good | Yes | Medium | For complex context |
+| stdin/stdout | Low | Good | No | Medium | For pipelines |
+| Unix Sockets | Low | Poor | **Yes** | **High** | For daemons |
 
 **Recommendation**: **Environment Variables** for simplicity + **File-Based JSON** for complex trace graphs
 
-______________________________________________________________________
+---
 
 ## 3. Bash-to-Python Integration Patterns
 
@@ -649,7 +649,7 @@ def is_circular_dependency(correlation_id: str, trace_id: str) -> bool:
     pass  # Implementation in section 4
 ```
 
-______________________________________________________________________
+---
 
 ### 3.2 Extracting IDs from JSON Input
 
@@ -712,7 +712,7 @@ def extract_trace_context(
     return context
 ```
 
-______________________________________________________________________
+---
 
 ### 3.3 Propagating to Subprocesses
 
@@ -765,7 +765,7 @@ def spawn_subprocess_with_trace(
     return result
 ```
 
-______________________________________________________________________
+---
 
 ## 4. Circular Dependency Detection Algorithms
 
@@ -821,7 +821,7 @@ CREATE INDEX idx_dependencies_from ON dependencies(from_span_id);
 CREATE INDEX idx_dependencies_to ON dependencies(to_span_id);
 ```
 
-______________________________________________________________________
+---
 
 ### 4.2 Topological Sort with Cycle Detection (Kahn's Algorithm)
 
@@ -946,7 +946,7 @@ def find_cycle_path(
     return []
 ```
 
-______________________________________________________________________
+---
 
 ### 4.3 DFS-Based Cycle Detection (Alternative)
 
@@ -996,7 +996,7 @@ def detect_cycle_graphlib(
         return True, str(e)
 ```
 
-______________________________________________________________________
+---
 
 ### 4.4 Loop Prevention Strategies
 
@@ -1095,7 +1095,7 @@ CREATE TABLE idempotent_operations (
 """
 ```
 
-______________________________________________________________________
+---
 
 #### 4.4.2 Circuit Breaker Pattern
 
@@ -1223,7 +1223,7 @@ CREATE TABLE circuit_breakers (
 """
 ```
 
-______________________________________________________________________
+---
 
 #### 4.4.3 Request Depth Limiting
 
@@ -1256,7 +1256,7 @@ def check_request_depth(
     return depth < max_depth, depth
 ```
 
-______________________________________________________________________
+---
 
 ## 5. Lightweight Tracing Libraries
 
@@ -1368,7 +1368,7 @@ with tracer.start_as_current_span("process_notification") as span:
 - Requires SDK setup
 - Overkill for simple tracing
 
-______________________________________________________________________
+---
 
 ### 5.2 Custom Lightweight Tracer
 
@@ -1489,7 +1489,7 @@ with tracer.span("orchestrator.launch_cli", correlation_id=cid) as span:
     subprocess.run(['claude', 'code'])
 ```
 
-______________________________________________________________________
+---
 
 ## 6. Reference Patterns from Production Systems
 
@@ -1520,7 +1520,7 @@ systemd-analyze critical-chain
 - Provide tools for visualization
 - Document that cycles are invalid (must be manually resolved)
 
-______________________________________________________________________
+---
 
 ### 6.2 Make Build System
 
@@ -1547,7 +1547,7 @@ make -Bnd | make2graph | dot -Tpng -o makefile.png
 - Timestamp-based change detection
 - Explicit error on circular dependencies
 
-______________________________________________________________________
+---
 
 ### 6.3 CI/CD Job Dependency Graphs
 
@@ -1597,7 +1597,7 @@ jobs:
 - Parallel execution where possible
 - Fail-fast on circular dependencies
 
-______________________________________________________________________
+---
 
 ## 7. Architecture Diagram
 
@@ -1688,7 +1688,7 @@ Query for cycle detection:
   → Build graph → Topological sort → Detect cycle
 ```
 
-______________________________________________________________________
+---
 
 ## 8. Complete SQLite Schema
 
@@ -1844,7 +1844,7 @@ JOIN spans s1 ON d.from_span_id = s1.span_id
 JOIN spans s2 ON d.to_span_id = s2.span_id;
 ```
 
-______________________________________________________________________
+---
 
 ## 9. Code Examples
 
@@ -1963,7 +1963,7 @@ SQL
 log_with_trace "INFO" "Stop hook completed successfully"
 ```
 
-______________________________________________________________________
+---
 
 ### 9.2 Python: Extract and Propagate Correlation IDs
 
@@ -2282,7 +2282,7 @@ if __name__ == '__main__':
     main()
 ```
 
-______________________________________________________________________
+---
 
 ### 9.3 Python: Build Request Graph from Logs
 
@@ -2472,53 +2472,46 @@ if __name__ == '__main__':
     export_graphviz_dot(graph, dot_file)
 ```
 
-______________________________________________________________________
+---
 
 ## 10. Recommendations Summary
 
 ### For Your Multi-Process System
 
 1. **Correlation ID Format**: Use **ULID** (sortable, compact, timestamp-embedded)
-
    - Bash: `uuidgen` for simplicity (fallback to UUID v4)
    - Python: `ulid.create()` library
 
 1. **Propagation Mechanism**: **Environment Variables** (primary) + **JSON files** (complex context)
-
    - Simple and Unix-native
    - Automatic inheritance across bash → Python → subprocess
    - Check `CORRELATION_ID` presence to detect loops
 
 1. **Parent-Child Tracking**: W3C Trace Context format
-
    - `TRACE_ID` (constant across request)
    - `SPAN_ID` (unique per process)
    - `PARENT_SPAN_ID` (link to parent)
 
 1. **Loop Detection**: **Three-layer approach**
-
    - **Layer 1**: Environment variable check (fast, immediate)
    - **Layer 2**: Topological sort before subprocess spawn (medium, comprehensive)
    - **Layer 3**: Idempotency tokens (slow, robust)
 
 1. **Storage**: **SQLite database** at `~/.claude/traces.db`
-
    - Lightweight (no external services)
    - Fast graph queries (indexed joins)
    - Schema provided in section 8
 
 1. **Tracing Library**: **Custom lightweight tracer** (section 5.2)
-
    - Avoid heavy OpenTelemetry SDK
    - Simple context manager API
    - Direct SQLite writes
 
 1. **Visualization**: **GraphViz export** + **ASCII tree**
-
    - Debug with `dot -Tpng trace.dot -o trace.png`
    - Quick inspection with ASCII tree in logs
 
-______________________________________________________________________
+---
 
 ## References
 
@@ -2529,6 +2522,6 @@ ______________________________________________________________________
 - Python graphlib: https://docs.python.org/3/library/graphlib.html
 - systemd Dependencies: https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 
-______________________________________________________________________
+---
 
 **End of Research Report**

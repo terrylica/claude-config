@@ -4,19 +4,19 @@
 
 **Status**: ✅ Installed and configured (October 2025)
 
-______________________________________________________________________
+---
 
 ## Stack Overview
 
-| Component      | Version                | Purpose                        |
-| -------------- | ---------------------- | ------------------------------ |
-| **MacTeX**     | 2025 (TeX Live 2025)   | Full LaTeX distribution        |
-| **latexmk**    | 4.86a (Dec 2024)       | Build automation, live preview |
-| **Skim**       | 1.7.11                 | PDF viewer with SyncTeX        |
-| **TeXShop**    | 5.57 (2025)            | Integrated LaTeX IDE           |
-| **tabularray** | Latest (TeX Live 2025) | Modern table system            |
+| Component | Version | Purpose |
+| --- | --- | --- |
+| **MacTeX** | 2025 (TeX Live 2025) | Full LaTeX distribution |
+| **latexmk** | 4.86a (Dec 2024) | Build automation, live preview |
+| **Skim** | 1.7.11 | PDF viewer with SyncTeX |
+| **TeXShop** | 5.57 (2025) | Integrated LaTeX IDE |
+| **tabularray** | Latest (TeX Live 2025) | Modern table system |
 
-______________________________________________________________________
+---
 
 ## Why This Stack?
 
@@ -47,7 +47,7 @@ ______________________________________________________________________
 - Replaces old packages (tabular, tabularx, longtable, booktabs)
 - **Critical**: Proper fixed-width column support
 
-______________________________________________________________________
+---
 
 ## Installation
 
@@ -88,7 +88,7 @@ defaults write -app Skim SKAutoReloadFileUpdate -boolean true
 brew install --cask texshop
 ```
 
-______________________________________________________________________
+---
 
 ## Configuration
 
@@ -119,7 +119,7 @@ $force_mode = 1;  # Force completion even with errors
 
 **Global config**: Copy to `~/.latexmkrc` for all projects
 
-______________________________________________________________________
+---
 
 ## Usage
 
@@ -163,7 +163,7 @@ latexmk -c document.tex  # Keep PDF
 latexmk -C document.tex  # Remove PDF too
 ```
 
-______________________________________________________________________
+---
 
 ### Workflow 2: TeXShop (Integrated IDE)
 
@@ -183,7 +183,7 @@ ______________________________________________________________________
 - Manual typesetting (not continuous)
 - Less flexible than Helix/VS Code
 
-______________________________________________________________________
+---
 
 ## Table Alignment: Critical Best Practices
 
@@ -229,7 +229,7 @@ ______________________________________________________________________
 1. **Define widths with `\newlength` for consistency**
 1. **Never use `X[width,align]` syntax** - it's unreliable
 
-______________________________________________________________________
+---
 
 ## SyncTeX: Forward and Inverse Search
 
@@ -262,7 +262,7 @@ This highlights the PDF location for line 42 in your `.tex` file.
 - Command: `/opt/homebrew/bin/hx` (for Helix)
 - Arguments: `%file:%line`
 
-______________________________________________________________________
+---
 
 ## Editor Integration
 
@@ -300,7 +300,7 @@ Use: **VimTeX** plugin
 - Full latexmk integration
 - SyncTeX with Skim works out-of-box
 
-______________________________________________________________________
+---
 
 ## Common LaTeX Packages for Cheat Sheets
 
@@ -321,7 +321,7 @@ ______________________________________________________________________
 \pagestyle{empty}
 ```
 
-______________________________________________________________________
+---
 
 ## Troubleshooting
 
@@ -366,7 +366,7 @@ latexmk -C document.tex  # Remove all generated files
 latexmk -pdf -pvc document.tex  # Rebuild from scratch
 ```
 
-______________________________________________________________________
+---
 
 ## Version Control: .gitignore for LaTeX
 
@@ -391,7 +391,7 @@ ______________________________________________________________________
 !.latexmkrc
 ```
 
-______________________________________________________________________
+---
 
 ## Resources
 
@@ -401,7 +401,7 @@ ______________________________________________________________________
 - **SyncTeX docs**: `texdoc synctex`
 - **TeXShop**: Bundled documentation in Help menu
 
-______________________________________________________________________
+---
 
 ## Real-World Example: Ghostty Cheat Sheet
 
@@ -428,7 +428,7 @@ latexmk -pdf -pvc ghostty-keybindings-fixed.tex
 
 Edit in Helix → Save → See changes in \<1 second
 
-______________________________________________________________________
+---
 
 ## Summary
 

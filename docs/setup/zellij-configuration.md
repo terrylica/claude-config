@@ -24,7 +24,7 @@ auto_exit_zellij_on_quit true               # Prevent nested shells
 - Crash recovery: Last 10,000 lines + viewport
 - Performance: Negligible overhead
 
-______________________________________________________________________
+---
 
 ## Historical Tracking Explained
 
@@ -51,7 +51,7 @@ ______________________________________________________________________
 - Want to scroll back immediately? Use larger `scroll_buffer_size`
 - Want to recover history after crash? Use larger `scrollback_lines_to_serialize`
 
-______________________________________________________________________
+---
 
 ## Configuration Options by Use Case
 
@@ -72,7 +72,7 @@ scrollback_editor "hx"
 - ~8 MB per pane memory
 - ~100-250 KB per session disk
 
-______________________________________________________________________
+---
 
 ### Option 2: Maximum Protection
 
@@ -93,7 +93,7 @@ scrollback_editor "hx"
 - ~16 MB per pane memory
 - Disk usage can reach 1-5 MB per session
 
-______________________________________________________________________
+---
 
 ### Option 3: Conservative (Low-Resource)
 
@@ -113,7 +113,7 @@ scrollback_editor "hx"
 - ~1.6 MB per pane memory
 - \<20 KB per session disk
 
-______________________________________________________________________
+---
 
 ### Option 4: Zero Recovery (No Serialization)
 
@@ -131,18 +131,18 @@ scrollback_lines_to_serialize 0
 - Nothing survives session close
 - ~1.6 MB per pane memory
 
-______________________________________________________________________
+---
 
 ## Memory vs. Disk Tradeoffs
 
-| Setting                | Memory/Pane | Disk/Session | Recovery     | Performance |
-| ---------------------- | ----------- | ------------ | ------------ | ----------- |
-| **Default (10K)**      | 1.6 MB      | 20-50 KB     | Layout only  | Fast        |
-| **Balanced (50K/10K)** | 8 MB        | 100-250 KB   | Full context | Good        |
-| **Maximum (100K/0)**   | 16 MB       | 500KB-5MB    | Complete     | Sluggish    |
-| **Conservative**       | 1.6 MB      | \<20 KB      | Minimal      | Fast        |
+| Setting | Memory/Pane | Disk/Session | Recovery | Performance |
+| --- | --- | --- | --- | --- |
+| **Default (10K)** | 1.6 MB | 20-50 KB | Layout only | Fast |
+| **Balanced (50K/10K)** | 8 MB | 100-250 KB | Full context | Good |
+| **Maximum (100K/0)** | 16 MB | 500KB-5MB | Complete | Sluggish |
+| **Conservative** | 1.6 MB | \<20 KB | Minimal | Fast |
 
-______________________________________________________________________
+---
 
 ## Performance Impact Analysis
 
@@ -150,12 +150,12 @@ ______________________________________________________________________
 
 **Per-pane estimates** (80 characters average line width):
 
-| Lines     | Memory | Comparison     |
-| --------- | ------ | -------------- |
-| 10,000    | 1.6 MB | Default Zellij |
-| 50,000    | 8 MB   | Your current   |
-| 100,000   | 16 MB  | Maximum        |
-| 1,000,000 | 160 MB | Warning zone   |
+| Lines | Memory | Comparison |
+| --- | --- | --- |
+| 10,000 | 1.6 MB | Default Zellij |
+| 50,000 | 8 MB | Your current |
+| 100,000 | 16 MB | Maximum |
+| 1,000,000 | 160 MB | Warning zone |
 
 **Scaling with multiple panes:**
 
@@ -179,7 +179,7 @@ Week 1:  ~1-2 MB (old snapshots auto-cleaned)
 Month 1: ~2-5 MB (steady state, Zellij cleans old data)
 ```
 
-______________________________________________________________________
+---
 
 ## Critical Issue: Very Long Lines
 
@@ -203,7 +203,7 @@ command > output.log
 tail -f output.log
 ```
 
-______________________________________________________________________
+---
 
 ## Practical Workflows
 
@@ -233,7 +233,7 @@ e
 :q                  # Exit
 ```
 
-______________________________________________________________________
+---
 
 ### Monitoring Disk Usage
 
@@ -252,20 +252,20 @@ find ~/.cache/zellij -type f -name "*.kdl" | wc -l
 sudo iotop | grep -i zellij
 ```
 
-______________________________________________________________________
+---
 
 ## Comparison with Other Multiplexers
 
 ### Zellij vs. tmux
 
-| Feature                | Zellij                | tmux                    |
-| ---------------------- | --------------------- | ----------------------- |
-| Default scrollback     | 10,000                | 2,000                   |
-| Memory efficiency      | Lower (Rust overhead) | Higher                  |
-| Session persistence    | Built-in              | Plugin (tmux-resurrect) |
-| Automatic recovery     | Yes (if configured)   | Manual                  |
-| Viewport serialization | Configurable          | N/A                     |
-| Empty session memory   | 80 MB                 | 6 MB                    |
+| Feature | Zellij | tmux |
+| --- | --- | --- |
+| Default scrollback | 10,000 | 2,000 |
+| Memory efficiency | Lower (Rust overhead) | Higher |
+| Session persistence | Built-in | Plugin (tmux-resurrect) |
+| Automatic recovery | Yes (if configured) | Manual |
+| Viewport serialization | Configurable | N/A |
+| Empty session memory | 80 MB | 6 MB |
 
 **For your use case (feature engineering):**
 
@@ -275,14 +275,14 @@ ______________________________________________________________________
 
 ### Zellij vs. screen
 
-| Feature             | Zellij   | screen         |
-| ------------------- | -------- | -------------- |
-| Default scrollback  | 10,000   | 100-1,024      |
-| Recommended         | 50,000   | 10,000-200,000 |
-| Session persistence | Modern   | Legacy         |
-| Memory usage        | Moderate | Light          |
+| Feature | Zellij | screen |
+| --- | --- | --- |
+| Default scrollback | 10,000 | 100-1,024 |
+| Recommended | 50,000 | 10,000-200,000 |
+| Session persistence | Modern | Legacy |
+| Memory usage | Moderate | Light |
 
-______________________________________________________________________
+---
 
 ## Cross-Machine Sync Considerations
 
@@ -313,7 +313,7 @@ scp ~/my-session.kdl user@machineB:~
 zellij --layout ~/my-session.kdl --session restored
 ```
 
-______________________________________________________________________
+---
 
 ## Troubleshooting
 
@@ -365,7 +365,7 @@ scroll_buffer_size 25000
 # pipe large output to less instead
 ```
 
-______________________________________________________________________
+---
 
 ## Monitoring Configuration Health
 
@@ -388,7 +388,7 @@ zellij setup --check
 zellij ls --exited | head -5
 ```
 
-______________________________________________________________________
+---
 
 ## References
 
@@ -404,7 +404,7 @@ ______________________________________________________________________
 - [Session Recovery](zellij-session-recovery.md) - Auto-recovery procedures
 - [Terminal Setup](terminal-setup.md) - Ghostty + Zellij integration
 
-______________________________________________________________________
+---
 
 ## See Also
 

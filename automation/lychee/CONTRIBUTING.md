@@ -79,7 +79,7 @@ Historical artifacts and deprecated code:
 - **`migrations/`** - Version migration documentation
 - **`deprecated-code/`** - Removed code (e.g., webhook infrastructure)
 
-______________________________________________________________________
+---
 
 ## Development Workflow
 
@@ -113,7 +113,7 @@ rm -rf state/completions/*.json
 find state/callbacks -name "*.json" -mtime +30 -delete
 ```
 
-______________________________________________________________________
+---
 
 ## Code Standards
 
@@ -169,7 +169,7 @@ temp_file.rename(state_dir / filename)
 (state_dir / filename).write_text(json.dumps(data))
 ```
 
-______________________________________________________________________
+---
 
 ## Event Store (SQLite)
 
@@ -199,7 +199,7 @@ sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE 
 sqlite3 state/events.db "SELECT event_type, metadata FROM session_events WHERE component = 'bot' ORDER BY timestamp DESC LIMIT 10;"
 ```
 
-______________________________________________________________________
+---
 
 ## SLOs
 
@@ -227,7 +227,7 @@ ______________________________________________________________________
 - **Measurement**: No duplicated configuration
 - **Validation**: Registry.json as canonical workspace source
 
-______________________________________________________________________
+---
 
 ## Common Tasks
 
@@ -266,7 +266,7 @@ launchctl unload ~/Library/LaunchAgents/com.user.lychee.telegram-handler.plist
 launchctl load ~/Library/LaunchAgents/com.user.lychee.telegram-handler.plist
 ```
 
-______________________________________________________________________
+---
 
 ## Architecture Decisions
 
@@ -293,7 +293,7 @@ ______________________________________________________________________
 - Observability: SQLite for correlation tracking
 - Queryability: Complex event analysis requires SQL
 
-______________________________________________________________________
+---
 
 ## Safety Guidelines
 
@@ -317,7 +317,7 @@ ______________________________________________________________________
 - Hook lychee validation
 - Error propagation
 
-______________________________________________________________________
+---
 
 ## Getting Help
 

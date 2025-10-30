@@ -242,15 +242,15 @@ Wrapper is trying to write to `/dev/tty` instead of `>&2`. Verify wrapper uses `
 
 ## Terminal Compatibility
 
-| Terminal     | Support        | Notes                    |
-| ------------ | -------------- | ------------------------ |
-| Ghostty      | ✅ Native      | Requires config          |
-| iTerm2       | ✅ Native      | v3.4.0+                  |
-| WezTerm      | ✅ Native      | Default enabled          |
-| Kitty        | ✅ Native      | Default enabled          |
-| Alacritty    | ⚠️ Partial     | Requires `osc52` feature |
-| tmux         | ✅ Passthrough | Requires wrapping        |
-| Terminal.app | ❌ None        | No OSC 52 support        |
+| Terminal | Support | Notes |
+| --- | --- | --- |
+| Ghostty | ✅ Native | Requires config |
+| iTerm2 | ✅ Native | v3.4.0+ |
+| WezTerm | ✅ Native | Default enabled |
+| Kitty | ✅ Native | Default enabled |
+| Alacritty | ⚠️ Partial | Requires `osc52` feature |
+| tmux | ✅ Passthrough | Requires wrapping |
+| Terminal.app | ❌ None | No OSC 52 support |
 
 ## References
 

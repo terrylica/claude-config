@@ -1,4 +1,4 @@
-______________________________________________________________________
+---
 
 ## name: research-scout description: Multi-perspective research agent performing parallel keyword exploration with batch processing capabilities including semantic analysis, credibility scoring, and evidence synthesis for knowledge mapping tools: Task, Bash, Glob, Grep, LS, ExitPlanMode, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, mcp\_\_ide\_\_getDiagnostics, mcp\_\_ide\_\_executeCode model: sonnet color: blue
 

@@ -11,24 +11,27 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
 
 # Fire-and-forget async formatting + AI auto-commit - exit immediately
 {
-    # Step 1: Run mdformat formatting on workspace files (includes table alignment)
+    # Step 1: Run prettier formatting on workspace files
+    # CRITICAL: Exclude ALL skills directories - YAML frontmatter must NEVER be touched
+    # Skills have special YAML frontmatter that formatters break
     find "$workspace_dir" -type f -name "*.md" \
         -not -path "*/node_modules/*" \
         -not -path "*/.git/*" \
+        -not -path "*/.claude/skills/*" \
+        -not -path "*/skills/*" \
         -not -path "*/file-history/*" \
         -not -path "*/plugins/*" \
-        -exec "$HOME/.local/bin/mdformat" \
-            --wrap keep \
-            {} + 2>/dev/null
+        -exec prettier --write --prose-wrap preserve {} \; 2>/dev/null
 
     # Step 1b: Also format markdown files in /tmp (no git operations for these)
     # Use /private/tmp on macOS since /tmp is a symlink
+    # Exclude skills directories here too
     find /private/tmp -maxdepth 3 -type f -name "*.md" \
-        -exec "$HOME/.local/bin/mdformat" \
-            --wrap keep \
-            {} + 2>/dev/null
+        -not -path "*/.claude/skills/*" \
+        -not -path "*/skills/*" \
+        -exec prettier --write --prose-wrap preserve {} \; 2>/dev/null
 
-    # Step 2: Check if mdformat made any changes
+    # Step 2: Check if prettier made any changes
     cd "$workspace_dir" 2>/dev/null || exit 0
 
     # Only proceed if we're in a git repository
@@ -36,25 +39,25 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
         exit 0
     fi
 
-    # Check for modified markdown files
-    if git diff --quiet '*.md' 2>/dev/null; then
+    # Check for modified markdown files (all subdirectories)
+    if git diff --quiet -- '*.md' '**/*.md' 2>/dev/null; then
         # No changes - exit silently
         exit 0
     fi
 
-    # Step 3: Stage mdformat changes
-    git add '*.md' 2>/dev/null || exit 0
+    # Step 3: Stage mdformat changes (all subdirectories)
+    git add -- '*.md' '**/*.md' 2>/dev/null || exit 0
 
     # Count and list changed files
-    changed_files=$(git diff --cached --name-only '*.md' 2>/dev/null | wc -l | tr -d ' ')
+    changed_files=$(git diff --cached --name-only -- '*.md' '**/*.md' 2>/dev/null | wc -l | tr -d ' ')
 
     if [[ "$changed_files" -eq 0 ]]; then
         exit 0
     fi
 
     # Get concise diff summary (first 50 lines to avoid token limits)
-    diff_summary=$(git diff --cached --stat '*.md' 2>/dev/null | head -50)
-    file_list=$(git diff --cached --name-only '*.md' 2>/dev/null)
+    diff_summary=$(git diff --cached --stat -- '*.md' '**/*.md' 2>/dev/null | head -50)
+    file_list=$(git diff --cached --name-only -- '*.md' '**/*.md' 2>/dev/null)
 
     # Step 4: Generate AI commit message using Claude Code headless mode (Haiku - cheapest model)
     commit_prompt="DISABLE_INTERLEAVED_THINKING

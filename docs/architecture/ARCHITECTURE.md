@@ -307,7 +307,7 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 - System-managed files excluded via `.gitignore`
 - Architecture documentation versioned with changes
 
-______________________________________________________________________
+---
 
 ## Workspace Reorganization Plan
 
@@ -368,7 +368,6 @@ The proposed reorganization enhances the existing structure:
 ### Reorganization Phases
 
 1. **Phase 1: Documentation** ✅ Complete (October 2025)
-
    - All specifications and guides created
    - Tool manifest documented
    - Target architecture defined
@@ -438,7 +437,7 @@ Automation target: `/tools/bin/workspace-health-check.sh`
 
 For detailed execution instructions, see `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md`.
 
-______________________________________________________________________
+---
 
 **Last Updated**: October 23, 2025 (Architecture version 2.2, Reorganization plan v1.0.0)
 **Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete
