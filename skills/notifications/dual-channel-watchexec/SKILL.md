@@ -1,8 +1,6 @@
----
-name: dual-channel-watchexec-notifications
-description: Send dual-channel notifications (Telegram + Pushover) on watchexec events with proper formatting and credentials. Use when monitoring file changes, process restarts, or setting up watchexec-triggered alerts. Covers HTML mode, credential management, and common pitfalls.
-allowed-tools: Read, Write, Edit, Bash
----
+______________________________________________________________________
+
+## name: dual-channel-watchexec-notifications description: Send dual-channel notifications (Telegram + Pushover) on watchexec events with proper formatting and credentials. Use when monitoring file changes, process restarts, or setting up watchexec-triggered alerts. Covers HTML mode, credential management, and common pitfalls. allowed-tools: Read, Write, Edit, Bash
 
 # Dual-Channel Watchexec Notifications
 
@@ -25,6 +23,7 @@ notify-script.sh <reason> <exit_code> <watchexec_info_file> <crash_context>
 ### Why HTML Mode
 
 **Industry Best Practice**:
+
 - Markdown/MarkdownV2 requires escaping 40+ special characters (`.`, `-`, `_`, etc.)
 - HTML only requires escaping 3 characters: `&`, `<`, `>`
 - More reliable, simpler, less error-prone
@@ -41,12 +40,14 @@ data = {
 ```
 
 **HTML Tags**:
+
 - Bold: `<b>text</b>`
 - Code: `<code>text</code>`
 - Italic: `<i>text</i>`
 - Code blocks: `<pre>text</pre>`
 
 **HTML Escaping** (Bash):
+
 ```bash
 # Escape special chars before sending
 ESCAPED=$(echo "$text" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
@@ -83,6 +84,7 @@ curl -s \
 ```
 
 **Priority Levels**:
+
 - `0`: Normal (default sound, respects quiet hours)
 - `1`: High (bypasses quiet hours, alert sound)
 
@@ -120,6 +122,7 @@ PUSHOVER_TOKEN=$(security find-generic-password -s 'pushover-app-token' -a 'user
 ### File Change Detection (macOS Compatible)
 
 **DO** (works on macOS):
+
 ```bash
 # Use stat to check modification time
 NOW=$(date +%s)
@@ -132,6 +135,7 @@ fi
 ```
 
 **DON'T** (broken on macOS):
+
 ```bash
 # find -newermt has different syntax on BSD/macOS
 find . -newermt "60 seconds ago"  # ❌ Fails on macOS
@@ -233,9 +237,10 @@ FILE_MTIME=$(stat -f %m "$file" 2>/dev/null || echo "0")  # macOS
 **Problem**: HTTP 400 errors with "Bad Request"
 
 **Causes**:
+
 1. Missing HTML escaping (`&`, `<`, `>`)
-2. Unclosed HTML tags
-3. Invalid HTML structure
+1. Unclosed HTML tags
+1. Invalid HTML structure
 
 **Solution**: Always escape special chars, validate HTML structure
 
@@ -289,26 +294,34 @@ Before deploying:
 - [ ] Tested with files containing special chars (`_`, `.`, `-`)
 - [ ] Both Telegram and Pushover successfully receiving
 
-## Reference Implementation
+## Example Scripts
 
-See: `/Users/terryli/.claude/automation/lychee/runtime/bot/notify-restart.sh`
+Self-contained examples in `examples/` directory:
 
-Complete working example with:
+- **`notify-restart.sh`**: Complete dual-channel notification script
+- **`bot-wrapper.sh`**: watchexec wrapper with restart detection
+- **`setup-example.sh`**: Full setup guide and systemd service
+
+All examples include:
+
 - HTML mode formatting
-- Dual-channel delivery
+- Dual-channel delivery (Telegram + Pushover)
 - Message archiving
 - watchexec integration
 - Crash context capture
-- Doppler credential loading
+- Multiple credential loading patterns
+
+See `reference.md` for detailed implementation notes.
 
 ## Summary
 
 **Key Lessons**:
+
 1. **Always use HTML mode** for Telegram (simpler escaping)
-2. **Escape only 3 chars** in HTML: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`
-3. **Archive messages** before sending for debugging
-4. **Use `stat`** for file detection on macOS (not `find -newermt`)
-5. **Load credentials** from env vars/Doppler (never hardcode)
-6. **Fire-and-forget** background notifications (don't block restarts)
+1. **Escape only 3 chars** in HTML: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`
+1. **Archive messages** before sending for debugging
+1. **Use `stat`** for file detection on macOS (not `find -newermt`)
+1. **Load credentials** from env vars/Doppler (never hardcode)
+1. **Fire-and-forget** background notifications (don't block restarts)
 
 **Token cost**: ~50 tokens until activated, ~1500 when loaded
