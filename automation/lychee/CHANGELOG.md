@@ -1,3 +1,32 @@
+## [5.4.0] - 2025-10-30
+
+### 🚀 Features
+
+- _(bot)_ Complete Phase 2: Migrate all messages from HTML to MarkdownV2
+- _(bot)_ Convert 15 message instances across 6 Python files
+- _(bot)_ Enable code block styling with gray background in Telegram
+- _(bot)_ Update notify-restart.sh to use telegramify-markdown inline
+
+### 🔄 Changes
+
+- _(handler_classes.py)_ Convert 5 message types to MarkdownV2 (notifications, completions, executions, summaries, fallbacks)
+- _(handlers.py)_ Convert 6 message types to MarkdownV2 (error messages, workflow confirmations)
+- _(message_builders.py)_ Add convert_to_telegram_markdown() to 3 builder functions
+- _(bot_services.py)_ Convert progress update messages to MarkdownV2
+- _(multi-workspace-bot.py)_ Convert 2 callback error messages to MarkdownV2
+- _(notify-restart.sh)_ Convert shell script messages, add telegramify-markdown to inline Python
+- All `parse_mode` changed from `HTML` to `MarkdownV2` (15 instances)
+
+### 📚 Documentation
+
+- Update telegram-markdownv2-migration.yaml with Phase 2 results
+- Document migration pattern and SLO validation status
+
+### ✅ Testing
+
+- Ready for validation: Bot startup, message delivery, code block rendering
+- Pending: Gray background verification, special character escaping validation
+
 ## [5.3.0] - 2025-10-30
 
 ### 🚀 Features
