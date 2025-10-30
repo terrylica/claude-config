@@ -381,7 +381,7 @@ class WorkflowExecutionHandler(BaseHandler):
                 # Build original context section (user prompt + assistant response)
                 original_context = ""
                 if user_prompt and last_response:
-                    original_context = f"❓ _{user_prompt}_\n{emoji} **{last_response}**\n\n"
+                    original_context = f"❓ _{user_prompt.strip()}_\n{emoji} **{last_response}**\n\n"
 
                 markdown_caption = (
                     f"{original_context}"  # Preserve original conversation context
@@ -650,7 +650,7 @@ class SummaryHandler(BaseHandler):
             lychee_details = lychee_status.get('details', 'Not run')
 
             # Build message with user prompt as first line if available
-            prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
+            prompt_line = f"❓ _{user_prompt.strip()}_\n" if user_prompt else ""
 
             # Compact session + debug log line
             session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"

@@ -82,7 +82,7 @@ def build_workflow_start_message(
         last_response = escape_markdown(last_response)
 
     # Build message with full context
-    prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
+    prompt_line = f"❓ _{user_prompt.strip()}_\n" if user_prompt else ""
 
     # Escape lychee details
     lychee_details = lychee_status.get('details', 'Not run')
