@@ -25,6 +25,20 @@ echo "========================================================================"
 HOSTNAME_SHORT="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo 'unknown')"
 PID="$$"
 
+# Get Claude Code session ID (from environment or recent session)
+CLAUDE_SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+if [[ -z "$CLAUDE_SESSION_ID" ]]; then
+    # Try to get most recent session from Claude Code debug dir
+    LATEST_SESSION=$(ls -t ~/.claude/debug/*.txt 2>/dev/null | head -1 | xargs -I {} basename {} .txt 2>/dev/null || echo "unknown")
+    CLAUDE_SESSION_ID="$LATEST_SESSION"
+fi
+
+# Get git branch and working directory
+BOT_DIR="/Users/terryli/.claude/automation/lychee/runtime/bot"
+cd "$BOT_DIR" 2>/dev/null || true
+GIT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+WORKING_DIR=$(pwd | sed "s|^$HOME|~|")  # Replace home with tilde
+
 # Parse watchexec diagnostic info if available
 WATCHEXEC_DETAILS=""
 CHANGED_FILES=""
@@ -95,30 +109,53 @@ if [[ "$REASON" == "startup" ]]; then
     PUSHOVER_SOUND="cosmic"
 elif [[ "$REASON" == "code_change" ]]; then
     EMOJI="🔄"
-    STATUS="Restarted (code change)"
+    STATUS="Restarted"
     PRIORITY="normal"
     PUSHOVER_SOUND="bike"
 elif [[ "$REASON" == "crash" ]]; then
     EMOJI="💥"
-    STATUS="Restarted (crash)"
+    STATUS="Crashed"
     PRIORITY="high"
     PUSHOVER_SOUND="siren"
 else
     EMOJI="⚠️"
-    STATUS="Restarted ($REASON)"
+    STATUS="Restarted"
     PRIORITY="normal"
     PUSHOVER_SOUND="cosmic"
 fi
 
-# Build detailed message (HTML format)
-MESSAGE="$EMOJI <b>Telegram Bot $STATUS</b>
+# Build session debug line (matches format from message_builders.py)
+SESSION_DEBUG_LINE="session=$CLAUDE_SESSION_ID | 🐛 debug=~/.claude/debug/\${session}.txt"
 
-<b>Host</b>: <code>$HOSTNAME_SHORT</code>
-<b>Time</b>: $TIMESTAMP
-<b>PID</b>: $PID
-<b>Exit Code</b>: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO
+# Build message (HTML format, simplified like other Telegram messages)
+if [[ "$REASON" == "crash" ]]; then
+    # For crashes, show exit code and crash details
+    MESSAGE="$EMOJI <b>Bot $STATUS</b>
 
-<i>Monitoring: watchexec</i>"
+<b>Directory</b>: <code>$WORKING_DIR</code>
+<b>Branch</b>: <code>$GIT_BRANCH</code>
+<code>$SESSION_DEBUG_LINE</code>
+
+<b>Exit Code</b>: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO"
+else
+    # For normal restarts, simplified format (no exit code, no host, no monitoring)
+    if [[ -n "$WATCHEXEC_DETAILS" ]]; then
+        # Code change restart - show trigger and action
+        MESSAGE="$EMOJI <b>Bot $STATUS</b>
+
+<b>Directory</b>: <code>$WORKING_DIR</code>
+<b>Branch</b>: <code>$GIT_BRANCH</code>
+<code>$SESSION_DEBUG_LINE</code>
+$WATCHEXEC_DETAILS"
+    else
+        # Startup or other reason
+        MESSAGE="$EMOJI <b>Bot $STATUS</b>
+
+<b>Directory</b>: <code>$WORKING_DIR</code>
+<b>Branch</b>: <code>$GIT_BRANCH</code>
+<code>$SESSION_DEBUG_LINE</code>"
+    fi
+fi
 
 # Save message to persistent file for debugging
 MESSAGE_ARCHIVE_DIR="/Users/terryli/.claude/automation/lychee/logs/notification-archive"

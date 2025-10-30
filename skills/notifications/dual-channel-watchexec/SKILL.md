@@ -56,16 +56,36 @@ MESSAGE="<b>Alert</b>: <code>$ESCAPED</code>"
 
 ### Message Template
 
+**Simplified format** (matches other Telegram messages in the system):
+
 ```bash
+# Build session debug line
+SESSION_DEBUG_LINE="session=$CLAUDE_SESSION_ID | 🐛 debug=~/.claude/debug/\${session}.txt"
+
+# Normal restart (code change or startup)
 MESSAGE="$EMOJI <b>Bot $STATUS</b>
 
-<b>Host</b>: <code>$HOSTNAME</code>
-<b>Time</b>: $TIMESTAMP
-<b>PID</b>: $PID
-<b>Exit Code</b>: $EXIT_CODE
+<b>Directory</b>: <code>$WORKING_DIR</code>
+<b>Branch</b>: <code>$GIT_BRANCH</code>
+<code>$SESSION_DEBUG_LINE</code>
+$WATCHEXEC_DETAILS"
 
-<i>Monitoring: watchexec</i>"
+# Crash (includes exit code and error details)
+MESSAGE="$EMOJI <b>Bot Crashed</b>
+
+<b>Directory</b>: <code>$WORKING_DIR</code>
+<b>Branch</b>: <code>$GIT_BRANCH</code>
+<code>$SESSION_DEBUG_LINE</code>
+
+<b>Exit Code</b>: $EXIT_CODE
+$CRASH_INFO"
 ```
+
+**Why this format**:
+- Consistent with other Telegram messages (workflow completions, notifications)
+- Removes unnecessary info (host, monitoring system, timestamp)
+- Adds context (session ID, branch, directory)
+- Exit code only shown for crashes (not for normal restarts with exit code 0)
 
 ## Pushover Integration
 
@@ -89,6 +109,39 @@ curl -s \
 - `1`: High (bypasses quiet hours, alert sound)
 
 **Sounds**: `cosmic`, `bike`, `siren`, etc.
+
+### ⚠️ CRITICAL: Pushover Does NOT Support HTML
+
+**Pushover uses plain text only** - you MUST strip HTML tags before sending:
+
+```bash
+# ❌ WRONG - Pushover will display literal HTML tags
+PUSHOVER_MESSAGE="<b>Alert</b>: <code>file.py</code>"
+# User sees: <b>Alert</b>: <code>file.py</code>
+
+# ✅ CORRECT - Strip HTML tags for plain text
+CHANGED_FILES_PLAIN=$(echo "$CHANGED_FILES" | sed 's/<[^>]*>//g')
+PUSHOVER_MESSAGE="Alert: $CHANGED_FILES_PLAIN"
+# User sees: Alert: file.py
+```
+
+**Why This Matters**:
+
+- Telegram uses HTML mode for formatting
+- Pushover does NOT interpret HTML
+- Sending HTML to Pushover shows ugly `<code>`, `<b>` tags in notification
+- Always strip tags: `sed 's/<[^>]*>//g'`
+
+**Pattern**: Build message in HTML for Telegram, then strip tags for Pushover:
+
+```bash
+# 1. Build HTML message for Telegram
+MESSAGE_HTML="<b>File</b>: <code>handler_classes.py</code>"
+
+# 2. Strip HTML for Pushover
+MESSAGE_PLAIN=$(echo "$MESSAGE_HTML" | sed 's/<[^>]*>//g')
+# Result: "File: handler_classes.py"
+```
 
 ## Credential Management
 
@@ -181,7 +234,28 @@ ARCHIVE_EOF
 
 ## Common Pitfalls
 
-### Pitfall 1: Markdown Escaping Hell
+### Pitfall 1: Pushover Shows HTML Tags (CRITICAL)
+
+**Problem**: Pushover displays literal `<code>`, `<b>`, `</code>` in notifications
+
+**Cause**: Pushover uses **plain text only** - does NOT interpret HTML
+
+**Solution**: Strip HTML tags before sending to Pushover
+
+```bash
+# ❌ WRONG - Sends HTML to Pushover
+PUSHOVER_MESSAGE="Modified: <code>handler_classes.py</code>"
+# User sees: Modified: <code>handler_classes.py</code>
+
+# ✅ CORRECT - Strip HTML tags
+CHANGED_FILES_PLAIN=$(echo "$CHANGED_FILES" | sed 's/<[^>]*>//g')
+PUSHOVER_MESSAGE="Modified: $CHANGED_FILES_PLAIN"
+# User sees: Modified: handler_classes.py
+```
+
+**Remember**: Telegram = HTML, Pushover = Plain Text
+
+### Pitfall 2: Markdown Escaping Hell
 
 **Problem**: Files with underscores (`handler_classes.py`) display as `handlerclasses.py`
 
@@ -198,7 +272,7 @@ FILENAME=$(basename "$file" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 MESSAGE="Modified: <code>$FILENAME</code>"  # Renders: handler_classes.py
 ```
 
-### Pitfall 2: Literal Variable Names Sent
+### Pitfall 3: Literal Variable Names Sent
 
 **Problem**: Telegram receives literal text `"$MESSAGE"` instead of content
 
