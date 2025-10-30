@@ -11,6 +11,7 @@
 **Location**: `automation/lychee/archive/v5.5.0-legacy-notification-system/`
 
 **Contents**:
+
 - `README.md` - Comprehensive archive documentation
 - `MIGRATION.md` - v3 → v4 migration timeline and patterns
 - `legacy-notification-code.sh` - Archived code (53 lines from check-links-hybrid.sh)
@@ -18,6 +19,7 @@
 ### 🏗️ System Audit Results
 
 All state directories confirmed as active:
+
 - ✅ `callbacks/` - 300 files (callback query state)
 - ✅ `completions/` - Orchestrator workflow completions
 - ✅ `executions/` - Orchestrator workflow results

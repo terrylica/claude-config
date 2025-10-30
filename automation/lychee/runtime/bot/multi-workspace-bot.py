@@ -88,7 +88,7 @@ WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-IDLE_TIMEOUT_SECONDS = 1800  # 30 minutes
+IDLE_TIMEOUT_SECONDS = int(os.getenv("BOT_IDLE_TIMEOUT", "0"))  # 0 = disabled (development), set env var for production
 POLL_INTERVAL = 1.0  # seconds
 POLL_TIMEOUT = 10  # API request timeout
 PROGRESS_POLL_INTERVAL = 2.0  # Progress updates every 2 seconds

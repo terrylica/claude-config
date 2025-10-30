@@ -217,6 +217,13 @@ async def progress_poller(
 
 async def idle_timeout_monitor(idle_timeout_seconds: int) -> None:
     """Monitor idle time and request shutdown if timeout exceeded."""
+    if idle_timeout_seconds == 0:
+        print(f"⏱️  Idle timeout monitor: DISABLED (running continuously)")
+        # Just wait for shutdown signal, don't enforce timeout
+        while not bot_state.shutdown_requested:
+            await asyncio.sleep(60)  # Check every minute
+        return
+
     print(f"⏱️  Idle timeout monitor started ({idle_timeout_seconds}s)")
 
     while not bot_state.shutdown_requested:
