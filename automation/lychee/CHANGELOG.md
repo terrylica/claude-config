@@ -1,3 +1,36 @@
+## [5.5.0] - 2025-10-30
+
+### ⚠️ BREAKING CHANGES
+
+- _(hook)_ Stop hook no longer starts Telegram bot automatically
+- Bot must be started manually via `run-bot-dev-watchexec.sh` or `run-bot-prod.sh`
+- Old pattern (hook starts bot) replaced with continuous process pattern (bot runs independently)
+
+### 🔄 Refactoring
+
+- _(hook)_ Remove legacy bot-starting code from Stop hook (97 lines across 2 locations)
+- Stop hook now ONLY creates SessionSummary files
+- Bot picks up summary files automatically via periodic scanning
+
+### 🏗️ Architecture
+
+- **OLD**: Stop hook → Create summary → Start bot (if not running) → Bot sends message
+- **NEW**: Bot runs continuously → Stop hook creates summary → Bot picks up summary automatically
+
+### 🐛 Bug Fixes
+
+- Eliminate race conditions from multiple bot instances
+- Prevent duplicate Telegram messages from legacy senders
+- Fix root cause of `❓ [` formatting issues (legacy sender bypassing MarkdownV2 fixes)
+
+### 📚 Documentation
+
+- Add Phase 5 comments to check-links-hybrid.sh explaining continuous process pattern
+
+### 🎯 Rationale
+
+Migration to continuous bot process pattern following Unix philosophy (do one thing well). Hooks should be stateless and side-effect-free - only emit data files, not manage processes. This eliminates the root cause of message formatting issues from legacy sender code that bypassed Phase 2 MarkdownV2 migration.
+
 ## [5.4.0] - 2025-10-30
 
 ### 🚀 Features
