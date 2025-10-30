@@ -1,0 +1,314 @@
+---
+name: dual-channel-watchexec-notifications
+description: Send dual-channel notifications (Telegram + Pushover) on watchexec events with proper formatting and credentials. Use when monitoring file changes, process restarts, or setting up watchexec-triggered alerts. Covers HTML mode, credential management, and common pitfalls.
+allowed-tools: Read, Write, Edit, Bash
+---
+
+# Dual-Channel Watchexec Notifications
+
+Send reliable notifications to both Telegram and Pushover when watchexec detects file changes or process crashes.
+
+## Core Pattern
+
+**watchexec wrapper script** → **detect event** → **notify-script** → **Telegram + Pushover**
+
+```bash
+# wrapper.sh - Monitors process and detects restart reasons
+watchexec --restart -- python bot.py
+
+# On event, call:
+notify-script.sh <reason> <exit_code> <watchexec_info_file> <crash_context>
+```
+
+## Telegram: Use HTML Mode (NOT Markdown)
+
+### Why HTML Mode
+
+**Industry Best Practice**:
+- Markdown/MarkdownV2 requires escaping 40+ special characters (`.`, `-`, `_`, etc.)
+- HTML only requires escaping 3 characters: `&`, `<`, `>`
+- More reliable, simpler, less error-prone
+
+### HTML Formatting
+
+```python
+# Python API call
+data = {
+    'chat_id': chat_id,
+    'text': message,
+    'parse_mode': 'HTML'  # NOT 'Markdown' or 'MarkdownV2'
+}
+```
+
+**HTML Tags**:
+- Bold: `<b>text</b>`
+- Code: `<code>text</code>`
+- Italic: `<i>text</i>`
+- Code blocks: `<pre>text</pre>`
+
+**HTML Escaping** (Bash):
+```bash
+# Escape special chars before sending
+ESCAPED=$(echo "$text" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+MESSAGE="<b>Alert</b>: <code>$ESCAPED</code>"
+```
+
+### Message Template
+
+```bash
+MESSAGE="$EMOJI <b>Bot $STATUS</b>
+
+<b>Host</b>: <code>$HOSTNAME</code>
+<b>Time</b>: $TIMESTAMP
+<b>PID</b>: $PID
+<b>Exit Code</b>: $EXIT_CODE
+
+<i>Monitoring: watchexec</i>"
+```
+
+## Pushover Integration
+
+### API Call Pattern
+
+```bash
+curl -s \
+  --form-string "token=$PUSHOVER_APP_TOKEN" \
+  --form-string "user=$PUSHOVER_USER_KEY" \
+  --form-string "device=device_name" \
+  --form-string "title=$TITLE" \
+  --form-string "message=$MESSAGE" \
+  --form-string "sound=$SOUND" \
+  --form-string "priority=$PRIORITY" \
+  https://api.pushover.net/1/messages.json
+```
+
+**Priority Levels**:
+- `0`: Normal (default sound, respects quiet hours)
+- `1`: High (bypasses quiet hours, alert sound)
+
+**Sounds**: `cosmic`, `bike`, `siren`, etc.
+
+## Credential Management
+
+### Pattern 1: Doppler (Recommended)
+
+```bash
+# Load from Doppler project
+export TELEGRAM_BOT_TOKEN=$(doppler secrets get TELEGRAM_BOT_TOKEN --plain)
+export TELEGRAM_CHAT_ID=$(doppler secrets get TELEGRAM_CHAT_ID --plain)
+```
+
+### Pattern 2: Environment Variables
+
+```bash
+# From shell environment
+if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+    # Send notification
+fi
+```
+
+### Pattern 3: Keychain (macOS)
+
+```bash
+PUSHOVER_TOKEN=$(security find-generic-password -s 'pushover-app-token' -a 'username' -w 2>/dev/null)
+```
+
+**Security**: Never hardcode credentials in scripts or skill files!
+
+## watchexec Integration
+
+### File Change Detection (macOS Compatible)
+
+**DO** (works on macOS):
+```bash
+# Use stat to check modification time
+NOW=$(date +%s)
+FILE_MTIME=$(stat -f %m "$file" 2>/dev/null || echo "0")
+AGE=$((NOW - FILE_MTIME))
+
+if [[ $AGE -lt 60 ]]; then
+    echo "File modified ${AGE}s ago"
+fi
+```
+
+**DON'T** (broken on macOS):
+```bash
+# find -newermt has different syntax on BSD/macOS
+find . -newermt "60 seconds ago"  # ❌ Fails on macOS
+```
+
+### Restart Reason Detection
+
+```bash
+# Determine why process restarted
+if [[ ! -f "$FIRST_RUN_MARKER" ]]; then
+    REASON="startup"
+    touch "$FIRST_RUN_MARKER"
+elif [[ $EXIT_CODE -ne 0 ]]; then
+    REASON="crash"
+else
+    REASON="code_change"
+fi
+```
+
+## Message Archiving (Debugging)
+
+Always save messages before sending for post-mortem debugging:
+
+```bash
+MESSAGE_ARCHIVE_DIR="/path/to/logs/notification-archive"
+mkdir -p "$MESSAGE_ARCHIVE_DIR"
+MESSAGE_FILE="$MESSAGE_ARCHIVE_DIR/$(date '+%Y%m%d-%H%M%S')-$REASON-$PID.txt"
+
+cat > "$MESSAGE_FILE" <<ARCHIVE_EOF
+========================================================================
+Timestamp: $TIMESTAMP
+Reason: $REASON
+Exit Code: $EXIT_CODE
+
+--- TELEGRAM MESSAGE ---
+$MESSAGE
+
+--- CONTEXT ---
+$(cat "$WATCHEXEC_INFO_FILE" 2>/dev/null || echo "Not available")
+========================================================================
+ARCHIVE_EOF
+```
+
+## Common Pitfalls
+
+### Pitfall 1: Markdown Escaping Hell
+
+**Problem**: Files with underscores (`handler_classes.py`) display as `handlerclasses.py`
+
+**Cause**: Markdown treats `_` as italic marker
+
+**Solution**: Use HTML mode, wrap in `<code>` tags
+
+```bash
+# ❌ WRONG (Markdown)
+MESSAGE="Modified: handler_classes.py"  # Renders: handlerclasses.py
+
+# ✅ CORRECT (HTML)
+FILENAME=$(basename "$file" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+MESSAGE="Modified: <code>$FILENAME</code>"  # Renders: handler_classes.py
+```
+
+### Pitfall 2: Literal Variable Names Sent
+
+**Problem**: Telegram receives literal text `"$MESSAGE"` instead of content
+
+**Cause**: Heredoc with quotes prevents variable expansion
+
+**Solution**: Use heredoc WITHOUT quotes
+
+```bash
+# ❌ WRONG
+cat > "$FILE" <<'MSGEOF'
+$MESSAGE
+MSGEOF
+
+# ✅ CORRECT
+cat > "$FILE" <<MSGEOF
+$MESSAGE
+MSGEOF
+```
+
+### Pitfall 3: macOS File Detection Failures
+
+**Problem**: Empty Trigger/Action fields, no file detected
+
+**Cause**: `find -newermt` syntax differs on BSD (macOS) vs GNU (Linux)
+
+**Solution**: Use `stat` instead of `find -newermt`
+
+```bash
+# ✅ CORRECT (portable)
+FILE_MTIME=$(stat -f %m "$file" 2>/dev/null || echo "0")  # macOS
+# For Linux: stat -c %Y "$file"
+```
+
+### Pitfall 4: Telegram 400 Bad Request
+
+**Problem**: HTTP 400 errors with "Bad Request"
+
+**Causes**:
+1. Missing HTML escaping (`&`, `<`, `>`)
+2. Unclosed HTML tags
+3. Invalid HTML structure
+
+**Solution**: Always escape special chars, validate HTML structure
+
+```bash
+# Test message before sending
+echo "$MESSAGE" | grep -E '<[^>]*$'  # Check for unclosed tags
+```
+
+### Pitfall 5: Hardcoded Credentials
+
+**Problem**: Secrets leaked in git, exposed in logs
+
+**Solution**: Use env vars, Doppler, or keychain
+
+```bash
+# ❌ WRONG
+TELEGRAM_BOT_TOKEN="1234567890:ABC..."
+
+# ✅ CORRECT
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+if [[ -z "$TELEGRAM_BOT_TOKEN" ]]; then
+    echo "Error: TELEGRAM_BOT_TOKEN not set"
+    exit 1
+fi
+```
+
+## Execution Pattern
+
+### Fire-and-Forget Background Notifications
+
+Don't block process restart on notification delivery:
+
+```bash
+# Run notification in background (non-blocking)
+"$NOTIFY_SCRIPT" "crash" "$EXIT_CODE" "$INFO_FILE" "$CONTEXT_FILE" &
+
+# Process continues/restarts immediately
+```
+
+## Validation Checklist
+
+Before deploying:
+
+- [ ] Using HTML parse mode for Telegram (not Markdown)
+- [ ] HTML escaping applied to all dynamic content (`&`, `<`, `>`)
+- [ ] Credentials loaded from env vars/Doppler (not hardcoded)
+- [ ] Message archiving enabled for debugging
+- [ ] File detection uses `stat` (not `find -newermt`)
+- [ ] Heredocs use unquoted delimiters for variable expansion
+- [ ] Notifications run in background (fire-and-forget)
+- [ ] Tested with files containing special chars (`_`, `.`, `-`)
+- [ ] Both Telegram and Pushover successfully receiving
+
+## Reference Implementation
+
+See: `/Users/terryli/.claude/automation/lychee/runtime/bot/notify-restart.sh`
+
+Complete working example with:
+- HTML mode formatting
+- Dual-channel delivery
+- Message archiving
+- watchexec integration
+- Crash context capture
+- Doppler credential loading
+
+## Summary
+
+**Key Lessons**:
+1. **Always use HTML mode** for Telegram (simpler escaping)
+2. **Escape only 3 chars** in HTML: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`
+3. **Archive messages** before sending for debugging
+4. **Use `stat`** for file detection on macOS (not `find -newermt`)
+5. **Load credentials** from env vars/Doppler (never hardcode)
+6. **Fire-and-forget** background notifications (don't block restarts)
+
+**Token cost**: ~50 tokens until activated, ~1500 when loaded
