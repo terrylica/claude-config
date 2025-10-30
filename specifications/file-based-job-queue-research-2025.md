@@ -16,26 +16,26 @@ This research evaluates modern file-based job queue and task coordination system
 
 ### Job Queue Systems
 
-| Library           | GitHub Stars | Last Update         | Python Support | Maintenance Status | License      |
-| ----------------- | ------------ | ------------------- | -------------- | ------------------ | ------------ |
-| **huey**          | 5.7k         | 2025-03-19 (v2.5.3) | 3.x            | Active             | MIT          |
-| **diskcache**     | 2.7k         | 2024-08             | 3.6-3.10+      | Active             | Apache-2.0   |
-| **persist-queue** | 365          | 2024-11 (v1.0.0)    | 3.5+           | Active             | BSD-3-Clause |
-| **litequeue**     | 213          | 2025-02-10 (v0.6)   | 3.x            | Active             | MIT          |
+| Library | GitHub Stars | Last Update | Python Support | Maintenance Status | License |
+| --- | --- | --- | --- | --- | --- |
+| **huey** | 5.7k | 2025-03-19 (v2.5.3) | 3.x | Active | MIT |
+| **diskcache** | 2.7k | 2024-08 | 3.6-3.10+ | Active | Apache-2.0 |
+| **persist-queue** | 365 | 2024-11 (v1.0.0) | 3.5+ | Active | BSD-3-Clause |
+| **litequeue** | 213 | 2025-02-10 (v0.6) | 3.x | Active | MIT |
 
 ### File Locking Libraries
 
-| Library         | GitHub Stars | Last Update          | Python Support | Cross-Platform     | License      |
-| --------------- | ------------ | -------------------- | -------------- | ------------------ | ------------ |
-| **filelock**    | 901          | 2025-10-08 (v3.20.0) | 3.x            | Yes                | Unlicense    |
-| **portalocker** | 310          | 2025-06-14 (v3.2.0)  | 3.x            | Yes (Windows/Unix) | BSD-3-Clause |
+| Library | GitHub Stars | Last Update | Python Support | Cross-Platform | License |
+| --- | --- | --- | --- | --- | --- |
+| **filelock** | 901 | 2025-10-08 (v3.20.0) | 3.x | Yes | Unlicense |
+| **portalocker** | 310 | 2025-06-14 (v3.2.0) | 3.x | Yes (Windows/Unix) | BSD-3-Clause |
 
 ### File System Monitoring
 
-| Library          | Type            | Best For      | Notes                                           |
-| ---------------- | --------------- | ------------- | ----------------------------------------------- |
-| **watchdog**     | Cross-platform  | Production    | Uses inotify (Linux), FSEvents (macOS), polling |
-| **os.replace()** | Built-in (3.3+) | Atomic writes | Atomic on same filesystem                       |
+| Library | Type | Best For | Notes |
+| --- | --- | --- | --- |
+| **watchdog** | Cross-platform | Production | Uses inotify (Linux), FSEvents (macOS), polling |
+| **os.replace()** | Built-in (3.3+) | Atomic writes | Atomic on same filesystem |
 
 ---
 
@@ -775,14 +775,14 @@ def read_and_delete_notification(notification_id):
 
 ## Migration Complexity Assessment
 
-| Solution                  | Complexity | Effort   | Benefits                              |
-| ------------------------- | ---------- | -------- | ------------------------------------- |
-| **SQLite Queue (custom)** | Medium     | 2-3 days | Maximum control, perfect fit          |
-| **persist-queue**         | Easy       | 1 day    | Drop-in replacement, ack pattern      |
-| **filelock wrapper**      | Easy       | 1 day    | Minimal changes, keeps current design |
-| **huey**                  | Medium     | 3-5 days | Full task queue, overkill for needs   |
-| **diskcache**             | Easy       | 1-2 days | Good performance, cache-focused       |
-| **litequeue**             | Easy       | 1-2 days | Lightweight, less mature              |
+| Solution | Complexity | Effort | Benefits |
+| --- | --- | --- | --- |
+| **SQLite Queue (custom)** | Medium | 2-3 days | Maximum control, perfect fit |
+| **persist-queue** | Easy | 1 day | Drop-in replacement, ack pattern |
+| **filelock wrapper** | Easy | 1 day | Minimal changes, keeps current design |
+| **huey** | Medium | 3-5 days | Full task queue, overkill for needs |
+| **diskcache** | Easy | 1-2 days | Good performance, cache-focused |
+| **litequeue** | Easy | 1-2 days | Lightweight, less mature |
 
 ---
 

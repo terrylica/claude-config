@@ -24,16 +24,16 @@ After comprehensive research of Python async task queue systems that don't requi
 
 ## Library Comparison Matrix
 
-| Library           | Async Support               | Storage Backend     | Maintenance         | Cross-Process | Bash Integration          | Performance                          |
-| ----------------- | --------------------------- | ------------------- | ------------------- | ------------- | ------------------------- | ------------------------------------ |
-| **persist-queue** | ✅ Native (v1.1.0+)         | SQLite3/File/MySQL  | ✅ Active           | ✅ Yes        | ✅ Direct SQLite          | ⭐⭐⭐⭐⭐ 2-4x faster with WAL      |
-| **litequeue**     | ⚠️ Manual wrapper           | SQLite3             | ⚠️ Inactive         | ✅ Yes        | ✅ Direct SQLite          | ⭐⭐⭐ Lightweight                   |
-| **aiodiskqueue**  | ✅ Native                   | SQLite3/DbmEngine   | ✅ Active           | ✅ Yes        | ⚠️ Requires Python client | ⭐⭐⭐⭐ 3x slower than DbmEngine    |
-| **Huey**          | ⚠️ Partial (result polling) | Redis/SQLite/Memory | ✅ Active           | ✅ Yes        | ⚠️ Requires worker daemon | ⭐⭐⭐⭐ Good with SQLite            |
-| **taskiq**        | ✅ Native                   | Redis/RabbitMQ/NATS | ✅ Active           | ✅ Yes        | ❌ No file backend        | N/A - requires broker                |
-| **SAQ**           | ✅ Native                   | Redis/Postgres      | ✅ Active           | ✅ Yes        | ❌ No file backend        | ⭐⭐⭐⭐⭐ Fastest (but needs Redis) |
-| **Dramatiq**      | ⚠️ async-dramatiq fork      | Redis/RabbitMQ      | ✅ Active           | ✅ Yes        | ❌ No SQLite backend      | ⭐⭐⭐⭐ Fast with Redis             |
-| **ARQ**           | ✅ Native                   | Redis only          | ⚠️ Maintenance mode | ✅ Yes        | ❌ Redis required         | ⭐⭐⭐⭐⭐ Very fast                 |
+| Library | Async Support | Storage Backend | Maintenance | Cross-Process | Bash Integration | Performance |
+| --- | --- | --- | --- | --- | --- | --- |
+| **persist-queue** | ✅ Native (v1.1.0+) | SQLite3/File/MySQL | ✅ Active | ✅ Yes | ✅ Direct SQLite | ⭐⭐⭐⭐⭐ 2-4x faster with WAL |
+| **litequeue** | ⚠️ Manual wrapper | SQLite3 | ⚠️ Inactive | ✅ Yes | ✅ Direct SQLite | ⭐⭐⭐ Lightweight |
+| **aiodiskqueue** | ✅ Native | SQLite3/DbmEngine | ✅ Active | ✅ Yes | ⚠️ Requires Python client | ⭐⭐⭐⭐ 3x slower than DbmEngine |
+| **Huey** | ⚠️ Partial (result polling) | Redis/SQLite/Memory | ✅ Active | ✅ Yes | ⚠️ Requires worker daemon | ⭐⭐⭐⭐ Good with SQLite |
+| **taskiq** | ✅ Native | Redis/RabbitMQ/NATS | ✅ Active | ✅ Yes | ❌ No file backend | N/A - requires broker |
+| **SAQ** | ✅ Native | Redis/Postgres | ✅ Active | ✅ Yes | ❌ No file backend | ⭐⭐⭐⭐⭐ Fastest (but needs Redis) |
+| **Dramatiq** | ⚠️ async-dramatiq fork | Redis/RabbitMQ | ✅ Active | ✅ Yes | ❌ No SQLite backend | ⭐⭐⭐⭐ Fast with Redis |
+| **ARQ** | ✅ Native | Redis only | ⚠️ Maintenance mode | ✅ Yes | ❌ Redis required | ⭐⭐⭐⭐⭐ Very fast |
 
 **Legend**: ✅ Full support | ⚠️ Partial/workaround needed | ❌ Not supported
 
@@ -518,13 +518,13 @@ if __name__ == "__main__":
 
 ### Benchmark Comparison
 
-| Metric             | File-Based          | SQLite Queue             | Improvement              |
-| ------------------ | ------------------- | ------------------------ | ------------------------ |
-| Enqueue latency    | ~5ms                | ~2ms                     | **2.5x faster**          |
-| Dequeue latency    | 0-5000ms            | 0-1000ms                 | **5x faster (avg)**      |
-| Concurrent writers | Prone to conflicts  | Serialized by SQLite     | **100% reliable**        |
-| Concurrent readers | Multiple file reads | WAL mode allows parallel | **Zero blocking**        |
-| Crash recovery     | Manual              | Automatic                | **Infinite improvement** |
+| Metric | File-Based | SQLite Queue | Improvement |
+| --- | --- | --- | --- |
+| Enqueue latency | ~5ms | ~2ms | **2.5x faster** |
+| Dequeue latency | 0-5000ms | 0-1000ms | **5x faster (avg)** |
+| Concurrent writers | Prone to conflicts | Serialized by SQLite | **100% reliable** |
+| Concurrent readers | Multiple file reads | WAL mode allows parallel | **Zero blocking** |
+| Crash recovery | Manual | Automatic | **Infinite improvement** |
 
 ---
 

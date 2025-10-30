@@ -217,18 +217,18 @@ ulid_value = (timestamp_ms << 80) | random_bits
 
 ### 1.6 Comparison Matrix
 
-| Feature                   | W3C Trace Context | UUID v4            | ULID               | Snowflake                      |
-| ------------------------- | ----------------- | ------------------ | ------------------ | ------------------------------ |
-| **Size**                  | 128-bit (32 hex)  | 128-bit (36 chars) | 128-bit (26 chars) | 64-bit (19 digits)             |
-| **Sortable**              | No                | No                 | **Yes**            | **Yes**                        |
-| **Timestamp**             | No                | No                 | **Yes** (48-bit)   | **Yes** (41-bit)               |
-| **Collision Resistance**  | High (2^128)      | High (2^122)       | High (2^80/ms)     | Medium (requires coordination) |
-| **Bash Generation**       | Complex           | **Easy** (uuidgen) | Medium             | Hard                           |
-| **Python Generation**     | Easy (OTel SDK)   | **Easy** (stdlib)  | Easy (library)     | Medium                         |
-| **String Length**         | 55 chars (full)   | 36 chars           | **26 chars**       | 19 digits                      |
-| **Parent-Child Tracking** | **Built-in**      | No                 | No                 | No                             |
-| **Machine ID**            | No                | No                 | No                 | **Yes** (10-bit)               |
-| **URL-Safe**              | No (hyphens)      | No (hyphens)       | **Yes**            | **Yes**                        |
+| Feature | W3C Trace Context | UUID v4 | ULID | Snowflake |
+| --- | --- | --- | --- | --- |
+| **Size** | 128-bit (32 hex) | 128-bit (36 chars) | 128-bit (26 chars) | 64-bit (19 digits) |
+| **Sortable** | No | No | **Yes** | **Yes** |
+| **Timestamp** | No | No | **Yes** (48-bit) | **Yes** (41-bit) |
+| **Collision Resistance** | High (2^128) | High (2^122) | High (2^80/ms) | Medium (requires coordination) |
+| **Bash Generation** | Complex | **Easy** (uuidgen) | Medium | Hard |
+| **Python Generation** | Easy (OTel SDK) | **Easy** (stdlib) | Easy (library) | Medium |
+| **String Length** | 55 chars (full) | 36 chars | **26 chars** | 19 digits |
+| **Parent-Child Tracking** | **Built-in** | No | No | No |
+| **Machine ID** | No | No | No | **Yes** (10-bit) |
+| **URL-Safe** | No (hyphens) | No (hyphens) | **Yes** | **Yes** |
 
 **Recommendation**: **ULID** for correlation IDs (sortable, compact, easy generation) + **W3C Trace Context format** for parent-child tracking
 
@@ -473,13 +473,13 @@ client.send(b'{"correlation_id": "..."}')
 
 ### 2.6 Propagation Mechanism Comparison
 
-| Mechanism                 | Overhead    | Bash Support  | Bidirectional | Complexity | Recommended         |
-| ------------------------- | ----------- | ------------- | ------------- | ---------- | ------------------- |
-| **Environment Variables** | **Minimal** | **Excellent** | No            | **Low**    | **YES**             |
-| Command-Line Args         | Minimal     | Excellent     | No            | Low        | For debugging       |
-| File-Based (JSON)         | Medium      | Good          | Yes           | Medium     | For complex context |
-| stdin/stdout              | Low         | Good          | No            | Medium     | For pipelines       |
-| Unix Sockets              | Low         | Poor          | **Yes**       | **High**   | For daemons         |
+| Mechanism | Overhead | Bash Support | Bidirectional | Complexity | Recommended |
+| --- | --- | --- | --- | --- | --- |
+| **Environment Variables** | **Minimal** | **Excellent** | No | **Low** | **YES** |
+| Command-Line Args | Minimal | Excellent | No | Low | For debugging |
+| File-Based (JSON) | Medium | Good | Yes | Medium | For complex context |
+| stdin/stdout | Low | Good | No | Medium | For pipelines |
+| Unix Sockets | Low | Poor | **Yes** | **High** | For daemons |
 
 **Recommendation**: **Environment Variables** for simplicity + **File-Based JSON** for complex trace graphs
 

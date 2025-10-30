@@ -57,16 +57,16 @@ struct MqlRates {
 
 ### Field Requirements
 
-| Field         | Required | Type     | Constraints                 | Notes                          |
-| ------------- | -------- | -------- | --------------------------- | ------------------------------ |
-| `time`        | ✅ YES   | datetime | M1 open time, no duplicates | Format: `YYYY.MM.DD HH:MM:SS`  |
-| `open`        | ✅ YES   | double   | > 0                         | First price in minute          |
-| `high`        | ✅ YES   | double   | ≥ max(open, close, low)     | Highest price in minute        |
-| `low`         | ✅ YES   | double   | ≤ min(open, close, high)    | Lowest price in minute         |
-| `close`       | ✅ YES   | double   | > 0                         | Last price in minute           |
-| `tick_volume` | ✅ YES   | long     | ≥ 0                         | Number of price changes        |
-| `spread`      | ❌ NO    | int      | ≥ 0, in points (not pips)   | Set 0 if unknown               |
-| `real_volume` | ❌ NO    | long     | ≥ 0                         | Trade volume, set 0 if unknown |
+| Field | Required | Type | Constraints | Notes |
+| --- | --- | --- | --- | --- |
+| `time` | ✅ YES | datetime | M1 open time, no duplicates | Format: `YYYY.MM.DD HH:MM:SS` |
+| `open` | ✅ YES | double | > 0 | First price in minute |
+| `high` | ✅ YES | double | ≥ max(open, close, low) | Highest price in minute |
+| `low` | ✅ YES | double | ≤ min(open, close, high) | Lowest price in minute |
+| `close` | ✅ YES | double | > 0 | Last price in minute |
+| `tick_volume` | ✅ YES | long | ≥ 0 | Number of price changes |
+| `spread` | ❌ NO | int | ≥ 0, in points (not pips) | Set 0 if unknown |
+| `real_volume` | ❌ NO | long | ≥ 0 | Trade volume, set 0 if unknown |
 
 ---
 
@@ -320,14 +320,14 @@ df[['time', 'open', 'high', 'low', 'close', 'tick_volume', 'real_volume', 'sprea
 
 ## Comparison: Ticks vs M1 Bars
 
-| Aspect           | Tick Import                      | M1 Bar Import      |
-| ---------------- | -------------------------------- | ------------------ |
-| **Data Size**    | Large (100s MB)                  | Moderate (10s MB)  |
-| **Import Speed** | Slower (500K chunks)             | Faster             |
-| **Tester Mode**  | "Every tick based on real ticks" | "1 minute OHLC"    |
-| **Spread Info**  | Preserved (bid/ask)              | Lost (only OHLC)   |
-| **Use Case**     | Scalping, HFT strategies         | Swing, day trading |
-| **Source**       | `query_ticks()`                  | `query_ohlc()`     |
+| Aspect | Tick Import | M1 Bar Import |
+| --- | --- | --- |
+| **Data Size** | Large (100s MB) | Moderate (10s MB) |
+| **Import Speed** | Slower (500K chunks) | Faster |
+| **Tester Mode** | "Every tick based on real ticks" | "1 minute OHLC" |
+| **Spread Info** | Preserved (bid/ask) | Lost (only OHLC) |
+| **Use Case** | Scalping, HFT strategies | Swing, day trading |
+| **Source** | `query_ticks()` | `query_ohlc()` |
 
 ---
 

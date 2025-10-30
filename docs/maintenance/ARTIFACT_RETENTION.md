@@ -13,14 +13,14 @@ The `~/.claude/` workspace accumulates runtime artifacts from Claude Code sessio
 
 ### Current State (as of 2025-10-23)
 
-| Artifact Type   | Location            | Size        | File Count     | Growth Rate      |
-| --------------- | ------------------- | ----------- | -------------- | ---------------- |
-| Shell Snapshots | `/shell-snapshots/` | 69 MB       | 371 files      | ~2-3 MB/week     |
-| Debug Logs      | `/debug/`           | 57 MB       | Unknown        | ~1-2 MB/week     |
-| File History    | `/file-history/`    | 63 MB       | ~300 UUIDs     | ~1-2 MB/week     |
-| Task Tracking   | `/todos/`           | 3.6 MB      | 60+ files      | ~100 KB/week     |
-| Session History | `/history.jsonl`    | 1.2 MB      | 1 file         | ~50 KB/week      |
-| **Total**       |                     | **~210 MB** | **700+ files** | **~5-8 MB/week** |
+| Artifact Type | Location | Size | File Count | Growth Rate |
+| --- | --- | --- | --- | --- |
+| Shell Snapshots | `/shell-snapshots/` | 69 MB | 371 files | ~2-3 MB/week |
+| Debug Logs | `/debug/` | 57 MB | Unknown | ~1-2 MB/week |
+| File History | `/file-history/` | 63 MB | ~300 UUIDs | ~1-2 MB/week |
+| Task Tracking | `/todos/` | 3.6 MB | 60+ files | ~100 KB/week |
+| Session History | `/history.jsonl` | 1.2 MB | 1 file | ~50 KB/week |
+| **Total** |  | **~210 MB** | **700+ files** | **~5-8 MB/week** |
 
 **Projected Growth**: Without management, artifacts will reach **~500 MB within 6 months**.
 
@@ -116,11 +116,11 @@ fi
 
 #### Retention Policy
 
-| Age        | Action                        | Location                                  |
-| ---------- | ----------------------------- | ----------------------------------------- |
-| 0-30 days  | **Keep**                      | `/shell-snapshots/`                       |
-| 30-90 days | **Archive**                   | `/archive/shell-snapshots-YYYY-MM.tar.gz` |
-| 90+ days   | **Delete archive** (optional) | N/A                                       |
+| Age | Action | Location |
+| --- | --- | --- |
+| 0-30 days | **Keep** | `/shell-snapshots/` |
+| 30-90 days | **Archive** | `/archive/shell-snapshots-YYYY-MM.tar.gz` |
+| 90+ days | **Delete archive** (optional) | N/A |
 
 #### Archival Process
 
@@ -172,11 +172,11 @@ fi
 
 #### Retention Policy
 
-| Age         | Action             | Location                             |
-| ----------- | ------------------ | ------------------------------------ |
-| 0-30 days   | **Keep**           | `/system/debug/`                     |
-| 30-180 days | **Archive**        | `/archive/debug-logs-YYYY-MM.tar.gz` |
-| 180+ days   | **Delete archive** | N/A                                  |
+| Age | Action | Location |
+| --- | --- | --- |
+| 0-30 days | **Keep** | `/system/debug/` |
+| 30-180 days | **Archive** | `/archive/debug-logs-YYYY-MM.tar.gz` |
+| 180+ days | **Delete archive** | N/A |
 
 #### Special Considerations
 
@@ -206,11 +206,11 @@ find /system/debug/ -name "*error*.log" -mtime +180 | \
 
 #### Retention Policy
 
-| Age        | Action             | Location                               |
-| ---------- | ------------------ | -------------------------------------- |
-| 0-30 days  | **Keep**           | `/system/file-history/`                |
-| 30-90 days | **Archive**        | `/archive/file-history-YYYY-MM.tar.gz` |
-| 90+ days   | **Delete archive** | N/A                                    |
+| Age | Action | Location |
+| --- | --- | --- |
+| 0-30 days | **Keep** | `/system/file-history/` |
+| 30-90 days | **Archive** | `/archive/file-history-YYYY-MM.tar.gz` |
+| 90+ days | **Delete archive** | N/A |
 
 #### Critical Warning
 
@@ -244,11 +244,11 @@ echo "Test file history in Claude Code before deleting originals"
 
 #### Retention Policy
 
-| Age       | Action             | Location                        |
-| --------- | ------------------ | ------------------------------- |
-| 0-7 days  | **Keep**           | `/system/todos/`                |
-| 7-30 days | **Archive**        | `/archive/todos-YYYY-MM.tar.gz` |
-| 30+ days  | **Delete archive** | N/A                             |
+| Age | Action | Location |
+| --- | --- | --- |
+| 0-7 days | **Keep** | `/system/todos/` |
+| 7-30 days | **Archive** | `/archive/todos-YYYY-MM.tar.gz` |
+| 30+ days | **Delete archive** | N/A |
 
 #### Notes
 
@@ -268,11 +268,11 @@ echo "Test file history in Claude Code before deleting originals"
 
 **Special case**: Single growing file, not directory
 
-| Size    | Action                          |
-| ------- | ------------------------------- |
-| < 5 MB  | **Keep as-is**                  |
-| 5-10 MB | **Rotate and archive**          |
-| 10+ MB  | **Split into monthly archives** |
+| Size | Action |
+| --- | --- |
+| < 5 MB | **Keep as-is** |
+| 5-10 MB | **Rotate and archive** |
+| 10+ MB | **Split into monthly archives** |
 
 #### Rotation Process
 
@@ -532,12 +532,12 @@ If archival caused issues:
 
 ## Implementation Timeline
 
-| Phase       | Action                  | Timeline |
-| ----------- | ----------------------- | -------- |
-| **Phase 1** | Create archival scripts | Week 1   |
-| **Phase 2** | Test manual archival    | Week 1   |
-| **Phase 3** | Set up automation       | Week 2   |
-| **Phase 4** | Monitor and adjust      | Ongoing  |
+| Phase | Action | Timeline |
+| --- | --- | --- |
+| **Phase 1** | Create archival scripts | Week 1 |
+| **Phase 2** | Test manual archival | Week 1 |
+| **Phase 3** | Set up automation | Week 2 |
+| **Phase 4** | Monitor and adjust | Ongoing |
 
 ---
 

@@ -37,11 +37,11 @@ allowed-tools: Read, Grep, Bash # Optional, CLI-only feature
 
 **Field Requirements:**
 
-| Field           | Rules                                                                                          |
-| --------------- | ---------------------------------------------------------------------------------------------- |
-| `name`          | Lowercase, hyphens, numbers only. Max 64 chars. Must be unique.                                |
-| `description`   | State WHAT it does + WHEN to use. Max 1024 chars (CLI) or 200 (API). Include trigger keywords! |
-| `allowed-tools` | **CLI-only**. Comma-separated list restricts available tools. Optional.                        |
+| Field | Rules |
+| --- | --- |
+| `name` | Lowercase, hyphens, numbers only. Max 64 chars. Must be unique. |
+| `description` | State WHAT it does + WHEN to use. Max 1024 chars (CLI) or 200 (API). Include trigger keywords! |
+| `allowed-tools` | **CLI-only**. Comma-separated list restricts available tools. Optional. |
 
 **Good vs Bad Descriptions:**
 
@@ -239,14 +239,14 @@ For advanced examples, see examples.md.
 
 ## Part 6: CLI vs API Differences
 
-| Feature           | Claude Code CLI        | Claude.ai API            |
-| ----------------- | ---------------------- | ------------------------ |
-| File name         | `SKILL.md` (uppercase) | `Skill.md` (capitalized) |
-| Location          | `~/.claude/skills/`    | ZIP upload               |
-| Description limit | 1024 characters        | 200 characters           |
-| `allowed-tools`   | ✅ Supported           | ❌ Not supported         |
-| Privacy           | Personal or project    | Individual account only  |
-| Package install   | Pre-installed only     | Pre-installed only       |
+| Feature | Claude Code CLI | Claude.ai API |
+| --- | --- | --- |
+| File name | `SKILL.md` (uppercase) | `Skill.md` (capitalized) |
+| Location | `~/.claude/skills/` | ZIP upload |
+| Description limit | 1024 characters | 200 characters |
+| `allowed-tools` | ✅ Supported | ❌ Not supported |
+| Privacy | Personal or project | Individual account only |
+| Package install | Pre-installed only | Pre-installed only |
 
 **This Agent Skill teaches CLI format only.**
 

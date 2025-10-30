@@ -24,13 +24,13 @@ This hybrid approach provides enterprise-grade observability without cloud depen
 
 ### Feature Comparison Matrix
 
-| Library                | Stars    | Last Updated  | Context Injection       | JSON Output    | Async Support | Performance | Ease of Use |
-| ---------------------- | -------- | ------------- | ----------------------- | -------------- | ------------- | ----------- | ----------- |
-| **structlog**          | 3.5K+    | Active (2024) | `bind()`, `contextvars` | Native         | Yes           | Fast        | Medium      |
-| **loguru**             | 19K+     | Active (2024) | `bind()`, `opt()`       | Native         | Yes           | Fastest     | Easiest     |
-| **python-json-logger** | 1.6K+    | Active (2024) | Manual                  | Native         | Yes           | Fast        | Easy        |
-| **eliot**              | 900+     | Active (2023) | Action trees            | Native         | Limited       | Medium      | Complex     |
-| **standard logging**   | Built-in | Active        | Manual                  | Via formatters | Yes           | Baseline    | Medium      |
+| Library | Stars | Last Updated | Context Injection | JSON Output | Async Support | Performance | Ease of Use |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **structlog** | 3.5K+ | Active (2024) | `bind()`, `contextvars` | Native | Yes | Fast | Medium |
+| **loguru** | 19K+ | Active (2024) | `bind()`, `opt()` | Native | Yes | Fastest | Easiest |
+| **python-json-logger** | 1.6K+ | Active (2024) | Manual | Native | Yes | Fast | Easy |
+| **eliot** | 900+ | Active (2023) | Action trees | Native | Limited | Medium | Complex |
+| **standard logging** | Built-in | Active | Manual | Via formatters | Yes | Baseline | Medium |
 
 ### Detailed Analysis
 
@@ -164,14 +164,14 @@ with start_action(action_type="session_lifecycle", workspace="/path"):
 
 ### Comparison Matrix
 
-| Tool                       | Storage Backend | Query Language | Setup Complexity | Offline Mode     | Python SDK | Use Case            |
-| -------------------------- | --------------- | -------------- | ---------------- | ---------------- | ---------- | ------------------- |
-| **Custom SQLite**          | SQLite          | SQL + FTS5     | Low              | Native           | Built-in   | Session tracking    |
-| **eventsourcing**          | SQLite/Postgres | Python API     | Low              | Native           | Native     | Event sourcing      |
-| **OpenTelemetry + Custom** | SQLite (custom) | SQL            | Medium           | Native           | Official   | Full observability  |
-| **Jaeger**                 | Cassandra/ES    | UI + API       | High             | No (memory only) | Yes        | Distributed tracing |
-| **Zipkin**                 | MySQL/ES        | UI + API       | Medium           | Partial          | Yes        | Distributed tracing |
-| **Tempo**                  | Local FS        | LogQL          | Medium           | Yes              | Via OTel   | Traces only         |
+| Tool | Storage Backend | Query Language | Setup Complexity | Offline Mode | Python SDK | Use Case |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Custom SQLite** | SQLite | SQL + FTS5 | Low | Native | Built-in | Session tracking |
+| **eventsourcing** | SQLite/Postgres | Python API | Low | Native | Native | Event sourcing |
+| **OpenTelemetry + Custom** | SQLite (custom) | SQL | Medium | Native | Official | Full observability |
+| **Jaeger** | Cassandra/ES | UI + API | High | No (memory only) | Yes | Distributed tracing |
+| **Zipkin** | MySQL/ES | UI + API | Medium | Partial | Yes | Distributed tracing |
+| **Tempo** | Local FS | LogQL | Medium | Yes | Via OTel | Traces only |
 
 ### Detailed Analysis
 
@@ -1094,14 +1094,14 @@ def migrate_file_sessions(file_dir: str, db_path: str):
 
 ### Migration Complexity: **Low to Medium**
 
-| Aspect                    | Complexity | Time Estimate | Risk             |
-| ------------------------- | ---------- | ------------- | ---------------- |
-| Schema creation           | Low        | 1 hour        | Minimal          |
-| Dual-write implementation | Low        | 2 hours       | Low              |
-| Historical data import    | Medium     | 2 hours       | Low (idempotent) |
-| Query interface           | Medium     | 4 hours       | Minimal          |
-| Testing                   | Medium     | 4 hours       | Low              |
-| **Total**                 | **Medium** | **13 hours**  | **Low**          |
+| Aspect | Complexity | Time Estimate | Risk |
+| --- | --- | --- | --- |
+| Schema creation | Low | 1 hour | Minimal |
+| Dual-write implementation | Low | 2 hours | Low |
+| Historical data import | Medium | 2 hours | Low (idempotent) |
+| Query interface | Medium | 4 hours | Minimal |
+| Testing | Medium | 4 hours | Low |
+| **Total** | **Medium** | **13 hours** | **Low** |
 
 **Risk Mitigation**:
 
@@ -1499,13 +1499,13 @@ def optimize_sqlite_for_writes(conn: sqlite3.Connection):
 
 ### Query Performance
 
-| Query Type                    | Rows | Index             | Time    |
-| ----------------------------- | ---- | ----------------- | ------- |
-| Active sessions (1 workspace) | 10K  | workspace_path    | <1ms    |
-| Time range query              | 100K | started_at        | 2-5ms   |
-| Session hierarchy (3 levels)  | 1K   | parent_session_id | <2ms    |
-| FTS search (events)           | 1M   | FTS5              | 10-50ms |
-| JSON extract search           | 1M   | None              | 500ms+  |
+| Query Type | Rows | Index | Time |
+| --- | --- | --- | --- |
+| Active sessions (1 workspace) | 10K | workspace_path | <1ms |
+| Time range query | 100K | started_at | 2-5ms |
+| Session hierarchy (3 levels) | 1K | parent_session_id | <2ms |
+| FTS search (events) | 1M | FTS5 | 10-50ms |
+| JSON extract search | 1M | None | 500ms+ |
 
 **Recommendation**: Use FTS5 for text search, avoid `json_extract` in hot paths
 
@@ -1564,15 +1564,15 @@ def health_check(store: SessionStore) -> Dict:
 
 ### Rejected Options
 
-| Approach                   | Why Rejected                                                    |
-| -------------------------- | --------------------------------------------------------------- |
-| **JSON files per session** | Current system - no queryability, no relationships              |
-| **Jaeger/Zipkin**          | Requires external services, no SQLite backend, overkill         |
-| **PostgreSQL**             | Heavyweight, requires server process, external dependency       |
-| **DuckDB**                 | Excellent for analytics but unnecessary for operational queries |
-| **Redis**                  | Requires server, no persistence guarantees, expensive queries   |
-| **MongoDB**                | Requires server, overkill for structured session data           |
-| **Elasticsearch**          | Heavyweight, JVM dependency, complex setup                      |
+| Approach | Why Rejected |
+| --- | --- |
+| **JSON files per session** | Current system - no queryability, no relationships |
+| **Jaeger/Zipkin** | Requires external services, no SQLite backend, overkill |
+| **PostgreSQL** | Heavyweight, requires server process, external dependency |
+| **DuckDB** | Excellent for analytics but unnecessary for operational queries |
+| **Redis** | Requires server, no persistence guarantees, expensive queries |
+| **MongoDB** | Requires server, overkill for structured session data |
+| **Elasticsearch** | Heavyweight, JVM dependency, complex setup |
 
 ### Why Not Full Event Sourcing?
 

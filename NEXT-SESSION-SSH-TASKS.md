@@ -94,12 +94,12 @@ Contains:
 
 ## Files Involved
 
-| File                              | Purpose           | Status           |
-| --------------------------------- | ----------------- | ---------------- |
-| `~/.ssh/id_ed25519_terrylica`     | SSH private key   | ✅ Generated     |
-| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key    | ⏳ Add to GitHub |
-| `~/.ssh/config`                   | SSH configuration | ✅ Updated       |
-| `./.git/config`                   | Git remote        | ✅ SSH protocol  |
+| File | Purpose | Status |
+| --- | --- | --- |
+| `~/.ssh/id_ed25519_terrylica` | SSH private key | ✅ Generated |
+| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key | ⏳ Add to GitHub |
+| `~/.ssh/config` | SSH configuration | ✅ Updated |
+| `./.git/config` | Git remote | ✅ SSH protocol |
 
 ---
 

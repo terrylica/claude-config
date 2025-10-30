@@ -337,10 +337,10 @@ cd ~/eon/project && git push origin main
 
 ### **ControlMaster Impact**
 
-| Setting                   | First SSH | Subsequent | Switching | Multi-Account |
-| ------------------------- | --------- | ---------- | --------- | ------------- |
-| **With ControlMaster**    | Slower    | Fast       | Broken    | Broken        |
-| **Without ControlMaster** | Normal    | Normal     | Works     | Works ✓       |
+| Setting | First SSH | Subsequent | Switching | Multi-Account |
+| --- | --- | --- | --- | --- |
+| **With ControlMaster** | Slower | Fast | Broken | Broken |
+| **Without ControlMaster** | Normal | Normal | Works | Works ✓ |
 
 **Conclusion**: For multi-account workflows with directory switching, the performance loss is negligible and worth the reliability gain.
 

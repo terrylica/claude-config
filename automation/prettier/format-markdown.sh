@@ -11,28 +11,24 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
 
 # Fire-and-forget async formatting + AI auto-commit - exit immediately
 {
-    # Step 1: Run prettier formatting on workspace files
+    # Step 1: Run mdformat formatting on workspace files (includes table alignment)
     find "$workspace_dir" -type f -name "*.md" \
         -not -path "*/node_modules/*" \
         -not -path "*/.git/*" \
         -not -path "*/file-history/*" \
         -not -path "*/plugins/*" \
-        -exec /Users/terryli/.nvm/versions/node/v22.17.0/bin/prettier \
-            --write \
-            --prose-wrap preserve \
-            --config "$HOME/.claude/.prettierrc" \
+        -exec "$HOME/.local/bin/mdformat" \
+            --wrap keep \
             {} + 2>/dev/null
 
     # Step 1b: Also format markdown files in /tmp (no git operations for these)
     # Use /private/tmp on macOS since /tmp is a symlink
     find /private/tmp -maxdepth 3 -type f -name "*.md" \
-        -exec /Users/terryli/.nvm/versions/node/v22.17.0/bin/prettier \
-            --write \
-            --prose-wrap preserve \
-            --config "$HOME/.claude/.prettierrc" \
+        -exec "$HOME/.local/bin/mdformat" \
+            --wrap keep \
             {} + 2>/dev/null
 
-    # Step 2: Check if prettier made any changes
+    # Step 2: Check if mdformat made any changes
     cd "$workspace_dir" 2>/dev/null || exit 0
 
     # Only proceed if we're in a git repository
@@ -46,7 +42,7 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
         exit 0
     fi
 
-    # Step 3: Stage prettier changes
+    # Step 3: Stage mdformat changes
     git add '*.md' 2>/dev/null || exit 0
 
     # Count and list changed files
@@ -63,7 +59,7 @@ workspace_dir="${CLAUDE_WORKSPACE_DIR:-$(pwd)}"
     # Step 4: Generate AI commit message using Claude Code headless mode (Haiku - cheapest model)
     commit_prompt="DISABLE_INTERLEAVED_THINKING
 
-Generate a git commit message for these prettier formatting changes.
+Generate a git commit message for these mdformat formatting changes.
 
 Files changed: $changed_files
 $file_list
@@ -85,7 +81,7 @@ Line 3+: optional body (72 chars per line)
 Use type: chore, docs, or style
 
 Example output (copy this format exactly):
-style: format markdown files with prettier
+style: format markdown files with mdformat
 
 Standardized formatting for $changed_files file(s)."
 
@@ -102,9 +98,9 @@ Standardized formatting for $changed_files file(s)."
 
     # Fallback to default message if Claude fails or returns empty
     if [[ -z "$commit_message" ]] || [[ ${#commit_message} -lt 10 ]]; then
-        commit_message="chore: auto-format markdown with prettier
+        commit_message="chore: auto-format markdown with mdformat
 
-Automated formatting of $changed_files markdown file(s) by prettier Stop hook.
+Automated formatting of $changed_files markdown file(s) by mdformat Stop hook.
 Reduces git diff clutter and maintains consistent formatting."
     fi
 

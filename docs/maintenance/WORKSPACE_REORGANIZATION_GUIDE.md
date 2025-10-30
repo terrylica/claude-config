@@ -33,14 +33,14 @@ This guide provides **step-by-step instructions** for executing the workspace re
 
 ## Quick Reference
 
-| Phase                             | Risk    | Duration | Deliverable                   |
-| --------------------------------- | ------- | -------- | ----------------------------- |
-| **Phase 1: Documentation**        | Minimal | 8h       | Complete specs & docs         |
-| **Phase 2: Safe Cleanup**         | Low     | 2h       | Remove backups, fix anomalies |
-| **Phase 3: Root Cleanup**         | Medium  | 3h       | Move root scripts             |
-| **Phase 4: System Consolidation** | Medium  | 4h       | Organize system artifacts     |
-| **Phase 5: Archival**             | Low     | 2h       | Archive old artifacts         |
-| **Phase 6: Advanced (Optional)**  | Medium  | 3h       | uv migration, etc.            |
+| Phase | Risk | Duration | Deliverable |
+| --- | --- | --- | --- |
+| **Phase 1: Documentation** | Minimal | 8h | Complete specs & docs |
+| **Phase 2: Safe Cleanup** | Low | 2h | Remove backups, fix anomalies |
+| **Phase 3: Root Cleanup** | Medium | 3h | Move root scripts |
+| **Phase 4: System Consolidation** | Medium | 4h | Organize system artifacts |
+| **Phase 5: Archival** | Low | 2h | Archive old artifacts |
+| **Phase 6: Advanced (Optional)** | Medium | 3h | uv migration, etc. |
 
 **Total Duration**: 22 hours (can be done incrementally)
 

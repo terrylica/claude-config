@@ -17,17 +17,17 @@ Successfully migrated from v3.0.1 (single-purpose lychee validator) to v4.0.0 (m
 
 ## Phase Completion Status
 
-| Phase | Description                    | Status      | Duration | Commit        |
-| ----- | ------------------------------ | ----------- | -------- | ------------- |
-| **0** | Pre-migration validation       | ✅ COMPLETE | 1h       | 6542cab       |
-| **1** | Workflow registry creation     | ✅ COMPLETE | 1h       | d77f4b1       |
-| **2** | Hook refactor (summaries)      | ✅ COMPLETE | 2h       | c406b72       |
-| **3** | Bot refactor (workflow menu)   | ✅ COMPLETE | 1.5h     | 1d11055       |
-| **4** | Orchestrator refactor (Jinja2) | ✅ COMPLETE | 2h       | 054f337       |
-| **5** | Integration testing            | ⏸️ DEFERRED | -        | -             |
-| **6** | Directory rename               | ⏸️ DEFERRED | -        | -             |
-| **7** | Remove dual-mode               | ⏸️ DEFERRED | -        | -             |
-| **8** | Documentation/release          | ✅ PARTIAL  | 0.5h     | (this commit) |
+| Phase | Description | Status | Duration | Commit |
+| --- | --- | --- | --- | --- |
+| **0** | Pre-migration validation | ✅ COMPLETE | 1h | 6542cab |
+| **1** | Workflow registry creation | ✅ COMPLETE | 1h | d77f4b1 |
+| **2** | Hook refactor (summaries) | ✅ COMPLETE | 2h | c406b72 |
+| **3** | Bot refactor (workflow menu) | ✅ COMPLETE | 1.5h | 1d11055 |
+| **4** | Orchestrator refactor (Jinja2) | ✅ COMPLETE | 2h | 054f337 |
+| **5** | Integration testing | ⏸️ DEFERRED | - | - |
+| **6** | Directory rename | ⏸️ DEFERRED | - | - |
+| **7** | Remove dual-mode | ⏸️ DEFERRED | - | - |
+| **8** | Documentation/release | ✅ PARTIAL | 0.5h | (this commit) |
 
 **Total Actual Time**: ~8 hours (including documentation)
 
@@ -197,12 +197,12 @@ automation/lychee/state/
 
 ## Code Metrics
 
-| Component    | File                              | Lines Added | Lines Changed | Complexity |
-| ------------ | --------------------------------- | ----------- | ------------- | ---------- |
-| Hook         | `check-links-hybrid.sh`           | +211        | ~50           | Medium     |
-| Bot          | `multi-workspace-bot.py`          | +420        | ~30           | High       |
-| Orchestrator | `multi-workspace-orchestrator.py` | +1060       | ~40           | High       |
-| **Total**    | -                                 | **+1,691**  | **~120**      | -          |
+| Component | File | Lines Added | Lines Changed | Complexity |
+| --- | --- | --- | --- | --- |
+| Hook | `check-links-hybrid.sh` | +211 | ~50 | Medium |
+| Bot | `multi-workspace-bot.py` | +420 | ~30 | High |
+| Orchestrator | `multi-workspace-orchestrator.py` | +1060 | ~40 | High |
+| **Total** | - | **+1,691** | **~120** | - |
 
 **Documentation**:
 
@@ -268,12 +268,12 @@ automation/lychee/state/
 
 ### SLO Achievement
 
-| SLO                 | Target | v4.0.0 Result | Validation Method                      |
-| ------------------- | ------ | ------------- | -------------------------------------- |
-| **Correctness**     | 100%   | ✅ PASS       | All workflows execute, results emitted |
-| **Observability**   | 100%   | ✅ PASS       | Full event trace with correlation_id   |
-| **Maintainability** | SSoT   | ✅ PASS       | workflows.json is canonical source     |
-| **Availability**    | 99%    | ⏸️ TBD        | Production monitoring (post-release)   |
+| SLO | Target | v4.0.0 Result | Validation Method |
+| --- | --- | --- | --- |
+| **Correctness** | 100% | ✅ PASS | All workflows execute, results emitted |
+| **Observability** | 100% | ✅ PASS | Full event trace with correlation_id |
+| **Maintainability** | SSoT | ✅ PASS | workflows.json is canonical source |
+| **Availability** | 99% | ⏸️ TBD | Production monitoring (post-release) |
 
 ### Integration Test Readiness
 
@@ -431,13 +431,13 @@ launchctl load ~/Library/LaunchAgents/com.terryli.telegram-bot.plist
 
 ## Related Documentation
 
-| Document           | Location                                                  | Purpose                        |
-| ------------------ | --------------------------------------------------------- | ------------------------------ |
+| Document | Location | Purpose |
+| --- | --- | --- |
 | SSoT Specification | `specifications/telegram-workflows-orchestration-v4.yaml` | OpenAPI 3.1.1 spec (canonical) |
-| Migration Plan     | `MIGRATION_v3_to_v4_PLAN_v2.md`                           | Original migration strategy    |
-| Phase 4 Handoff    | `PHASE_4_HANDOFF.md`                                      | Technical implementation guide |
-| Integration Tests  | `tests/INTEGRATION_TESTS.md`                              | Test scenarios and validation  |
-| This Document      | `MIGRATION_COMPLETE.md`                                   | Completion summary             |
+| Migration Plan | `MIGRATION_v3_to_v4_PLAN_v2.md` | Original migration strategy |
+| Phase 4 Handoff | `PHASE_4_HANDOFF.md` | Technical implementation guide |
+| Integration Tests | `tests/INTEGRATION_TESTS.md` | Test scenarios and validation |
+| This Document | `MIGRATION_COMPLETE.md` | Completion summary |
 
 ---
 

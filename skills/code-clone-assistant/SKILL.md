@@ -28,23 +28,23 @@ Triggers: "find duplicate code", "DRY violations", "refactor similar code", "det
 
 PMD CPD and Semgrep detect different clone types:
 
-| Aspect       | PMD CPD                          | Semgrep                          |
-| ------------ | -------------------------------- | -------------------------------- |
-| **Detects**  | Exact copy-paste duplicates      | Similar patterns with variations |
-| **Scope**    | Across files ✅                  | Within/across files (Pro only)   |
-| **Matching** | Token-based (ignores formatting) | Pattern-based (AST matching)     |
-| **Rules**    | ❌ No custom rules               | ✅ Custom rules                  |
+| Aspect | PMD CPD | Semgrep |
+| --- | --- | --- |
+| **Detects** | Exact copy-paste duplicates | Similar patterns with variations |
+| **Scope** | Across files ✅ | Within/across files (Pro only) |
+| **Matching** | Token-based (ignores formatting) | Pattern-based (AST matching) |
+| **Rules** | ❌ No custom rules | ✅ Custom rules |
 
 **Result**: Using both finds ~3x more DRY violations.
 
 ### Clone Types
 
-| Type   | Description                     | PMD CPD         | Semgrep     |
-| ------ | ------------------------------- | --------------- | ----------- |
-| Type-1 | Exact copies                    | ✅ Default      | ✅          |
-| Type-2 | Renamed identifiers             | ✅ `--ignore-*` | ✅          |
-| Type-3 | Near-miss with variations       | ⚠️ Partial      | ✅ Patterns |
-| Type-4 | Semantic clones (same behavior) | ❌              | ❌          |
+| Type | Description | PMD CPD | Semgrep |
+| --- | --- | --- | --- |
+| Type-1 | Exact copies | ✅ Default | ✅ |
+| Type-2 | Renamed identifiers | ✅ `--ignore-*` | ✅ |
+| Type-3 | Near-miss with variations | ⚠️ Partial | ✅ Patterns |
+| Type-4 | Semantic clones (same behavior) | ❌ | ❌ |
 
 ---
 

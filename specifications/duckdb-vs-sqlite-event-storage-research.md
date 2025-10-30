@@ -28,27 +28,27 @@ While DuckDB excels at analytical workloads and would provide 10-50x faster perf
 
 ## 1. Feature Comparison Table
 
-| Feature                      | SQLite                                        | DuckDB                                                    | Winner for Your Use Case          |
-| ---------------------------- | --------------------------------------------- | --------------------------------------------------------- | --------------------------------- |
-| **Workload Optimization**    | OLTP (transactional)                          | OLAP (analytical)                                         | SQLite (mixed workload)           |
-| **Storage Model**            | Row-oriented (B-tree)                         | Columnar (optimized for analytics)                        | SQLite (small events)             |
-| **Multi-process Writes**     | ✅ Supported (WAL mode)                       | ❌ Not supported                                          | **SQLite (critical requirement)** |
-| **Multi-process Reads**      | ✅ Unlimited concurrent readers               | ✅ Unlimited (read-only mode)                             | Tie                               |
-| **Point Query Performance**  | Excellent (~20% faster)                       | Good                                                      | **SQLite**                        |
-| **Aggregation Performance**  | Good                                          | Excellent (12-35x faster)                                 | DuckDB (but not critical for you) |
-| **Insert Performance**       | Excellent (optimized for small writes)        | Poor for row-by-row (10-500x slower)                      | **SQLite**                        |
-| **Batch Insert Performance** | Good                                          | Excellent (10x faster)                                    | Tie (you don't batch)             |
-| **Time-Series Functions**    | Good (date(), datetime())                     | Excellent (date_trunc, time_bucket, window functions)     | DuckDB (nice-to-have)             |
-| **Full-Text Search**         | Excellent (FTS5 extension)                    | Good (FTS extension)                                      | **SQLite** (mature)               |
-| **JSON Support**             | Good (json_extract, JSON1)                    | Excellent (yyjson, nested queries)                        | Tie                               |
-| **File Format Stability**    | ✅ 20+ years, rock-solid                      | ⚠️ Stable since 1.0 (2024), limited forward compatibility | **SQLite**                        |
-| **Python Integration**       | ✅ stdlib (no deps)                           | Requires `duckdb` package                                 | **SQLite**                        |
-| **SQLAlchemy Support**       | ✅ Native, mature                             | ✅ Via `duckdb_engine` (based on PostgreSQL dialect)      | SQLite (maturity)                 |
-| **Pandas Integration**       | Good                                          | Excellent (zero-copy via Apache Arrow)                    | DuckDB (analytics focus)          |
-| **Storage Compression**      | None (larger files)                           | Excellent (70-80% less space)                             | DuckDB                            |
-| **Memory Usage**             | Low (~480 MB typical)                         | High (~2.3 GB typical)                                    | **SQLite**                        |
-| **Backup Strategies**        | Simple file copy (offline), WAL checkpointing | EXPORT/IMPORT DATABASE, no safe live file copy            | **SQLite**                        |
-| **Production Maturity**      | ✅ Decades of production use                  | ⚠️ Growing adoption, reached 1.0 in 2024                  | **SQLite**                        |
+| Feature | SQLite | DuckDB | Winner for Your Use Case |
+| --- | --- | --- | --- |
+| **Workload Optimization** | OLTP (transactional) | OLAP (analytical) | SQLite (mixed workload) |
+| **Storage Model** | Row-oriented (B-tree) | Columnar (optimized for analytics) | SQLite (small events) |
+| **Multi-process Writes** | ✅ Supported (WAL mode) | ❌ Not supported | **SQLite (critical requirement)** |
+| **Multi-process Reads** | ✅ Unlimited concurrent readers | ✅ Unlimited (read-only mode) | Tie |
+| **Point Query Performance** | Excellent (~20% faster) | Good | **SQLite** |
+| **Aggregation Performance** | Good | Excellent (12-35x faster) | DuckDB (but not critical for you) |
+| **Insert Performance** | Excellent (optimized for small writes) | Poor for row-by-row (10-500x slower) | **SQLite** |
+| **Batch Insert Performance** | Good | Excellent (10x faster) | Tie (you don't batch) |
+| **Time-Series Functions** | Good (date(), datetime()) | Excellent (date_trunc, time_bucket, window functions) | DuckDB (nice-to-have) |
+| **Full-Text Search** | Excellent (FTS5 extension) | Good (FTS extension) | **SQLite** (mature) |
+| **JSON Support** | Good (json_extract, JSON1) | Excellent (yyjson, nested queries) | Tie |
+| **File Format Stability** | ✅ 20+ years, rock-solid | ⚠️ Stable since 1.0 (2024), limited forward compatibility | **SQLite** |
+| **Python Integration** | ✅ stdlib (no deps) | Requires `duckdb` package | **SQLite** |
+| **SQLAlchemy Support** | ✅ Native, mature | ✅ Via `duckdb_engine` (based on PostgreSQL dialect) | SQLite (maturity) |
+| **Pandas Integration** | Good | Excellent (zero-copy via Apache Arrow) | DuckDB (analytics focus) |
+| **Storage Compression** | None (larger files) | Excellent (70-80% less space) | DuckDB |
+| **Memory Usage** | Low (~480 MB typical) | High (~2.3 GB typical) | **SQLite** |
+| **Backup Strategies** | Simple file copy (offline), WAL checkpointing | EXPORT/IMPORT DATABASE, no safe live file copy | **SQLite** |
+| **Production Maturity** | ✅ Decades of production use | ⚠️ Growing adoption, reached 1.0 in 2024 | **SQLite** |
 
 **Verdict**: SQLite wins 9/10 critical categories for your use case. DuckDB wins on analytics performance (not critical) and storage compression (not critical at 10GB scale).
 
@@ -99,18 +99,18 @@ While DuckDB excels at analytical workloads and would provide 10-50x faster perf
 
 ## 3. Use Case Matrix
 
-| Scenario                                          | Recommendation                                              | Reasoning                                                            |
-| ------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| **Low-volume append-only events (your use case)** | ✅ **SQLite**                                               | Multi-process writes essential, low volume negates DuckDB advantages |
-| **High-volume streaming (>10K events/sec)**       | Consider specialized time-series DB (TimescaleDB, InfluxDB) | Both SQLite/DuckDB struggle at this scale                            |
-| **Heavy analytics on historical data**            | ✅ **DuckDB**                                               | 10-80x faster aggregations, window functions, time bucketing         |
-| **IoT edge devices**                              | ✅ **SQLite**                                               | Lightweight, no dependencies, proven stability                       |
-| **Data science notebooks**                        | ✅ **DuckDB**                                               | Pandas integration, fast analytics, Parquet support                  |
-| **Mobile/embedded apps**                          | ✅ **SQLite**                                               | Industry standard, minimal footprint                                 |
-| **Read-heavy analytics dashboards**               | ✅ **DuckDB**                                               | Columnar storage, vectorized execution                               |
-| **Transactional web apps**                        | ✅ **SQLite**                                               | ACID compliance, multi-process writes, mature ecosystem              |
-| **Mixed OLTP + OLAP**                             | ✅ **SQLite + DuckDB Hybrid**                               | SQLite for durability, DuckDB scanner for analytics                  |
-| **Single-process Python analytics**               | ✅ **DuckDB**                                               | Fast, Pandas/Polars integration, no multi-process needed             |
+| Scenario | Recommendation | Reasoning |
+| --- | --- | --- |
+| **Low-volume append-only events (your use case)** | ✅ **SQLite** | Multi-process writes essential, low volume negates DuckDB advantages |
+| **High-volume streaming (>10K events/sec)** | Consider specialized time-series DB (TimescaleDB, InfluxDB) | Both SQLite/DuckDB struggle at this scale |
+| **Heavy analytics on historical data** | ✅ **DuckDB** | 10-80x faster aggregations, window functions, time bucketing |
+| **IoT edge devices** | ✅ **SQLite** | Lightweight, no dependencies, proven stability |
+| **Data science notebooks** | ✅ **DuckDB** | Pandas integration, fast analytics, Parquet support |
+| **Mobile/embedded apps** | ✅ **SQLite** | Industry standard, minimal footprint |
+| **Read-heavy analytics dashboards** | ✅ **DuckDB** | Columnar storage, vectorized execution |
+| **Transactional web apps** | ✅ **SQLite** | ACID compliance, multi-process writes, mature ecosystem |
+| **Mixed OLTP + OLAP** | ✅ **SQLite + DuckDB Hybrid** | SQLite for durability, DuckDB scanner for analytics |
+| **Single-process Python analytics** | ✅ **DuckDB** | Fast, Pandas/Polars integration, no multi-process needed |
 
 **Your Use Case (Multi-workspace CLI observability):**
 
@@ -757,15 +757,15 @@ print(result)
 
 ### 11.3 When to Use Each Database
 
-| Operation                                      | Database | Reasoning                        |
-| ---------------------------------------------- | -------- | -------------------------------- |
-| Insert event from bash hook                    | SQLite   | Multi-process write support      |
-| Insert event from Python bot                   | SQLite   | Multi-process write support      |
-| Point query (`WHERE session_id = ?`)           | SQLite   | Faster for indexed lookups       |
-| Time-range query (`WHERE timestamp BETWEEN ?`) | SQLite   | Good enough with proper indexes  |
-| Complex analytics (GROUP BY, window functions) | DuckDB   | 10-50x faster                    |
-| Ad-hoc exploration (Jupyter notebooks)         | DuckDB   | Pandas integration, powerful SQL |
-| Daily aggregation report                       | DuckDB   | Much faster for large scans      |
+| Operation | Database | Reasoning |
+| --- | --- | --- |
+| Insert event from bash hook | SQLite | Multi-process write support |
+| Insert event from Python bot | SQLite | Multi-process write support |
+| Point query (`WHERE session_id = ?`) | SQLite | Faster for indexed lookups |
+| Time-range query (`WHERE timestamp BETWEEN ?`) | SQLite | Good enough with proper indexes |
+| Complex analytics (GROUP BY, window functions) | DuckDB | 10-50x faster |
+| Ad-hoc exploration (Jupyter notebooks) | DuckDB | Pandas integration, powerful SQL |
+| Daily aggregation report | DuckDB | Much faster for large scans |
 
 ### 11.4 Code Example
 
@@ -1229,18 +1229,18 @@ conn.close()
 
 ## 16. Decision Matrix: Final Recommendation
 
-| Criteria                    | Weight          | SQLite Score | DuckDB Score | Winner     |
-| --------------------------- | --------------- | ------------ | ------------ | ---------- |
-| **Multi-process writes**    | 🔴 Critical     | 10/10        | 0/10         | **SQLite** |
-| **Point query performance** | 🟡 Important    | 10/10        | 8/10         | **SQLite** |
-| **Insert performance**      | 🟡 Important    | 10/10        | 3/10         | **SQLite** |
-| **Analytics performance**   | 🟢 Nice-to-have | 5/10         | 10/10        | DuckDB     |
-| **Python integration**      | 🟡 Important    | 10/10        | 8/10         | **SQLite** |
-| **Production stability**    | 🔴 Critical     | 10/10        | 7/10         | **SQLite** |
-| **Time-series features**    | 🟢 Nice-to-have | 6/10         | 10/10        | DuckDB     |
-| **Storage compression**     | 🟢 Nice-to-have | 5/10         | 10/10        | DuckDB     |
-| **Backup strategies**       | 🟡 Important    | 9/10         | 7/10         | **SQLite** |
-| **File format stability**   | 🟡 Important    | 10/10        | 7/10         | **SQLite** |
+| Criteria | Weight | SQLite Score | DuckDB Score | Winner |
+| --- | --- | --- | --- | --- |
+| **Multi-process writes** | 🔴 Critical | 10/10 | 0/10 | **SQLite** |
+| **Point query performance** | 🟡 Important | 10/10 | 8/10 | **SQLite** |
+| **Insert performance** | 🟡 Important | 10/10 | 3/10 | **SQLite** |
+| **Analytics performance** | 🟢 Nice-to-have | 5/10 | 10/10 | DuckDB |
+| **Python integration** | 🟡 Important | 10/10 | 8/10 | **SQLite** |
+| **Production stability** | 🔴 Critical | 10/10 | 7/10 | **SQLite** |
+| **Time-series features** | 🟢 Nice-to-have | 6/10 | 10/10 | DuckDB |
+| **Storage compression** | 🟢 Nice-to-have | 5/10 | 10/10 | DuckDB |
+| **Backup strategies** | 🟡 Important | 9/10 | 7/10 | **SQLite** |
+| **File format stability** | 🟡 Important | 10/10 | 7/10 | **SQLite** |
 
 **Weighted Score:**
 

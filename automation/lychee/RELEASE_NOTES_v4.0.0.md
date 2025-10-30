@@ -119,12 +119,12 @@ Workflows automatically shown/hidden based on context:
 
 ## SLOs Achieved
 
-| SLO                 | Target | v4.0.0 Result                                    |
-| ------------------- | ------ | ------------------------------------------------ |
-| **Correctness**     | 100%   | ✅ PASS - All workflows execute, results emitted |
-| **Observability**   | 100%   | ✅ PASS - Full event trace with correlation_id   |
-| **Maintainability** | SSoT   | ✅ PASS - workflows.json canonical source        |
-| **Availability**    | 99%    | ⏸️ TBD - Production monitoring post-release      |
+| SLO | Target | v4.0.0 Result |
+| --- | --- | --- |
+| **Correctness** | 100% | ✅ PASS - All workflows execute, results emitted |
+| **Observability** | 100% | ✅ PASS - Full event trace with correlation_id |
+| **Maintainability** | SSoT | ✅ PASS - workflows.json canonical source |
+| **Availability** | 99% | ⏸️ TBD - Production monitoring post-release |
 
 ---
 

@@ -25,21 +25,21 @@ For your multi-process notification/queue system, the **recommended approach** i
 
 ### File Locking Libraries (2024-2025)
 
-| Library          | Latest Release     | Stars | Maintenance   | Platform       | API Simplicity   | Use Case                               |
-| ---------------- | ------------------ | ----- | ------------- | -------------- | ---------------- | -------------------------------------- |
-| **filelock**     | Oct 2025 (v3.20.0) | 901   | ✅ Active     | Cross-platform | ⭐⭐⭐ Excellent | General-purpose file locking           |
-| **portalocker**  | Jun 2025 (v3.2.0)  | 310   | ✅ Active     | Cross-platform | ⭐⭐ Good        | Advanced features (Redis, RW locks)    |
-| **fasteners**    | Aug 2025 (v0.20)   | 268   | ✅ Active     | Cross-platform | ⭐⭐ Good        | Inter-process locks, RW locks          |
-| **atomicwrites** | 2018 (v1.4.0)      | -     | ❌ Deprecated | Cross-platform | N/A              | **DO NOT USE** (maintainer deprecated) |
+| Library | Latest Release | Stars | Maintenance | Platform | API Simplicity | Use Case |
+| --- | --- | --- | --- | --- | --- | --- |
+| **filelock** | Oct 2025 (v3.20.0) | 901 | ✅ Active | Cross-platform | ⭐⭐⭐ Excellent | General-purpose file locking |
+| **portalocker** | Jun 2025 (v3.2.0) | 310 | ✅ Active | Cross-platform | ⭐⭐ Good | Advanced features (Redis, RW locks) |
+| **fasteners** | Aug 2025 (v0.20) | 268 | ✅ Active | Cross-platform | ⭐⭐ Good | Inter-process locks, RW locks |
+| **atomicwrites** | 2018 (v1.4.0) | - | ❌ Deprecated | Cross-platform | N/A | **DO NOT USE** (maintainer deprecated) |
 
 ### Native Python Options
 
-| Method          | Availability | Atomicity              | Platform            | Complexity    |
-| --------------- | ------------ | ---------------------- | ------------------- | ------------- |
-| `os.replace()`  | Python 3.3+  | ✅ Atomic              | All POSIX + Windows | ⭐ Simple     |
-| `os.rename()`   | All Python   | ✅ Atomic (POSIX only) | POSIX               | ⭐ Simple     |
-| `fcntl.flock()` | All Python   | N/A (locking)          | POSIX only          | ⭐⭐ Moderate |
-| `fcntl.lockf()` | All Python   | N/A (locking)          | POSIX only          | ⭐⭐ Moderate |
+| Method | Availability | Atomicity | Platform | Complexity |
+| --- | --- | --- | --- | --- |
+| `os.replace()` | Python 3.3+ | ✅ Atomic | All POSIX + Windows | ⭐ Simple |
+| `os.rename()` | All Python | ✅ Atomic (POSIX only) | POSIX | ⭐ Simple |
+| `fcntl.flock()` | All Python | N/A (locking) | POSIX only | ⭐⭐ Moderate |
+| `fcntl.lockf()` | All Python | N/A (locking) | POSIX only | ⭐⭐ Moderate |
 
 ---
 
@@ -475,16 +475,16 @@ if __name__ == "__main__":
 
 ### fcntl.flock() vs fcntl.lockf()
 
-| Aspect             | `fcntl.flock()`         | `fcntl.lockf()`          |
-| ------------------ | ----------------------- | ------------------------ |
-| **Lock scope**     | Whole file only         | Byte ranges possible     |
-| **Lock binding**   | File descriptor         | Process                  |
-| **Multiple FDs**   | Independent locks       | Same process shares lock |
-| **POSIX standard** | ❌ Not standardized     | ✅ POSIX standard        |
-| **NFS support**    | ❌ Limited/broken       | ✅ Works on NFSv3+       |
-| **Portability**    | Some Unix lack it       | More portable            |
-| **Python docs**    | Not recommended         | Recommended              |
-| **Use case**       | Simple whole-file locks | Prefer for new code      |
+| Aspect | `fcntl.flock()` | `fcntl.lockf()` |
+| --- | --- | --- |
+| **Lock scope** | Whole file only | Byte ranges possible |
+| **Lock binding** | File descriptor | Process |
+| **Multiple FDs** | Independent locks | Same process shares lock |
+| **POSIX standard** | ❌ Not standardized | ✅ POSIX standard |
+| **NFS support** | ❌ Limited/broken | ✅ Works on NFSv3+ |
+| **Portability** | Some Unix lack it | More portable |
+| **Python docs** | Not recommended | Recommended |
+| **Use case** | Simple whole-file locks | Prefer for new code |
 
 **Recommendation**: Use `fcntl.lockf()` for native Python, or **filelock library** for simplicity.
 
@@ -1001,31 +1001,31 @@ for filepath in directory.glob("*.txt"):
 
 ### Lock Acquisition Time (Local Filesystem)
 
-| Method              | Avg Time   | Notes                    |
-| ------------------- | ---------- | ------------------------ |
-| `fcntl.flock()`     | ~1-5 μs    | Native system call       |
-| `fcntl.lockf()`     | ~1-5 μs    | Native system call       |
-| filelock (FileLock) | ~10-50 μs  | Includes Python overhead |
-| portalocker         | ~10-50 μs  | Wrapper around fcntl     |
-| Directory creation  | ~50-200 μs | mkdir() as lock          |
+| Method | Avg Time | Notes |
+| --- | --- | --- |
+| `fcntl.flock()` | ~1-5 μs | Native system call |
+| `fcntl.lockf()` | ~1-5 μs | Native system call |
+| filelock (FileLock) | ~10-50 μs | Includes Python overhead |
+| portalocker | ~10-50 μs | Wrapper around fcntl |
+| Directory creation | ~50-200 μs | mkdir() as lock |
 
 ### File Operation Time (ext4 filesystem)
 
-| Operation      | Avg Time     | Notes                 |
-| -------------- | ------------ | --------------------- |
-| `os.rename()`  | ~50-200 μs   | Atomic, metadata only |
-| `os.replace()` | ~50-200 μs   | Atomic, metadata only |
-| `os.unlink()`  | ~50-100 μs   | Metadata operation    |
-| Read 1KB file  | ~100-500 μs  | Depends on page cache |
-| Write 1KB file | ~200-1000 μs | Includes fsync        |
+| Operation | Avg Time | Notes |
+| --- | --- | --- |
+| `os.rename()` | ~50-200 μs | Atomic, metadata only |
+| `os.replace()` | ~50-200 μs | Atomic, metadata only |
+| `os.unlink()` | ~50-100 μs | Metadata operation |
+| Read 1KB file | ~100-500 μs | Depends on page cache |
+| Write 1KB file | ~200-1000 μs | Includes fsync |
 
 ### NFS Performance (NFSv4)
 
-| Operation       | Avg Time | Notes              |
-| --------------- | -------- | ------------------ |
-| `os.rename()`   | ~1-10 ms | Network round-trip |
+| Operation | Avg Time | Notes |
+| --- | --- | --- |
+| `os.rename()` | ~1-10 ms | Network round-trip |
 | `fcntl.lockf()` | ~1-10 ms | Network round-trip |
-| Read 1KB file   | ~2-20 ms | Network + cache    |
+| Read 1KB file | ~2-20 ms | Network + cache |
 
 **Note**: These are approximate values. Always benchmark your specific workload.
 

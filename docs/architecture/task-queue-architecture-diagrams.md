@@ -480,16 +480,16 @@ Phase 3: Queue Only (cleanup)
 
 ## Performance Benchmarks (Estimated)
 
-| Operation              | File-Based                 | SQLite Queue             | Improvement          |
-| ---------------------- | -------------------------- | ------------------------ | -------------------- |
-| **Enqueue**            | 5ms (write JSON)           | 2ms (INSERT)             | **2.5x faster**      |
-| **Dequeue**            | 2500ms avg (polling)       | 500ms avg (polling)      | **5x faster**        |
-| **Dequeue**            | 2500ms avg (polling)       | <100ms (event-driven)    | **25x faster**       |
-| **Concurrent writers** | Conflicts (manual locking) | Safe (SQLite ACID)       | **∞ improvement**    |
-| **Concurrent readers** | N × file reads             | 1 × SELECT               | **N×/1 improvement** |
-| **Crash recovery**     | Manual file cleanup        | Automatic (AckQueue)     | **∞ improvement**    |
-| **Deduplication**      | Hash check (O(n))          | UNIQUE constraint (O(1)) | **N× improvement**   |
-| **Queue depth query**  | len(glob()) = O(n)         | SELECT COUNT(\*) = O(1)  | **N× improvement**   |
+| Operation | File-Based | SQLite Queue | Improvement |
+| --- | --- | --- | --- |
+| **Enqueue** | 5ms (write JSON) | 2ms (INSERT) | **2.5x faster** |
+| **Dequeue** | 2500ms avg (polling) | 500ms avg (polling) | **5x faster** |
+| **Dequeue** | 2500ms avg (polling) | <100ms (event-driven) | **25x faster** |
+| **Concurrent writers** | Conflicts (manual locking) | Safe (SQLite ACID) | **∞ improvement** |
+| **Concurrent readers** | N × file reads | 1 × SELECT | **N×/1 improvement** |
+| **Crash recovery** | Manual file cleanup | Automatic (AckQueue) | **∞ improvement** |
+| **Deduplication** | Hash check (O(n)) | UNIQUE constraint (O(1)) | **N× improvement** |
+| **Queue depth query** | len(glob()) = O(n) | SELECT COUNT(\*) = O(1) | **N× improvement** |
 
 ---
 

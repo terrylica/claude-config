@@ -154,16 +154,16 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 
 ### Terminal Support Matrix
 
-| Terminal     | OSC 52 Support | Notes                                      |
-| ------------ | -------------- | ------------------------------------------ |
-| Ghostty      | ✅ Full        | Native, requires `clipboard-write = allow` |
-| iTerm2       | ✅ Full        | Native since v3.4.0                        |
-| WezTerm      | ✅ Full        | Native                                     |
-| Kitty        | ✅ Full        | Native                                     |
-| Alacritty    | ✅ With config | Requires `osc52` feature enabled           |
-| tmux         | ✅ Passthrough | Requires special wrapping (Ptmux)          |
-| Terminal.app | ❌ None        | Does not support OSC 52                    |
-| xterm        | ⚠️ Partial     | Requires compile-time flag                 |
+| Terminal | OSC 52 Support | Notes |
+| --- | --- | --- |
+| Ghostty | ✅ Full | Native, requires `clipboard-write = allow` |
+| iTerm2 | ✅ Full | Native since v3.4.0 |
+| WezTerm | ✅ Full | Native |
+| Kitty | ✅ Full | Native |
+| Alacritty | ✅ With config | Requires `osc52` feature enabled |
+| tmux | ✅ Passthrough | Requires special wrapping (Ptmux) |
+| Terminal.app | ❌ None | Does not support OSC 52 |
+| xterm | ⚠️ Partial | Requires compile-time flag |
 
 ### Ghostty Specific Configuration
 

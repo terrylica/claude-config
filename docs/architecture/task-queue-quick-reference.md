@@ -131,14 +131,14 @@ observer.start()
 
 ## Comparison Cheat Sheet
 
-| Feature           | File-Based        | persist-queue        |
-| ----------------- | ----------------- | -------------------- |
-| Latency           | 0-5s (avg 2.5s)   | 0-1s (avg 0.5s)      |
-| Race conditions   | Yes               | No (ACID)            |
-| Crash recovery    | Manual            | Automatic (AckQueue) |
-| Deduplication     | Manual hashing    | Native (UNIQUE)      |
-| Bash integration  | Easy (JSON files) | Easy (SQLite CLI)    |
-| Concurrent access | Risky             | Safe (WAL mode)      |
+| Feature | File-Based | persist-queue |
+| --- | --- | --- |
+| Latency | 0-5s (avg 2.5s) | 0-1s (avg 0.5s) |
+| Race conditions | Yes | No (ACID) |
+| Crash recovery | Manual | Automatic (AckQueue) |
+| Deduplication | Manual hashing | Native (UNIQUE) |
+| Bash integration | Easy (JSON files) | Easy (SQLite CLI) |
+| Concurrent access | Risky | Safe (WAL mode) |
 
 ---
 

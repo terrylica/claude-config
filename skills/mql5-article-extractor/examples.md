@@ -267,15 +267,15 @@ Output: /tmp/test_output/29210372/article_19625/
 
 ## Bounding Summary
 
-| User Intent                  | Skill Action           | Reason                     |
-| ---------------------------- | ---------------------- | -------------------------- |
-| "Extract mql5 article [URL]" | ✅ Execute             | Valid scope                |
-| "Get user [ID] articles"     | ✅ Execute             | Valid scope                |
-| "Extract from yahoo.com"     | ❌ Reject              | Out of scope               |
-| "Extract trading articles"   | ⚠️ Prompt              | Ambiguous - need specifics |
-| "Process URLs in [file]"     | ✅ Verify then execute | Valid if all mql5.com      |
-| "Extract 1000 articles"      | ⚠️ Confirm             | Large operation warning    |
-| "Scrape bloomberg"           | ❌ Reject              | Out of scope               |
+| User Intent | Skill Action | Reason |
+| --- | --- | --- |
+| "Extract mql5 article [URL]" | ✅ Execute | Valid scope |
+| "Get user [ID] articles" | ✅ Execute | Valid scope |
+| "Extract from yahoo.com" | ❌ Reject | Out of scope |
+| "Extract trading articles" | ⚠️ Prompt | Ambiguous - need specifics |
+| "Process URLs in [file]" | ✅ Verify then execute | Valid if all mql5.com |
+| "Extract 1000 articles" | ⚠️ Confirm | Large operation warning |
+| "Scrape bloomberg" | ❌ Reject | Out of scope |
 
 ---
 

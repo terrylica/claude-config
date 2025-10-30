@@ -26,13 +26,13 @@ unix_ms,bid,ask,last,volume_real
 
 ### Field Requirements
 
-| Field         | Required       | Type   | Constraints                         | Default if Missing     |
-| ------------- | -------------- | ------ | ----------------------------------- | ---------------------- |
-| `unix_ms`     | ✅ YES         | int64  | > 0, strictly ascending             | N/A (import fails)     |
-| `bid`         | ⚠️ Conditional | double | ≥ 0, if >0 then `ask` should be set | 0 (MT5 infers no bid)  |
-| `ask`         | ⚠️ Conditional | double | ≥ 0, if >0 then `bid` ≤ `ask`       | 0 (MT5 infers no ask)  |
-| `last`        | ⚠️ Conditional | double | ≥ 0                                 | 0 (MT5 infers no last) |
-| `volume_real` | ❌ NO          | double | ≥ 0                                 | 0                      |
+| Field | Required | Type | Constraints | Default if Missing |
+| --- | --- | --- | --- | --- |
+| `unix_ms` | ✅ YES | int64 | > 0, strictly ascending | N/A (import fails) |
+| `bid` | ⚠️ Conditional | double | ≥ 0, if >0 then `ask` should be set | 0 (MT5 infers no bid) |
+| `ask` | ⚠️ Conditional | double | ≥ 0, if >0 then `bid` ≤ `ask` | 0 (MT5 infers no ask) |
+| `last` | ⚠️ Conditional | double | ≥ 0 | 0 (MT5 infers no last) |
+| `volume_real` | ❌ NO | double | ≥ 0 | 0 |
 
 **Conditional Logic**:
 
@@ -69,12 +69,12 @@ struct MqlTick {
 
 When you provide ticks via `CustomTicksReplace()`, MT5 sets flags:
 
-| Condition         | Flag Set           | Meaning                    |
-| ----------------- | ------------------ | -------------------------- |
-| `bid > 0`         | `TICK_FLAG_BID`    | Bid price changed          |
-| `ask > 0`         | `TICK_FLAG_ASK`    | Ask price changed          |
-| `last > 0`        | `TICK_FLAG_LAST`   | Last price (trade) changed |
-| `volume_real > 0` | `TICK_FLAG_VOLUME` | Volume present             |
+| Condition | Flag Set | Meaning |
+| --- | --- | --- |
+| `bid > 0` | `TICK_FLAG_BID` | Bid price changed |
+| `ask > 0` | `TICK_FLAG_ASK` | Ask price changed |
+| `last > 0` | `TICK_FLAG_LAST` | Last price (trade) changed |
+| `volume_real > 0` | `TICK_FLAG_VOLUME` | Volume present |
 
 **Source**: Inferred from [CustomTicksAdd() behavior](https://www.mql5.com/en/book/advanced/custom_symbols/custom_symbols_ticks)
 

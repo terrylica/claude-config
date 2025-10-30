@@ -608,13 +608,13 @@ Activate when user mentions:
 
 ### Documentation Time Savings
 
-| Knowledge Area           | Documentation   | Time Saved per Use |
-| ------------------------ | --------------- | ------------------ |
-| Lessons Learned Playbook | 8 gotchas       | 8-12 hours         |
-| Legacy Assessment        | 70+ items       | 30-50 hours        |
-| Validation Methodology   | 6 pitfalls      | 2-3 hours          |
-| External Research        | 3 breakthroughs | 10-15 hours        |
-| Migration Guide          | 7 phases        | 4-6 hours          |
+| Knowledge Area | Documentation | Time Saved per Use |
+| --- | --- | --- |
+| Lessons Learned Playbook | 8 gotchas | 8-12 hours |
+| Legacy Assessment | 70+ items | 30-50 hours |
+| Validation Methodology | 6 pitfalls | 2-3 hours |
+| External Research | 3 breakthroughs | 10-15 hours |
+| Migration Guide | 7 phases | 4-6 hours |
 
 **Total Time Invested**: 185+ hours (captured in documentation)
 **Total Time Saved**: 50-100 hours per developer

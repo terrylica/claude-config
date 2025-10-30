@@ -135,13 +135,13 @@ sudo tlmgr install tabularray
 
 ### Alignment Options
 
-| Code       | Meaning                          |
-| ---------- | -------------------------------- |
-| `l`        | Left-aligned                     |
-| `c`        | Centered                         |
-| `r`        | Right-aligned                    |
-| `X`        | Flexible width (expands to fill) |
-| `Q[width]` | Fixed width with wrapping        |
+| Code | Meaning |
+| --- | --- |
+| `l` | Left-aligned |
+| `c` | Centered |
+| `r` | Right-aligned |
+| `X` | Flexible width (expands to fill) |
+| `Q[width]` | Fixed width with wrapping |
 
 ### Examples
 

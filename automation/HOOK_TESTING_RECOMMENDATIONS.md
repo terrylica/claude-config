@@ -173,13 +173,13 @@ shUnit2 is more familiar to developers with xUnit experience, but BATS-core has 
 
 ### Why pre-commit > Husky for Our Use Case
 
-| Feature                | pre-commit              | Husky                 |
-| ---------------------- | ----------------------- | --------------------- |
-| **Platform**           | Python (cross-platform) | Node.js/npm required  |
-| **Multi-language**     | Native support          | Limited               |
-| **Shell script focus** | Excellent               | JavaScript-focused    |
-| **Maturity**           | Mature, stable          | Younger ecosystem     |
-| **Our stack**          | Python (uv), Shell      | No Node.js dependency |
+| Feature | pre-commit | Husky |
+| --- | --- | --- |
+| **Platform** | Python (cross-platform) | Node.js/npm required |
+| **Multi-language** | Native support | Limited |
+| **Shell script focus** | Excellent | JavaScript-focused |
+| **Maturity** | Mature, stable | Younger ecosystem |
+| **Our stack** | Python (uv), Shell | No Node.js dependency |
 
 **Decision**: Use **pre-commit** since we already use Python (uv) and have no Node.js requirement.
 
@@ -468,13 +468,13 @@ To prevent the "Stop hook error" from recurring:
 
 ## 10. Cost-Benefit Analysis
 
-| Solution                | Setup Time | Ongoing Maintenance | Benefit                    | ROI        |
-| ----------------------- | ---------- | ------------------- | -------------------------- | ---------- |
-| Custom output validator | 30 min     | Near-zero           | High - Catches exact issue | ⭐⭐⭐⭐⭐ |
-| ShellCheck              | 5 min      | Zero                | Medium - General quality   | ⭐⭐⭐⭐⭐ |
-| pre-commit framework    | 1 hour     | 5 min/month         | High - Automation          | ⭐⭐⭐⭐   |
-| BATS test suite         | 2 hours    | Low                 | Medium - Regression tests  | ⭐⭐⭐     |
-| GitHub Actions CI/CD    | 1 hour     | Near-zero           | Medium - Auto-validation   | ⭐⭐⭐     |
+| Solution | Setup Time | Ongoing Maintenance | Benefit | ROI |
+| --- | --- | --- | --- | --- |
+| Custom output validator | 30 min | Near-zero | High - Catches exact issue | ⭐⭐⭐⭐⭐ |
+| ShellCheck | 5 min | Zero | Medium - General quality | ⭐⭐⭐⭐⭐ |
+| pre-commit framework | 1 hour | 5 min/month | High - Automation | ⭐⭐⭐⭐ |
+| BATS test suite | 2 hours | Low | Medium - Regression tests | ⭐⭐⭐ |
+| GitHub Actions CI/CD | 1 hour | Near-zero | Medium - Auto-validation | ⭐⭐⭐ |
 
 **Recommendation**: Implement Tiers 1 and 2 (custom validator, ShellCheck, pre-commit). Tier 3 is optional.
 

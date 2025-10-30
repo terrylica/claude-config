@@ -90,13 +90,13 @@ source "$LIB_DIR/sage-sync-core.sh" || { echo "FATAL: Cannot load"; exit 1; }
 
 ### **Maintainability Metrics**
 
-| Metric                 | Before      | After          | Improvement          |
-| ---------------------- | ----------- | -------------- | -------------------- |
-| **File Size**          | 570 lines   | 283 lines      | 50% reduction        |
-| **Total Lines**        | 1,457 lines | 396 lines      | 73% reduction        |
-| **Module Count**       | 1 monolith  | 3 modules      | Logical separation   |
-| **Function Isolation** | Mixed       | Modular        | Clear boundaries     |
-| **Import Safety**      | None        | Absolute paths | Stability guaranteed |
+| Metric | Before | After | Improvement |
+| --- | --- | --- | --- |
+| **File Size** | 570 lines | 283 lines | 50% reduction |
+| **Total Lines** | 1,457 lines | 396 lines | 73% reduction |
+| **Module Count** | 1 monolith | 3 modules | Logical separation |
+| **Function Isolation** | Mixed | Modular | Clear boundaries |
+| **Import Safety** | None | Absolute paths | Stability guaranteed |
 
 ### **Configuration Alignment**
 

@@ -87,14 +87,14 @@ automation/lychee/
 
 **Location**: `$HOME/.claude/automation/lychee/state/`
 
-| File/Directory   | Purpose                      | Pattern                                         | Retention |
-| ---------------- | ---------------------------- | ----------------------------------------------- | --------- |
-| `events.db`      | Event correlation store      | SQLite database with session_events table       | ∞         |
-| `notifications/` | Hook → Bot requests          | `notify_{session_id}_{workspace_hash}.json`     | Consumed  |
-| `approvals/`     | Bot → Orchestrator decisions | `approval_{session_id}_{workspace_hash}.json`   | Consumed  |
-| `completions/`   | Orchestrator → Bot results   | `completion_{session_id}_{workspace_hash}.json` | Consumed  |
-| `callbacks/`     | Telegram button callbacks    | `cb_{hash8}.json`                               | 30 days   |
-| `registry.json`  | Workspace metadata           | JSON with emoji + path mapping                  | ∞         |
+| File/Directory | Purpose | Pattern | Retention |
+| --- | --- | --- | --- |
+| `events.db` | Event correlation store | SQLite database with session_events table | ∞ |
+| `notifications/` | Hook → Bot requests | `notify_{session_id}_{workspace_hash}.json` | Consumed |
+| `approvals/` | Bot → Orchestrator decisions | `approval_{session_id}_{workspace_hash}.json` | Consumed |
+| `completions/` | Orchestrator → Bot results | `completion_{session_id}_{workspace_hash}.json` | Consumed |
+| `callbacks/` | Telegram button callbacks | `cb_{hash8}.json` | 30 days |
+| `registry.json` | Workspace metadata | JSON with emoji + path mapping | ∞ |
 
 ## Components
 

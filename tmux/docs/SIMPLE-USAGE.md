@@ -50,12 +50,12 @@ td                    # Smart detach command (recommended)
 
 The session manager automatically creates session names:
 
-| Directory       | Session Name  | Reason                   |
-| --------------- | ------------- | ------------------------ |
-| `~/my-project`  | `my-project`  | Standard naming          |
-| `~/.config`     | `dotconfig`   | Dot folder awareness     |
-| `~/.git`        | `dotgit`      | Preserves dot nature     |
-| `/tmp/Test_App` | `test-app`    | Normalized to lowercase  |
+| Directory | Session Name | Reason |
+| --- | --- | --- |
+| `~/my-project` | `my-project` | Standard naming |
+| `~/.config` | `dotconfig` | Dot folder awareness |
+| `~/.git` | `dotgit` | Preserves dot nature |
+| `/tmp/Test_App` | `test-app` | Normalized to lowercase |
 | `~/My-Cool-App` | `my-cool-app` | Spaces/symbols → hyphens |
 
 ## 📋 Commands
@@ -180,15 +180,15 @@ The scripts are simple bash files - feel free to modify them:
 
 ## ✨ Benefits of Simple Approach
 
-| Aspect          | Simple Approach         | Complex Systems      |
-| --------------- | ----------------------- | -------------------- |
-| **Learning**    | Standard tmux knowledge | Custom commands      |
-| **Debugging**   | Visible commands        | Hidden automation    |
-| **Portability** | Works everywhere        | Requires setup       |
-| **Maintenance** | Minimal                 | High overhead        |
-| **Reliability** | Predictable             | Race conditions      |
-| **Performance** | Fast                    | Complex logic        |
-| **Resources**   | Minimal                 | Background processes |
+| Aspect | Simple Approach | Complex Systems |
+| --- | --- | --- |
+| **Learning** | Standard tmux knowledge | Custom commands |
+| **Debugging** | Visible commands | Hidden automation |
+| **Portability** | Works everywhere | Requires setup |
+| **Maintenance** | Minimal | High overhead |
+| **Reliability** | Predictable | Race conditions |
+| **Performance** | Fast | Complex logic |
+| **Resources** | Minimal | Background processes |
 
 ---
 

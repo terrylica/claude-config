@@ -177,13 +177,13 @@ Is it a functional script?
 
 ### Naming Conventions
 
-| Type           | Convention                                   | Example                    |
-| -------------- | -------------------------------------------- | -------------------------- |
-| Directories    | `kebab-case`                                 | `/tools/doc-intelligence/` |
-| Shell scripts  | `kebab-case.sh`                              | `install-all-tools.sh`     |
-| Python scripts | `kebab-case.py`                              | `workspace-cleanup.py`     |
-| Documentation  | `SCREAMING_SNAKE_CASE.md` or `kebab-case.md` | `TOOL_ORGANIZATION.md`     |
-| Specifications | `kebab-case.yaml`                            | `tool-manifest.yaml`       |
+| Type | Convention | Example |
+| --- | --- | --- |
+| Directories | `kebab-case` | `/tools/doc-intelligence/` |
+| Shell scripts | `kebab-case.sh` | `install-all-tools.sh` |
+| Python scripts | `kebab-case.py` | `workspace-cleanup.py` |
+| Documentation | `SCREAMING_SNAKE_CASE.md` or `kebab-case.md` | `TOOL_ORGANIZATION.md` |
+| Specifications | `kebab-case.yaml` | `tool-manifest.yaml` |
 
 ### Script Header Template
 
@@ -226,12 +226,12 @@ from pathlib import Path
 
 ### File Permissions
 
-| Type                | Permissions         | Rationale                         |
-| ------------------- | ------------------- | --------------------------------- |
-| Executable scripts  | `755` (`rwxr-xr-x`) | Owner can modify, all can execute |
-| Library scripts     | `644` (`rw-r--r--`) | Sourced, not executed directly    |
-| Configuration files | `644` (`rw-r--r--`) | Read-only for non-owner           |
-| Secrets/credentials | `600` (`rw-------`) | Owner only                        |
+| Type | Permissions | Rationale |
+| --- | --- | --- |
+| Executable scripts | `755` (`rwxr-xr-x`) | Owner can modify, all can execute |
+| Library scripts | `644` (`rw-r--r--`) | Sourced, not executed directly |
+| Configuration files | `644` (`rw-r--r--`) | Read-only for non-owner |
+| Secrets/credentials | `600` (`rw-------`) | Owner only |
 
 Set permissions:
 
@@ -495,14 +495,14 @@ See `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md` for detailed migration
 
 ### Where Should I Put...?
 
-| Type                  | Location                | Example                    |
-| --------------------- | ----------------------- | -------------------------- |
-| Installation script   | `/tools/bin/`           | `install-all-tools.sh`     |
-| Configuration utility | `/tools/config/`        | `disable-pyright.sh`       |
-| Automation hook       | `/automation/{system}/` | `cns_hook_entry.sh`        |
-| Standalone tool       | `/tools/{tool-name}/`   | `/tools/doc-intelligence/` |
-| Shared library        | `/tools/lib/`           | `common.sh`                |
-| System integration    | `/bin/` (avoid)         | `cns-notify`               |
+| Type | Location | Example |
+| --- | --- | --- |
+| Installation script | `/tools/bin/` | `install-all-tools.sh` |
+| Configuration utility | `/tools/config/` | `disable-pyright.sh` |
+| Automation hook | `/automation/{system}/` | `cns_hook_entry.sh` |
+| Standalone tool | `/tools/{tool-name}/` | `/tools/doc-intelligence/` |
+| Shared library | `/tools/lib/` | `common.sh` |
+| System integration | `/bin/` (avoid) | `cns-notify` |
 
 ### Required Files for Tools
 

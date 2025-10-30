@@ -18,11 +18,11 @@ allowed-tools: Read, Edit, Bash
 
 ## Recommended Stack
 
-| Component        | Purpose                                 | Status          |
-| ---------------- | --------------------------------------- | --------------- |
-| **MacTeX 2025**  | Full LaTeX distribution (TeX Live 2025) | ✅ Recommended  |
-| **Skim 1.7.11**  | PDF viewer with SyncTeX support         | ✅ macOS only   |
-| **TeXShop 5.57** | Integrated LaTeX IDE (optional)         | ✅ Native macOS |
+| Component | Purpose | Status |
+| --- | --- | --- |
+| **MacTeX 2025** | Full LaTeX distribution (TeX Live 2025) | ✅ Recommended |
+| **Skim 1.7.11** | PDF viewer with SyncTeX support | ✅ macOS only |
+| **TeXShop 5.57** | Integrated LaTeX IDE (optional) | ✅ Native macOS |
 
 ---
 

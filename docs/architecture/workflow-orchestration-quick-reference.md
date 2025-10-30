@@ -22,13 +22,13 @@ mkdir -p ~/.claude/workflows
 
 ## 5-Approach Comparison
 
-| Approach               | Deploy     | Extend     | Simple   | Score | Use When                       |
-| ---------------------- | ---------- | ---------- | -------- | ----- | ------------------------------ |
-| **SQLite + Huey**      | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐   | ⭐⭐⭐⭐ | **5** | **Starting simple, growing**   |
-| Asyncio Event Bus      | ⭐⭐⭐⭐⭐ | ⭐⭐⭐     | ⭐⭐⭐⭐ | 4     | Embedded, single-process       |
-| State Machine + SQLite | ⭐⭐⭐⭐   | ⭐⭐⭐⭐   | ⭐⭐⭐   | 4     | Complex multi-step workflows   |
-| Redis Streams          | ⭐⭐       | ⭐⭐⭐⭐⭐ | ⭐⭐⭐   | 3     | Already have Redis, need scale |
-| MCP Server             | ⭐⭐       | ⭐⭐⭐⭐   | ⭐⭐     | 2     | **Wait until 2026**            |
+| Approach | Deploy | Extend | Simple | Score | Use When |
+| --- | --- | --- | --- | --- | --- |
+| **SQLite + Huey** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | **5** | **Starting simple, growing** |
+| Asyncio Event Bus | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | 4 | Embedded, single-process |
+| State Machine + SQLite | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | 4 | Complex multi-step workflows |
+| Redis Streams | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | 3 | Already have Redis, need scale |
+| MCP Server | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐ | 2 | **Wait until 2026** |
 
 ---
 

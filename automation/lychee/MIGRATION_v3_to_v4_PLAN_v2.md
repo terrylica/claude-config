@@ -1699,16 +1699,16 @@ launchctl start com.user.lychee.telegram-handler
 
 ### Phase-Specific Rollback
 
-| Phase | Rollback Command                                              |
-| ----- | ------------------------------------------------------------- |
-| 1     | `rm state/workflows.json`                                     |
-| 2     | `git checkout runtime/hook/; rm -rf state/summaries`          |
-| 3     | `git checkout runtime/bot/; rm -rf state/selections`          |
-| 4     | `git checkout runtime/orchestrator/; rm -rf state/executions` |
-| 5     | Fix failing tests, don't rollback                             |
-| 6     | `git mv telegram-workflows lychee; restart services`          |
-| 7     | `git revert HEAD`                                             |
-| 8     | `git revert HEAD` (docs only)                                 |
+| Phase | Rollback Command |
+| --- | --- |
+| 1 | `rm state/workflows.json` |
+| 2 | `git checkout runtime/hook/; rm -rf state/summaries` |
+| 3 | `git checkout runtime/bot/; rm -rf state/selections` |
+| 4 | `git checkout runtime/orchestrator/; rm -rf state/executions` |
+| 5 | Fix failing tests, don't rollback |
+| 6 | `git mv telegram-workflows lychee; restart services` |
+| 7 | `git revert HEAD` |
+| 8 | `git revert HEAD` (docs only) |
 
 ---
 
@@ -1736,18 +1736,18 @@ Phase 1 (registry) ← 1-1.5h
 
 ### Timeline
 
-| Phase                      | Duration | Cumulative |
-| -------------------------- | -------- | ---------- |
-| Phase 0: Preparation       | 2h       | 2h ✅      |
-| Phase 1: Registry          | 1.5h     | 3.5h       |
-| Phase 2: Hook              | 3.5h     | 7h         |
-| Phase 3: Bot               | 4h       | 11h        |
-| Phase 4: Orchestrator      | 5h       | 16h        |
-| Phase 5: Testing           | 3h       | 19h        |
-| Phase 6: Rename + Services | 1.5h     | 20.5h      |
-| Phase 7: Cleanup           | 2h       | 22.5h      |
-| Phase 8: Documentation     | 3h       | 25.5h      |
-| **Buffer (issues)**        | 4.5h     | **30h**    |
+| Phase | Duration | Cumulative |
+| --- | --- | --- |
+| Phase 0: Preparation | 2h | 2h ✅ |
+| Phase 1: Registry | 1.5h | 3.5h |
+| Phase 2: Hook | 3.5h | 7h |
+| Phase 3: Bot | 4h | 11h |
+| Phase 4: Orchestrator | 5h | 16h |
+| Phase 5: Testing | 3h | 19h |
+| Phase 6: Rename + Services | 1.5h | 20.5h |
+| Phase 7: Cleanup | 2h | 22.5h |
+| Phase 8: Documentation | 3h | 25.5h |
+| **Buffer (issues)** | 4.5h | **30h** |
 
 **Realistic Estimate**: 2-3 days (allowing for breaks, debugging, careful testing)
 
@@ -1763,16 +1763,16 @@ Phase 1 (registry) ← 1-1.5h
 
 ### Risk Matrix
 
-| Phase | Risk   | Impact | Mitigation                        |
-| ----- | ------ | ------ | --------------------------------- |
-| 1     | LOW    | LOW    | JSON validation before commit     |
-| 2     | MEDIUM | MEDIUM | Dual mode, test after completion  |
-| 3     | HIGH   | HIGH   | Dual mode, test extensively       |
-| 4     | HIGH   | HIGH   | Dual mode, template validation    |
-| 5     | MEDIUM | HIGH   | Comprehensive test scenarios      |
-| 6     | MEDIUM | HIGH   | Service management, git mv        |
-| 7     | LOW    | MEDIUM | Keep archives, test after removal |
-| 8     | LOW    | LOW    | Documentation only                |
+| Phase | Risk | Impact | Mitigation |
+| --- | --- | --- | --- |
+| 1 | LOW | LOW | JSON validation before commit |
+| 2 | MEDIUM | MEDIUM | Dual mode, test after completion |
+| 3 | HIGH | HIGH | Dual mode, test extensively |
+| 4 | HIGH | HIGH | Dual mode, template validation |
+| 5 | MEDIUM | HIGH | Comprehensive test scenarios |
+| 6 | MEDIUM | HIGH | Service management, git mv |
+| 7 | LOW | MEDIUM | Keep archives, test after removal |
+| 8 | LOW | LOW | Documentation only |
 
 ### Critical Success Factors
 

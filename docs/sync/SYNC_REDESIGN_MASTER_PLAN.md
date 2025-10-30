@@ -203,14 +203,14 @@ generate_session_fingerprint() {
 
 ### Before vs After Transformation
 
-| Metric               | Before (Current)             | After (Redesigned)            |
-| -------------------- | ---------------------------- | ----------------------------- |
-| Data Loss Risk       | HIGH (destructive by design) | ZERO (preservation first)     |
-| Backup Automation    | None                         | Multi-layer with verification |
-| Conflict Resolution  | None (overwrite)             | Intelligent + user-guided     |
-| Rollback Capability  | None                         | Tested emergency restoration  |
-| User Confirmation    | Silent destruction           | Explicit risk acknowledgment  |
-| Session Intelligence | File-copying only            | Conversation-aware            |
+| Metric | Before (Current) | After (Redesigned) |
+| --- | --- | --- |
+| Data Loss Risk | HIGH (destructive by design) | ZERO (preservation first) |
+| Backup Automation | None | Multi-layer with verification |
+| Conflict Resolution | None (overwrite) | Intelligent + user-guided |
+| Rollback Capability | None | Tested emergency restoration |
+| User Confirmation | Silent destruction | Explicit risk acknowledgment |
+| Session Intelligence | File-copying only | Conversation-aware |
 
 ### Implementation Success Criteria
 

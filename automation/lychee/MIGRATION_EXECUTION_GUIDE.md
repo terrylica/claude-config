@@ -595,19 +595,19 @@ Remove backward compatibility:
 
 ### Timeline Summary
 
-| Phase     | Est  | Actual | Status      |
-| --------- | ---- | ------ | ----------- |
-| **Fixes** | 3-4h | 2h     | ✅ Complete |
-| Phase 0   | 0.5h | 0.3h   | ✅ Complete |
-| Phase 1   | 1.5h | 0.25h  | ✅ Complete |
-| Phase 2   | 3.5h | -      | ⏳ Next     |
-| Phase 3   | 4h   | -      | Pending     |
-| Phase 4   | 5h   | -      | Pending     |
-| Phase 5   | 3h   | -      | Pending     |
-| Phase 6   | 1.5h | -      | Pending     |
-| Phase 7   | 2h   | -      | Pending     |
-| Phase 8   | 3h   | -      | Pending     |
-| Buffer    | 5h   | -      | Pending     |
+| Phase | Est | Actual | Status |
+| --- | --- | --- | --- |
+| **Fixes** | 3-4h | 2h | ✅ Complete |
+| Phase 0 | 0.5h | 0.3h | ✅ Complete |
+| Phase 1 | 1.5h | 0.25h | ✅ Complete |
+| Phase 2 | 3.5h | - | ⏳ Next |
+| Phase 3 | 4h | - | Pending |
+| Phase 4 | 5h | - | Pending |
+| Phase 5 | 3h | - | Pending |
+| Phase 6 | 1.5h | - | Pending |
+| Phase 7 | 2h | - | Pending |
+| Phase 8 | 3h | - | Pending |
+| Buffer | 5h | - | Pending |
 
 **Completed**: 2.55h of 33h (7.7%) | **Remaining**: 30.45h (Phases 2-8)
 

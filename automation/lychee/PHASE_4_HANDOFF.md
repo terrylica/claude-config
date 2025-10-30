@@ -466,13 +466,13 @@ for workflow_id in ordered_workflow_ids:
 
 **New Events for Phase 4**:
 
-| Event Type                   | Component    | Metadata                      |
-| ---------------------------- | ------------ | ----------------------------- |
-| `selection.received`         | orchestrator | selection_file, workflow_ids  |
-| `workflow.started`           | orchestrator | workflow_id, workflow_name    |
-| `workflow.template_rendered` | orchestrator | workflow_id, template_length  |
-| `workflow.completed`         | orchestrator | workflow_id, status, duration |
-| `execution.created`          | orchestrator | execution_file, workflow_id   |
+| Event Type | Component | Metadata |
+| --- | --- | --- |
+| `selection.received` | orchestrator | selection_file, workflow_ids |
+| `workflow.started` | orchestrator | workflow_id, workflow_name |
+| `workflow.template_rendered` | orchestrator | workflow_id, template_length |
+| `workflow.completed` | orchestrator | workflow_id, status, duration |
+| `execution.created` | orchestrator | execution_file, workflow_id |
 
 **Query for End-to-End Trace**:
 
@@ -504,11 +504,11 @@ ORDER BY timestamp;
 
 **Phase 4 SLOs**:
 
-| SLO             | Target        | Validation Method                      |
-| --------------- | ------------- | -------------------------------------- |
-| Correctness     | 100%          | All workflows execute, results emitted |
-| Observability   | 100%          | All events logged with correlation_id  |
-| Maintainability | Single source | workflows.json is canonical            |
+| SLO | Target | Validation Method |
+| --- | --- | --- |
+| Correctness | 100% | All workflows execute, results emitted |
+| Observability | 100% | All events logged with correlation_id |
+| Maintainability | Single source | workflows.json is canonical |
 
 ---
 

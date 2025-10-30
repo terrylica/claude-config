@@ -10,13 +10,13 @@ For orchestrating Telegram bot → file watching → Claude CLI invocation → n
 
 ### Quick Comparison Matrix
 
-| Approach               | Deploy | Extend | Simple | Score | Best For                       |
-| ---------------------- | ------ | ------ | ------ | ----- | ------------------------------ |
-| **SQLite + Huey**      | 1      | 4      | 2      | 5     | **Starting simple, growing**   |
-| Asyncio Event Bus      | 1      | 3      | 2      | 4     | Embedded, single-process       |
-| Redis Streams          | 3      | 5      | 3      | 3     | Already have Redis, need scale |
-| State Machine + SQLite | 2      | 4      | 3      | 4     | Complex multi-step workflows   |
-| MCP Server             | 3      | 4      | 4      | 2     | Future, wait for maturity      |
+| Approach | Deploy | Extend | Simple | Score | Best For |
+| --- | --- | --- | --- | --- | --- |
+| **SQLite + Huey** | 1 | 4 | 2 | 5 | **Starting simple, growing** |
+| Asyncio Event Bus | 1 | 3 | 2 | 4 | Embedded, single-process |
+| Redis Streams | 3 | 5 | 3 | 3 | Already have Redis, need scale |
+| State Machine + SQLite | 2 | 4 | 3 | 4 | Complex multi-step workflows |
+| MCP Server | 3 | 4 | 4 | 2 | Future, wait for maturity |
 
 **Scoring**: 1 = simplest/best, 5 = most complex/worst (except Extend and Score where higher is better)
 
@@ -532,55 +532,55 @@ Q5: Already have Redis infrastructure?
 
 ### Deployment Complexity
 
-| Approach      | Requirements                      | Setup Time |
-| ------------- | --------------------------------- | ---------- |
-| SQLite + Huey | Single file, no services          | 30 min     |
-| Asyncio       | Pure Python, no dependencies      | 1 hour     |
-| Redis Streams | Redis server (local or remote)    | 2 hours    |
-| State Machine | SQLite + library                  | 1 hour     |
-| MCP           | MCP server process, documentation | 4+ hours   |
+| Approach | Requirements | Setup Time |
+| --- | --- | --- |
+| SQLite + Huey | Single file, no services | 30 min |
+| Asyncio | Pure Python, no dependencies | 1 hour |
+| Redis Streams | Redis server (local or remote) | 2 hours |
+| State Machine | SQLite + library | 1 hour |
+| MCP | MCP server process, documentation | 4+ hours |
 
 ### Persistence
 
-| Approach      | Method                       | Durability |
-| ------------- | ---------------------------- | ---------- |
-| SQLite + Huey | SQLite ACID guarantees       | Excellent  |
-| Asyncio       | Manual (JSON/YAML)           | Fair       |
-| Redis Streams | Redis AOF/RDB (memory-based) | Good       |
-| State Machine | SQLite state tables          | Excellent  |
-| MCP           | Backend-dependent            | Unknown    |
+| Approach | Method | Durability |
+| --- | --- | --- |
+| SQLite + Huey | SQLite ACID guarantees | Excellent |
+| Asyncio | Manual (JSON/YAML) | Fair |
+| Redis Streams | Redis AOF/RDB (memory-based) | Good |
+| State Machine | SQLite state tables | Excellent |
+| MCP | Backend-dependent | Unknown |
 
 ### Distribution
 
-| Approach      | Capability              |
-| ------------- | ----------------------- |
-| SQLite + Huey | Single machine\*        |
-| Asyncio       | Single process only     |
-| Redis Streams | Multi-worker native     |
-| State Machine | Single machine          |
-| MCP           | Implementation-specific |
+| Approach | Capability |
+| --- | --- |
+| SQLite + Huey | Single machine\* |
+| Asyncio | Single process only |
+| Redis Streams | Multi-worker native |
+| State Machine | Single machine |
+| MCP | Implementation-specific |
 
 \*Can switch Huey to Redis backend for distribution
 
 ### Learning Curve
 
-| Approach      | Difficulty | Prerequisites                  |
-| ------------- | ---------- | ------------------------------ |
-| SQLite + Huey | Low        | Task queue patterns            |
-| Asyncio       | Medium     | async/await knowledge          |
-| Redis Streams | Medium     | Redis concepts                 |
-| State Machine | Medium     | State machine design           |
-| MCP           | High       | New protocol, limited examples |
+| Approach | Difficulty | Prerequisites |
+| --- | --- | --- |
+| SQLite + Huey | Low | Task queue patterns |
+| Asyncio | Medium | async/await knowledge |
+| Redis Streams | Medium | Redis concepts |
+| State Machine | Medium | State machine design |
+| MCP | High | New protocol, limited examples |
 
 ### Debugging & Monitoring
 
-| Approach      | Tools                          | Quality   |
-| ------------- | ------------------------------ | --------- |
-| SQLite + Huey | sqlite3 CLI, inspect queue     | Excellent |
-| Asyncio       | Python debugger, print/logging | Good      |
-| Redis Streams | Redis CLI, XINFO commands      | Good      |
-| State Machine | Visual diagrams + SQL queries  | Excellent |
-| MCP           | TBD - tooling immature         | Unknown   |
+| Approach | Tools | Quality |
+| --- | --- | --- |
+| SQLite + Huey | sqlite3 CLI, inspect queue | Excellent |
+| Asyncio | Python debugger, print/logging | Good |
+| Redis Streams | Redis CLI, XINFO commands | Good |
+| State Machine | Visual diagrams + SQL queries | Excellent |
+| MCP | TBD - tooling immature | Unknown |
 
 ---
 

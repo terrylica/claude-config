@@ -354,16 +354,16 @@ rust 1.70.0
 
 ### 2.1 Comparison Matrix
 
-| Scheme                | Bits | Collision Resistance | Human Readable | Sortable | Global Unique | Content Based |
-| --------------------- | ---- | -------------------- | -------------- | -------- | ------------- | ------------- |
-| **UUID v4**           | 128  | 50% @ 2.7×10¹⁸       | ❌             | ❌       | ✅            | ❌            |
-| **UUID v7**           | 128  | 50% @ 2.7×10¹⁸       | ❌             | ✅       | ✅            | ❌            |
-| **ULID**              | 128  | 50% @ 2.7×10¹⁸       | ⚠️             | ✅       | ✅            | ❌            |
-| **NanoID**            | ~126 | 50% @ ~10¹⁸          | ⚠️             | ❌       | ✅            | ❌            |
-| **SHA-256 (full)**    | 256  | 50% @ 2¹²⁸           | ❌             | ❌       | ❌            | ✅            |
-| **SHA-256 (128-bit)** | 128  | 50% @ 2⁶⁴            | ❌             | ❌       | ❌            | ✅            |
-| **SHA-256 (64-bit)**  | 64   | 50% @ 2³² (~4B)      | ❌             | ❌       | ❌            | ✅            |
-| **SHA-256 (32-bit)**  | 32   | 50% @ 2¹⁶ (~64K)     | ❌             | ❌       | ❌            | ✅            |
+| Scheme | Bits | Collision Resistance | Human Readable | Sortable | Global Unique | Content Based |
+| --- | --- | --- | --- | --- | --- | --- |
+| **UUID v4** | 128 | 50% @ 2.7×10¹⁸ | ❌ | ❌ | ✅ | ❌ |
+| **UUID v7** | 128 | 50% @ 2.7×10¹⁸ | ❌ | ✅ | ✅ | ❌ |
+| **ULID** | 128 | 50% @ 2.7×10¹⁸ | ⚠️ | ✅ | ✅ | ❌ |
+| **NanoID** | ~126 | 50% @ ~10¹⁸ | ⚠️ | ❌ | ✅ | ❌ |
+| **SHA-256 (full)** | 256 | 50% @ 2¹²⁸ | ❌ | ❌ | ❌ | ✅ |
+| **SHA-256 (128-bit)** | 128 | 50% @ 2⁶⁴ | ❌ | ❌ | ❌ | ✅ |
+| **SHA-256 (64-bit)** | 64 | 50% @ 2³² (~4B) | ❌ | ❌ | ❌ | ✅ |
+| **SHA-256 (32-bit)** | 32 | 50% @ 2¹⁶ (~64K) | ❌ | ❌ | ❌ | ✅ |
 
 ### 2.2 Collision Probability Analysis
 
@@ -381,12 +381,12 @@ where:
 
 **Practical Numbers**:
 
-| Bits | 50% Collision @ | 1 in 1B @    | Safe Up To |
-| ---- | --------------- | ------------ | ---------- |
-| 32   | 65,536          | 1,933        | 1,000      |
-| 64   | 4.3 billion     | 103 million  | 10 million |
-| 128  | 2.7×10¹⁸        | 103 trillion | 1 trillion |
-| 256  | 2.7×10³⁸        | 10⁶³         | 10⁶⁰       |
+| Bits | 50% Collision @ | 1 in 1B @ | Safe Up To |
+| --- | --- | --- | --- |
+| 32 | 65,536 | 1,933 | 1,000 |
+| 64 | 4.3 billion | 103 million | 10 million |
+| 128 | 2.7×10¹⁸ | 103 trillion | 1 trillion |
+| 256 | 2.7×10³⁸ | 10⁶³ | 10⁶⁰ |
 
 **Current Problem**: 8-char hex (32-bit) SHA-256 truncation
 
@@ -485,11 +485,11 @@ def workspace_id_from_path(path: Path) -> str:
 
 ### 3.1 File System Watching vs Periodic Scanning
 
-| Approach                 | Pros                                       | Cons                                                                                           | Best For                                                    |
-| ------------------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| **File System Watching** | Real-time updates, no polling overhead     | Complex setup, platform-specific APIs, high memory (150MB for 500K files), queue overflow risk | Active development with frequent workspace creation         |
-| **Periodic Scanning**    | Simple, cross-platform, low memory         | Stale data between scans, CPU spikes during scan                                               | Infrequent workspace changes, embedded/resource-constrained |
-| **On-Demand Scanning**   | Zero overhead when idle, always fresh data | Slight delay on first access                                                                   | CLI tools, most development workflows                       |
+| Approach | Pros | Cons | Best For |
+| --- | --- | --- | --- |
+| **File System Watching** | Real-time updates, no polling overhead | Complex setup, platform-specific APIs, high memory (150MB for 500K files), queue overflow risk | Active development with frequent workspace creation |
+| **Periodic Scanning** | Simple, cross-platform, low memory | Stale data between scans, CPU spikes during scan | Infrequent workspace changes, embedded/resource-constrained |
+| **On-Demand Scanning** | Zero overhead when idle, always fresh data | Slight delay on first access | CLI tools, most development workflows |
 
 **Recommendation**: On-demand scanning with SQLite caching (hybrid approach).
 
@@ -732,12 +732,12 @@ observer.join()
 
 ### 4.1 SQLite vs DuckDB vs File-based
 
-| Storage        | Performance                               | Query Features                                 | Size   | Use Case                          |
-| -------------- | ----------------------------------------- | ---------------------------------------------- | ------ | --------------------------------- |
-| **SQLite**     | Point queries: ✅✅✅<br>Aggregations: ⚠️ | Full-text search (FTS5), transactions, indexes | ~1.5MB | OLTP workloads, metadata registry |
-| **DuckDB**     | Point queries: ⚠️<br>Aggregations: ✅✅✅ | Analytical queries, columnar storage           | ~30MB  | Data analysis, logs               |
-| **JSON files** | Single file: ✅✅<br>Search: ❌           | Manual parsing                                 | ~KB-MB | Simple configs                    |
-| **YAML files** | Single file: ✅✅<br>Search: ❌           | Manual parsing                                 | ~KB-MB | Human-editable configs            |
+| Storage | Performance | Query Features | Size | Use Case |
+| --- | --- | --- | --- | --- |
+| **SQLite** | Point queries: ✅✅✅<br>Aggregations: ⚠️ | Full-text search (FTS5), transactions, indexes | ~1.5MB | OLTP workloads, metadata registry |
+| **DuckDB** | Point queries: ⚠️<br>Aggregations: ✅✅✅ | Analytical queries, columnar storage | ~30MB | Data analysis, logs |
+| **JSON files** | Single file: ✅✅<br>Search: ❌ | Manual parsing | ~KB-MB | Simple configs |
+| **YAML files** | Single file: ✅✅<br>Search: ❌ | Manual parsing | ~KB-MB | Human-editable configs |
 
 **Recommendation**: SQLite for workspace registry.
 
@@ -1732,14 +1732,14 @@ if __name__ == "__main__":
 
 **Timeline**: 6 weeks
 
-| Phase              | Duration | Activities                          | Risk   |
-| ------------------ | -------- | ----------------------------------- | ------ |
-| **1. Preparation** | Week 1   | Schema design, testing, backup plan | Low    |
-| **2. Dual-Write**  | Week 2-3 | Write to both JSON and SQLite       | Medium |
-| **3. Dual-Read**   | Week 4   | Read from SQLite, fallback to JSON  | Medium |
-| **4. Migration**   | Week 5   | Bulk migrate JSON to SQLite         | High   |
-| **5. Validation**  | Week 6   | Verify integrity, remove JSON code  | Low    |
-| **6. Cleanup**     | Week 7+  | Documentation, monitoring           | Low    |
+| Phase | Duration | Activities | Risk |
+| --- | --- | --- | --- |
+| **1. Preparation** | Week 1 | Schema design, testing, backup plan | Low |
+| **2. Dual-Write** | Week 2-3 | Write to both JSON and SQLite | Medium |
+| **3. Dual-Read** | Week 4 | Read from SQLite, fallback to JSON | Medium |
+| **4. Migration** | Week 5 | Bulk migrate JSON to SQLite | High |
+| **5. Validation** | Week 6 | Verify integrity, remove JSON code | Low |
+| **6. Cleanup** | Week 7+ | Documentation, monitoring | Low |
 
 ### 6.3 Migration Implementation
 
@@ -2268,22 +2268,22 @@ All code examples in this report are production-ready with:
 ### A.1 Hash Truncation Safety
 
 | Hash Bits | Safe Workspace Count | 50% Collision @ | 1-in-1B Collision @ |
-| --------- | -------------------- | --------------- | ------------------- |
-| 32        | 1,000                | 65,536          | 1,933               |
-| 64        | 10,000,000           | 4.3 billion     | 103 million         |
-| 96        | 1 trillion           | 2.8×10¹⁴        | 6.7 billion         |
-| 128       | 1 quintillion        | 2.7×10¹⁸        | 103 trillion        |
-| 256       | 10⁶⁰                 | 2.7×10³⁸        | 10⁶³                |
+| --- | --- | --- | --- |
+| 32 | 1,000 | 65,536 | 1,933 |
+| 64 | 10,000,000 | 4.3 billion | 103 million |
+| 96 | 1 trillion | 2.8×10¹⁴ | 6.7 billion |
+| 128 | 1 quintillion | 2.7×10¹⁸ | 103 trillion |
+| 256 | 10⁶⁰ | 2.7×10³⁸ | 10⁶³ |
 
 ### A.2 Current System (8-char hex = 32-bit)
 
 | Workspaces | Collision Probability |
-| ---------- | --------------------- |
-| 100        | 0.00012%              |
-| 1,000      | 0.012%                |
-| 10,000     | 1.16%                 |
-| 65,536     | 50%                   |
-| 100,000    | 77%                   |
+| --- | --- |
+| 100 | 0.00012% |
+| 1,000 | 0.012% |
+| 10,000 | 1.16% |
+| 65,536 | 50% |
+| 100,000 | 77% |
 
 **Conclusion**: Current 32-bit scheme unsafe beyond 10K workspaces.
 

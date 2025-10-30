@@ -190,7 +190,7 @@ Chat identifier for sending messages to specific user. Required for all bot.send
 
 ## Change Log
 
-| Version | Date       | Change                                 | Rationale                        |
-| ------- | ---------- | -------------------------------------- | -------------------------------- |
-| 1.0.0   | 2025-10-23 | Initial credential setup               | Phase 0 implementation           |
-| 1.1.0   | 2025-10-23 | Add bot token and chat ID placeholders | Phase 0 bot creation preparation |
+| Version | Date | Change | Rationale |
+| --- | --- | --- | --- |
+| 1.0.0 | 2025-10-23 | Initial credential setup | Phase 0 implementation |
+| 1.1.0 | 2025-10-23 | Add bot token and chat ID placeholders | Phase 0 bot creation preparation |

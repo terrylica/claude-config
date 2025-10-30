@@ -471,12 +471,12 @@ rm -f state/executions/execution_test-scenario*.json
 
 ## SLO Validation Summary
 
-| SLO             | Target | Validation Method                      | Status                   |
-| --------------- | ------ | -------------------------------------- | ------------------------ |
-| Correctness     | 100%   | All workflows execute, results emitted | ✅ Manual testing        |
-| Observability   | 100%   | Full event trace with correlation_id   | ✅ SQLite queries        |
-| Maintainability | SSoT   | workflows.json is canonical            | ✅ Code review           |
-| Availability    | 99%    | Bot uptime during active hours         | ⏸️ Production monitoring |
+| SLO | Target | Validation Method | Status |
+| --- | --- | --- | --- |
+| Correctness | 100% | All workflows execute, results emitted | ✅ Manual testing |
+| Observability | 100% | Full event trace with correlation_id | ✅ SQLite queries |
+| Maintainability | SSoT | workflows.json is canonical | ✅ Code review |
+| Availability | 99% | Bot uptime during active hours | ⏸️ Production monitoring |
 
 ---
 

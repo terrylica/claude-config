@@ -8,13 +8,13 @@
 
 ## Stack Overview
 
-| Component      | Version                | Purpose                        |
-| -------------- | ---------------------- | ------------------------------ |
-| **MacTeX**     | 2025 (TeX Live 2025)   | Full LaTeX distribution        |
-| **latexmk**    | 4.86a (Dec 2024)       | Build automation, live preview |
-| **Skim**       | 1.7.11                 | PDF viewer with SyncTeX        |
-| **TeXShop**    | 5.57 (2025)            | Integrated LaTeX IDE           |
-| **tabularray** | Latest (TeX Live 2025) | Modern table system            |
+| Component | Version | Purpose |
+| --- | --- | --- |
+| **MacTeX** | 2025 (TeX Live 2025) | Full LaTeX distribution |
+| **latexmk** | 4.86a (Dec 2024) | Build automation, live preview |
+| **Skim** | 1.7.11 | PDF viewer with SyncTeX |
+| **TeXShop** | 5.57 (2025) | Integrated LaTeX IDE |
+| **tabularray** | Latest (TeX Live 2025) | Modern table system |
 
 ---
 
