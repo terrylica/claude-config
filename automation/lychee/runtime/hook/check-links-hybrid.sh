@@ -584,69 +584,16 @@ EOF
         fi
 
         # =====================================================================
-        # Phase 2 - v4.0.0: ALWAYS start bot (not just on errors)
+        # Phase 5 - Bot Management: Continuous Process via Watchexec
         # =====================================================================
-
-        # Check if Telegram bot is running
-        pid_file="$HOME/.claude/automation/lychee/state/bot.pid"
-        bot_script="$HOME/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py"
-        bot_running=false
+        # Bot should be running continuously via watchexec (run-bot-dev-watchexec.sh)
+        # This hook only creates summary files - bot picks them up automatically
 
         {
             echo ""
-            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 Checking if Telegram bot is running..."
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ SessionSummary created - bot will pick it up automatically"
+            echo "   → Bot should be running via: ~/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh"
         } >> "$log_file" 2>&1
-
-        # Check if PID file exists
-        if [[ -f "$pid_file" ]]; then
-            bot_pid=$(cat "$pid_file" 2>/dev/null)
-
-            {
-                echo "   → PID file exists: $pid_file (PID: $bot_pid)"
-            } >> "$log_file" 2>&1
-
-            # Check if process is alive
-            if kill -0 "$bot_pid" 2>/dev/null; then
-                # Verify it's our bot process
-                if ps -p "$bot_pid" -o command= | grep -q "multi-workspace-bot.py"; then
-                    bot_running=true
-                    {
-                        echo "   → ✅ Bot is running (PID: $bot_pid)"
-                    } >> "$log_file" 2>&1
-                else
-                    {
-                        echo "   → ⚠️  PID $bot_pid is not our bot (PID reused), removing stale PID file"
-                    } >> "$log_file" 2>&1
-                    rm -f "$pid_file"
-                fi
-            else
-                {
-                    echo "   → ⚠️  Process $bot_pid is dead, removing stale PID file"
-                } >> "$log_file" 2>&1
-                rm -f "$pid_file"
-            fi
-        else
-            {
-                echo "   → PID file does not exist"
-            } >> "$log_file" 2>&1
-        fi
-
-        # Start bot if not running (v4: always start, not just on errors)
-        if [[ "$bot_running" == "false" ]]; then
-            {
-                echo "   → 🚀 Starting Telegram bot in background..."
-            } >> "$log_file" 2>&1
-
-            # Start bot in background with Doppler secrets and output redirected to bot log
-            # Note: Doppler CLI injects secrets as environment variables
-            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/automation/lychee/logs/telegram-handler.log" 2>&1 &
-            new_bot_pid=$!
-
-            {
-                echo "   → ✅ Bot started (PID: $new_bot_pid)"
-                echo "   → Bot will auto-shutdown after 10 minutes idle"
-            } >> "$log_file" 2>&1
-        fi
     else
         # No markdown files found - still emit SessionSummary (v4.0.0)
         {
@@ -670,28 +617,11 @@ EOF
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log summary.created event" >> "$log_file" 2>&1
             }
 
-        # Start bot (even when no markdown files)
-        pid_file="$HOME/.claude/automation/lychee/state/bot.pid"
-        bot_script="$HOME/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py"
-        bot_running=false
-
-        # Check if bot running
-        if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
-            bot_running=true
-        fi
-
-        # Start bot if not running
-        if [[ "$bot_running" == "false" ]]; then
-            {
-                echo "   → 🚀 Starting Telegram bot..."
-            } >> "$log_file" 2>&1
-
-            nohup doppler run --project claude-config --config dev -- "$bot_script" >> "$HOME/.claude/automation/lychee/logs/telegram-handler.log" 2>&1 &
-
-            {
-                echo "   → ✅ Bot started (PID: $!)"
-            } >> "$log_file" 2>&1
-        fi
+        # Bot should be running continuously via watchexec
+        # No need to start it here - bot picks up summary files automatically
+        {
+            echo "   → ✅ SessionSummary created - bot will process it automatically"
+        } >> "$log_file" 2>&1
     fi
 
     {
