@@ -88,9 +88,10 @@ else
 fi
 
 # Send startup notification (fire-and-forget, non-blocking)
+# Use doppler to load credentials for Telegram notification
 if [[ -x "$NOTIFY_SCRIPT" ]]; then
     echo "🔔 Sending $REASON notification..."
-    "$NOTIFY_SCRIPT" "$REASON" 0 "$WATCHEXEC_INFO_FILE" &
+    doppler run --project claude-config --config dev -- "$NOTIFY_SCRIPT" "$REASON" 0 "$WATCHEXEC_INFO_FILE" &
 fi
 
 # Run the bot with doppler and capture exit code and stderr
@@ -113,7 +114,7 @@ if [[ $EXIT_CODE -ne 0 ]]; then
 
     if [[ -x "$NOTIFY_SCRIPT" ]]; then
         echo "🔔 Sending crash notification (exit code: $EXIT_CODE)..."
-        "$NOTIFY_SCRIPT" "crash" "$EXIT_CODE" "$WATCHEXEC_INFO_FILE" "$CRASH_CONTEXT" &
+        doppler run --project claude-config --config dev -- "$NOTIFY_SCRIPT" "crash" "$EXIT_CODE" "$WATCHEXEC_INFO_FILE" "$CRASH_CONTEXT" &
     fi
 fi
 
