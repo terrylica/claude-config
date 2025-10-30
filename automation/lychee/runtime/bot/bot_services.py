@@ -175,13 +175,22 @@ async def progress_poller(
                 )
 
                 # Update message text
-                await app.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=progress_text,
-                    parse_mode="Markdown"
-                )
-                print(f"   ✅ Message updated successfully")
+                try:
+                    await app.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=progress_text,
+                        parse_mode="Markdown"
+                    )
+                    print(f"   ✅ Message updated successfully")
+                except Exception as edit_error:
+                    # Handle Telegram API errors gracefully (e.g., duplicate content)
+                    error_type = type(edit_error).__name__
+                    if "BadRequest" in error_type and "not modified" in str(edit_error).lower():
+                        print(f"   ⏭️  Skipped update (content unchanged)")
+                    else:
+                        # Re-raise unexpected errors
+                        raise
 
                 # Clean up progress file (but keep tracking for execution completion)
                 if stage == "completed":
