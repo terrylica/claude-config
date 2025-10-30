@@ -411,3 +411,48 @@ def get_workspace_config(
         result["name"] = ws_name
 
     return result
+
+
+def convert_to_telegram_markdown(markdown_text: str) -> str:
+    """
+    Convert Markdown to Telegram's MarkdownV2 format using telegramify-markdown.
+
+    This function uses the telegramify-markdown library to handle automatic escaping
+    of special characters and conversion to MarkdownV2 format. This enables proper
+    code block styling (gray background, monospace font) in Telegram messages.
+
+    Args:
+        markdown_text: Standard Markdown text
+
+    Returns:
+        Text formatted for Telegram MarkdownV2 parse mode
+
+    Raises:
+        ImportError: If telegramify-markdown not installed
+        Exception: Propagates any conversion errors from library
+
+    Example:
+        >>> md = "**Bold** text with `inline code`"
+        >>> convert_to_telegram_markdown(md)
+        '*Bold* text with `inline code`'
+
+    References:
+        - Library: https://github.com/sudoskys/telegramify-markdown
+        - Specification: ~/.claude/specifications/telegram-markdownv2-migration.yaml
+    """
+    try:
+        import telegramify_markdown
+    except ImportError as e:
+        raise ImportError(
+            "telegramify-markdown not installed. "
+            "Add to dependencies: telegramify-markdown>=0.5.2"
+        ) from e
+
+    try:
+        # Use markdownify for basic conversion
+        # telegramify() would handle chunking for long text, but we don't need it here
+        converted = telegramify_markdown.markdownify(markdown_text)
+        return converted
+    except Exception as e:
+        # Propagate errors - do not fall back or use defaults
+        raise RuntimeError(f"Failed to convert Markdown to MarkdownV2: {e}") from e

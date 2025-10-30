@@ -82,6 +82,7 @@ $CRASH_INFO"
 ```
 
 **Why this format**:
+
 - Consistent with other Telegram messages (workflow completions, notifications)
 - Removes unnecessary info (host, monitoring system, timestamp)
 - Adds context (session ID, branch, directory)

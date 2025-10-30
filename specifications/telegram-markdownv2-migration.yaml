@@ -1,0 +1,220 @@
+openapi: 3.1.1
+info:
+  title: Telegram MarkdownV2 Migration
+  version: 1.0.0
+  description: |
+    Migration from HTML parse mode to MarkdownV2 using telegramify-markdown library.
+
+    Context: HTML mode lacks code block styling in Telegram. Native MarkdownV2 requires escaping
+    40+ characters. telegramify-markdown provides automatic conversion and escaping.
+
+    Research: https://github.com/sudoskys/telegramify-markdown (238 stars, v0.5.2, Oct 2025)
+
+  x-slos:
+    availability:
+      target: "99.9%"
+      metric: "Message delivery success rate (no Telegram API 400 errors)"
+      measurement: "Track Telegram API responses for parse errors"
+
+    correctness:
+      target: "100%"
+      metric: "Message formatting correctness (code blocks render with styling)"
+      measurement: |
+        - Inline code renders with monospace background
+        - Multi-line code blocks render with syntax highlighting
+        - Special characters display correctly (no escaping visible)
+        - Links, bold, italic render correctly
+
+    observability:
+      target: "100% error visibility"
+      metric: "All parse errors logged with message preview"
+      measurement: "Log Telegram API errors with first 200 chars of message"
+
+    maintainability:
+      target: "< 50 lines for conversion layer"
+      metric: "Code complexity for Markdown conversion"
+      measurement: "Use library (telegramify-markdown) instead of custom escaping logic"
+
+paths: {}  # No API endpoints, internal library
+
+components:
+  schemas:
+    TelegramMessage:
+      type: object
+      required:
+        - chat_id
+        - text
+        - parse_mode
+      properties:
+        chat_id:
+          type: string
+          description: Telegram chat ID
+        text:
+          type: string
+          description: Message text in MarkdownV2 format (after conversion)
+        parse_mode:
+          type: string
+          enum: [MarkdownV2]
+          description: Must be MarkdownV2 (not HTML or Markdown)
+
+x-implementation:
+  phases:
+    phase_1_library_integration:
+      version: "5.3.0"
+      description: "Add telegramify-markdown and create conversion helpers"
+      scope:
+        - Add telegramify-markdown>=0.5.2 to inline dependencies (PEP 723)
+        - Create convert_to_telegram_markdown() in format_utils.py
+        - Add tests for code blocks, inline code, special characters
+        - Update documentation
+
+      files_modified:
+        - /Users/terryli/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py
+        - /Users/terryli/.claude/automation/lychee/runtime/lib/format_utils.py
+
+      validation_criteria:
+        - Library imports successfully
+        - Helper function converts Markdown → MarkdownV2
+        - Code blocks render with styling in Telegram
+        - Special characters escaped correctly
+        - No Telegram API 400 errors
+
+      rollback_plan: "Revert to v5.2.0 (git checkout v5.2.0)"
+
+    phase_2_message_migration:
+      version: "5.4.0"
+      description: "Convert all messages from HTML to MarkdownV2"
+      scope:
+        - Convert handler_classes.py messages (6 instances)
+        - Convert handlers.py messages (5 instances)
+        - Convert bot_services.py messages (1 instance)
+        - Convert notify-restart.sh messages (Telegram notification)
+        - Update all parse_mode='HTML' to parse_mode='MarkdownV2'
+
+      validation_criteria:
+        - All messages use MarkdownV2 parse mode
+        - Code blocks render with gray background
+        - No HTML tags visible in messages
+        - Links clickable, bold/italic working
+        - No Telegram API errors
+
+      rollback_plan: "Revert to v5.3.0"
+
+x-implementation-findings:
+  library_evaluation:
+    telegramify-markdown:
+      status: "recommended"
+      version: ">=0.5.2"
+      license: "MIT"
+      maintenance: "Active (Oct 2025, 238 stars, 33 releases)"
+      size: "Lightweight (pure Python)"
+      python_versions: "3.9+"
+      features:
+        - "Automatic MarkdownV2 escaping (40+ special chars)"
+        - "Code blocks with language syntax highlighting"
+        - "Inline code with monospace styling"
+        - "Tables, lists, headings, links"
+        - "LaTeX math expressions"
+        - "Long text chunking (for messages > 4096 chars)"
+
+      api_functions:
+        markdownify: "Basic Markdown → MarkdownV2 conversion"
+        telegramify: "Advanced with chunking and code rendering"
+        standardize: "Normalize MarkdownV2 input"
+
+      alternatives_considered:
+        telegram-markdown-v2: "Less maintained (2021), manual escaping required"
+        telegram-md: "TypeScript library, not Python"
+        custom_escaping: "40+ characters, error-prone, unmaintainable"
+
+  html_vs_markdownv2:
+    html_mode:
+      pros:
+        - "Simple escaping (3 chars: &, <, >)"
+        - "Industry standard for Telegram bots"
+      cons:
+        - "NO code block styling (plain text only)"
+        - "No syntax highlighting"
+        - "Inline code same as regular text"
+
+    markdownv2_mode:
+      pros:
+        - "Code blocks with gray background + monospace"
+        - "Syntax highlighting for code blocks"
+        - "Inline code with background styling"
+        - "Better visual hierarchy"
+      cons:
+        - "40+ special chars to escape manually"
+        - "Complex escaping rules"
+        - "Easy to break with raw text"
+
+    telegramify_markdown_solution:
+      pros:
+        - "Automatic escaping (no manual work)"
+        - "Code block styling"
+        - "Maintained library (v0.5.2)"
+        - "Supports all Markdown features"
+      cons:
+        - "Additional dependency (~50KB)"
+        - "Learning curve for Markdown syntax"
+
+x-testing:
+  scenarios:
+    inline_code:
+      description: "Inline code with backticks renders with background"
+      input: "Session: `abc123-def456`"
+      expected: "Gray background on code text in Telegram"
+
+    multiline_code_block:
+      description: "Multi-line code block with syntax highlighting"
+      input: |
+        ```python
+        def hello():
+            print("world")
+        ```
+      expected: "Gray background block with monospace font"
+
+    special_characters:
+      description: "Special characters escaped correctly"
+      input: "File: `handler_classes.py` (M:1 S:0 U:11)"
+      expected: "Underscores, parentheses, colons display correctly"
+
+    mixed_formatting:
+      description: "Bold, code, and links together"
+      input: "**Directory**: `~/.claude` | **Branch**: `main`"
+      expected: "Bold text, code backgrounds, pipe separator visible"
+
+    long_text:
+      description: "Message > 4096 chars handled by chunking"
+      input: "Very long transcript with code blocks..."
+      expected: "Message split into multiple parts, all formatted correctly"
+
+x-rollout:
+  strategy: "Feature flag with validation"
+  steps:
+    - Add telegramify-markdown dependency
+    - Create helper function with tests
+    - Migrate one message type (test in production)
+    - Validate code blocks render correctly
+    - Migrate remaining messages
+    - Remove HTML escaping functions (deprecated)
+    - Tag v5.4.0 and create GitHub release
+
+  rollback_triggers:
+    - Telegram API 400 errors increase
+    - Code blocks not rendering with styling
+    - Special characters showing escape sequences
+    - User reports formatting issues
+
+x-migration-mapping:
+  html_to_markdown:
+    bold: "<b>text</b> → **text**"
+    code: "<code>text</code> → `text`"
+    italic: "<i>text</i> → _text_"
+    pre: "<pre>code</pre> → ```code```"
+    link: "<a href='url'>text</a> → [text](url)"
+
+  edge_cases:
+    underscores_in_filenames: "handler_classes.py → `handler_classes.py` (wrap in backticks)"
+    pipe_characters: "a | b → a \\| b (escape or wrap in code)"
+    parentheses: "(text) → \\(text\\) (escape or natural in Markdown)"

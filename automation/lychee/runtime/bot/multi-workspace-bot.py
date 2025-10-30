@@ -5,6 +5,7 @@
 #     "python-telegram-bot[rate-limiter]>=21.0",
 #     "jsonschema>=4.0.0",
 #     "psutil>=7.0.0",
+#     "telegramify-markdown>=0.5.2",
 # ]
 # ///
 """
@@ -15,8 +16,13 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 5.2.0
+Version: 5.3.0
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
+
+Changes from v5.2.0:
+- Add telegramify-markdown library for MarkdownV2 support
+- Create convert_to_telegram_markdown() helper in format_utils.py
+- Enable code block styling in Telegram messages (Phase 1)
 
 Changes from v5.0.0:
 - Migrate to psutil for PID management (industry-standard approach)
@@ -329,7 +335,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 5.2.0")
+    print(f"Version: 5.3.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")
