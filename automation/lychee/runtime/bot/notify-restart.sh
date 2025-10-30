@@ -116,7 +116,7 @@ MESSAGE="$EMOJI **Telegram Bot $STATUS**
 **PID**: $PID
 **Exit Code**: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO
 
-_Monitoring: watchexec_"
+\\_Monitoring: watchexec\\_"
 
 # Save message to persistent file for debugging
 MESSAGE_ARCHIVE_DIR="/Users/terryli/.claude/automation/lychee/logs/notification-archive"
