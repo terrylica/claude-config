@@ -1,3 +1,24 @@
+## [5.5.1] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(hook)_ Fix Stop hook extracting tool_result instead of user text prompts
+- Telegram messages now show full user prompt instead of `❓ [`
+
+### 🔍 Root Cause
+
+The Stop hook's transcript extraction was using `tac` (reverse order) and getting the LAST user message, which after tool use was a tool_result with array content. When jq tried to output the array as raw text, it printed `[` instead of the actual user prompt text.
+
+### 🛠️ Technical Details
+
+- **Before**: `jq -r '.message | select(.role == "user") | .content'` extracted ALL user messages including tool_results
+- **After**: Added filters to skip tool_results (array content) and system messages (starts with `<`)
+- **Verification**: Tested with session 17b6d05b - now correctly extracts "Please tell me a curentt time!!!!" instead of `[`
+
+### 📚 Impact
+
+Fixes the `❓ [` issue that persisted across multiple test sessions even after Phase 2 MarkdownV2 migration and Phase 5 legacy sender removal.
+
 ## [5.5.0] - 2025-10-30
 
 ### ⚠️ BREAKING CHANGES
