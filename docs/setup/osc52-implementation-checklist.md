@@ -35,10 +35,10 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 **Critical Components**:
 
 1. **xclip wrapper** intercepts Claude Code call
-2. **OSC 52** terminal-native clipboard protocol
-3. **stderr output** (>&2) works in non-interactive contexts
-4. **tmux detection** ($TMUX) applies correct wrapping
-5. **Ghostty config** (clipboard-write = allow) accepts sequences
+1. **OSC 52** terminal-native clipboard protocol
+1. **stderr output** (>&2) works in non-interactive contexts
+1. **tmux detection** ($TMUX) applies correct wrapping
+1. **Ghostty config** (clipboard-write = allow) accepts sequences
 
 ## Verification ✓
 
@@ -76,10 +76,10 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 ### Design Principles Applied
 
 1. **Link Farm**: CLAUDE.md minimal, links to details
-2. **Hub-and-Spoke**: Central docs/INDEX.md navigation
-3. **Separation**: Config in ~/.local/bin/, docs in ~/.claude/docs/
-4. **Single Source**: Each topic documented once, linked many times
-5. **Irreducible Essentials**: Only critical details in CLAUDE.md
+1. **Hub-and-Spoke**: Central docs/INDEX.md navigation
+1. **Separation**: Config in ~/.local/bin/, docs in ~/.claude/docs/
+1. **Single Source**: Each topic documented once, linked many times
+1. **Irreducible Essentials**: Only critical details in CLAUDE.md
 
 ## Quick Reference 📖
 
@@ -206,19 +206,19 @@ Each piece essential for the solution to work.
 ### If you want to extend:
 
 1. **Add to docs/INDEX.md**: Reference under "Terminal Setup" or "Tools"
-2. **Create specification**: `specifications/ssh-clipboard-osc52.yaml` (OpenAPI format)
-3. **Add to other machines**: Copy wrapper to other remote Linux boxes
-4. **Share with team**: Point them to setup guide
+1. **Create specification**: `specifications/ssh-clipboard-osc52.yaml` (OpenAPI format)
+1. **Add to other machines**: Copy wrapper to other remote Linux boxes
+1. **Share with team**: Point them to setup guide
 
 ### If issues arise:
 
 1. Check `~/.local/bin/xclip` is executable
-2. Verify Ghostty has `clipboard-write = allow`
-3. Test outside Claude Code: `echo "test" | xclip -selection clipboard`
-4. Check stderr isn't being redirected: `2>/dev/null` would break it
-5. Consult deep dive doc for debugging techniques
+1. Verify Ghostty has `clipboard-write = allow`
+1. Test outside Claude Code: `echo "test" | xclip -selection clipboard`
+1. Check stderr isn't being redirected: `2>/dev/null` would break it
+1. Consult deep dive doc for debugging techniques
 
----
+______________________________________________________________________
 
 ## Summary for Future Reference 📌
 

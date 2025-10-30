@@ -19,28 +19,28 @@ Automated link validation and auto-fixing with Telegram-based approval workflows
 ### Phase 1: Detection & Notification
 
 1. User stops Claude Code session
-2. Stop hook runs lychee link validation
-3. If broken links found: hook emits notification file
-4. Bot detects notification → sends Telegram message with workspace emoji
+1. Stop hook runs lychee link validation
+1. If broken links found: hook emits notification file
+1. Bot detects notification → sends Telegram message with workspace emoji
 
 ### Phase 2: User Approval
 
 1. User receives Telegram notification with action buttons
-2. User clicks **"✅ Auto-Fix All"** or **"❌ Reject"**
-3. Bot writes approval file to state directory
+1. User clicks **"✅ Auto-Fix All"** or **"❌ Reject"**
+1. Bot writes approval file to state directory
 
 ### Phase 3: Claude CLI Execution
 
 1. Orchestrator detects approval file
-2. Validates workspace path (security check)
-3. Invokes Claude CLI in background with 5-minute timeout
-4. Captures stdout, stderr, exit code, duration
+1. Validates workspace path (security check)
+1. Invokes Claude CLI in background with 5-minute timeout
+1. Captures stdout, stderr, exit code, duration
 
 ### Phase 4: Completion Notification ✨ NEW in v2.1.0
 
 1. Orchestrator emits completion file with execution results
-2. Bot detects completion → sends Telegram message with outcome
-3. User receives feedback: **✅ Success** / **❌ Error** / **⏱️ Timeout**
+1. Bot detects completion → sends Telegram message with outcome
+1. User receives feedback: **✅ Success** / **❌ Error** / **⏱️ Timeout**
 
 ## Directory Structure
 
@@ -87,14 +87,14 @@ automation/lychee/
 
 **Location**: `$HOME/.claude/automation/lychee/state/`
 
-| File/Directory | Purpose | Pattern | Retention |
-| --- | --- | --- | --- |
-| `events.db` | Event correlation store | SQLite database with session_events table | ∞ |
-| `notifications/` | Hook → Bot requests | `notify_{session_id}_{workspace_hash}.json` | Consumed |
-| `approvals/` | Bot → Orchestrator decisions | `approval_{session_id}_{workspace_hash}.json` | Consumed |
-| `completions/` | Orchestrator → Bot results | `completion_{session_id}_{workspace_hash}.json` | Consumed |
-| `callbacks/` | Telegram button callbacks | `cb_{hash8}.json` | 30 days |
-| `registry.json` | Workspace metadata | JSON with emoji + path mapping | ∞ |
+| File/Directory   | Purpose                      | Pattern                                         | Retention |
+| ---------------- | ---------------------------- | ----------------------------------------------- | --------- |
+| `events.db`      | Event correlation store      | SQLite database with session_events table       | ∞         |
+| `notifications/` | Hook → Bot requests          | `notify_{session_id}_{workspace_hash}.json`     | Consumed  |
+| `approvals/`     | Bot → Orchestrator decisions | `approval_{session_id}_{workspace_hash}.json`   | Consumed  |
+| `completions/`   | Orchestrator → Bot results   | `completion_{session_id}_{workspace_hash}.json` | Consumed  |
+| `callbacks/`     | Telegram button callbacks    | `cb_{hash8}.json`                               | 30 days   |
+| `registry.json`  | Workspace metadata           | JSON with emoji + path mapping                  | ∞         |
 
 ## Components
 
@@ -277,17 +277,17 @@ Claude CLI exceeded 5-minute timeout
    /Users/terryli/.claude/automation/lychee/testing/test-notification-emit.py
    ```
 
-2. **Check Telegram** for notification message
+1. **Check Telegram** for notification message
 
-3. **Click button** in Telegram
+1. **Click button** in Telegram
 
-4. **Watch logs** for Claude CLI execution:
+1. **Watch logs** for Claude CLI execution:
 
    ```bash
    tail -f ~/.claude/logs/orchestrator.log
    ```
 
-5. **Check Telegram** for completion message
+1. **Check Telegram** for completion message
 
 ### Test Scenarios
 
@@ -372,20 +372,20 @@ Detection-only (deprecated), see `specifications/lychee-link-validation.yaml`
 ### No Telegram Messages
 
 1. Check bot process: `launchctl list | grep telegram-handler`
-2. Check bot log: `tail -f ~/.claude/logs/telegram-handler.log`
-3. Verify Doppler secrets: `doppler secrets -p claude-config -c dev`
+1. Check bot log: `tail -f ~/.claude/logs/telegram-handler.log`
+1. Verify Doppler secrets: `doppler secrets -p claude-config -c dev`
 
 ### Claude CLI Not Running
 
 1. Check orchestrator process: `launchctl list | grep orchestrator`
-2. Check orchestrator log: `tail -f ~/.claude/logs/orchestrator.log`
-3. Check approval files exist: `ls /tmp/lychee_state/approvals/`
+1. Check orchestrator log: `tail -f ~/.claude/logs/orchestrator.log`
+1. Check approval files exist: `ls /tmp/lychee_state/approvals/`
 
 ### No Completion Messages
 
 1. Check completions directory: `ls /tmp/lychee_state/completions/`
-2. Check bot log for completion processing
-3. Verify bot is watching completions directory (should see in startup logs)
+1. Check bot log for completion processing
+1. Verify bot is watching completions directory (should see in startup logs)
 
 ### State Files Not Cleaning Up
 

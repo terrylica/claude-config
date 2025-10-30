@@ -8,7 +8,7 @@
 **Created**: 2025-10-10
 **Completed**: 2025-10-11T05:58:02Z
 
----
+______________________________________________________________________
 
 ## Document Purpose
 
@@ -20,7 +20,7 @@ This document serves as a reference implementation for eliminating plain-text AW
 - Understanding Doppler integration patterns
 - Reference for troubleshooting credential migration issues
 
----
+______________________________________________________________________
 
 ## Objective
 
@@ -119,8 +119,8 @@ Eliminate all plain-text AWS credentials from local files and migrate to Doppler
 **Issues Resolved**:
 
 1. **Invalid Doppler Format**: Fixed `env-no-names` → `env-no-quotes --no-file`
-2. **Large JSON Breaking eval**: Added grep filter to exclude AWS_ACCESS_INVENTORY_REPORT and AWS_ACCESS_SUMMARY
-3. **Missing Exports**: Added explicit export statements after eval to ensure AWS CLI can access credentials
+1. **Large JSON Breaking eval**: Added grep filter to exclude AWS_ACCESS_INVENTORY_REPORT and AWS_ACCESS_SUMMARY
+1. **Missing Exports**: Added explicit export statements after eval to ensure AWS CLI can access credentials
 
 **Validation**: All authentication flows functional, zero hardcoded credentials used
 
@@ -191,23 +191,23 @@ Eliminate all plain-text AWS credentials from local files and migrate to Doppler
 
 ### Sources Eliminated
 
-| Location | Type | Status | Old Key | Action Date |
-| --- | --- | --- | --- | --- |
-| `~/eon/ml-feature-experiments/set_env.sh:698-705` | Hardcoded | ✅ Removed | AKIAQXMIDFANLGRPPGUJ | 2025-10-10 |
-| `~/.local-configs/ml-feature-set/set_env.sh:178-185` | Hardcoded | ✅ Removed | AKIAQXMIDFANLGRPPGUJ | 2025-10-10 |
-| `~/.aws/credentials` | File | ✅ Archived | AKIAQXMIDFANLGRPPGUJ | 2025-10-11T05:58:02Z |
-| AWS IAM | Key | ✅ Deleted | AKIAQXMIDFANLGRPPGUJ | 2025-10-11T05:57:41Z |
+| Location                                             | Type      | Status      | Old Key              | Action Date          |
+| ---------------------------------------------------- | --------- | ----------- | -------------------- | -------------------- |
+| `~/eon/ml-feature-experiments/set_env.sh:698-705`    | Hardcoded | ✅ Removed  | AKIAQXMIDFANLGRPPGUJ | 2025-10-10           |
+| `~/.local-configs/ml-feature-set/set_env.sh:178-185` | Hardcoded | ✅ Removed  | AKIAQXMIDFANLGRPPGUJ | 2025-10-10           |
+| `~/.aws/credentials`                                 | File      | ✅ Archived | AKIAQXMIDFANLGRPPGUJ | 2025-10-11T05:58:02Z |
+| AWS IAM                                              | Key       | ✅ Deleted  | AKIAQXMIDFANLGRPPGUJ | 2025-10-11T05:57:41Z |
 
 ### Doppler Storage (Canonical Source)
 
-| Secret | Value | Status | Notes |
-| --- | --- | --- | --- |
-| AWS_ACCESS_KEY_ID | AKIAQXMIDFANMPSY7LFK | Active | Current production credential (created 2025-10-11) |
-| AWS_SECRET_ACCESS_KEY | [secure] | Active | Current production credential |
-| AWS_ACCESS_KEY_ID_OLD | AKIAQXMIDFANLGRPPGUJ | Archived | Historical reference (deleted 2025-10-11T05:57:41Z) |
-| AWS_SECRET_ACCESS_KEY_OLD | [secure] | Archived | Historical reference |
-| AWS_DEFAULT_REGION | us-west-2 | Active | Primary region |
-| AWS_ACCOUNT_ID | 050214414362 | Active | EonLabs account |
+| Secret                    | Value                | Status   | Notes                                               |
+| ------------------------- | -------------------- | -------- | --------------------------------------------------- |
+| AWS_ACCESS_KEY_ID         | AKIAQXMIDFANMPSY7LFK | Active   | Current production credential (created 2025-10-11)  |
+| AWS_SECRET_ACCESS_KEY     | [secure]             | Active   | Current production credential                       |
+| AWS_ACCESS_KEY_ID_OLD     | AKIAQXMIDFANLGRPPGUJ | Archived | Historical reference (deleted 2025-10-11T05:57:41Z) |
+| AWS_SECRET_ACCESS_KEY_OLD | [secure]             | Archived | Historical reference                                |
+| AWS_DEFAULT_REGION        | us-west-2            | Active   | Primary region                                      |
+| AWS_ACCOUNT_ID            | 050214414362         | Active   | EonLabs account                                     |
 
 ## Dependencies
 

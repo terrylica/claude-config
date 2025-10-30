@@ -5,7 +5,7 @@
 **Status**: SCAFFOLDING COMPLETE / CORE IMPLEMENTATION PENDING
 **Commits**: c406b72 (Phase 2), 1d11055 (Phase 3), e094550 (Phase 4 scaffolding)
 
----
+______________________________________________________________________
 
 ## Current Implementation Status
 
@@ -58,25 +58,28 @@
 ### ⏹️ Pending (Phase 4 Core)
 
 1. **WorkflowOrchestrator Class**
+
    - Process WorkflowSelection files
    - Multi-workflow execution loop
    - Template context building (from SessionSummary)
    - Claude CLI invocation per workflow
    - Execution results emission
 
-2. **Main Function Updates**
+1. **Main Function Updates**
+
    - Dual-mode CLI argument handling: `--selection-file` (v4) or approval file (v3)
    - Registry loading on startup
    - Route to WorkflowOrchestrator or ApprovalOrchestrator
 
-3. **Testing**
+1. **Testing**
+
    - Inject test selection file
    - Verify Jinja2 rendering
    - Verify Claude CLI invocation
    - Verify execution results emission
    - Verify SQLite event logging
 
----
+______________________________________________________________________
 
 ## Architecture Overview
 
@@ -120,7 +123,7 @@ automation/lychee/state/
 └── events.db                # SQLite event log (ULID correlation)
 ```
 
----
+______________________________________________________________________
 
 ## Implementation Guide
 
@@ -310,7 +313,7 @@ def _read_session_summary(self, session_id: str, workspace_hash: str) -> Dict[st
 
 **Alternative Approach**: Store summary data in selection file (bot could include it)
 
----
+______________________________________________________________________
 
 ## Testing Strategy
 
@@ -397,7 +400,7 @@ print(prompt)
 # Should output: "Identify and remove legacy code in /Users/terryli/.claude: ..."
 ```
 
----
+______________________________________________________________________
 
 ## Key Implementation Decisions
 
@@ -460,19 +463,19 @@ for workflow_id in ordered_workflow_ids:
 
 **Future Enhancement**: Parallel execution for independent workflows
 
----
+______________________________________________________________________
 
 ## SQLite Event Tracking
 
 **New Events for Phase 4**:
 
-| Event Type | Component | Metadata |
-| --- | --- | --- |
-| `selection.received` | orchestrator | selection_file, workflow_ids |
-| `workflow.started` | orchestrator | workflow_id, workflow_name |
-| `workflow.template_rendered` | orchestrator | workflow_id, template_length |
-| `workflow.completed` | orchestrator | workflow_id, status, duration |
-| `execution.created` | orchestrator | execution_file, workflow_id |
+| Event Type                   | Component    | Metadata                      |
+| ---------------------------- | ------------ | ----------------------------- |
+| `selection.received`         | orchestrator | selection_file, workflow_ids  |
+| `workflow.started`           | orchestrator | workflow_id, workflow_name    |
+| `workflow.template_rendered` | orchestrator | workflow_id, template_length  |
+| `workflow.completed`         | orchestrator | workflow_id, status, duration |
+| `execution.created`          | orchestrator | execution_file, workflow_id   |
 
 **Query for End-to-End Trace**:
 
@@ -486,31 +489,31 @@ ORDER BY timestamp;
 **Expected Trace**:
 
 1. hook.started
-2. hook.completed
-3. summary.created
-4. summary.received (bot)
-5. summary.processed (bot)
-6. selection.created (bot)
-7. selection.received (orchestrator)
-8. workflow.started (orchestrator)
-9. claude_cli.started (orchestrator)
-10. claude_cli.completed (orchestrator)
-11. workflow.completed (orchestrator)
-12. execution.created (orchestrator)
+1. hook.completed
+1. summary.created
+1. summary.received (bot)
+1. summary.processed (bot)
+1. selection.created (bot)
+1. selection.received (orchestrator)
+1. workflow.started (orchestrator)
+1. claude_cli.started (orchestrator)
+1. claude_cli.completed (orchestrator)
+1. workflow.completed (orchestrator)
+1. execution.created (orchestrator)
 
----
+______________________________________________________________________
 
 ## SLO Validation
 
 **Phase 4 SLOs**:
 
-| SLO | Target | Validation Method |
-| --- | --- | --- |
-| Correctness | 100% | All workflows execute, results emitted |
-| Observability | 100% | All events logged with correlation_id |
-| Maintainability | Single source | workflows.json is canonical |
+| SLO             | Target        | Validation Method                      |
+| --------------- | ------------- | -------------------------------------- |
+| Correctness     | 100%          | All workflows execute, results emitted |
+| Observability   | 100%          | All events logged with correlation_id  |
+| Maintainability | Single source | workflows.json is canonical            |
 
----
+______________________________________________________________________
 
 ## Next Session Resumption
 
@@ -543,7 +546,7 @@ less specifications/telegram-workflows-orchestration-v4.yaml
 - Orchestrator: `automation/lychee/runtime/orchestrator/multi-workspace-orchestrator.py`
 - Handoff: `automation/lychee/PHASE_4_HANDOFF.md` (this file)
 
----
+______________________________________________________________________
 
 ## Estimated Remaining Effort
 
@@ -574,7 +577,7 @@ less specifications/telegram-workflows-orchestration-v4.yaml
 
 **Total Remaining**: ~10-15 hours
 
----
+______________________________________________________________________
 
 ## Success Criteria
 

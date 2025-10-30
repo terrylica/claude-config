@@ -1,8 +1,6 @@
----
-name: doppler-workflows
-description: Complete credential management using Doppler CLI for PyPI tokens and AWS keys. Use when publishing Python packages, rotating AWS credentials, managing project-scoped tokens, troubleshooting authentication errors, or setting up multi-service credential strategies with Doppler.
-allowed-tools: Read, Bash
----
+______________________________________________________________________
+
+## name: doppler-workflows description: Complete credential management using Doppler CLI for PyPI tokens and AWS keys. Use when publishing Python packages, rotating AWS credentials, managing project-scoped tokens, troubleshooting authentication errors, or setting up multi-service credential strategies with Doppler. allowed-tools: Read, Bash
 
 # Doppler Credential Workflows Skill
 
@@ -31,7 +29,7 @@ doppler run --project <project> --config <config> --command='<command>'
 - Ensures variables expand AFTER Doppler injects them
 - Without it: shell expands `$VAR` before Doppler runs → empty string
 
----
+______________________________________________________________________
 
 ## Use Case 1: PyPI Package Publishing
 
@@ -97,7 +95,7 @@ doppler run --project claude-config --config dev \
 - Actual value has NO newline when injected
 - Verify: `doppler run --command='printf "%s" "$TOKEN" | wc -c'`
 
----
+______________________________________________________________________
 
 ## Use Case 2: AWS Credential Management
 
@@ -187,7 +185,7 @@ doppler run --project aws-credentials --config dev \
 - Root cause: Different Doppler config or HOME variable
 - Verify: `doppler me` (check logged-in user), `echo $HOME`
 
----
+______________________________________________________________________
 
 ## Multi-Service / Multi-Account Patterns
 
@@ -215,19 +213,19 @@ doppler run --project aws-credentials --config prod \
   --command='aws s3 sync dist/ s3://prod-bucket/'
 ```
 
----
+______________________________________________________________________
 
 ## Best Practices
 
 1. **Always use --command flag** for credential injection
-2. **Use project-scoped tokens** (PyPI) for better security
-3. **Rotate credentials regularly** (90 days recommended)
-4. **Document with Doppler notes**: `doppler secrets notes set <SECRET> "<note>" --project <project>`
-5. **Use stdin for storing secrets**: `echo -n 'secret' | doppler secrets set`
-6. **Test injection before using**: `echo ${#VAR}` to verify length
-7. **Multi-token naming**: `SERVICE_TOKEN_{ABBREV}` for clarity
+1. **Use project-scoped tokens** (PyPI) for better security
+1. **Rotate credentials regularly** (90 days recommended)
+1. **Document with Doppler notes**: `doppler secrets notes set <SECRET> "<note>" --project <project>`
+1. **Use stdin for storing secrets**: `echo -n 'secret' | doppler secrets set`
+1. **Test injection before using**: `echo ${#VAR}` to verify length
+1. **Multi-token naming**: `SERVICE_TOKEN_{ABBREV}` for clarity
 
----
+______________________________________________________________________
 
 ## Setup Checklist
 
@@ -246,7 +244,7 @@ doppler run --project aws-credentials --config prod \
 - [ ] Test with `aws sts get-caller-identity`
 - [ ] Set rotation reminder (90 days)
 
----
+______________________________________________________________________
 
 ## See Also
 

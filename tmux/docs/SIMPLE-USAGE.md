@@ -50,12 +50,12 @@ td                    # Smart detach command (recommended)
 
 The session manager automatically creates session names:
 
-| Directory | Session Name | Reason |
-| --- | --- | --- |
-| `~/my-project` | `my-project` | Standard naming |
-| `~/.config` | `dotconfig` | Dot folder awareness |
-| `~/.git` | `dotgit` | Preserves dot nature |
-| `/tmp/Test_App` | `test-app` | Normalized to lowercase |
+| Directory       | Session Name  | Reason                   |
+| --------------- | ------------- | ------------------------ |
+| `~/my-project`  | `my-project`  | Standard naming          |
+| `~/.config`     | `dotconfig`   | Dot folder awareness     |
+| `~/.git`        | `dotgit`      | Preserves dot nature     |
+| `/tmp/Test_App` | `test-app`    | Normalized to lowercase  |
 | `~/My-Cool-App` | `my-cool-app` | Spaces/symbols → hyphens |
 
 ## 📋 Commands
@@ -148,11 +148,11 @@ tk backend
 ## 💡 Design Principles
 
 1. **Transparency**: You can see exactly what tmux commands are run
-2. **Simplicity**: Each script does one thing well
-3. **Unix-First**: Built for Unix-like systems (macOS, Linux) using standard conventions
-4. **Maintainability**: Easy to modify and extend
-5. **Predictability**: Same input always gives same output
-6. **Clean**: No plugins, no persistence, no complexity
+1. **Simplicity**: Each script does one thing well
+1. **Unix-First**: Built for Unix-like systems (macOS, Linux) using standard conventions
+1. **Maintainability**: Easy to modify and extend
+1. **Predictability**: Same input always gives same output
+1. **Clean**: No plugins, no persistence, no complexity
 
 > **Platform Note**: Designed for Unix environments with standard `$HOME` and shell conventions. Not Windows-compatible.
 
@@ -180,16 +180,16 @@ The scripts are simple bash files - feel free to modify them:
 
 ## ✨ Benefits of Simple Approach
 
-| Aspect | Simple Approach | Complex Systems |
-| --- | --- | --- |
-| **Learning** | Standard tmux knowledge | Custom commands |
-| **Debugging** | Visible commands | Hidden automation |
-| **Portability** | Works everywhere | Requires setup |
-| **Maintenance** | Minimal | High overhead |
-| **Reliability** | Predictable | Race conditions |
-| **Performance** | Fast | Complex logic |
-| **Resources** | Minimal | Background processes |
+| Aspect          | Simple Approach         | Complex Systems      |
+| --------------- | ----------------------- | -------------------- |
+| **Learning**    | Standard tmux knowledge | Custom commands      |
+| **Debugging**   | Visible commands        | Hidden automation    |
+| **Portability** | Works everywhere        | Requires setup       |
+| **Maintenance** | Minimal                 | High overhead        |
+| **Reliability** | Predictable             | Race conditions      |
+| **Performance** | Fast                    | Complex logic        |
+| **Resources**   | Minimal                 | Background processes |
 
----
+______________________________________________________________________
 
 _Simple tools for simple needs. Tmux does session management perfectly - no plugins required._

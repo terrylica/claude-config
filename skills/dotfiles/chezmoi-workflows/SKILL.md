@@ -1,8 +1,6 @@
----
-name: chezmoi-workflows
-description: Manage dotfiles with chezmoi via natural language. Use when user mentions dotfiles, config sync, chezmoi, track changes, sync dotfiles, check status, or push changes.
-allowed-tools: Read, Edit, Bash
----
+______________________________________________________________________
+
+## name: chezmoi-workflows description: Manage dotfiles with chezmoi via natural language. Use when user mentions dotfiles, config sync, chezmoi, track changes, sync dotfiles, check status, or push changes. allowed-tools: Read, Edit, Bash
 
 # Chezmoi Workflows
 
@@ -21,7 +19,7 @@ allowed-tools: Read, Edit, Bash
 - **Target State**: `/Users/terryli/` (home directory)
 - **Remote**: https://github.com/terrylica/dotfiles (private)
 
----
+______________________________________________________________________
 
 ## Prompt Pattern 1: Track Changes
 
@@ -37,7 +35,7 @@ allowed-tools: Read, Edit, Bash
 
    Expected: Shows modified file(s) with 'M' indicator
 
-2. **Show changes**
+1. **Show changes**
 
    ```bash
    chezmoi diff [file]
@@ -45,7 +43,7 @@ allowed-tools: Read, Edit, Bash
 
    Expected: Displays unified diff of changes
 
-3. **Add to source state** (auto-commits)
+1. **Add to source state** (auto-commits)
 
    ```bash
    chezmoi add [file]
@@ -54,7 +52,7 @@ allowed-tools: Read, Edit, Bash
    Expected: File added to source directory, git commit created automatically
    Note: `autocommit = true` in chezmoi.toml triggers automatic commit
 
-4. **Verify commit**
+1. **Verify commit**
 
    ```bash
    cd ~/.local/share/chezmoi && git log -1 --oneline
@@ -62,7 +60,7 @@ allowed-tools: Read, Edit, Bash
 
    Expected: Shows new commit with timestamp
 
-5. **Push to remote**
+1. **Push to remote**
 
    ```bash
    cd ~/.local/share/chezmoi && git push
@@ -70,7 +68,8 @@ allowed-tools: Read, Edit, Bash
 
    Expected: Successfully pushed to https://github.com/terrylica/dotfiles
 
-6. **Confirm to user**
+1. **Confirm to user**
+
    - Show commit message
    - Show files changed
    - Confirm push success
@@ -91,7 +90,7 @@ AI: I'll track the changes to .zshrc.
     Successfully pushed to remote.
 ```
 
----
+______________________________________________________________________
 
 ## Prompt Pattern 2: Sync from Remote
 
@@ -108,7 +107,7 @@ AI: I'll track the changes to .zshrc.
    Expected: Pulls from GitHub, applies changes to home directory
    Note: Equivalent to `git pull` + `chezmoi apply`
 
-2. **Show what changed**
+1. **Show what changed**
 
    ```bash
    chezmoi status
@@ -116,7 +115,7 @@ AI: I'll track the changes to .zshrc.
 
    Expected: Should show empty (no drift after sync)
 
-3. **Verify SLOs**
+1. **Verify SLOs**
 
    ```bash
    chezmoi verify
@@ -124,7 +123,8 @@ AI: I'll track the changes to .zshrc.
 
    Expected: Exit code 0 (all files match source state)
 
-4. **Confirm to user**
+1. **Confirm to user**
+
    - Show files updated
    - Confirm no errors
    - Report SLO status
@@ -141,7 +141,7 @@ AI: Syncing dotfiles from GitHub...
     All files synchronized successfully.
 ```
 
----
+______________________________________________________________________
 
 ## Prompt Pattern 3: Push to Remote
 
@@ -157,7 +157,7 @@ AI: Syncing dotfiles from GitHub...
 
    Expected: Shows any untracked modifications
 
-2. **Re-add all modified tracked files**
+1. **Re-add all modified tracked files**
 
    ```bash
    chezmoi re-add
@@ -165,7 +165,7 @@ AI: Syncing dotfiles from GitHub...
 
    Expected: Updates source state for all managed files, creates commit
 
-3. **Show commit log**
+1. **Show commit log**
 
    ```bash
    cd ~/.local/share/chezmoi && git log --oneline -3
@@ -173,7 +173,7 @@ AI: Syncing dotfiles from GitHub...
 
    Expected: Shows recent commits including new auto-commit
 
-4. **Push to remote**
+1. **Push to remote**
 
    ```bash
    cd ~/.local/share/chezmoi && git push
@@ -181,7 +181,8 @@ AI: Syncing dotfiles from GitHub...
 
    Expected: Successfully pushed to origin/main
 
-5. **Confirm to user**
+1. **Confirm to user**
+
    - Show commit count pushed
    - Show commit messages
    - Confirm push success
@@ -199,7 +200,7 @@ AI: Checking for changes...
     Successfully pushed 1 commit to GitHub.
 ```
 
----
+______________________________________________________________________
 
 ## Prompt Pattern 4: Check Status
 
@@ -215,7 +216,7 @@ AI: Checking for changes...
 
    Expected: Lists modified/added/deleted files with indicators (M/A/D)
 
-2. **List managed files**
+1. **List managed files**
 
    ```bash
    chezmoi managed
@@ -223,7 +224,8 @@ AI: Checking for changes...
 
    Expected: Shows all files tracked by chezmoi
 
-3. **Explain drift**
+1. **Explain drift**
+
    - If drift detected: Explain which files differ
    - If no drift: Confirm everything synchronized
    - Suggest next action (track changes, sync, push, etc.)
@@ -243,7 +245,7 @@ AI: Checking dotfile status...
     Suggested action: "I edited .zshrc. Track the changes."
 ```
 
----
+______________________________________________________________________
 
 ## Prompt Pattern 5: Track New File
 
@@ -259,7 +261,7 @@ AI: Checking dotfile status...
 
    Expected: File added to source directory, commit created
 
-2. **Verify in managed list**
+1. **Verify in managed list**
 
    ```bash
    chezmoi managed | grep [filename]
@@ -267,7 +269,7 @@ AI: Checking dotfile status...
 
    Expected: File appears in managed list
 
-3. **Push to remote**
+1. **Push to remote**
 
    ```bash
    cd ~/.local/share/chezmoi && git push
@@ -275,12 +277,14 @@ AI: Checking dotfile status...
 
    Expected: Successfully pushed
 
-4. **Update PLAN.yaml** (if significant)
+1. **Update PLAN.yaml** (if significant)
+
    - Add to appropriate capability section
    - Document purpose and dependencies
    - Update managed file count in observability SLO
 
-5. **Confirm to user**
+1. **Confirm to user**
+
    - Show file now tracked
    - Confirm pushed to remote
    - Suggest reviewing PLAN.yaml if needed
@@ -301,7 +305,7 @@ AI: Adding helix config to chezmoi...
     Note: This is a new editor configuration. Would you like me to update PLAN.yaml?
 ```
 
----
+______________________________________________________________________
 
 ## Prompt Pattern 6: Resolve Conflicts
 
@@ -317,15 +321,17 @@ AI: Adding helix config to chezmoi...
 
    Expected: Shows conflicted files
 
-2. **Show conflicted files**
+1. **Show conflicted files**
+
    - List each file with conflict markers
    - Explain the conflict (local vs. remote changes)
 
-3. **Guide resolution**
+1. **Guide resolution**
+
    - Ask user which version to keep (local/remote/manual merge)
    - For manual merge: show conflict markers and guide editing
 
-4. **Complete merge**
+1. **Complete merge**
 
    ```bash
    cd ~/.local/share/chezmoi
@@ -333,7 +339,7 @@ AI: Adding helix config to chezmoi...
    git commit -m "Resolve merge conflict in [files]"
    ```
 
-5. **Apply to home directory**
+1. **Apply to home directory**
 
    ```bash
    chezmoi apply
@@ -341,13 +347,14 @@ AI: Adding helix config to chezmoi...
 
    Expected: Resolved changes applied to home directory
 
-6. **Push to remote**
+1. **Push to remote**
 
    ```bash
    cd ~/.local/share/chezmoi && git push
    ```
 
-7. **Verify SLOs**
+1. **Verify SLOs**
+
    ```bash
    chezmoi verify
    ```
@@ -372,7 +379,7 @@ AI: Checking for conflicts...
     Which would you like?
 ```
 
----
+______________________________________________________________________
 
 ## Configuration Reference
 
@@ -398,16 +405,17 @@ AI: Checking for conflicts...
 - `autopush = false`: Manual push for review (Claude Code handles this)
 - `secrets = "error"`: Fail-fast on detected secrets (prevents SECRET-001 type issues)
 
----
+______________________________________________________________________
 
 ## Template Handling
 
 **When user edits a templated file** (files ending in `.tmpl` in source directory):
 
 1. **Identify template**
+
    - Check if file is template: `ls ~/.local/share/chezmoi/dot_[filename].tmpl`
 
-2. **Edit source template**
+1. **Edit source template**
 
    ```bash
    chezmoi edit ~/.filename
@@ -415,7 +423,7 @@ AI: Checking for conflicts...
 
    OR manually edit the template file directly
 
-3. **Test template rendering**
+1. **Test template rendering**
 
    ```bash
    chezmoi execute-template < ~/.local/share/chezmoi/dot_filename.tmpl
@@ -423,13 +431,14 @@ AI: Checking for conflicts...
 
    Expected: Valid rendered output, no template errors
 
-4. **Apply to home directory**
+1. **Apply to home directory**
 
    ```bash
    chezmoi apply ~/.filename
    ```
 
-5. **Commit and push**
+1. **Commit and push**
+
    ```bash
    cd ~/.local/share/chezmoi
    git add dot_filename.tmpl
@@ -445,7 +454,7 @@ AI: Checking for conflicts...
 - `.chezmoi.hostname` - m3max
 - `.data.git.name`, `.data.git.email` - From chezmoi.toml
 
----
+______________________________________________________________________
 
 ## Secret Detection
 
@@ -460,28 +469,28 @@ chezmoi: /Users/terryli/.zshrc:283: Uncovered a GCP API key...
 **Resolution**:
 
 1. Operation fails immediately (fail-fast principle)
-2. User must resolve:
+1. User must resolve:
    - Remove secret from file
    - Template it with secure source
    - Use password manager integration
-3. **NEVER bypass** - secrets in git are prohibited
+1. **NEVER bypass** - secrets in git are prohibited
 
 **Historical Example**: SECRET-001 (GEMINI_API_KEY) detected and removed from dot_zshrc.tmpl
 
----
+______________________________________________________________________
 
 ## SLO Validation
 
 After operations, validate Service Level Objectives:
 
 1. **Availability**: `chezmoi verify` (exit code 0)
-2. **Correctness**: `chezmoi diff` (empty output)
-3. **Observability**: `chezmoi managed` (shows all tracked files)
-4. **Maintainability**: `git log` (preserves change history)
+1. **Correctness**: `chezmoi diff` (empty output)
+1. **Observability**: `chezmoi managed` (shows all tracked files)
+1. **Maintainability**: `git log` (preserves change history)
 
 Report SLO status to user after major operations.
 
----
+______________________________________________________________________
 
 ## Progressive Disclosure
 
@@ -493,7 +502,7 @@ Report SLO status to user after major operations.
 
 **Official Documentation**: https://www.chezmoi.io/reference/
 
----
+______________________________________________________________________
 
 ## Version Compatibility
 

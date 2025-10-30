@@ -4,7 +4,7 @@
 
 **⚠️ DEVELOPMENT ONLY** - Do not run in production environments
 
----
+______________________________________________________________________
 
 ## Scripts
 
@@ -22,12 +22,12 @@ cd /Users/terryli/.claude/automation/lychee/testing
 **What it does**:
 
 1. Creates fake lychee results with broken links
-2. Writes to `../.lychee-results.txt`
-3. Triggers notification workflow when session stops
+1. Writes to `../.lychee-results.txt`
+1. Triggers notification workflow when session stops
 
 **Expected outcome**: Telegram notification appears with broken link count
 
----
+______________________________________________________________________
 
 ### test-notification-emit.py
 
@@ -43,12 +43,12 @@ uv run test-notification-emit.py
 **What it does**:
 
 1. Generates notification JSON with test data
-2. Writes to `state/notifications/notify_test_*.json`
-3. Bot detects file and sends Telegram message
+1. Writes to `state/notifications/notify_test_*.json`
+1. Bot detects file and sends Telegram message
 
 **Expected outcome**: Telegram notification with test workspace data
 
----
+______________________________________________________________________
 
 ### test-headless-invocation.py
 
@@ -64,12 +64,12 @@ uv run test-headless-invocation.py
 **What it does**:
 
 1. Mocks Telegram bot initialization
-2. Tests file watching and processing logic
-3. Validates JSON parsing and error handling
+1. Tests file watching and processing logic
+1. Validates JSON parsing and error handling
 
 **Expected outcome**: Console output showing bot logic execution
 
----
+______________________________________________________________________
 
 ## Testing Workflow
 
@@ -81,21 +81,22 @@ uv run test-headless-invocation.py
    ./inject-results.sh
    ```
 
-2. **Stop Session**: End Claude Code session to trigger hook
+1. **Stop Session**: End Claude Code session to trigger hook
 
-3. **Verify Notification**: Check Telegram for notification message
+1. **Verify Notification**: Check Telegram for notification message
 
-4. **Click Button**: Click "Auto-Fix All" in Telegram
+1. **Click Button**: Click "Auto-Fix All" in Telegram
 
-5. **Monitor Orchestrator**:
+1. **Monitor Orchestrator**:
 
    ```bash
    tail -f ~/.claude/logs/orchestrator.log
    ```
 
-6. **Verify Completion**: Check Telegram for completion message
+1. **Verify Completion**: Check Telegram for completion message
 
-7. **Query Events**:
+1. **Query Events**:
+
    ```bash
    sqlite3 ../state/events.db "SELECT event_type, timestamp FROM session_events WHERE correlation_id = '...' ORDER BY timestamp;"
    ```
@@ -137,7 +138,7 @@ EOF
 # Expected: Orchestrator spawns, invokes Claude CLI
 ```
 
----
+______________________________________________________________________
 
 ## State Cleanup
 
@@ -157,7 +158,7 @@ rm ../state/completions/completion_test_*.json
 find ../state/callbacks -name "*.json" -mtime +30 -delete
 ```
 
----
+______________________________________________________________________
 
 ## Debugging
 
@@ -200,7 +201,7 @@ sqlite3 ../state/events.db ".schema session_events"
 sqlite3 ../state/events.db "SELECT * FROM session_events ORDER BY timestamp DESC LIMIT 10;"
 ```
 
----
+______________________________________________________________________
 
 ## SLOs for Testing
 
@@ -214,17 +215,17 @@ sqlite3 ../state/events.db "SELECT * FROM session_events ORDER BY timestamp DESC
 - **Target**: 100% - Test events logged to event store
 - **Validation**: Query events.db after running tests
 
----
+______________________________________________________________________
 
 ## Adding New Tests
 
 When adding test scripts:
 
 1. Add `# /// script` PEP 723 header for uv dependencies
-2. Include `# DEVELOPMENT ONLY` comment at top
-3. Use emoji-prefixed logging for consistency
-4. Clean up generated state files
-5. Document in this README
+1. Include `# DEVELOPMENT ONLY` comment at top
+1. Use emoji-prefixed logging for consistency
+1. Clean up generated state files
+1. Document in this README
 
 Example template:
 
@@ -252,7 +253,7 @@ if __name__ == "__main__":
     main()
 ```
 
----
+______________________________________________________________________
 
 ## References
 

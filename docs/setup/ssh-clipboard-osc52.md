@@ -174,20 +174,20 @@ claude
 ### `/export` still fails
 
 1. Check xclip is in PATH: `which xclip` (should show `~/.local/bin/xclip`)
-2. Verify wrapper is executable: `ls -la ~/.local/bin/xclip`
-3. Test manually: `echo "test" | xclip -selection clipboard`
+1. Verify wrapper is executable: `ls -la ~/.local/bin/xclip`
+1. Test manually: `echo "test" | xclip -selection clipboard`
 
 ### Nothing appears in clipboard
 
 1. Verify Ghostty config has `clipboard-write = allow`
-2. Test raw OSC 52 outside Claude Code
-3. Check terminal supports OSC 52: [Terminal.Sexy](https://terminal.sexy/)
+1. Test raw OSC 52 outside Claude Code
+1. Check terminal supports OSC 52: [Terminal.Sexy](https://terminal.sexy/)
 
 ### Works outside tmux, fails inside
 
 1. Verify `$TMUX` environment variable is set: `echo $TMUX`
-2. Test tmux-wrapped sequence manually
-3. Check tmux version: `tmux -V` (≥3.2 recommended)
+1. Test tmux-wrapped sequence manually
+1. Check tmux version: `tmux -V` (≥3.2 recommended)
 
 ### "No such device or address" error
 
@@ -242,15 +242,15 @@ Wrapper is trying to write to `/dev/tty` instead of `>&2`. Verify wrapper uses `
 
 ## Terminal Compatibility
 
-| Terminal | Support | Notes |
-| --- | --- | --- |
-| Ghostty | ✅ Native | Requires config |
-| iTerm2 | ✅ Native | v3.4.0+ |
-| WezTerm | ✅ Native | Default enabled |
-| Kitty | ✅ Native | Default enabled |
-| Alacritty | ⚠️ Partial | Requires `osc52` feature |
-| tmux | ✅ Passthrough | Requires wrapping |
-| Terminal.app | ❌ None | No OSC 52 support |
+| Terminal     | Support        | Notes                    |
+| ------------ | -------------- | ------------------------ |
+| Ghostty      | ✅ Native      | Requires config          |
+| iTerm2       | ✅ Native      | v3.4.0+                  |
+| WezTerm      | ✅ Native      | Default enabled          |
+| Kitty        | ✅ Native      | Default enabled          |
+| Alacritty    | ⚠️ Partial     | Requires `osc52` feature |
+| tmux         | ✅ Passthrough | Requires wrapping        |
+| Terminal.app | ❌ None        | No OSC 52 support        |
 
 ## References
 

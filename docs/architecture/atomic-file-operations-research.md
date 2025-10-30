@@ -6,42 +6,42 @@
 **Context**: Multi-process Python systems with concurrent file read/write/delete operations
 **Target Platform**: Unix-like systems (macOS, Linux)
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
 For your multi-process notification/queue system, the **recommended approach** is:
 
 1. **Atomic Writes**: Use Python's built-in `os.replace()` with `tempfile.NamedTemporaryFile()` in the same directory
-2. **File Locking**: Use **filelock** library (actively maintained, simple API, cross-platform)
-3. **Atomic Read-Delete**: Combine file locking + `os.unlink()` within the lock context
-4. **Deduplication**: Use filesystem-based lock pattern (lockfile-as-flag) or in-memory set for process-local tracking
+1. **File Locking**: Use **filelock** library (actively maintained, simple API, cross-platform)
+1. **Atomic Read-Delete**: Combine file locking + `os.unlink()` within the lock context
+1. **Deduplication**: Use filesystem-based lock pattern (lockfile-as-flag) or in-memory set for process-local tracking
 
 **Key Insight**: Modern Python 3.x built-in functions (`os.replace`, `os.rename`) provide atomic operations on POSIX systems. External libraries are primarily needed for **locking coordination**, not atomic operations themselves.
 
----
+______________________________________________________________________
 
 ## Library Comparison
 
 ### File Locking Libraries (2024-2025)
 
-| Library | Latest Release | Stars | Maintenance | Platform | API Simplicity | Use Case |
-| --- | --- | --- | --- | --- | --- | --- |
-| **filelock** | Oct 2025 (v3.20.0) | 901 | ✅ Active | Cross-platform | ⭐⭐⭐ Excellent | General-purpose file locking |
-| **portalocker** | Jun 2025 (v3.2.0) | 310 | ✅ Active | Cross-platform | ⭐⭐ Good | Advanced features (Redis, RW locks) |
-| **fasteners** | Aug 2025 (v0.20) | 268 | ✅ Active | Cross-platform | ⭐⭐ Good | Inter-process locks, RW locks |
-| **atomicwrites** | 2018 (v1.4.0) | - | ❌ Deprecated | Cross-platform | N/A | **DO NOT USE** (maintainer deprecated) |
+| Library          | Latest Release     | Stars | Maintenance   | Platform       | API Simplicity   | Use Case                               |
+| ---------------- | ------------------ | ----- | ------------- | -------------- | ---------------- | -------------------------------------- |
+| **filelock**     | Oct 2025 (v3.20.0) | 901   | ✅ Active     | Cross-platform | ⭐⭐⭐ Excellent | General-purpose file locking           |
+| **portalocker**  | Jun 2025 (v3.2.0)  | 310   | ✅ Active     | Cross-platform | ⭐⭐ Good        | Advanced features (Redis, RW locks)    |
+| **fasteners**    | Aug 2025 (v0.20)   | 268   | ✅ Active     | Cross-platform | ⭐⭐ Good        | Inter-process locks, RW locks          |
+| **atomicwrites** | 2018 (v1.4.0)      | -     | ❌ Deprecated | Cross-platform | N/A              | **DO NOT USE** (maintainer deprecated) |
 
 ### Native Python Options
 
-| Method | Availability | Atomicity | Platform | Complexity |
-| --- | --- | --- | --- | --- |
-| `os.replace()` | Python 3.3+ | ✅ Atomic | All POSIX + Windows | ⭐ Simple |
-| `os.rename()` | All Python | ✅ Atomic (POSIX only) | POSIX | ⭐ Simple |
-| `fcntl.flock()` | All Python | N/A (locking) | POSIX only | ⭐⭐ Moderate |
-| `fcntl.lockf()` | All Python | N/A (locking) | POSIX only | ⭐⭐ Moderate |
+| Method          | Availability | Atomicity              | Platform            | Complexity    |
+| --------------- | ------------ | ---------------------- | ------------------- | ------------- |
+| `os.replace()`  | Python 3.3+  | ✅ Atomic              | All POSIX + Windows | ⭐ Simple     |
+| `os.rename()`   | All Python   | ✅ Atomic (POSIX only) | POSIX               | ⭐ Simple     |
+| `fcntl.flock()` | All Python   | N/A (locking)          | POSIX only          | ⭐⭐ Moderate |
+| `fcntl.lockf()` | All Python   | N/A (locking)          | POSIX only          | ⭐⭐ Moderate |
 
----
+______________________________________________________________________
 
 ## Code Examples
 
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 - ✅ `os.replace()` is atomic on all platforms (POSIX + Windows)
 - ✅ Cleanup temp file if operation fails
 
----
+______________________________________________________________________
 
 ### 2. Atomic Read-and-Delete (Never Process Twice)
 
@@ -222,7 +222,7 @@ if __name__ == "__main__":
 - ✅ Delete within lock context ensures atomicity
 - ✅ Returns `None` if file is already being processed (not an error)
 
----
+______________________________________________________________________
 
 ### 3. Safe File Listing (Avoid Race Conditions)
 
@@ -320,7 +320,7 @@ if __name__ == "__main__":
 - ✅ Always release lock in finally block
 - ✅ Graceful handling of missing files (no errors)
 
----
+______________________________________________________________________
 
 ### 4. Maildir-Style Queue Pattern (Production-Grade)
 
@@ -459,8 +459,8 @@ if __name__ == "__main__":
 **How It Works**:
 
 1. **Write**: tmp/file → new/file (atomic rename)
-2. **Read**: new/file → cur/file (atomic rename claims file)
-3. **Delete**: cur/file (after processing)
+1. **Read**: new/file → cur/file (atomic rename claims file)
+1. **Delete**: cur/file (after processing)
 
 **Advantages over locking**:
 
@@ -469,22 +469,22 @@ if __name__ == "__main__":
 - No lock timeout tuning
 - Works on NFS (rename is atomic on NFSv3+)
 
----
+______________________________________________________________________
 
 ## File Locking Deep Dive
 
 ### fcntl.flock() vs fcntl.lockf()
 
-| Aspect | `fcntl.flock()` | `fcntl.lockf()` |
-| --- | --- | --- |
-| **Lock scope** | Whole file only | Byte ranges possible |
-| **Lock binding** | File descriptor | Process |
-| **Multiple FDs** | Independent locks | Same process shares lock |
-| **POSIX standard** | ❌ Not standardized | ✅ POSIX standard |
-| **NFS support** | ❌ Limited/broken | ✅ Works on NFSv3+ |
-| **Portability** | Some Unix lack it | More portable |
-| **Python docs** | Not recommended | Recommended |
-| **Use case** | Simple whole-file locks | Prefer for new code |
+| Aspect             | `fcntl.flock()`         | `fcntl.lockf()`          |
+| ------------------ | ----------------------- | ------------------------ |
+| **Lock scope**     | Whole file only         | Byte ranges possible     |
+| **Lock binding**   | File descriptor         | Process                  |
+| **Multiple FDs**   | Independent locks       | Same process shares lock |
+| **POSIX standard** | ❌ Not standardized     | ✅ POSIX standard        |
+| **NFS support**    | ❌ Limited/broken       | ✅ Works on NFSv3+       |
+| **Portability**    | Some Unix lack it       | More portable            |
+| **Python docs**    | Not recommended         | Recommended              |
+| **Use case**       | Simple whole-file locks | Prefer for new code      |
 
 **Recommendation**: Use `fcntl.lockf()` for native Python, or **filelock library** for simplicity.
 
@@ -498,7 +498,7 @@ if __name__ == "__main__":
 
 **Implication**: Your Python code must use locks consistently across all processes.
 
----
+______________________________________________________________________
 
 ## Production Deployment Considerations
 
@@ -522,9 +522,9 @@ if __name__ == "__main__":
 **Common Failure Modes**:
 
 1. **File deleted between list and read**: Handle `FileNotFoundError` gracefully
-2. **Process crash while holding lock**: Use lock timeouts + stale lock detection
-3. **Disk full during write**: Catch `OSError` and cleanup temp files
-4. **NFS staleness**: Retry with exponential backoff
+1. **Process crash while holding lock**: Use lock timeouts + stale lock detection
+1. **Disk full during write**: Catch `OSError` and cleanup temp files
+1. **NFS staleness**: Retry with exponential backoff
 
 **Retry Strategy**:
 
@@ -599,9 +599,9 @@ def cleanup_stale_locks(directory: Path, max_age_seconds: int = 300):
 **Optimization Tips**:
 
 1. **Batch operations**: Process multiple files per lock acquisition
-2. **Use tmpfs**: Put queue directories in `/dev/shm` (RAM)
-3. **Reduce stat calls**: Cache file lists, use iterator pattern
-4. **Avoid lock timeouts**: Use short timeouts (0.1s) and skip locked files
+1. **Use tmpfs**: Put queue directories in `/dev/shm` (RAM)
+1. **Reduce stat calls**: Cache file lists, use iterator pattern
+1. **Avoid lock timeouts**: Use short timeouts (0.1s) and skip locked files
 
 **Lock Acquisition Time** (estimates):
 
@@ -609,7 +609,7 @@ def cleanup_stale_locks(directory: Path, max_age_seconds: int = 300):
 - filelock library: ~10-50 microseconds (includes Python overhead)
 - NFS: ~1-10 milliseconds (network round-trip)
 
----
+______________________________________________________________________
 
 ## Deduplication Patterns
 
@@ -725,7 +725,7 @@ def process_unique_content(filepath: Path, seen_hashes: Set[str]) -> bool:
 **Pros**: Detects duplicate content across filenames
 **Cons**: Requires reading entire file, memory for hash storage
 
----
+______________________________________________________________________
 
 ## Recommendation for Your Use Case
 
@@ -907,7 +907,7 @@ Use **filelock** if you need:
 - Lock timeouts and non-blocking locks
 - Cross-platform Windows support
 
----
+______________________________________________________________________
 
 ## Summary: Most Reliable Patterns
 
@@ -968,7 +968,7 @@ for filepath in directory.glob("*.txt"):
         continue
 ```
 
----
+______________________________________________________________________
 
 ## References and Further Reading
 
@@ -995,37 +995,37 @@ for filepath in directory.glob("*.txt"):
 - portalocker: https://github.com/wolph/portalocker (310 stars, active)
 - fasteners: https://github.com/harlowja/fasteners (268 stars, active)
 
----
+______________________________________________________________________
 
 ## Appendix: Performance Benchmarks
 
 ### Lock Acquisition Time (Local Filesystem)
 
-| Method | Avg Time | Notes |
-| --- | --- | --- |
-| `fcntl.flock()` | ~1-5 μs | Native system call |
-| `fcntl.lockf()` | ~1-5 μs | Native system call |
-| filelock (FileLock) | ~10-50 μs | Includes Python overhead |
-| portalocker | ~10-50 μs | Wrapper around fcntl |
-| Directory creation | ~50-200 μs | mkdir() as lock |
+| Method              | Avg Time   | Notes                    |
+| ------------------- | ---------- | ------------------------ |
+| `fcntl.flock()`     | ~1-5 μs    | Native system call       |
+| `fcntl.lockf()`     | ~1-5 μs    | Native system call       |
+| filelock (FileLock) | ~10-50 μs  | Includes Python overhead |
+| portalocker         | ~10-50 μs  | Wrapper around fcntl     |
+| Directory creation  | ~50-200 μs | mkdir() as lock          |
 
 ### File Operation Time (ext4 filesystem)
 
-| Operation | Avg Time | Notes |
-| --- | --- | --- |
-| `os.rename()` | ~50-200 μs | Atomic, metadata only |
-| `os.replace()` | ~50-200 μs | Atomic, metadata only |
-| `os.unlink()` | ~50-100 μs | Metadata operation |
-| Read 1KB file | ~100-500 μs | Depends on page cache |
-| Write 1KB file | ~200-1000 μs | Includes fsync |
+| Operation      | Avg Time     | Notes                 |
+| -------------- | ------------ | --------------------- |
+| `os.rename()`  | ~50-200 μs   | Atomic, metadata only |
+| `os.replace()` | ~50-200 μs   | Atomic, metadata only |
+| `os.unlink()`  | ~50-100 μs   | Metadata operation    |
+| Read 1KB file  | ~100-500 μs  | Depends on page cache |
+| Write 1KB file | ~200-1000 μs | Includes fsync        |
 
 ### NFS Performance (NFSv4)
 
-| Operation | Avg Time | Notes |
-| --- | --- | --- |
-| `os.rename()` | ~1-10 ms | Network round-trip |
+| Operation       | Avg Time | Notes              |
+| --------------- | -------- | ------------------ |
+| `os.rename()`   | ~1-10 ms | Network round-trip |
 | `fcntl.lockf()` | ~1-10 ms | Network round-trip |
-| Read 1KB file | ~2-20 ms | Network + cache |
+| Read 1KB file   | ~2-20 ms | Network + cache    |
 
 **Note**: These are approximate values. Always benchmark your specific workload.
 
@@ -1045,6 +1045,6 @@ for filepath in directory.glob("*.txt"):
 
 **Key Takeaway**: Maildir pattern (lock-free rename) is ~50% faster than lock-based approaches.
 
----
+______________________________________________________________________
 
 **End of Report**

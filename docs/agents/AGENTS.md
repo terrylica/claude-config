@@ -53,9 +53,9 @@ tools: Tool1, Tool2, Tool3
 ### Common Mistakes That Cause Parsing Failures
 
 1. ❌ `README.md` in `/agents/` directory → Move to `/docs/AGENTS.md`
-2. ❌ Missing `name:` field in frontmatter → Add required field
-3. ❌ Documentation files in `/agents/` → Move to appropriate `/docs/` location
-4. ❌ Non-agent `.md` files in `/agents/` → Move or rename
+1. ❌ Missing `name:` field in frontmatter → Add required field
+1. ❌ Documentation files in `/agents/` → Move to appropriate `/docs/` location
+1. ❌ Non-agent `.md` files in `/agents/` → Move or rename
 
 ## Claude Code Official Status
 

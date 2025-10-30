@@ -15,7 +15,7 @@ Complete end-to-end workflow documentation showing all 4 phases of the multi-wor
 - **SQLite Correlation**: All events tracked in `events.db` with ULID correlation IDs
 - **Fail-Fast**: No silent failures, all errors propagate and are logged
 
----
+______________________________________________________________________
 
 ## Bot Lifecycle (v3.0.0 Polling Architecture)
 
@@ -54,7 +54,7 @@ Complete end-to-end workflow documentation showing all 4 phases of the multi-wor
 sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE component='bot' ORDER BY timestamp DESC LIMIT 10;"
 ```
 
----
+______________________________________________________________________
 
 ## Phase 1: Detection & Initial Notification ✅
 
@@ -124,7 +124,7 @@ sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE 
 [Deletes consumed notification file]
 ```
 
----
+______________________________________________________________________
 
 ## Phase 2: User Decision & Approval ✅
 
@@ -184,7 +184,7 @@ sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE 
 └─────────────────────────────────────────────────────────────┘
 ```
 
----
+______________________________________________________________________
 
 ## Phase 3: Claude CLI Execution ✅
 
@@ -259,7 +259,7 @@ sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE 
 [Proceeds to Phase 4...]
 ```
 
----
+______________________________________________________________________
 
 ## Phase 4: Completion Notification ✅
 
@@ -358,33 +358,37 @@ sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE 
 [User sees completion notification in Telegram] ✅
 ````
 
----
+______________________________________________________________________
 
 ## Summary of Data Flow
 
 ### State Files Created Throughout Process
 
 1. **Notifications** (`/tmp/lychee_state/notifications/notify_{session}_{hash}.json`)
+
    - Created by: Stop Hook
    - Consumed by: Bot
    - Triggers: Initial Telegram notification
 
-2. **Callbacks** (`/tmp/lychee_state/callbacks/cb_{hash}.json`)
+1. **Callbacks** (`/tmp/lychee_state/callbacks/cb_{hash}.json`)
+
    - Created by: Bot (when sending Telegram message)
    - Consumed by: Bot (when user clicks button)
    - Purpose: Map short callback_data to full context
 
-3. **Approvals** (`/tmp/lychee_state/approvals/approval_{session}_{hash}.json`)
+1. **Approvals** (`/tmp/lychee_state/approvals/approval_{session}_{hash}.json`)
+
    - Created by: Bot (after user clicks button)
    - Consumed by: Orchestrator
    - Triggers: Claude CLI execution
 
-4. **Completions** (`/tmp/lychee_state/completions/completion_{session}_{hash}.json`) ✨ NEW
+1. **Completions** (`/tmp/lychee_state/completions/completion_{session}_{hash}.json`) ✨ NEW
+
    - Created by: Orchestrator (after Claude CLI finishes)
    - Consumed by: Bot
    - Triggers: Completion Telegram notification
 
----
+______________________________________________________________________
 
 ## Processes Involved
 
@@ -425,7 +429,7 @@ sqlite3 state/events.db "SELECT event_type, timestamp FROM session_events WHERE 
 **Role**: Fix broken links based on lychee results
 **Output**: stdout (changes made), stderr (errors)
 
----
+______________________________________________________________________
 
 ## Completion Notification Scenarios
 
@@ -480,7 +484,7 @@ Summary:
 Claude CLI exceeded 5-minute timeout
 ```
 
----
+______________________________________________________________________
 
 ## Observability Commands
 
@@ -524,7 +528,7 @@ launchctl list | grep lychee
 # XXXXX  0  com.user.lychee.orchestrator
 ```
 
----
+______________________________________________________________________
 
 ## Testing
 
@@ -556,7 +560,7 @@ tail -f ~/.claude/logs/orchestrator.log
 # - Timeout
 ```
 
----
+______________________________________________________________________
 
 ## Version History
 

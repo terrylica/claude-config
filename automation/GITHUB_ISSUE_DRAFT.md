@@ -48,9 +48,9 @@ Claude Code v2.0.28 displays "⎿ Stop hook error" after every response, even th
 Stop hooks should execute silently with **no error message** since they:
 
 1. Produce 0 bytes of output (verified)
-2. Exit with code 0
-3. Have proper output redirection (`> /dev/null 2>&1 &`)
-4. Are configured correctly per documentation
+1. Exit with code 0
+1. Have proper output redirection (`> /dev/null 2>&1 &`)
+1. Are configured correctly per documentation
 
 ### Actual Behavior
 
@@ -186,26 +186,26 @@ $ lsof | grep -E "cns_hook|format-markdown|check-links"
    } > /dev/null 2>&1 &
    ```
 
-2. ✅ **Suppressed UV debug output**
+1. ✅ **Suppressed UV debug output**
 
    ```bash
    export UV_NO_PROGRESS=1
    export RUST_LOG=error
    ```
 
-3. ✅ **Redirected Python script stdout** (7 locations)
+1. ✅ **Redirected Python script stdout** (7 locations)
 
    ```bash
    script.py args >> /dev/null 2>> "$log_file"
    ```
 
-4. ✅ **Added explicit exit 0** to all hooks
+1. ✅ **Added explicit exit 0** to all hooks
 
-5. ✅ **Killed stale cached processes** (24+ hour old bash processes)
+1. ✅ **Killed stale cached processes** (24+ hour old bash processes)
 
-6. ✅ **Implemented single-instance protection** (prevents duplicate processes)
+1. ✅ **Implemented single-instance protection** (prevents duplicate processes)
 
-7. ✅ **Added stale process cleanup** (auto-kills processes >1 hour old)
+1. ✅ **Added stale process cleanup** (auto-kills processes >1 hour old)
 
 ## Root Cause Analysis
 
@@ -251,8 +251,8 @@ Error message "Hook output does not start with {" suggests Claude Code expects *
 ## Requested Fix
 
 1. **If hooks produce 0 bytes output**, do not show "Stop hook error"
-2. **Clarify documentation**: Are Stop hooks required to output JSON?
-3. **Fix detection logic**: "Hook output does not start with {" should not trigger for empty output
+1. **Clarify documentation**: Are Stop hooks required to output JSON?
+1. **Fix detection logic**: "Hook output does not start with {" should not trigger for empty output
 
 ## Diagnostic Files Available
 
@@ -264,11 +264,11 @@ Error message "Hook output does not start with {" suggests Claude Code expects *
 ## Questions for Claude Team
 
 1. Are Stop hooks **required** to output JSON starting with `{`?
-2. Should empty output (0 bytes, exit 0) trigger "Stop hook error"?
-3. Is this related to the v2.0.17+ hook display regression (#9602)?
-4. Can you reproduce with minimal test hook shown above?
+1. Should empty output (0 bytes, exit 0) trigger "Stop hook error"?
+1. Is this related to the v2.0.17+ hook display regression (#9602)?
+1. Can you reproduce with minimal test hook shown above?
 
----
+______________________________________________________________________
 
 **Report Date**: 2025-10-27
 **Reproducibility**: 100% (consistent across all sessions)

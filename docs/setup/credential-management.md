@@ -4,7 +4,7 @@
 
 **Specification**: [`specifications/doppler-integration.yaml`](../../specifications/doppler-integration.yaml)
 
----
+______________________________________________________________________
 
 ## Doppler Projects
 
@@ -44,7 +44,7 @@ doppler secrets notes set <SECRET_NAME> "<note>" --project claude-config
 doppler secrets notes set NOTION_API_TOKEN "Notion Internal Integration Secret | Purpose: Fetch Touchstone docs" --project claude-config
 ```
 
----
+______________________________________________________________________
 
 ### aws-credentials
 
@@ -75,7 +75,7 @@ doppler secrets notes set NOTION_API_TOKEN "Notion Internal Integration Secret |
 doppler run --project aws-credentials --config dev -- aws <command>
 ```
 
----
+______________________________________________________________________
 
 ## Usage Pattern
 

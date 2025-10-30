@@ -83,13 +83,13 @@ auto_exit_zellij_on_quit true
 ### After Normal Shutdown
 
 1. Zellij saves final session state
-2. Session moves to "EXITED" status in session manager
-3. Can be resumed anytime with `zellij attach <session-name>`
+1. Session moves to "EXITED" status in session manager
+1. Can be resumed anytime with `zellij attach <session-name>`
 
 ### After Crash or System Restart
 
 1. Previous session stored in cache (~/.cache/zellij)
-2. Next time terminal opens in Ghostty:
+1. Next time terminal opens in Ghostty:
    - Zellij autostart activates
    - `ZELLIJ_AUTO_ATTACH=true` reuses session
    - Session layout and panes are restored

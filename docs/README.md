@@ -4,14 +4,14 @@ This repository serves as a template for Claude Code workspace configuration, pr
 
 ## 🚀 Quick Navigation
 
-| Category | Description | Key Documents |
-| --- | --- | --- |
-| 📋 **Standards** | Official Claude Code standards and references | [Session Storage Standard](standards/CLAUDE_SESSION_STORAGE_STANDARD.md) |
-| 🏗️ **Architecture** | System design and architectural principles | [Architecture Overview](architecture/ARCHITECTURE.md) |
-| ⚙️ **Setup** | Installation and configuration guides | [Team Setup](setup/TEAM_SETUP.md), [GPU Setup](setup/gpu-cloud-setup.md) |
-| 🔄 **Sync** | Cross-platform synchronization workflows | [Sync Strategy](sync/claude-code-sync-strategy.md) |
-| 🤖 **Agents** | AI agents and slash commands | [Agents](agents/AGENTS.md) |
-| 📊 **Reports** | Analysis and project reports | [SAGE Sync Report](reports/MHR_SAGE_SYNC_REPORT.md) |
+| Category            | Description                                   | Key Documents                                                            |
+| ------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
+| 📋 **Standards**    | Official Claude Code standards and references | [Session Storage Standard](standards/CLAUDE_SESSION_STORAGE_STANDARD.md) |
+| 🏗️ **Architecture** | System design and architectural principles    | [Architecture Overview](architecture/ARCHITECTURE.md)                    |
+| ⚙️ **Setup**        | Installation and configuration guides         | [Team Setup](setup/TEAM_SETUP.md), [GPU Setup](setup/gpu-cloud-setup.md) |
+| 🔄 **Sync**         | Cross-platform synchronization workflows      | [Sync Strategy](sync/claude-code-sync-strategy.md)                       |
+| 🤖 **Agents**       | AI agents and slash commands                  | [Agents](agents/AGENTS.md)                                               |
+| 📊 **Reports**      | Analysis and project reports                  | [SAGE Sync Report](reports/MHR_SAGE_SYNC_REPORT.md)                      |
 
 ## Quick Start
 
@@ -89,11 +89,15 @@ Project reports and analysis documentation:
 ### System & Productivity Tools
 
 - **CNS Notification System**: `automation/cns/`
+
 - **Documentation**: [CNS Documentation](../automation/cns/README.md)
+
 - **Command**: `cns-notify`
 
 - **Tmux Session Management**: `tmux/`
+
 - **Documentation**: [Tmux Tools Documentation](../tmux/docs/README.md)
+
 - **Commands**: `tmux-session`, `tmux-list`, `tmux-kill`
 
 ### Agent Configurations

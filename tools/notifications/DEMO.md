@@ -64,8 +64,8 @@ pushover-emergency "URGENT" "Action required!" 30 60 "siren"
 Pushover credentials are loaded with priority:
 
 1. `.claude/automation/cns/config/cns_config.json` (git-based, team-shared)
-2. `~/.pushover_config` (local override)
-3. macOS Keychain (legacy)
+1. `~/.pushover_config` (local override)
+1. macOS Keychain (legacy)
 
 ## Emergency Notifications
 

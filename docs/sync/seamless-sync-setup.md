@@ -50,18 +50,18 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
 ### 1. Add Remote Device
 
 1. Open http://localhost:8384 on your Mac
-2. Click "Add Remote Device"
-3. Enter GPU workstation's Device ID
-4. Name it "GPU Workstation"
-5. Save
+1. Click "Add Remote Device"
+1. Enter GPU workstation's Device ID
+1. Name it "GPU Workstation"
+1. Save
 
 ### 2. Create Shared Folder
 
 1. Click "Add Folder"
-2. **Folder Path**: `/Users/terryli/eon/nt/`
-3. **Folder ID**: `nt-workspace`
-4. **Share with**: Select "GPU Workstation"
-5. Additional Settings:
+1. **Folder Path**: `/Users/terryli/eon/nt/`
+1. **Folder ID**: `nt-workspace`
+1. **Share with**: Select "GPU Workstation"
+1. Additional Settings:
    - **Ignore Patterns**: Add these lines:
      ```
      .git/objects/**
@@ -74,13 +74,13 @@ ssh zerotier-remote "~/bin/syncthing --device-id"
      **/*.pyc
      **/trade_logs/*.csv
      ```
-6. Save
+1. Save
 
 ### 3. Accept on Remote
 
 1. SSH to remote: `ssh zerotier-remote`
-2. Open remote web interface or accept via command line
-3. Accept the shared folder to `~/eon/nt/`
+1. Open remote web interface or accept via command line
+1. Accept the shared folder to `~/eon/nt/`
 
 ## Setup Phase 3: Create Quick Commands
 
@@ -185,8 +185,8 @@ Add to ignore patterns:
 ### Multiple Folder Setup:
 
 1. **nt-code**: Source code only
-2. **nt-data**: Data files (larger, less frequent sync)
-3. **nt-results**: GPU computation results
+1. **nt-data**: Data files (larger, less frequent sync)
+1. **nt-results**: GPU computation results
 
 ## Security Notes
 
@@ -218,8 +218,8 @@ work-local   # For local development
 work-remote  # For GPU validation work
 ```
 
----
+______________________________________________________________________
 
-**Status**: Ready for seamless background synchronization  
-**Performance**: Optimal (ZeroTier using direct local network)  
+**Status**: Ready for seamless background synchronization\
+**Performance**: Optimal (ZeroTier using direct local network)\
 **Workflow**: Switch between machines instantly with automatic sync

@@ -125,17 +125,17 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 **Why stderr (fd 2) Works:**
 
 1. stderr is always connected (even for non-interactive processes)
-2. Escape sequences written to stderr are processed by terminal emulator
-3. Terminal emulators read from both stdout and stderr for control sequences
-4. Claude Code doesn't suppress stderr (it displays tool output)
-5. Ghostty receives the sequence regardless of which stream it's on
+1. Escape sequences written to stderr are processed by terminal emulator
+1. Terminal emulators read from both stdout and stderr for control sequences
+1. Claude Code doesn't suppress stderr (it displays tool output)
+1. Ghostty receives the sequence regardless of which stream it's on
 
 ### The Complete Flow
 
 1. **User triggers**: `/export` in Claude Code
-2. **Claude Code calls**: `echo "<data>" | xclip -selection clipboard`
-3. **System resolves**: `~/.local/bin/xclip` (our wrapper, not real xclip)
-4. **Wrapper executes**:
+1. **Claude Code calls**: `echo "<data>" | xclip -selection clipboard`
+1. **System resolves**: `~/.local/bin/xclip` (our wrapper, not real xclip)
+1. **Wrapper executes**:
    ```bash
    input=$(cat)                              # Read stdin
    encoded=$(printf %s "$input" | base64 | tr -d '\n')
@@ -145,25 +145,25 @@ printf '\033]52;c;%s\007' "$encoded" >&2
      printf "\033]52;c;%s\007" "$encoded" >&2
    fi
    ```
-5. **Escape sequence travels**:
+1. **Escape sequence travels**:
    - Through tmux (if present) → unwrapped
    - Through SSH connection → transparent passthrough
    - To Ghostty terminal → interpreted
-6. **Ghostty updates**: macOS system clipboard
-7. **User can paste**: `⌘V` anywhere on macOS
+1. **Ghostty updates**: macOS system clipboard
+1. **User can paste**: `⌘V` anywhere on macOS
 
 ### Terminal Support Matrix
 
-| Terminal | OSC 52 Support | Notes |
-| --- | --- | --- |
-| Ghostty | ✅ Full | Native, requires `clipboard-write = allow` |
-| iTerm2 | ✅ Full | Native since v3.4.0 |
-| WezTerm | ✅ Full | Native |
-| Kitty | ✅ Full | Native |
-| Alacritty | ✅ With config | Requires `osc52` feature enabled |
-| tmux | ✅ Passthrough | Requires special wrapping (Ptmux) |
-| Terminal.app | ❌ None | Does not support OSC 52 |
-| xterm | ⚠️ Partial | Requires compile-time flag |
+| Terminal     | OSC 52 Support | Notes                                      |
+| ------------ | -------------- | ------------------------------------------ |
+| Ghostty      | ✅ Full        | Native, requires `clipboard-write = allow` |
+| iTerm2       | ✅ Full        | Native since v3.4.0                        |
+| WezTerm      | ✅ Full        | Native                                     |
+| Kitty        | ✅ Full        | Native                                     |
+| Alacritty    | ✅ With config | Requires `osc52` feature enabled           |
+| tmux         | ✅ Passthrough | Requires special wrapping (Ptmux)          |
+| Terminal.app | ❌ None        | Does not support OSC 52                    |
+| xterm        | ⚠️ Partial     | Requires compile-time flag                 |
 
 ### Ghostty Specific Configuration
 
@@ -213,10 +213,10 @@ echo "test" | xclip -selection clipboard
 **Disadvantages:**
 
 1. Requires `X11Forwarding yes` in `/etc/ssh/sshd_config` (admin access)
-2. Requires X11 server running on macOS (XQuartz)
-3. Higher security risk (full display access)
-4. Slower (more protocol overhead)
-5. Breaks if X11 forwarding disabled by policy
+1. Requires X11 server running on macOS (XQuartz)
+1. Higher security risk (full display access)
+1. Slower (more protocol overhead)
+1. Breaks if X11 forwarding disabled by policy
 
 **OSC 52 advantages:**
 
@@ -278,7 +278,7 @@ ssh ${SSH_CLIENT%% *} pbcopy
 
 **Latency:**
 
-- Local machine: <1ms
+- Local machine: \<1ms
 - LAN SSH: 1-10ms
 - WAN SSH: 50-200ms (depends on RTT)
 - tmux adds: ~5ms processing overhead
@@ -326,14 +326,14 @@ tmux show-options -g | grep clipboard
    base64               # Wrong: includes newlines
    ```
 
-2. **Wrong terminator:**
+1. **Wrong terminator:**
 
    ```bash
    printf '...\007'  # BEL (correct)
    printf '...\n'    # Wrong
    ```
 
-3. **Missing tmux detection:**
+1. **Missing tmux detection:**
 
    ```bash
    if [ -n "$TMUX" ]; then  # Correct
@@ -341,7 +341,8 @@ tmux show-options -g | grep clipboard
    if command -v tmux; then # Wrong: checks if tmux exists, not if inside
    ```
 
-4. **Output to wrong stream:**
+1. **Output to wrong stream:**
+
    ```bash
    printf '...' >&2   # Correct
    printf '...' >&1   # Works but less reliable
@@ -353,10 +354,10 @@ tmux show-options -g | grep clipboard
 **Where this solution touches:**
 
 1. `~/.local/bin/xclip` - Wrapper script (created)
-2. `~/.zshrc` - Optional: `osc52-copy()` function and `pbcopy` alias
-3. Ghostty config - Must have `clipboard-write = allow`
-4. Claude Code - Uses via `/export` command (no changes needed)
-5. tmux - Transparent passthrough (no config changes needed)
+1. `~/.zshrc` - Optional: `osc52-copy()` function and `pbcopy` alias
+1. Ghostty config - Must have `clipboard-write = allow`
+1. Claude Code - Uses via `/export` command (no changes needed)
+1. tmux - Transparent passthrough (no config changes needed)
 
 ### Related Standards
 
@@ -372,7 +373,7 @@ tmux show-options -g | grep clipboard
 - [tmux Control Mode](https://github.com/tmux/tmux/wiki/Control-Mode)
 - [Terminal Feature Detection](https://github.com/termstandard/colors)
 
----
+______________________________________________________________________
 
 ## Summary: The Irreducible Essentials
 
@@ -381,10 +382,10 @@ tmux show-options -g | grep clipboard
 **Solution:** Create `~/.local/bin/xclip` wrapper that:
 
 1. Reads stdin (what xclip would do)
-2. Base64 encodes it
-3. Wraps in OSC 52 escape sequence
-4. Double-wraps if inside tmux
-5. Outputs to stderr (not /dev/tty)
+1. Base64 encodes it
+1. Wraps in OSC 52 escape sequence
+1. Double-wraps if inside tmux
+1. Outputs to stderr (not /dev/tty)
 
 **Why it works:**
 

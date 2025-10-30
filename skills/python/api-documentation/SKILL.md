@@ -1,8 +1,6 @@
----
-name: python-api-documentation
-description: Industry-standard Python API documentation using Pydantic v2 models with rich docstrings. Use when documenting Python packages, creating data models, generating JSON schemas, or building FastAPI applications. Includes 3-layer architecture pattern (Literal types → Pydantic models → Rich docstrings), migration steps, and AI agent discovery patterns. Eliminates documentation fragmentation by making code the single source of truth.
-allowed-tools: Read, Edit, Write
----
+______________________________________________________________________
+
+## name: python-api-documentation description: Industry-standard Python API documentation using Pydantic v2 models with rich docstrings. Use when documenting Python packages, creating data models, generating JSON schemas, or building FastAPI applications. Includes 3-layer architecture pattern (Literal types → Pydantic models → Rich docstrings), migration steps, and AI agent discovery patterns. Eliminates documentation fragmentation by making code the single source of truth. allowed-tools: Read, Edit, Write
 
 # Pydantic API Documentation Skill
 
@@ -89,32 +87,32 @@ def update_data(
 ## Best Practices
 
 1. **Use Literal types** for all enums (not Enum class)
-2. **Add `description` to every Field()** - Machine-readable constraints
-3. **Embed examples** in `model_config` json_schema_extra
-4. **Type all method returns** - Use Pydantic models for complex returns
-5. **Add @staticmethod helpers** - e.g., `supported_pairs()` for agent discovery
-6. **Avoid separate docs files** - No README.md API sections, no llms.txt duplication
+1. **Add `description` to every Field()** - Machine-readable constraints
+1. **Embed examples** in `model_config` json_schema_extra
+1. **Type all method returns** - Use Pydantic models for complex returns
+1. **Add @staticmethod helpers** - e.g., `supported_pairs()` for agent discovery
+1. **Avoid separate docs files** - No README.md API sections, no llms.txt duplication
 
 ## Migration Path
 
 1. Define Literal types for all enums
-2. Create Pydantic models for all return types
-3. Add Field(description=...) to every field
-4. Embed examples in model_config
-5. Update method signatures with typed returns
-6. Add rich docstrings with Examples section
-7. Add @staticmethod helpers
-8. Remove redundant documentation files
+1. Create Pydantic models for all return types
+1. Add Field(description=...) to every field
+1. Embed examples in model_config
+1. Update method signatures with typed returns
+1. Add rich docstrings with Examples section
+1. Add @staticmethod helpers
+1. Remove redundant documentation files
 
 ## AI Agent Discovery Workflow
 
 When Claude, Copilot, or other AI agents encounter your API, they:
 
 1. Call `help(ClassName)` → reads rich docstrings
-2. Use `inspect.signature(method)` → discovers typed parameters
-3. Call `Model.model_json_schema()` → gets machine-readable schema
-4. Use `get_args(PairType)` → discovers valid enum values
-5. Access `Model.model_config` → reads embedded examples
+1. Use `inspect.signature(method)` → discovers typed parameters
+1. Call `Model.model_json_schema()` → gets machine-readable schema
+1. Use `get_args(PairType)` → discovers valid enum values
+1. Access `Model.model_config` → reads embedded examples
 
 This gives AI agents the complete picture without separate documentation.
 

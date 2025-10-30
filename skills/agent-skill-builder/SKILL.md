@@ -1,7 +1,6 @@
----
-name: agent-skill-builder
-description: Guide for creating Claude Code CLI Agent Skills following canonical format and best practices. Use when user wants to create, design, or learn about building Agent Skills. Covers SKILL.md structure, security, and token optimization.
----
+______________________________________________________________________
+
+## name: agent-skill-builder description: Guide for creating Claude Code CLI Agent Skills following canonical format and best practices. Use when user wants to create, design, or learn about building Agent Skills. Covers SKILL.md structure, security, and token optimization.
 
 # Agent Skill Builder
 
@@ -19,7 +18,7 @@ Guide users to create properly formatted Claude Code Agent Skills following Anth
 
 Triggers: "create skill", "agent skill", "build skill", "skill structure", "skill format", "how to write skills", "how to create agent skills"
 
----
+______________________________________________________________________
 
 ## Part 1: Canonical Structure
 
@@ -37,11 +36,11 @@ allowed-tools: Read, Grep, Bash # Optional, CLI-only feature
 
 **Field Requirements:**
 
-| Field | Rules |
-| --- | --- |
-| `name` | Lowercase, hyphens, numbers only. Max 64 chars. Must be unique. |
-| `description` | State WHAT it does + WHEN to use. Max 1024 chars (CLI) or 200 (API). Include trigger keywords! |
-| `allowed-tools` | **CLI-only**. Comma-separated list restricts available tools. Optional. |
+| Field           | Rules                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `name`          | Lowercase, hyphens, numbers only. Max 64 chars. Must be unique.                                |
+| `description`   | State WHAT it does + WHEN to use. Max 1024 chars (CLI) or 200 (API). Include trigger keywords! |
+| `allowed-tools` | **CLI-only**. Comma-separated list restricts available tools. Optional.                        |
 
 **Good vs Bad Descriptions:**
 
@@ -78,7 +77,7 @@ allowed-tools: Read, Grep, Bash # Optional, CLI-only feature
 - Supporting files: `reference.md`, `examples.md` (singular, not directories)
 - Directory path: `~/.claude/skills/` (lowercase "skills")
 
----
+______________________________________________________________________
 
 ## Part 2: How Agent Skills Work (Token Efficiency)
 
@@ -87,8 +86,8 @@ allowed-tools: Read, Grep, Bash # Optional, CLI-only feature
 Agent Skills use a **three-tier loading system** to minimize token consumption:
 
 1. **Metadata only** (30-50 tokens): Name + description loaded in system prompt for discovery
-2. **SKILL.md content**: Loaded only when Agent Skill is relevant to current task
-3. **Referenced files**: Loaded on-demand when explicitly referenced
+1. **SKILL.md content**: Loaded only when Agent Skill is relevant to current task
+1. **Referenced files**: Loaded on-demand when explicitly referenced
 
 **Result**: You can have unlimited Agent Skills without bloating context window! Each Agent Skill costs only 30-50 tokens until activated.
 
@@ -107,7 +106,7 @@ For authentication details, see reference.md section "OAuth Flow".
 For examples, consult examples.md.
 ```
 
----
+______________________________________________________________________
 
 ## Part 3: Security (Critical)
 
@@ -173,7 +172,7 @@ Use environment variable $API_KEY from user's shell.
 Validate all inputs before API calls.
 ```
 
----
+______________________________________________________________________
 
 ## Part 4: Content Sections (Recommended)
 
@@ -213,7 +212,7 @@ For advanced examples, see examples.md.
 - ✅ **Imperative**: "Read the file", "Run the script"
 - ❌ **Suggestive**: "You should read", "Maybe try"
 
----
+______________________________________________________________________
 
 ## Part 5: Agent Skill Composition & Limitations
 
@@ -235,22 +234,22 @@ For advanced examples, see examples.md.
 - No explicit coordination needed
 - Agent Skills work together organically based on descriptions
 
----
+______________________________________________________________________
 
 ## Part 6: CLI vs API Differences
 
-| Feature | Claude Code CLI | Claude.ai API |
-| --- | --- | --- |
-| File name | `SKILL.md` (uppercase) | `Skill.md` (capitalized) |
-| Location | `~/.claude/skills/` | ZIP upload |
-| Description limit | 1024 characters | 200 characters |
-| `allowed-tools` | ✅ Supported | ❌ Not supported |
-| Privacy | Personal or project | Individual account only |
-| Package install | Pre-installed only | Pre-installed only |
+| Feature           | Claude Code CLI        | Claude.ai API            |
+| ----------------- | ---------------------- | ------------------------ |
+| File name         | `SKILL.md` (uppercase) | `Skill.md` (capitalized) |
+| Location          | `~/.claude/skills/`    | ZIP upload               |
+| Description limit | 1024 characters        | 200 characters           |
+| `allowed-tools`   | ✅ Supported           | ❌ Not supported         |
+| Privacy           | Personal or project    | Individual account only  |
+| Package install   | Pre-installed only     | Pre-installed only       |
 
 **This Agent Skill teaches CLI format only.**
 
----
+______________________________________________________________________
 
 ## Part 7: Creation Workflow
 
@@ -282,9 +281,9 @@ Focus on description that enables autonomous discovery.
 ### Step 5: Test Activation
 
 1. Start new conversation (or `/clear`)
-2. Ask question using trigger keywords
-3. Verify Claude loads Agent Skill (check output mentions skill)
-4. Refine description if not activating
+1. Ask question using trigger keywords
+1. Verify Claude loads Agent Skill (check output mentions skill)
+1. Refine description if not activating
 
 ### Step 6: Security Audit
 
@@ -294,7 +293,7 @@ Focus on description that enables autonomous discovery.
 - [ ] Tested for prompt injection
 - [ ] No unsafe file operations
 
----
+______________________________________________________________________
 
 ## Part 8: Common Patterns
 
@@ -372,15 +371,15 @@ allowed-tools: Read, Bash
 - examples.md: Request/response examples
 ```
 
----
+______________________________________________________________________
 
 ## Part 9: Validation Checklist
 
 Before finalizing:
 
 - [ ] YAML frontmatter valid (name, description)
-- [ ] `name` follows rules (lowercase, hyphens, <64 chars)
-- [ ] `description` includes WHAT + WHEN (<1024 chars, specific triggers)
+- [ ] `name` follows rules (lowercase, hyphens, \<64 chars)
+- [ ] `description` includes WHAT + WHEN (\<1024 chars, specific triggers)
 - [ ] Instructions use imperative mood
 - [ ] At least one concrete example
 - [ ] Security audit passed (no secrets, input validation)
@@ -390,7 +389,7 @@ Before finalizing:
 - [ ] No duplicate functionality
 - [ ] Supporting files in scripts/, reference.md, examples.md
 
----
+______________________________________________________________________
 
 ## Part 10: Quick Reference
 
@@ -419,7 +418,7 @@ description: Does X when user mentions Y (specific triggers)
 
 **Security**: Sandbox, restrict tools, validate inputs, no secrets.
 
----
+______________________________________________________________________
 
 ## Resources
 
@@ -428,36 +427,36 @@ description: Does X when user mentions Y (specific triggers)
 - **Template**: https://github.com/anthropics/skills/tree/main/template-skill
 - **Support**: https://support.claude.com/en/articles/12512198-how-to-create-custom-skills
 
----
+______________________________________________________________________
 
 ## Meta-Example: This Agent Skill
 
 This `agent-skill-builder` demonstrates its own principles:
 
 1. ✅ **Clear name**: `agent-skill-builder` (lowercase, hyphenated, precise)
-2. ✅ **Specific description**: Mentions "agent skill", "create", "build", "structure" as triggers
-3. ✅ **Structured content**: Progressive disclosure with 10 parts
-4. ✅ **Security included**: Dedicated section on threats and best practices
-5. ✅ **Token efficient**: Core guidance here, could add reference.md for advanced topics
-6. ✅ **CLI-specific**: Clarifies this is for Claude Code CLI, not API
-7. ✅ **Examples**: Multiple concrete patterns
-8. ✅ **Validation**: Includes checklist
-9. ✅ **Official terminology**: Uses "Agent Skills" (formal) and `skills/` (file paths)
+1. ✅ **Specific description**: Mentions "agent skill", "create", "build", "structure" as triggers
+1. ✅ **Structured content**: Progressive disclosure with 10 parts
+1. ✅ **Security included**: Dedicated section on threats and best practices
+1. ✅ **Token efficient**: Core guidance here, could add reference.md for advanced topics
+1. ✅ **CLI-specific**: Clarifies this is for Claude Code CLI, not API
+1. ✅ **Examples**: Multiple concrete patterns
+1. ✅ **Validation**: Includes checklist
+1. ✅ **Official terminology**: Uses "Agent Skills" (formal) and `skills/` (file paths)
 
 **Token usage**: ~50 tokens when inactive, ~2000 when fully loaded
 
----
+______________________________________________________________________
 
 ## Summary
 
 **Creating effective Claude Code CLI Agent Skills requires:**
 
 1. **Specific naming/descriptions** for autonomous discovery (WHAT + WHEN + triggers)
-2. **YAML frontmatter** with name, description, optional allowed-tools
-3. **Security-first mindset** (sandbox, restrict tools, validate inputs, no secrets)
-4. **Token optimization** (progressive disclosure, split large content)
-5. **Structured content** (imperative instructions, concrete examples)
-6. **Validation testing** (verify activation, security audit)
-7. **Single focus** (one capability per Agent Skill)
+1. **YAML frontmatter** with name, description, optional allowed-tools
+1. **Security-first mindset** (sandbox, restrict tools, validate inputs, no secrets)
+1. **Token optimization** (progressive disclosure, split large content)
+1. **Structured content** (imperative instructions, concrete examples)
+1. **Validation testing** (verify activation, security audit)
+1. **Single focus** (one capability per Agent Skill)
 
 This meta-Agent Skill teaches Agent Skill creation by being a canonical example itself.

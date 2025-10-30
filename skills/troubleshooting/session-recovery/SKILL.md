@@ -1,8 +1,6 @@
----
-name: session-recovery
-description: Troubleshooting Claude Code session storage and resume failures. Use when experiencing "No conversations found to resume", sessions not appearing in claude -r, session files not being created, or HOME environment variable issues. Covers diagnosis commands, recovery procedures, and prevention strategies.
-allowed-tools: Read, Bash
----
+______________________________________________________________________
+
+## name: session-recovery description: Troubleshooting Claude Code session storage and resume failures. Use when experiencing "No conversations found to resume", sessions not appearing in claude -r, session files not being created, or HOME environment variable issues. Covers diagnosis commands, recovery procedures, and prevention strategies. allowed-tools: Read, Bash
 
 # Claude Code Session Recovery Skill
 
@@ -97,14 +95,14 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
    # Should show: "✓ Authenticated as user@email.com"
    ```
 
-2. **Check HOME Variable**
+1. **Check HOME Variable**
 
    ```bash
    echo "HOME: $HOME"
    # Should show: /home/username (on Linux) or /Users/username (on macOS)
    ```
 
-3. **Test Directory Access**
+1. **Test Directory Access**
 
    ```bash
    ls -ld ~/.claude/projects/
@@ -115,7 +113,7 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
    # Should succeed without errors
    ```
 
-4. **Monitor Session File Creation**
+1. **Monitor Session File Creation**
 
    ```bash
    # Count before
@@ -130,7 +128,8 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 minute ago"
    # Should show increase of 1
    ```
 
-5. **Check for Sessions in Wrong Locations**
+1. **Check for Sessions in Wrong Locations**
+
    ```bash
    # Sessions might be in /tmp or other $HOME variants
    find /tmp -name "*.jsonl" -path "*/.claude/projects/*" -newermt "1 hour ago" 2>/dev/null
@@ -212,10 +211,10 @@ claude -r
 ## Key Learnings
 
 1. **Official format is correct**: `~/.claude/projects/` confirmed by isolated Docker tests
-2. **Environment is critical**: Wrong `$HOME` breaks everything, regardless of file structure
-3. **IDE settings override**: Terminal.app, Cursor, VS Code can override HOME variable
-4. **Resumability requirements**: Sessions need assistant responses to be resumable (complete sessions are auto-archived)
-5. **Symlinks can confuse tools**: Avoid symlinks pointing to custom session directories
+1. **Environment is critical**: Wrong `$HOME` breaks everything, regardless of file structure
+1. **IDE settings override**: Terminal.app, Cursor, VS Code can override HOME variable
+1. **Resumability requirements**: Sessions need assistant responses to be resumable (complete sessions are auto-archived)
+1. **Symlinks can confuse tools**: Avoid symlinks pointing to custom session directories
 
 ## Setup Checklist
 

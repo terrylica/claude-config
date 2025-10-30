@@ -7,7 +7,7 @@
 - ✅ Git remote set to SSH: `git@github.com:terrylica/claude-config.git`
 - ⏳ **PENDING**: Add public key to GitHub
 
----
+______________________________________________________________________
 
 ## Immediate Action Items
 
@@ -22,13 +22,13 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHM47aEGeNE3EARBoAYPmXUfZaHLPrpoHn7l48FFzSTK
 **Steps:**
 
 1. Go to: https://github.com/settings/keys
-2. Click "New SSH key"
-3. Title: `terrylica-claude-config`
-4. Type: Authentication Key
-5. Paste key above
-6. Click "Add SSH key"
+1. Click "New SSH key"
+1. Title: `terrylica-claude-config`
+1. Type: Authentication Key
+1. Paste key above
+1. Click "Add SSH key"
 
----
+______________________________________________________________________
 
 ### **2. TEST SSH CONNECTION**
 
@@ -39,7 +39,7 @@ ssh -T git@github.com
 # Expected output: "Hi terrylica! You've successfully authenticated..."
 ```
 
----
+______________________________________________________________________
 
 ### **3. IMPLEMENT BETTER SSH CONFIG** (Optional but Recommended)
 
@@ -59,7 +59,7 @@ Host github.com
 
 See: `docs/setup/SSH-CACHING-ISSUE-ANALYSIS.md` (Option 2) for full implementation
 
----
+______________________________________________________________________
 
 ### **4. VERIFY GIT OPERATIONS WORK**
 
@@ -76,7 +76,7 @@ git status
 git push origin main
 ```
 
----
+______________________________________________________________________
 
 ## Problem Documentation
 
@@ -90,18 +90,18 @@ Contains:
 - Performance considerations
 - Debugging techniques
 
----
+______________________________________________________________________
 
 ## Files Involved
 
-| File | Purpose | Status |
-| --- | --- | --- |
-| `~/.ssh/id_ed25519_terrylica` | SSH private key | ✅ Generated |
-| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key | ⏳ Add to GitHub |
-| `~/.ssh/config` | SSH configuration | ✅ Updated |
-| `./.git/config` | Git remote | ✅ SSH protocol |
+| File                              | Purpose           | Status           |
+| --------------------------------- | ----------------- | ---------------- |
+| `~/.ssh/id_ed25519_terrylica`     | SSH private key   | ✅ Generated     |
+| `~/.ssh/id_ed25519_terrylica.pub` | SSH public key    | ⏳ Add to GitHub |
+| `~/.ssh/config`                   | SSH configuration | ✅ Updated       |
+| `./.git/config`                   | Git remote        | ✅ SSH protocol  |
 
----
+______________________________________________________________________
 
 ## Quick Test Command
 
@@ -115,19 +115,19 @@ git fetch origin && \
 echo "✓ SSH setup complete!"
 ```
 
----
+______________________________________________________________________
 
 ## Next Session Workflow
 
 1. Add SSH public key to GitHub (5 min)
-2. Test connections (2 min)
-3. Implement better SSH config (5-10 min)
-4. Verify all git operations work (5 min)
-5. Done! No more caching issues
+1. Test connections (2 min)
+1. Implement better SSH config (5-10 min)
+1. Verify all git operations work (5 min)
+1. Done! No more caching issues
 
 **Total Time**: ~20 minutes
 
----
+______________________________________________________________________
 
 ## Resources
 
@@ -135,7 +135,7 @@ echo "✓ SSH setup complete!"
 - **SSH Config Docs**: `docs/setup/SSH-CONFIG-SETUP.md`
 - **GitHub SSH Keys**: https://github.com/settings/keys
 
----
+______________________________________________________________________
 
 **Created**: October 20, 2025
 **Session**: Ongoing SSH Setup

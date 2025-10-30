@@ -2,7 +2,7 @@
 
 **Secure credential storage, rotation, and documentation workflow**
 
----
+______________________________________________________________________
 
 ## Overview
 
@@ -15,7 +15,7 @@ This workflow manages AWS IAM credentials using Doppler for secure storage, rota
 - ✅ Comprehensive access audits (read-only, non-intrusive)
 - ✅ Full documentation in Doppler (notes, activity logs, versioning)
 
----
+______________________________________________________________________
 
 ## Doppler Project Structure
 
@@ -38,7 +38,7 @@ AWS_LAST_AUDIT_DATE            # Last audit timestamp
 
 All secrets include detailed notes explaining their purpose, history, and usage.
 
----
+______________________________________________________________________
 
 ## Credential Rotation Workflow
 
@@ -120,7 +120,7 @@ doppler secrets notes set AWS_ACCESS_KEY_ID_OLD \
   --project aws-credentials
 ```
 
----
+______________________________________________________________________
 
 ## Access Audit & Inventory
 
@@ -163,7 +163,7 @@ doppler secrets notes set AWS_ACCESS_INVENTORY_REPORT \
   --project aws-credentials
 ```
 
----
+______________________________________________________________________
 
 ## Usage Patterns
 
@@ -196,7 +196,7 @@ doppler activity --project aws-credentials
 open https://dashboard.doppler.com
 ```
 
----
+______________________________________________________________________
 
 ## Stored Reports
 
@@ -230,7 +230,7 @@ Last comprehensive audit date.
 
 **Recommended cadence:** Quarterly or after permission changes
 
----
+______________________________________________________________________
 
 ## Security Best Practices
 
@@ -266,7 +266,7 @@ Last comprehensive audit date.
 - `put-*` - Write operations
 - Any command without `--dry-run` flag when available
 
----
+______________________________________________________________________
 
 ## Account Details
 
@@ -291,7 +291,7 @@ Last comprehensive audit date.
 - 19 DynamoDB tables (ModelPredictions, TradeModels, etc.)
 - 2 ECS clusters, 3 ECR repositories
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -334,7 +334,7 @@ doppler secrets notes set AWS_ACCESS_KEY_ID \
   --project aws-credentials
 ```
 
----
+______________________________________________________________________
 
 ## Related Documentation
 
@@ -353,6 +353,6 @@ doppler secrets notes set AWS_ACCESS_KEY_ID \
 - **This Document**: Rotation and usage workflows
 - **Elimination Plan**: [`docs/setup/aws-credentials-elimination.md`](../../../docs/setup/aws-credentials-elimination.md) - Reference implementation for ml-feature-experiments
 
----
+______________________________________________________________________
 
 **Last Updated**: 2025-10-11

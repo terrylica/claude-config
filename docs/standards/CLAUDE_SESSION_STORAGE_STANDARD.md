@@ -14,8 +14,8 @@ This document records definitive, empirical evidence for how official Claude Cod
 We ran a clean, isolated test:
 
 1. Built Docker image (Ubuntu 24.04), installed Node.js and `@anthropic-ai/claude-code` globally.
-2. Created user `testuser`, ran `claude` in `/home/testuser/my-project`.
-3. Results inside container (key excerpts):
+1. Created user `testuser`, ran `claude` in `/home/testuser/my-project`.
+1. Results inside container (key excerpts):
 
 ```
 $HOME/.claude/
@@ -72,9 +72,9 @@ Implementation plan: `specifications/session-storage-adoption.yaml`
 **Recovery Steps**:
 
 1. Removed legacy symlink: `rm ~/.claude/projects` (was pointing to `system/sessions`)
-2. Created official directory: `mkdir -p ~/.claude/projects`
-3. Migrated all sessions with timestamp preservation using custom recovery script
-4. Result: All sessions properly organized in official format
+1. Created official directory: `mkdir -p ~/.claude/projects`
+1. Migrated all sessions with timestamp preservation using custom recovery script
+1. Result: All sessions properly organized in official format
 
 ### 🚨 Critical Pitfall: HOME Environment Variable
 
@@ -124,14 +124,14 @@ echo "test" | claude --dangerously-skip-permissions --model sonnet
    claude /login
    ```
 
-2. **Verify HOME Variable**:
+1. **Verify HOME Variable**:
 
    ```bash
    echo "HOME: $HOME"
    # Should be: /home/username
    ```
 
-3. **Check Disk Space & Permissions**:
+1. **Check Disk Space & Permissions**:
 
    ```bash
    df -h ~/.claude
@@ -139,7 +139,7 @@ echo "test" | claude --dangerously-skip-permissions --model sonnet
    touch ~/.claude/projects/test-write.tmp && rm ~/.claude/projects/test-write.tmp
    ```
 
-4. **Monitor File Creation**:
+1. **Monitor File Creation**:
 
    ```bash
    # Before conversation
@@ -149,7 +149,8 @@ echo "test" | claude --dangerously-skip-permissions --model sonnet
    find ~/.claude/projects -name "*.jsonl" | wc -l
    ```
 
-5. **Check Alternative Locations**:
+1. **Check Alternative Locations**:
+
    ```bash
    # Find sessions created in last hour
    find /tmp -name "*.jsonl" -path "*/.claude/projects/*" -newermt "1 hour ago" 2>/dev/null
@@ -189,7 +190,7 @@ Created `/home/tca/.claude/tools/session-recovery.sh` for systematic session mig
 ### 🎯 Key Learnings
 
 1. **Official format works perfectly** - Docker test confirmed `~/.claude/projects/` is correct
-2. **Environment matters more than file structure** - Wrong HOME breaks everything
-3. **IDE terminals can override environment** - Check Cursor/VS Code settings
-4. **Sessions are resumable only if incomplete** - Completed sessions won't show in `claude -r`
-5. **Original wrapper is sufficient** - No custom wrapper needed, just fix environment
+1. **Environment matters more than file structure** - Wrong HOME breaks everything
+1. **IDE terminals can override environment** - Check Cursor/VS Code settings
+1. **Sessions are resumable only if incomplete** - Completed sessions won't show in `claude -r`
+1. **Original wrapper is sufficient** - No custom wrapper needed, just fix environment

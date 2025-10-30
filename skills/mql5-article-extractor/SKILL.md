@@ -1,8 +1,6 @@
----
-name: mql5-article-extractor
-description: Extract trading strategy articles AND official documentation from mql5.com ONLY. Handles user articles, official Python API docs, TICK data research. Use when user mentions MQL5, MetaTrader, trading articles, Python MT5 API, algorithmic trading content. NOT for other websites.
-allowed-tools: Read, Bash, Grep, Glob
----
+______________________________________________________________________
+
+## name: mql5-article-extractor description: Extract trading strategy articles AND official documentation from mql5.com ONLY. Handles user articles, official Python API docs, TICK data research. Use when user mentions MQL5, MetaTrader, trading articles, Python MT5 API, algorithmic trading content. NOT for other websites. allowed-tools: Read, Bash, Grep, Glob
 
 # MQL5 Article Extractor
 
@@ -59,8 +57,8 @@ cd /Users/terryli/eon/mql5
 If user says "extract mql5 articles" without specifics, prompt for:
 
 1. Article URL OR User ID
-2. Quantity limit (for testing)
-3. Output location preference
+1. Quantity limit (for testing)
+1. Output location preference
 
 ## Extraction Modes
 
@@ -169,19 +167,23 @@ cd /Users/terryli/eon/mql5
 When user makes vague request:
 
 1. **Ask for domain confirmation** (if ambiguous):
+
    - "Is this for mql5.com articles? (This tool only works with mql5.com)"
 
-2. **Request specific input**:
+1. **Request specific input**:
+
    - "Please provide one of:
      - Article URL: https://www.mql5.com/en/articles/[ID]
      - User ID: numeric or username from mql5.com profile
      - Path to file with article URLs"
 
-3. **Suggest scope limits**:
+1. **Suggest scope limits**:
+
    - "For testing, use --max-articles N to limit quantity"
    - "For production, omit limit to extract all"
 
-4. **Confirm before large operations**:
+1. **Confirm before large operations**:
+
    - If user says "all articles" → ask "User X has Y articles. Proceed with full extraction?"
 
 ## Common Usage Examples
@@ -192,8 +194,8 @@ When user makes vague request:
 **Skill**: "This extracts from mql5.com only. Please specify:
 
 1. Article URL (https://www.mql5.com/en/articles/[ID])
-2. MQL5 user ID (e.g., 29210372)
-3. Path to URL file
+1. MQL5 user ID (e.g., 29210372)
+1. Path to URL file
 
 Which do you have?"
 
@@ -290,9 +292,9 @@ cat mql5_articles/extraction_summary.json
 If extraction fails:
 
 1. Check logs: `tail -f logs/extraction.log`
-2. Verify URL is mql5.com domain
-3. Check internet connection
-4. For batch: use `--resume` to continue from checkpoint
+1. Verify URL is mql5.com domain
+1. Check internet connection
+1. For batch: use `--resume` to continue from checkpoint
 
 ## CLI Options Reference
 
@@ -345,11 +347,11 @@ If discovery would extract >10 articles, confirm with user before proceeding.
 ## Typical Interaction Flow
 
 1. User mentions MQL5 or trading articles
-2. Skill activates and bounds request to mql5.com
-3. If input vague → prompt for specifics (URL, user ID, or file)
-4. Validate input type and domain
-5. Execute appropriate command
-6. Show output location and verification commands
+1. Skill activates and bounds request to mql5.com
+1. If input vague → prompt for specifics (URL, user ID, or file)
+1. Validate input type and domain
+1. Execute appropriate command
+1. Show output location and verification commands
 
 ## Success Indicators
 
@@ -362,6 +364,6 @@ After execution, report:
 - Output directory location
 - Link to extraction summary
 
----
+______________________________________________________________________
 
 **Remember**: This skill ONLY works with mql5.com. Any request for other domains is out of scope and should be rejected with a clear message.

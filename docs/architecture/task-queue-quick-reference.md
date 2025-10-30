@@ -2,7 +2,7 @@
 
 **TL;DR**: Use `persist-queue` with SQLite backend for lightweight, crash-resistant task coordination between bash, Python asyncio, and subprocesses.
 
----
+______________________________________________________________________
 
 ## Installation
 
@@ -16,7 +16,7 @@
 # ///
 ```
 
----
+______________________________________________________________________
 
 ## Quick Start
 
@@ -87,7 +87,7 @@ while True:
         queue.nack(task_id)  # Failure - return to queue for retry
 ```
 
----
+______________________________________________________________________
 
 ## Key Patterns
 
@@ -127,20 +127,20 @@ observer.schedule(QueueWatcher(QUEUE_PATH, process_queue), QUEUE_PATH)
 observer.start()
 ```
 
----
+______________________________________________________________________
 
 ## Comparison Cheat Sheet
 
-| Feature | File-Based | persist-queue |
-| --- | --- | --- |
-| Latency | 0-5s (avg 2.5s) | 0-1s (avg 0.5s) |
-| Race conditions | Yes | No (ACID) |
-| Crash recovery | Manual | Automatic (AckQueue) |
-| Deduplication | Manual hashing | Native (UNIQUE) |
-| Bash integration | Easy (JSON files) | Easy (SQLite CLI) |
-| Concurrent access | Risky | Safe (WAL mode) |
+| Feature           | File-Based        | persist-queue        |
+| ----------------- | ----------------- | -------------------- |
+| Latency           | 0-5s (avg 2.5s)   | 0-1s (avg 0.5s)      |
+| Race conditions   | Yes               | No (ACID)            |
+| Crash recovery    | Manual            | Automatic (AckQueue) |
+| Deduplication     | Manual hashing    | Native (UNIQUE)      |
+| Bash integration  | Easy (JSON files) | Easy (SQLite CLI)    |
+| Concurrent access | Risky             | Safe (WAL mode)      |
 
----
+______________________________________________________________________
 
 ## Common Issues & Solutions
 
@@ -175,7 +175,7 @@ async def cleanup_old_tasks():
 queue = get_ack_queue("approvals")  # Tasks persist until ack'd
 ```
 
----
+______________________________________________________________________
 
 ## Full Research
 

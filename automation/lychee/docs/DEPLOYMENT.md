@@ -7,7 +7,7 @@ Version: 1.0.0
 The system consists of two background services:
 
 1. **telegram-approval-handler.py** - Polls Telegram for button clicks, updates approval state
-2. **auto-fix-orchestrator.py** - Watches approval state, triggers Claude CLI auto-fix
+1. **auto-fix-orchestrator.py** - Watches approval state, triggers Claude CLI auto-fix
 
 ## Deployment Options
 
@@ -37,7 +37,7 @@ zellij --layout ~/.claude/automation/lychee/lychee-bot.kdl
 
 - Close Zellij session or kill panes individually
 
----
+______________________________________________________________________
 
 ### Option 2: Production Mode (macOS Launchd) ✨ Recommended for Daily Use
 
@@ -100,7 +100,7 @@ launchctl kickstart -k gui/$(id -u)/com.user.lychee.telegram-handler
 launchctl kickstart -k gui/$(id -u)/com.user.lychee.orchestrator
 ```
 
----
+______________________________________________________________________
 
 ### Option 3: Manual Background Processes (Current)
 
@@ -121,20 +121,20 @@ doppler run -p claude-config -c dev -- uv run telegram-approval-handler.py &
 doppler run -p claude-config -c dev -- uv run auto-fix-orchestrator.py &
 ```
 
----
+______________________________________________________________________
 
 ## Recommended Setup
 
 ### For Daily Use:
 
 1. **Install Launchd agents** (Option 2)
-2. **Keep Zellij layout** (Option 1) for debugging when needed
+1. **Keep Zellij layout** (Option 1) for debugging when needed
 
 ### For Development:
 
 1. **Use Zellij layout exclusively** (Option 1)
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -197,7 +197,7 @@ ps aux | grep auto-fix-orchestrator
 doppler run -p claude-config -c dev -- uv run send-hook-notification.py
 ```
 
----
+______________________________________________________________________
 
 ## Configuration
 
@@ -215,7 +215,7 @@ Required secrets in `claude-config/dev`:
 - **Logs:** `~/.claude/logs/`
 - **Scripts:** `~/.claude/automation/lychee/`
 
----
+______________________________________________________________________
 
 ## Monitoring
 
@@ -241,7 +241,7 @@ launchctl list com.user.lychee.orchestrator
 ps aux | grep -E "(telegram-approval|auto-fix-orchestrator)" | grep -v grep
 ```
 
----
+______________________________________________________________________
 
 ## Uninstall
 

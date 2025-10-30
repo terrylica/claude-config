@@ -10,34 +10,34 @@ This research evaluates modern file-based job queue and task coordination system
 
 **Key Finding:** SQLite-based solutions (Huey, persist-queue, litequeue) combined with proper file locking libraries (filelock, portalocker) offer the best balance of atomicity, crash recovery, and offline capability for the specific use case.
 
----
+______________________________________________________________________
 
 ## Library Comparison
 
 ### Job Queue Systems
 
-| Library | GitHub Stars | Last Update | Python Support | Maintenance Status | License |
-| --- | --- | --- | --- | --- | --- |
-| **huey** | 5.7k | 2025-03-19 (v2.5.3) | 3.x | Active | MIT |
-| **diskcache** | 2.7k | 2024-08 | 3.6-3.10+ | Active | Apache-2.0 |
-| **persist-queue** | 365 | 2024-11 (v1.0.0) | 3.5+ | Active | BSD-3-Clause |
-| **litequeue** | 213 | 2025-02-10 (v0.6) | 3.x | Active | MIT |
+| Library           | GitHub Stars | Last Update         | Python Support | Maintenance Status | License      |
+| ----------------- | ------------ | ------------------- | -------------- | ------------------ | ------------ |
+| **huey**          | 5.7k         | 2025-03-19 (v2.5.3) | 3.x            | Active             | MIT          |
+| **diskcache**     | 2.7k         | 2024-08             | 3.6-3.10+      | Active             | Apache-2.0   |
+| **persist-queue** | 365          | 2024-11 (v1.0.0)    | 3.5+           | Active             | BSD-3-Clause |
+| **litequeue**     | 213          | 2025-02-10 (v0.6)   | 3.x            | Active             | MIT          |
 
 ### File Locking Libraries
 
-| Library | GitHub Stars | Last Update | Python Support | Cross-Platform | License |
-| --- | --- | --- | --- | --- | --- |
-| **filelock** | 901 | 2025-10-08 (v3.20.0) | 3.x | Yes | Unlicense |
-| **portalocker** | 310 | 2025-06-14 (v3.2.0) | 3.x | Yes (Windows/Unix) | BSD-3-Clause |
+| Library         | GitHub Stars | Last Update          | Python Support | Cross-Platform     | License      |
+| --------------- | ------------ | -------------------- | -------------- | ------------------ | ------------ |
+| **filelock**    | 901          | 2025-10-08 (v3.20.0) | 3.x            | Yes                | Unlicense    |
+| **portalocker** | 310          | 2025-06-14 (v3.2.0)  | 3.x            | Yes (Windows/Unix) | BSD-3-Clause |
 
 ### File System Monitoring
 
-| Library | Type | Best For | Notes |
-| --- | --- | --- | --- |
-| **watchdog** | Cross-platform | Production | Uses inotify (Linux), FSEvents (macOS), polling |
-| **os.replace()** | Built-in (3.3+) | Atomic writes | Atomic on same filesystem |
+| Library          | Type            | Best For      | Notes                                           |
+| ---------------- | --------------- | ------------- | ----------------------------------------------- |
+| **watchdog**     | Cross-platform  | Production    | Uses inotify (Linux), FSEvents (macOS), polling |
+| **os.replace()** | Built-in (3.3+) | Atomic writes | Atomic on same filesystem                       |
 
----
+______________________________________________________________________
 
 ## Detailed Analysis
 
@@ -76,7 +76,7 @@ process_approval('approval-123')
 
 **Migration Complexity:** Medium - Requires refactoring current file-based workflow to task-based model
 
----
+______________________________________________________________________
 
 ### 2. DiskCache
 
@@ -117,7 +117,7 @@ except IndexError:
 
 **Migration Complexity:** Easy - Can wrap existing file operations with minimal changes
 
----
+______________________________________________________________________
 
 ### 3. persist-queue
 
@@ -164,7 +164,7 @@ except Exception as e:
 
 **Migration Complexity:** Easy - Minimal refactoring, direct queue API
 
----
+______________________________________________________________________
 
 ### 4. litequeue
 
@@ -211,7 +211,7 @@ if message:
 
 **Migration Complexity:** Easy - Simple API, direct replacement for file operations
 
----
+______________________________________________________________________
 
 ## File Locking Solutions
 
@@ -271,7 +271,7 @@ def atomic_read_and_delete(filepath):
         return data
 ```
 
----
+______________________________________________________________________
 
 ### 2. portalocker
 
@@ -310,7 +310,7 @@ def atomic_read_with_lock(filepath):
         return None
 ```
 
----
+______________________________________________________________________
 
 ## Atomic File Operations (Built-in)
 
@@ -375,7 +375,7 @@ def atomic_read_and_delete(filepath):
 - Atomic only on same filesystem
 - No built-in retry/timeout mechanism
 
----
+______________________________________________________________________
 
 ## Process Coordination Patterns
 
@@ -429,7 +429,7 @@ observer.schedule(handler, path='/path/to/notifications', recursive=False)
 observer.start()
 ```
 
----
+______________________________________________________________________
 
 ### 2. SQLite-Based Coordination (Recommended)
 
@@ -640,7 +640,7 @@ while True:
         time.sleep(5)  # No jobs, wait
 ```
 
----
+______________________________________________________________________
 
 ## Preventing Feedback Loops
 
@@ -664,7 +664,7 @@ job_id = create_job_id('/path/file.md', 'https://dead.link', 42)
 queue.enqueue(job_id, 'link_broken', {...})  # Duplicate = ignored
 ```
 
----
+______________________________________________________________________
 
 ### Strategy 2: Exclude Hook from Claude Sessions
 
@@ -702,7 +702,7 @@ def run_claude_session(command):
         os.environ.pop('CLAUDE_SESSION_ID', None)
 ```
 
----
+______________________________________________________________________
 
 ## Recommendation for Your Use Case
 
@@ -711,11 +711,11 @@ def run_claude_session(command):
 **Why:**
 
 1. **Atomic Operations:** SQLite IMMEDIATE transactions prevent race conditions
-2. **Deduplication:** Primary key job IDs prevent duplicate processing
-3. **Crash Recovery:** All state persisted to disk automatically
-4. **No Servers:** Pure file-based, works offline
-5. **Multi-Process Safe:** WAL mode allows concurrent readers + single writer
-6. **Acknowledgment Pattern:** Track pending/processing/completed states
+1. **Deduplication:** Primary key job IDs prevent duplicate processing
+1. **Crash Recovery:** All state persisted to disk automatically
+1. **No Servers:** Pure file-based, works offline
+1. **Multi-Process Safe:** WAL mode allows concurrent readers + single writer
+1. **Acknowledgment Pattern:** Track pending/processing/completed states
 
 **Implementation:**
 
@@ -733,7 +733,7 @@ from job_queue import JobQueue  # See implementation above
 queue = JobQueue('/data/jobs.db')
 ```
 
----
+______________________________________________________________________
 
 ### Secondary: File Locking for Legacy Compatibility
 
@@ -771,20 +771,20 @@ def read_and_delete_notification(notification_id):
         return data
 ```
 
----
+______________________________________________________________________
 
 ## Migration Complexity Assessment
 
-| Solution | Complexity | Effort | Benefits |
-| --- | --- | --- | --- |
-| **SQLite Queue (custom)** | Medium | 2-3 days | Maximum control, perfect fit |
-| **persist-queue** | Easy | 1 day | Drop-in replacement, ack pattern |
-| **filelock wrapper** | Easy | 1 day | Minimal changes, keeps current design |
-| **huey** | Medium | 3-5 days | Full task queue, overkill for needs |
-| **diskcache** | Easy | 1-2 days | Good performance, cache-focused |
-| **litequeue** | Easy | 1-2 days | Lightweight, less mature |
+| Solution                  | Complexity | Effort   | Benefits                              |
+| ------------------------- | ---------- | -------- | ------------------------------------- |
+| **SQLite Queue (custom)** | Medium     | 2-3 days | Maximum control, perfect fit          |
+| **persist-queue**         | Easy       | 1 day    | Drop-in replacement, ack pattern      |
+| **filelock wrapper**      | Easy       | 1 day    | Minimal changes, keeps current design |
+| **huey**                  | Medium     | 3-5 days | Full task queue, overkill for needs   |
+| **diskcache**             | Easy       | 1-2 days | Good performance, cache-focused       |
+| **litequeue**             | Easy       | 1-2 days | Lightweight, less mature              |
 
----
+______________________________________________________________________
 
 ## Production Examples
 
@@ -821,7 +821,7 @@ while True:
         logger.error(f"Failed {item['id']}: {e}")
 ```
 
----
+______________________________________________________________________
 
 ### Example 2: Approval Workflow (Custom SQLite)
 
@@ -919,20 +919,20 @@ def poll_completions():
             time.sleep(5)
 ```
 
----
+______________________________________________________________________
 
 ## Key Takeaways
 
 1. **SQLite + WAL mode** is the sweet spot for file-based job coordination in 2025
-2. **filelock** (901 stars) is the most widely adopted file locking library
-3. **persist-queue** offers best balance of simplicity and features for acknowledgment workflows
-4. **Custom SQLite implementation** provides maximum control for specific requirements
-5. **Avoid atomicwrites** (unmaintained) - use `os.replace()` instead
-6. **watchdog** for file monitoring, but prefer polling SQLite queue for reliability
-7. **Deduplication via deterministic job IDs** prevents duplicate processing
-8. **Environment markers** (CLAUDE_SESSION_ID) prevent feedback loops
+1. **filelock** (901 stars) is the most widely adopted file locking library
+1. **persist-queue** offers best balance of simplicity and features for acknowledgment workflows
+1. **Custom SQLite implementation** provides maximum control for specific requirements
+1. **Avoid atomicwrites** (unmaintained) - use `os.replace()` instead
+1. **watchdog** for file monitoring, but prefer polling SQLite queue for reliability
+1. **Deduplication via deterministic job IDs** prevents duplicate processing
+1. **Environment markers** (CLAUDE_SESSION_ID) prevent feedback loops
 
----
+______________________________________________________________________
 
 ## References
 

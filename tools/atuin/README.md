@@ -167,10 +167,10 @@ atuin login -u $(doppler secrets get ATUIN_USERNAME --project claude-config --co
 ## Security Model
 
 1. **Encryption key generation**: Created locally during registration
-2. **Key storage**: Stored in `~/.local/share/atuin/key` (never leaves device)
-3. **Password**: Used only for authentication (not encryption)
-4. **Data encryption**: All history encrypted with local key before upload
-5. **Server blindness**: Atuin servers cannot decrypt your history
+1. **Key storage**: Stored in `~/.local/share/atuin/key` (never leaves device)
+1. **Password**: Used only for authentication (not encryption)
+1. **Data encryption**: All history encrypted with local key before upload
+1. **Server blindness**: Atuin servers cannot decrypt your history
 
 ## Troubleshooting
 

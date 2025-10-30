@@ -17,7 +17,7 @@ Please specify one of:
 What would you like to extract?
 ```
 
----
+______________________________________________________________________
 
 ## Example 2: Direct URL (Valid)
 
@@ -26,7 +26,7 @@ What would you like to extract?
 **Skill Actions**:
 
 1. Recognizes valid mql5.com URL
-2. Executes single extraction:
+1. Executes single extraction:
    ```bash
    cd /Users/terryli/eon/mql5
    .venv/bin/python mql5_extract.py single https://www.mql5.com/en/articles/19625
@@ -45,7 +45,7 @@ What would you like to extract?
    Output: /Users/terryli/eon/mql5/mql5_articles/29210372/article_19625/
 ```
 
----
+______________________________________________________________________
 
 ## Example 3: Out-of-Scope Domain (Rejected)
 
@@ -66,7 +66,7 @@ Valid inputs for this skill:
 - Files containing mql5.com URLs
 ```
 
----
+______________________________________________________________________
 
 ## Example 4: User ID Discovery (Valid)
 
@@ -75,9 +75,9 @@ Valid inputs for this skill:
 **Skill Actions**:
 
 1. Validates user ID format
-2. Confirms scope (mql5.com)
-3. Checks article count
-4. Prompts for confirmation if >10 articles
+1. Confirms scope (mql5.com)
+1. Checks article count
+1. Prompts for confirmation if >10 articles
 
 **Skill Response**:
 
@@ -102,7 +102,7 @@ cd /Users/terryli/eon/mql5
 .venv/bin/python mql5_extract.py discover-and-extract --user-id 29210372
 ```
 
----
+______________________________________________________________________
 
 ## Example 5: Testing Limit (Bounded Operation)
 
@@ -128,7 +128,7 @@ Total: 3, Successful: 3, Failed: 0
 Output: /Users/terryli/eon/mql5/mql5_articles/jslopes/
 ```
 
----
+______________________________________________________________________
 
 ## Example 6: Ambiguous Keywords (Prompt for Clarification)
 
@@ -149,7 +149,7 @@ Are you looking for:
 Please clarify your request.
 ```
 
----
+______________________________________________________________________
 
 ## Example 7: Batch File Processing (Valid)
 
@@ -158,10 +158,10 @@ Please clarify your request.
 **Skill Actions**:
 
 1. Ask for file path
-2. Verify file exists
-3. Preview first few URLs
-4. Confirm all are mql5.com domain
-5. Execute batch
+1. Verify file exists
+1. Preview first few URLs
+1. Confirm all are mql5.com domain
+1. Execute batch
 
 **Skill Response**:
 
@@ -187,7 +187,7 @@ cd /Users/terryli/eon/mql5
 .venv/bin/python mql5_extract.py batch /tmp/mql5_urls.txt
 ```
 
----
+______________________________________________________________________
 
 ## Example 8: Mixed Domain File (Reject Invalid)
 
@@ -218,7 +218,7 @@ Options:
 Would you like me to filter and create mql5-only file?
 ```
 
----
+______________________________________________________________________
 
 ## Example 9: Resume Interrupted Extraction (Valid)
 
@@ -243,7 +243,7 @@ This will skip the 50 already-processed articles and continue from article 51.
 Checkpoint file: .extraction_checkpoint.json
 ```
 
----
+______________________________________________________________________
 
 ## Example 10: Custom Output Location (Valid)
 
@@ -263,21 +263,21 @@ cd /Users/terryli/eon/mql5
 Output: /tmp/test_output/29210372/article_19625/
 ```
 
----
+______________________________________________________________________
 
 ## Bounding Summary
 
-| User Intent | Skill Action | Reason |
-| --- | --- | --- |
-| "Extract mql5 article [URL]" | ✅ Execute | Valid scope |
-| "Get user [ID] articles" | ✅ Execute | Valid scope |
-| "Extract from yahoo.com" | ❌ Reject | Out of scope |
-| "Extract trading articles" | ⚠️ Prompt | Ambiguous - need specifics |
-| "Process URLs in [file]" | ✅ Verify then execute | Valid if all mql5.com |
-| "Extract 1000 articles" | ⚠️ Confirm | Large operation warning |
-| "Scrape bloomberg" | ❌ Reject | Out of scope |
+| User Intent                  | Skill Action           | Reason                     |
+| ---------------------------- | ---------------------- | -------------------------- |
+| "Extract mql5 article [URL]" | ✅ Execute             | Valid scope                |
+| "Get user [ID] articles"     | ✅ Execute             | Valid scope                |
+| "Extract from yahoo.com"     | ❌ Reject              | Out of scope               |
+| "Extract trading articles"   | ⚠️ Prompt              | Ambiguous - need specifics |
+| "Process URLs in [file]"     | ✅ Verify then execute | Valid if all mql5.com      |
+| "Extract 1000 articles"      | ⚠️ Confirm             | Large operation warning    |
+| "Scrape bloomberg"           | ❌ Reject              | Out of scope               |
 
----
+______________________________________________________________________
 
 ## Skill Activation Keywords
 

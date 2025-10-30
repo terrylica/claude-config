@@ -138,14 +138,15 @@ The enhanced installer will:
    echo $PATH | grep ".local/bin"
    ```
 
-2. **Check files exist and are executable:**
+1. **Check files exist and are executable:**
 
    ```bash
    ls -la ~/.local/bin/sage-*
    ls -la ~/.local/bin/gpu-ws
    ```
 
-3. **Test individual commands:**
+1. **Test individual commands:**
+
    ```bash
    ~/.local/bin/sage-dev --help
    ~/.local/bin/sage-sync --help

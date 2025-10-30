@@ -2,7 +2,7 @@
 
 **Purpose**: Systematic verification of legacy components before removal/archival.
 
----
+______________________________________________________________________
 
 ## **Legacy Component Inventory**
 
@@ -33,7 +33,7 @@ _Requires verification:_
 - **Status**: ❓ May contain legacy settings
 - **Action Required**: Audit for obsolete configuration keys
 
----
+______________________________________________________________________
 
 ## **Verification Workflow**
 
@@ -42,16 +42,19 @@ _Requires verification:_
 For each legacy component:
 
 1. **Dependency Check**
+
    - [ ] Search codebase for active references
    - [ ] Check recent git history for usage
    - [ ] Verify no scripts/agents depend on it
 
-2. **Functionality Test**
+1. **Functionality Test**
+
    - [ ] Test if component still operates
    - [ ] Check if removal breaks any workflows
    - [ ] Validate against current system architecture
 
-3. **Data Analysis**
+1. **Data Analysis**
+
    - [ ] Assess data value/importance
    - [ ] Check for unique information not elsewhere
    - [ ] Determine archival vs. deletion approach
@@ -61,16 +64,19 @@ For each legacy component:
 For verified unnecessary components:
 
 1. **Backup Creation**
+
    - [ ] Create dated backup in `archive/legacy-cleanup-YYYY-MM-DD/`
    - [ ] Document removal rationale
    - [ ] Include recovery instructions
 
-2. **Reference Cleanup**
+1. **Reference Cleanup**
+
    - [ ] Remove code references
    - [ ] Update documentation
    - [ ] Clean symlinks/shortcuts
 
-3. **Verification**
+1. **Verification**
+
    - [ ] Test system functionality post-removal
    - [ ] Verify no broken dependencies
    - [ ] Confirm no unintended side effects
@@ -81,7 +87,7 @@ For verified unnecessary components:
 - [ ] Document lessons learned from cleanup
 - [ ] Create maintenance schedule for future legacy management
 
----
+______________________________________________________________________
 
 ## **Checklist Status**
 
@@ -115,7 +121,7 @@ For verified unnecessary components:
 - [ ] **Removal Decision**: Confirm archive completeness before full legacy removal
 - [ ] **Action**: Document archive contents and recovery procedures
 
----
+______________________________________________________________________
 
 ## **Automation Opportunities**
 
@@ -137,6 +143,6 @@ For verified unnecessary components:
 - Rollback procedures for accidental removal
 - Integration with milestone logging for audit trail
 
----
+______________________________________________________________________
 
 **Next Steps**: Begin Phase 1 assessment starting with shell snapshots as they're most likely to be either active system components or clear legacy remnants.

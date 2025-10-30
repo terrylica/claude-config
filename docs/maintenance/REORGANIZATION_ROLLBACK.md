@@ -5,13 +5,13 @@
 **Created**: 2025-10-23
 **Purpose**: Safety procedures for rolling back failed reorganization operations
 
----
+______________________________________________________________________
 
 ## Overview
 
 This document provides **step-by-step rollback procedures** for each phase of workspace reorganization. Every reorganization operation must have a defined, tested rollback strategy before execution.
 
----
+______________________________________________________________________
 
 ## Rollback Principles
 
@@ -51,7 +51,7 @@ git reset --hard <commit-hash>
 /tools/rollback-restore.sh --backup=/path/to/backup.tar.gz
 ```
 
----
+______________________________________________________________________
 
 ## Phase-by-Phase Rollback
 
@@ -70,7 +70,8 @@ git reset --hard <commit-hash>
    git restore automation/cns/cns_hook_entry.sh.backup
    ```
 
-2. **For nested directory fix**:
+1. **For nested directory fix**:
+
    ```bash
    # Recreate nested structure if needed
    mkdir -p .claude/
@@ -79,7 +80,7 @@ git reset --hard <commit-hash>
 
 **Validation**: Verify all backup files restored
 
----
+______________________________________________________________________
 
 ### Phase 3: Root Cleanup (Move Scripts)
 
@@ -96,20 +97,21 @@ git reset --hard <commit-hash>
    mv archive/legacy/instant-sync-option.sh ./instant-sync-option.sh
    ```
 
-2. **Verify executability**:
+1. **Verify executability**:
 
    ```bash
    chmod +x install-all-tools disable-pyright.sh instant-sync-option.sh
    ```
 
-3. **Test functionality**:
+1. **Test functionality**:
+
    ```bash
    ./install-all-tools --help
    ```
 
 **Validation**: All scripts work from original locations
 
----
+______________________________________________________________________
 
 ### Phase 4: System Consolidation (HIGH RISK)
 
@@ -119,7 +121,7 @@ git reset --hard <commit-hash>
 
 1. **STOP Claude Code immediately**
 
-2. **Move directories back**:
+1. **Move directories back**:
 
    ```bash
    # MOVE-008, MOVE-009, MOVE-010
@@ -130,12 +132,14 @@ git reset --hard <commit-hash>
    mv system/history/archive ./history
    ```
 
-3. **Verify Claude Code configuration**:
+1. **Verify Claude Code configuration**:
+
    - Check if Claude Code can find todos/
    - Verify file history works
    - Test session functionality
 
-4. **If configuration changes were made**:
+1. **If configuration changes were made**:
+
    ```bash
    # Restore settings.json from git
    git restore settings.json
@@ -148,7 +152,7 @@ git reset --hard <commit-hash>
 - [ ] File history accessible
 - [ ] Sessions restore properly
 
----
+______________________________________________________________________
 
 ### Phase 5: Artifact Archival
 
@@ -169,7 +173,7 @@ git reset --hard <commit-hash>
    tar -xzf archive/file-history-2025-10.tar.gz -C file-history/
    ```
 
-2. **Verify extraction**:
+1. **Verify extraction**:
 
    ```bash
    # Count files
@@ -178,14 +182,15 @@ git reset --hard <commit-hash>
    find file-history/ -type d -mindepth 1 | wc -l
    ```
 
-3. **Test systems**:
+1. **Test systems**:
+
    - Claude Code file history
    - Debug logging
    - Session recovery
 
 **Validation**: All extracted files accessible and functional
 
----
+______________________________________________________________________
 
 ### Phase 6: Advanced (uv migration)
 
@@ -200,14 +205,15 @@ git reset --hard <commit-hash>
    tar -xzf backup/gfm-link-checker-venv.tar.gz -C gfm-link-checker/
    ```
 
-2. **Remove uv configuration if added**:
+1. **Remove uv configuration if added**:
 
    ```bash
    rm gfm-link-checker/pyproject.toml # if newly created
    git restore gfm-link-checker/pyproject.toml # if modified
    ```
 
-3. **Test functionality**:
+1. **Test functionality**:
+
    ```bash
    cd gfm-link-checker
    .venv/bin/python -m pytest  # or whatever test command works
@@ -215,7 +221,7 @@ git reset --hard <commit-hash>
 
 **Validation**: gfm-link-checker works with .venv
 
----
+______________________________________________________________________
 
 ## Emergency Procedures
 
@@ -230,31 +236,32 @@ git reset --hard <commit-hash>
    pkill -f "claude"
    ```
 
-2. **Identify last known good commit**:
+1. **Identify last known good commit**:
 
    ```bash
    git log --oneline | head -20
    # Find commit before reorganization started
    ```
 
-3. **Hard reset**:
+1. **Hard reset**:
 
    ```bash
    git reset --hard <last-good-commit>
    ```
 
-4. **Restore from backup if needed**:
+1. **Restore from backup if needed**:
 
    ```bash
    /tools/emergency-backup.sh --restore /path/to/backup.tar.gz
    ```
 
-5. **Verify workspace**:
+1. **Verify workspace**:
+
    ```bash
    /tools/bin/workspace-health-check.sh
    ```
 
----
+______________________________________________________________________
 
 ### Backup-Based Recovery
 
@@ -266,21 +273,21 @@ git reset --hard <commit-hash>
    ls -lh /path/to/backups/
    ```
 
-2. **Choose backup**:
+1. **Choose backup**:
 
    ```bash
    # Most recent before reorganization
    BACKUP="/path/to/backup-2025-10-23-pre-reorg.tar.gz"
    ```
 
-3. **Extract to temporary location**:
+1. **Extract to temporary location**:
 
    ```bash
    mkdir /tmp/workspace-restore
    tar -xzf "$BACKUP" -C /tmp/workspace-restore
    ```
 
-4. **Compare and restore selectively**:
+1. **Compare and restore selectively**:
 
    ```bash
    # Restore specific directories
@@ -288,12 +295,13 @@ git reset --hard <commit-hash>
    rsync -av /tmp/workspace-restore/file-history/ ~/.claude/file-history/
    ```
 
-5. **Verify**:
+1. **Verify**:
+
    ```bash
    /tools/bin/workspace-health-check.sh
    ```
 
----
+______________________________________________________________________
 
 ## Validation Checklist
 
@@ -309,7 +317,7 @@ After any rollback, verify:
 - [ ] No broken symlinks
 - [ ] Workspace health check passes
 
----
+______________________________________________________________________
 
 ## Prevention
 
@@ -318,26 +326,26 @@ After any rollback, verify:
 Before **any** reorganization operation:
 
 1. [ ] **Full backup**: Run `/tools/emergency-backup.sh`
-2. [ ] **Git commit**: Commit current state with descriptive message
-3. [ ] **Test health**: Run workspace health check
-4. [ ] **Document state**: Note current configuration
-5. [ ] **Prepare rollback**: Know exact rollback steps
+1. [ ] **Git commit**: Commit current state with descriptive message
+1. [ ] **Test health**: Run workspace health check
+1. [ ] **Document state**: Note current configuration
+1. [ ] **Prepare rollback**: Know exact rollback steps
 
 ### During Operation
 
 1. **One operation at a time**: Don't batch risky operations
-2. **Test immediately**: Verify each operation before proceeding
-3. **Commit frequently**: Git commit after each successful operation
-4. **Monitor logs**: Watch for errors or warnings
+1. **Test immediately**: Verify each operation before proceeding
+1. **Commit frequently**: Git commit after each successful operation
+1. **Monitor logs**: Watch for errors or warnings
 
 ### After Operation
 
 1. **Immediate validation**: Test affected systems
-2. **Health check**: Run full workspace health check
-3. **Document issues**: Note any problems encountered
-4. **Wait before cleanup**: Keep backups for 30 days
+1. **Health check**: Run full workspace health check
+1. **Document issues**: Note any problems encountered
+1. **Wait before cleanup**: Keep backups for 30 days
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -348,8 +356,8 @@ Before **any** reorganization operation:
 **Fix**:
 
 1. Rollback Phase 4 operations (see above)
-2. Check settings.json for path references
-3. Restore from backup if needed
+1. Check settings.json for path references
+1. Restore from backup if needed
 
 ### Issue: Tools not found after Phase 3
 
@@ -358,8 +366,8 @@ Before **any** reorganization operation:
 **Fix**:
 
 1. Verify symlinks: `ls -l ~/.local/bin/`
-2. Recreate symlinks if needed
-3. Check PATH includes `~/.local/bin`
+1. Recreate symlinks if needed
+1. Check PATH includes `~/.local/bin`
 
 ### Issue: File history missing after Phase 5
 
@@ -368,8 +376,8 @@ Before **any** reorganization operation:
 **Fix**:
 
 1. Extract from archive (see Phase 5 rollback)
-2. Verify archive integrity
-3. Test Claude Code file history
+1. Verify archive integrity
+1. Test Claude Code file history
 
 ### Issue: Git rollback doesn't restore files
 
@@ -378,10 +386,10 @@ Before **any** reorganization operation:
 **Fix**:
 
 1. Use backup-based recovery
-2. Check what files were in .gitignore
-3. Extract selectively from emergency backup
+1. Check what files were in .gitignore
+1. Extract selectively from emergency backup
 
----
+______________________________________________________________________
 
 ## Related Documentation
 
@@ -391,6 +399,6 @@ Before **any** reorganization operation:
 - [Health Check Specification](/specifications/workspace-health-check.yaml)
 - [Migration Guide](/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md)
 
----
+______________________________________________________________________
 
 **Remember**: Conservative approach. When in doubt, don't proceed. A slow, careful reorganization is better than a fast, broken one.

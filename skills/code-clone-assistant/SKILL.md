@@ -1,8 +1,6 @@
----
-name: code-clone-assistant
-description: Code clone detection and automated refactoring assistant using PMD CPD and Semgrep. Detects exact duplicates (Type-1/2) and pattern-based clones (Type-3), then guides Claude Code CLI to refactor duplications with safety checks and verification. Use when user mentions code duplication, code clones, DRY violations, refactoring similar code, detecting repeated patterns, copy-paste code, or exact duplicates.
-allowed-tools: Read, Grep, Bash, Edit, Write
----
+______________________________________________________________________
+
+## name: code-clone-assistant description: Code clone detection and automated refactoring assistant using PMD CPD and Semgrep. Detects exact duplicates (Type-1/2) and pattern-based clones (Type-3), then guides Claude Code CLI to refactor duplications with safety checks and verification. Use when user mentions code duplication, code clones, DRY violations, refactoring similar code, detecting repeated patterns, copy-paste code, or exact duplicates. allowed-tools: Read, Grep, Bash, Edit, Write
 
 # Code Clone Assistant
 
@@ -16,37 +14,37 @@ Detect code clones and guide refactoring using PMD CPD (exact duplicates) + Semg
 **Tested**: October 2025 - 30 violations detected across 3 sample files
 **Coverage**: ~3x more violations than using either tool alone
 
----
+______________________________________________________________________
 
 ## When to Use
 
 Triggers: "find duplicate code", "DRY violations", "refactor similar code", "detect code duplication", "similar validation logic", "repeated patterns", "copy-paste code", "exact duplicates"
 
----
+______________________________________________________________________
 
 ## Why Two Tools?
 
 PMD CPD and Semgrep detect different clone types:
 
-| Aspect | PMD CPD | Semgrep |
-| --- | --- | --- |
-| **Detects** | Exact copy-paste duplicates | Similar patterns with variations |
-| **Scope** | Across files ✅ | Within/across files (Pro only) |
-| **Matching** | Token-based (ignores formatting) | Pattern-based (AST matching) |
-| **Rules** | ❌ No custom rules | ✅ Custom rules |
+| Aspect       | PMD CPD                          | Semgrep                          |
+| ------------ | -------------------------------- | -------------------------------- |
+| **Detects**  | Exact copy-paste duplicates      | Similar patterns with variations |
+| **Scope**    | Across files ✅                  | Within/across files (Pro only)   |
+| **Matching** | Token-based (ignores formatting) | Pattern-based (AST matching)     |
+| **Rules**    | ❌ No custom rules               | ✅ Custom rules                  |
 
 **Result**: Using both finds ~3x more DRY violations.
 
 ### Clone Types
 
-| Type | Description | PMD CPD | Semgrep |
-| --- | --- | --- | --- |
-| Type-1 | Exact copies | ✅ Default | ✅ |
-| Type-2 | Renamed identifiers | ✅ `--ignore-*` | ✅ |
-| Type-3 | Near-miss with variations | ⚠️ Partial | ✅ Patterns |
-| Type-4 | Semantic clones (same behavior) | ❌ | ❌ |
+| Type   | Description                     | PMD CPD         | Semgrep     |
+| ------ | ------------------------------- | --------------- | ----------- |
+| Type-1 | Exact copies                    | ✅ Default      | ✅          |
+| Type-2 | Renamed identifiers             | ✅ `--ignore-*` | ✅          |
+| Type-3 | Near-miss with variations       | ⚠️ Partial      | ✅ Patterns |
+| Type-4 | Semantic clones (same behavior) | ❌              | ❌          |
 
----
+______________________________________________________________________
 
 ## Quick Start Workflow
 
@@ -64,7 +62,7 @@ semgrep --config=clone-rules.yaml --sarif --quiet > semgrep-results.sarif
 # Extract shared functions, consolidate patterns, verify tests
 ```
 
----
+______________________________________________________________________
 
 ## Detection Commands
 
@@ -108,7 +106,7 @@ semgrep --config=clone-rules.yaml --sarif --quiet | \
 
 Full rules file: `~/.claude/skills/code-clone-assistant/clone-rules.yaml`
 
----
+______________________________________________________________________
 
 ## Complete Detection Workflow
 
@@ -137,8 +135,8 @@ jq -r '.runs[0].results[] | "\(.ruleId): \(.message.text) at \(.locations[0].phy
 **Combine findings**:
 
 1. List PMD CPD duplications by severity (tokens/lines)
-2. List Semgrep violations by file
-3. Prioritize: Exact duplicates across files > Large within-file > Patterns
+1. List Semgrep violations by file
+1. Prioritize: Exact duplicates across files > Large within-file > Patterns
 
 ### Phase 3: Presentation
 
@@ -175,12 +173,12 @@ Proceed with refactoring? (y/n)
 ### Phase 4: Refactoring (With User Approval)
 
 1. Read affected files using Read tool
-2. Create shared functions/classes
-3. Replace duplicates using Edit tool
-4. Run tests using Bash tool
-5. Commit changes if tests pass
+1. Create shared functions/classes
+1. Replace duplicates using Edit tool
+1. Run tests using Bash tool
+1. Commit changes if tests pass
 
----
+______________________________________________________________________
 
 ## Best Practices
 
@@ -199,7 +197,7 @@ Proceed with refactoring? (y/n)
 - ❌ Refactor without understanding context
 - ❌ Skip test verification
 
----
+______________________________________________________________________
 
 ## Security
 
@@ -213,7 +211,7 @@ Proceed with refactoring? (y/n)
 - Preserve git history
 - Validate file paths before editing
 
----
+______________________________________________________________________
 
 ## Detailed Documentation
 
@@ -224,7 +222,7 @@ For comprehensive details, see:
 - **Examples**: `examples.md` - Real-world examples, complementary detection scenarios
 - **Sample Rules**: `clone-rules.yaml` - Ready-to-use Semgrep patterns
 
----
+______________________________________________________________________
 
 ## Installation
 
@@ -238,7 +236,7 @@ brew install pmd      # PMD v7.17.0+
 brew install semgrep  # Semgrep v1.140.0+
 ```
 
----
+______________________________________________________________________
 
 ## Testing Results
 
@@ -252,6 +250,6 @@ brew install semgrep  # Semgrep v1.140.0+
 - Total Unique: ~27 DRY violations
 - Coverage: 3x more than either tool alone
 
----
+______________________________________________________________________
 
 **This skill uses only tested commands validated in October 2025 with PMD CPD and Semgrep**

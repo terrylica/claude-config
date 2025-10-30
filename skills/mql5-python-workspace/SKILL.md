@@ -4,7 +4,7 @@
 **Project**: mql5-crossover (CrossOver Bottle MT5 + Python Validation)
 **Purpose**: Seamless MQL5 indicator translation to Python with autonomous validation and self-correction
 
----
+______________________________________________________________________
 
 ## When to Use This Skill
 
@@ -18,20 +18,20 @@ Use this skill when the user wants to:
 
 **Activation Phrases**: "MQL5", "MetaTrader", "indicator translation", "Python validation", "export data", "mql5-crossover workspace"
 
----
+______________________________________________________________________
 
 ## Core Mission
 
 **Main Theme**: Make MQL5→Python translation **as seamless as possible** through:
 
 1. **Autonomous workflows** (headless export, CLI compilation, automated validation)
-2. **Validation-driven iteration** (≥0.999 correlation gates all work)
-3. **Self-correction** (documented failures prevent future mistakes)
-4. **Clear boundaries** (what works vs what doesn't, with alternatives)
+1. **Validation-driven iteration** (≥0.999 correlation gates all work)
+1. **Self-correction** (documented failures prevent future mistakes)
+1. **Clear boundaries** (what works vs what doesn't, with alternatives)
 
 **Project Root**: `/Users/terryli/Library/Application Support/CrossOver/Bottles/MetaTrader 5/drive_c`
 
----
+______________________________________________________________________
 
 ## Workspace Capabilities Matrix
 
@@ -64,7 +64,7 @@ wine "C:\\Program Files\\Python312\\python.exe" \
 
 **Reference**: `/docs/guides/WINE_PYTHON_EXECUTION.md`
 
----
+______________________________________________________________________
 
 #### 2. GUI-Based Custom Indicator Export (v4.0.0)
 
@@ -95,7 +95,7 @@ python generate_export_config.py \
 
 **Reference**: `/docs/guides/V4_FILE_BASED_CONFIG_WORKFLOW.md`
 
----
+______________________________________________________________________
 
 #### 3. Rigorous Validation Framework
 
@@ -111,7 +111,7 @@ python generate_export_config.py \
 **Quality Gates**:
 
 - **Correlation**: MUST be ≥0.999 (not 0.95 "good enough")
-- **MAE**: MUST be <0.001
+- **MAE**: MUST be \<0.001
 - **NaN Count**: MUST be 0 (after warmup period)
 - **Historical Warmup**: MUST use 5000+ bars for adaptive indicators
 
@@ -130,7 +130,7 @@ python validate_indicator.py \
 
 **Reference**: `/docs/guides/INDICATOR_VALIDATION_METHODOLOGY.md`
 
----
+______________________________________________________________________
 
 #### 4. Complete MQL5→Python Migration Workflow (7 Phases)
 
@@ -151,10 +151,10 @@ python validate_indicator.py \
 **Self-Correction Mechanisms**:
 
 1. Validation-driven re-implementation loop (correlation threshold)
-2. Multi-level compilation verification (4 checks)
-3. Wine Python MT5 API error handling (actionable messages)
-4. DuckDB historical tracking (regression detection)
-5. Comprehensive test suite (32 automated tests)
+1. Multi-level compilation verification (4 checks)
+1. Wine Python MT5 API error handling (actionable messages)
+1. DuckDB historical tracking (regression detection)
+1. Comprehensive test suite (32 automated tests)
 
 **Use When**: User wants to migrate a complete indicator from MQL5 to Python
 
@@ -162,7 +162,7 @@ python validate_indicator.py \
 
 **Reference**: `/docs/guides/MQL5_TO_PYTHON_MIGRATION_GUIDE.md`
 
----
+______________________________________________________________________
 
 #### 5. Lessons Learned Knowledge Base (185+ Hours Captured)
 
@@ -181,7 +181,7 @@ python validate_indicator.py \
 
 **Reference**: `/docs/guides/LESSONS_LEARNED_PLAYBOOK.md`
 
----
+______________________________________________________________________
 
 ### ❌ WHAT THIS WORKSPACE **CANNOT DO**
 
@@ -205,7 +205,7 @@ python validate_indicator.py \
 
 **Reference**: `/docs/guides/EXTERNAL_RESEARCH_BREAKTHROUGHS.md` (Research B)
 
----
+______________________________________________________________________
 
 #### 2. Reliable Startup.ini Parameter Passing
 
@@ -216,8 +216,8 @@ python validate_indicator.py \
 **Failed Approaches** (v2.1.0 - ALL NOT VIABLE):
 
 1. Named sections `[ScriptName]` - ignored by MT5
-2. ScriptParameters directive - blocks execution silently
-3. .set preset files - strict requirements + silent failures
+1. ScriptParameters directive - blocks execution silently
+1. .set preset files - strict requirements + silent failures
 
 **Evidence**:
 
@@ -233,7 +233,7 @@ python validate_indicator.py \
 
 **Reference**: `/docs/guides/SCRIPT_PARAMETER_PASSING_RESEARCH.md`
 
----
+______________________________________________________________________
 
 #### 3. Pandas Rolling Windows for MQL5 ATR
 
@@ -262,9 +262,9 @@ for i in range(len(tr)):
 
 **Reference**: `/docs/guides/LESSONS_LEARNED_PLAYBOOK.md` (Gotcha #4)
 
----
+______________________________________________________________________
 
-#### 4. Cold Start Validation (<5000 Bars)
+#### 4. Cold Start Validation (\<5000 Bars)
 
 **Limitation**: Cannot validate adaptive indicators without sufficient historical warmup
 
@@ -290,7 +290,7 @@ Correct: Fetch 5000, calculate on ALL, compare last N
 
 **Reference**: `/docs/guides/PYTHON_INDICATOR_VALIDATION_FAILURES.md` (Failure #5)
 
----
+______________________________________________________________________
 
 #### 5. Accept 0.95 Correlation as "Good Enough"
 
@@ -305,13 +305,13 @@ Correct: Fetch 5000, calculate on ALL, compare last N
 - 0.95-0.97: Missing historical warmup
 - 0.85-0.95: NaN handling mismatch
 - 0.70-0.85: Algorithm mismatch
-- <0.70: Fundamental implementation error
+- \<0.70: Fundamental implementation error
 
 **Time Saved by Knowing**: Don't waste time on "good enough" - fix the root cause
 
 **Reference**: `/docs/guides/LESSONS_LEARNED_PLAYBOOK.md` (Bug Pattern #1)
 
----
+______________________________________________________________________
 
 #### 6. Wine/CrossOver Compilation with Spaces in Paths
 
@@ -339,7 +339,7 @@ cp "C:/Temp.ex5" "C:/Program Files/.../Script.ex5"
 
 **Reference**: `/docs/guides/LESSONS_LEARNED_PLAYBOOK.md` (Gotcha #2)
 
----
+______________________________________________________________________
 
 #### 7. Use `/inc` Parameter for Standard Compilation
 
@@ -362,33 +362,33 @@ metaeditor64.exe /compile:"C:/Program Files/MT5/MQL5/Scripts/Script.mq5"
 
 **Reference**: `/docs/guides/EXTERNAL_RESEARCH_BREAKTHROUGHS.md` (Research A)
 
----
+______________________________________________________________________
 
 ## Critical Requirements & Assumptions
 
 ### User MUST Assume:
 
 1. ✅ **MT5 Terminal Running**: API approaches require logged-in terminal
-2. ✅ **Wine/CrossOver Installed**: No native macOS MT5 support
-3. ✅ **Python 3.12+ in Wine**: Required for MetaTrader5 package
-4. ✅ **NumPy 1.26.4**: MUST use this version (not 2.x - Wine incompatible)
-5. ✅ **5000+ Bar Warmup**: Required for validation (not 100 or 500 bars)
-6. ✅ **Manual Loops for ATR**: Cannot use pandas rolling windows
-7. ✅ **≥0.999 Correlation**: Strict threshold (not 0.95 "good enough")
-8. ✅ **Copy-Compile-Move**: Required for paths with spaces in Wine
+1. ✅ **Wine/CrossOver Installed**: No native macOS MT5 support
+1. ✅ **Python 3.12+ in Wine**: Required for MetaTrader5 package
+1. ✅ **NumPy 1.26.4**: MUST use this version (not 2.x - Wine incompatible)
+1. ✅ **5000+ Bar Warmup**: Required for validation (not 100 or 500 bars)
+1. ✅ **Manual Loops for ATR**: Cannot use pandas rolling windows
+1. ✅ **≥0.999 Correlation**: Strict threshold (not 0.95 "good enough")
+1. ✅ **Copy-Compile-Move**: Required for paths with spaces in Wine
 
 ### User Must NOT Assume:
 
 1. ❌ startup.ini parameter passing works reliably
-2. ❌ Python API can access custom indicator buffers
-3. ❌ Pandas operations match MQL5 behavior automatically
-4. ❌ 0.95 correlation is "good enough"
-5. ❌ 100 bars is sufficient for validation
-6. ❌ `/inc` parameter helps with standard compilation
-7. ❌ Paths with spaces work in Wine compilation
-8. ❌ NumPy 2.x works with MetaTrader5 package
+1. ❌ Python API can access custom indicator buffers
+1. ❌ Pandas operations match MQL5 behavior automatically
+1. ❌ 0.95 correlation is "good enough"
+1. ❌ 100 bars is sufficient for validation
+1. ❌ `/inc` parameter helps with standard compilation
+1. ❌ Paths with spaces work in Wine compilation
+1. ❌ NumPy 2.x works with MetaTrader5 package
 
----
+______________________________________________________________________
 
 ## Common User Workflows
 
@@ -411,7 +411,7 @@ wine "C:\\Program Files\\Python312\\python.exe" \
 
 **Reference**: `/docs/guides/V4_FILE_BASED_CONFIG_WORKFLOW.md` (Quick Start)
 
----
+______________________________________________________________________
 
 ### 2. Custom Laguerre RSI Export (Intermediate - 20-30 seconds)
 
@@ -433,7 +433,7 @@ python generate_export_config.py --symbol XAUUSD --timeframe M1 \
 
 **Reference**: `/docs/guides/V4_FILE_BASED_CONFIG_WORKFLOW.md` (Example 3)
 
----
+______________________________________________________________________
 
 ### 3. Validate Python Indicator (Intermediate - 5-10 minutes)
 
@@ -462,7 +462,7 @@ python validate_indicator.py \
 
 **Reference**: `/docs/guides/INDICATOR_VALIDATION_METHODOLOGY.md`
 
----
+______________________________________________________________________
 
 ### 4. Complete Indicator Migration (Advanced - 2-4 hours)
 
@@ -475,18 +475,18 @@ python validate_indicator.py \
 **Key Phases**:
 
 1. Locate & analyze (bash commands + manual review)
-2. Modify MQL5 (expose hidden buffers)
-3. CLI compile (~1 second)
-4. Fetch 5000 bars (automated)
-5. Implement Python (manual + pandas patterns)
-6. Validate ≥0.999 (automated)
-7. Document lessons (manual + git)
+1. Modify MQL5 (expose hidden buffers)
+1. CLI compile (~1 second)
+1. Fetch 5000 bars (automated)
+1. Implement Python (manual + pandas patterns)
+1. Validate ≥0.999 (automated)
+1. Document lessons (manual + git)
 
 **Time Investment**: 2-4 hours first time, 1-2 hours subsequently
 
 **Reference**: `/docs/guides/MQL5_TO_PYTHON_MIGRATION_GUIDE.md`
 
----
+______________________________________________________________________
 
 ## Documentation Hub (Single Source of Truth)
 
@@ -521,7 +521,7 @@ python validate_indicator.py \
 - **Project Memory**: `/CLAUDE.md` (hub-and-spoke architecture)
 - **Documentation Index**: `/docs/README.md` (complete guide catalog)
 
----
+______________________________________________________________________
 
 ## Skill Activation Guidelines
 
@@ -571,7 +571,7 @@ Activate when user mentions:
 - Every failure documented with solutions
 - Hub-and-spoke architecture (single source of truth per topic)
 
----
+______________________________________________________________________
 
 ## Error Handling Patterns
 
@@ -602,25 +602,25 @@ Activate when user mentions:
 **Solution**: Use manual loops for expanding window logic
 **Time**: 30-45 minutes
 
----
+______________________________________________________________________
 
 ## Time Investment ROI
 
 ### Documentation Time Savings
 
-| Knowledge Area | Documentation | Time Saved per Use |
-| --- | --- | --- |
-| Lessons Learned Playbook | 8 gotchas | 8-12 hours |
-| Legacy Assessment | 70+ items | 30-50 hours |
-| Validation Methodology | 6 pitfalls | 2-3 hours |
-| External Research | 3 breakthroughs | 10-15 hours |
-| Migration Guide | 7 phases | 4-6 hours |
+| Knowledge Area           | Documentation   | Time Saved per Use |
+| ------------------------ | --------------- | ------------------ |
+| Lessons Learned Playbook | 8 gotchas       | 8-12 hours         |
+| Legacy Assessment        | 70+ items       | 30-50 hours        |
+| Validation Methodology   | 6 pitfalls      | 2-3 hours          |
+| External Research        | 3 breakthroughs | 10-15 hours        |
+| Migration Guide          | 7 phases        | 4-6 hours          |
 
 **Total Time Invested**: 185+ hours (captured in documentation)
 **Total Time Saved**: 50-100 hours per developer
 **Break-Even Point**: After 2-3 indicators
 
----
+______________________________________________________________________
 
 ## Success Metrics
 
@@ -637,7 +637,7 @@ Activate when user mentions:
 ### Quality Standards
 
 - **Correlation**: ≥0.999 (not 0.95)
-- **MAE**: <0.001
+- **MAE**: \<0.001
 - **NaN Count**: 0 (after warmup)
 - **Historical Warmup**: 5000+ bars
 - **Documentation**: Algorithm analysis + validation report + temporal audit
@@ -649,7 +649,7 @@ Activate when user mentions:
 - **Bar-Level Debugging**: Top 100 largest differences stored
 - **Reproducibility**: All parameters stored
 
----
+______________________________________________________________________
 
 ## Version History
 
@@ -661,7 +661,7 @@ Activate when user mentions:
 - 185+ hours of debugging captured
 - Production-ready validation framework (1.000000 correlation)
 
----
+______________________________________________________________________
 
 ## Skill Maintenance
 
@@ -682,7 +682,7 @@ python comprehensive_validation.py --priority ALL --verbose
 
 **Target**: 30/32 PASS (2 expected failures: duckdb/numpy missing in macOS Python)
 
----
+______________________________________________________________________
 
 **Skill Status**: ✅ PRODUCTION READY
 **Last Updated**: 2025-10-27

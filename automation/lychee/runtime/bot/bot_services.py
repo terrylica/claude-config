@@ -180,7 +180,7 @@ async def progress_poller(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=progress_text,
-                        parse_mode="Markdown"
+                        parse_mode="HTML"
                     )
                     print(f"   ✅ Message updated successfully")
                 except Exception as edit_error:

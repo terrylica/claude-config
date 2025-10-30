@@ -107,8 +107,8 @@ doppler run -p claude-config -c dev -- uv run auth-telegram.py
 **Critical Path Dependencies**:
 
 1. API credentials → TDLib authentication → Session file
-2. Session file → Bot creation → BotFather interaction
-3. Bot token → Link fixing automation
+1. Session file → Bot creation → BotFather interaction
+1. Bot token → Link fixing automation
 
 **Single Point of Failure**:
 
@@ -190,7 +190,7 @@ Chat identifier for sending messages to specific user. Required for all bot.send
 
 ## Change Log
 
-| Version | Date | Change | Rationale |
-| --- | --- | --- | --- |
-| 1.0.0 | 2025-10-23 | Initial credential setup | Phase 0 implementation |
-| 1.1.0 | 2025-10-23 | Add bot token and chat ID placeholders | Phase 0 bot creation preparation |
+| Version | Date       | Change                                 | Rationale                        |
+| ------- | ---------- | -------------------------------------- | -------------------------------- |
+| 1.0.0   | 2025-10-23 | Initial credential setup               | Phase 0 implementation           |
+| 1.1.0   | 2025-10-23 | Add bot token and chat ID placeholders | Phase 0 bot creation preparation |

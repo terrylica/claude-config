@@ -4,7 +4,7 @@
 **Status**: In Progress - Pending GitHub Key Registration
 **Issue**: SSH ControlMaster caching blocked directory-based key switching
 
----
+______________________________________________________________________
 
 ## Problem Summary
 
@@ -19,7 +19,7 @@ When switching between project directories frequently, SSH's ControlMaster cachi
        IdentityFile ~/.ssh/id_ed25519_terrylica
    ```
 
-2. **First Connection**: SSH cached the connection via ControlMaster
+1. **First Connection**: SSH cached the connection via ControlMaster
 
    ```bash
    ControlMaster auto
@@ -27,12 +27,13 @@ When switching between project directories frequently, SSH's ControlMaster cachi
    ControlPersist 600
    ```
 
-3. **Subsequent Connections**: SSH reused cached connection
+1. **Subsequent Connections**: SSH reused cached connection
+
    - Ignored Match directives (Match evaluated once at cache time)
    - Kept using first authenticated key (tainora)
    - New directories couldn't trigger key selection
 
-4. **Result**: All git operations from `~/.claude` used wrong key (tainora instead of terrylica)
+1. **Result**: All git operations from `~/.claude` used wrong key (tainora instead of terrylica)
 
 ### Why This Happened
 
@@ -46,7 +47,7 @@ SSH's ControlMaster feature:
 **Perfect for stable environments** (same directory, same key)
 **Breaks with multi-account, multi-directory workflows**
 
----
+______________________________________________________________________
 
 ## Current Solution (Temporary)
 
@@ -64,7 +65,7 @@ ssh -T git@github.com  # Now uses correct key
 - Easy to forget
 - Inefficient with frequent switching
 
----
+______________________________________________________________________
 
 ## Better SSH Configuration Strategies
 
@@ -97,7 +98,7 @@ Host github.com
 
 **Recommendation**: Use this if you switch directories frequently
 
----
+______________________________________________________________________
 
 ### **Option 2: Per-Host Control Master Settings**
 
@@ -132,7 +133,7 @@ Host github.com
 
 **Recommendation**: Use this for hybrid workflows
 
----
+______________________________________________________________________
 
 ### **Option 3: Conditional Control Master Script**
 
@@ -180,7 +181,7 @@ Host github.com
 
 **Recommendation**: Not recommended (too complex)
 
----
+______________________________________________________________________
 
 ### **Option 4: Account-Specific Hosts (Recommended)**
 
@@ -246,7 +247,7 @@ git remote set-url origin git@gh-459ecs:459ecs/project.git
 
 **Recommendation**: Use this if you manage repositories explicitly
 
----
+______________________________________________________________________
 
 ## Recommended Solution for Your Workflow
 
@@ -297,7 +298,7 @@ Match host github.com exec "echo $PWD | grep -q '/459ecs'"
 - ✅ Simple to understand and debug
 - ✅ No per-repo configuration needed
 
----
+______________________________________________________________________
 
 ## Implementation Steps for Next Session
 
@@ -331,20 +332,20 @@ cd ~/.claude && git push origin main
 cd ~/eon/project && git push origin main
 ```
 
----
+______________________________________________________________________
 
 ## Performance Considerations
 
 ### **ControlMaster Impact**
 
-| Setting | First SSH | Subsequent | Switching | Multi-Account |
-| --- | --- | --- | --- | --- |
-| **With ControlMaster** | Slower | Fast | Broken | Broken |
-| **Without ControlMaster** | Normal | Normal | Works | Works ✓ |
+| Setting                   | First SSH | Subsequent | Switching | Multi-Account |
+| ------------------------- | --------- | ---------- | --------- | ------------- |
+| **With ControlMaster**    | Slower    | Fast       | Broken    | Broken        |
+| **Without ControlMaster** | Normal    | Normal     | Works     | Works ✓       |
 
 **Conclusion**: For multi-account workflows with directory switching, the performance loss is negligible and worth the reliability gain.
 
----
+______________________________________________________________________
 
 ## Monitoring & Debugging
 
@@ -366,7 +367,7 @@ ssh -vv git@github.com 2>&1 | grep "Offering public key"
 rm -f ~/.ssh/control-*
 ```
 
----
+______________________________________________________________________
 
 ## Session Summary
 
@@ -375,11 +376,11 @@ rm -f ~/.ssh/control-*
 **Next Steps**:
 
 1. Add SSH public key to GitHub (terrylica account)
-2. Implement Option 2 (disable ControlMaster for GitHub)
-3. Test directory switching without manual cache clearing
-4. Monitor for caching issues
+1. Implement Option 2 (disable ControlMaster for GitHub)
+1. Test directory switching without manual cache clearing
+1. Monitor for caching issues
 
----
+______________________________________________________________________
 
 ## Related Files
 
@@ -388,7 +389,7 @@ rm -f ~/.ssh/control-*
 - **GitHub Settings**: https://github.com/settings/keys
 - **Documentation**: `docs/setup/SSH-CONFIG-SETUP.md`
 
----
+______________________________________________________________________
 
 ## Future Considerations
 
@@ -397,7 +398,7 @@ rm -f ~/.ssh/control-*
 - **Per-Repo Verification**: Add pre-push hook to verify correct key used
 - **Session Tracking**: Log which SSH key used per repository
 
----
+______________________________________________________________________
 
 **Last Updated**: October 20, 2025
 **Status**: Pending GitHub SSH Key Registration

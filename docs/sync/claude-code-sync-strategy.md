@@ -49,7 +49,8 @@ Local macOS (Development & Planning)     Remote GPU (Model Inference & Validatio
    git push -u origin gpu-validation
    ```
 
-2. **Remote Environment Setup** (when GPU workstation is online):
+1. **Remote Environment Setup** (when GPU workstation is online):
+
    ```bash
    # On GPU workstation via SSH
    gpu  # Use our new alias
@@ -100,16 +101,16 @@ git merge gpu-validation
 
 ### Advantages
 
-✅ **True distributed development** with specialized environments  
-✅ **Git history preservation** with proper branching strategy  
-✅ **Automatic conflict resolution** via GitHub merge/PR workflow  
-✅ **Independent Claude Code instances** optimized for each environment  
+✅ **True distributed development** with specialized environments\
+✅ **Git history preservation** with proper branching strategy\
+✅ **Automatic conflict resolution** via GitHub merge/PR workflow\
+✅ **Independent Claude Code instances** optimized for each environment\
 ✅ **Bandwidth efficient** (only sync code changes, not data)
 
 ### Limitations
 
-⚠️ **Requires GPU workstation to be online** for TiRex validation  
-⚠️ **Manual sync discipline** required for consistency  
+⚠️ **Requires GPU workstation to be online** for TiRex validation\
+⚠️ **Manual sync discipline** required for consistency\
 ⚠️ **Claude Code SSH authentication issues** (known bug #1178)
 
 ## Strategy 2: Hybrid Rsync + Git Backup
@@ -137,15 +138,15 @@ gpu-sync-from
 
 ### Advantages
 
-✅ **Simple workflow** with single source of truth  
-✅ **Full Claude Code integration** on macOS  
-✅ **Fast synchronization** with rsync  
+✅ **Simple workflow** with single source of truth\
+✅ **Full Claude Code integration** on macOS\
+✅ **Fast synchronization** with rsync\
 ✅ **No Git complexity** on remote machine
 
 ### Limitations
 
-⚠️ **Manual sync required** for each GPU operation  
-⚠️ **Risk of data loss** if sync fails  
+⚠️ **Manual sync required** for each GPU operation\
+⚠️ **Risk of data loss** if sync fails\
 ⚠️ **No version control** on GPU workstation
 
 ## Strategy 3: Remote Claude Code Installation
@@ -165,20 +166,21 @@ gpu-sync-from
    curl -sSL https://claude.ai/code/install | sh
    ```
 
-2. **Configure Shared GitHub Repository**:
+1. **Configure Shared GitHub Repository**:
+
    - Both instances commit to different branches
    - Regular merge/rebase operations for synchronization
 
 ### Advantages
 
-✅ **Full Claude Code functionality** on both machines  
-✅ **Independent development** with AI assistance everywhere  
+✅ **Full Claude Code functionality** on both machines\
+✅ **Independent development** with AI assistance everywhere\
 ✅ **Professional workflow** with proper version control
 
 ### Limitations
 
-⚠️ **Complex setup** and maintenance  
-⚠️ **SSH authentication issues** with Claude Code  
+⚠️ **Complex setup** and maintenance\
+⚠️ **SSH authentication issues** with Claude Code\
 ⚠️ **Potential conflicts** between AI development decisions
 
 ## Recommended Implementation Plan
@@ -186,20 +188,20 @@ gpu-sync-from
 ### Phase 1: Immediate Setup (Today)
 
 1. ✅ **GPU Connection Aliases** - Already implemented
-2. **Test GPU Workstation Connection** - Wait for workstation to come online
-3. **Strategy 2 Implementation** - Quick rsync-based workflow for immediate TiRex testing
+1. **Test GPU Workstation Connection** - Wait for workstation to come online
+1. **Strategy 2 Implementation** - Quick rsync-based workflow for immediate TiRex testing
 
 ### Phase 2: Medium-term (Next Week)
 
 1. **Strategy 1 Implementation** - Git worktree setup when GPU workstation stable
-2. **Claude Code Remote Setup** - If SSH authentication issues resolved
-3. **Automated Sync Scripts** - Cron jobs or Git hooks for synchronization
+1. **Claude Code Remote Setup** - If SSH authentication issues resolved
+1. **Automated Sync Scripts** - Cron jobs or Git hooks for synchronization
 
 ### Phase 3: Long-term (Production)
 
 1. **CI/CD Pipeline** - GitHub Actions for automatic validation
-2. **Monitoring Setup** - GPU workstation health and availability
-3. **Backup Strategy** - Regular snapshots of both environments
+1. **Monitoring Setup** - GPU workstation health and availability
+1. **Backup Strategy** - Regular snapshots of both environments
 
 ## Quick Commands Summary
 
@@ -239,8 +241,8 @@ gpu-tmux         # Connect with persistent tmux session
 - **Git LFS**: For large model files or datasets
 - **Compression**: Enable SSH compression for slow connections
 
----
+______________________________________________________________________
 
-**Status**: Implementation ready - waiting for GPU workstation to come online  
-**Next Action**: Test connection and implement Strategy 2 for immediate TiRex validation  
+**Status**: Implementation ready - waiting for GPU workstation to come online\
+**Next Action**: Test connection and implement Strategy 2 for immediate TiRex validation\
 **Created**: 2025-07-31

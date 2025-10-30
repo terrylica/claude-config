@@ -46,6 +46,8 @@ def escape_markdown(text: str) -> str:
     """
     Escape special characters for Telegram markdown.
 
+    DEPRECATED: Use escape_html() instead. HTML mode is industry best practice.
+
     Args:
         text: Text to escape
 
@@ -60,9 +62,34 @@ def escape_markdown(text: str) -> str:
     return text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
 
 
+def escape_html(text: str) -> str:
+    """
+    Escape special characters for Telegram HTML mode.
+
+    HTML mode is the industry-recommended best practice for Telegram bots:
+    - Only 3 characters need escaping (vs 40+ in Markdown)
+    - More reliable, simpler, less error-prone
+    - Prevents common issues with underscores in filenames
+
+    Args:
+        text: Text to escape
+
+    Returns:
+        Text with HTML entities escaped
+
+    Example:
+        >>> escape_html("File: handler_classes.py & utils.py")
+        'File: handler_classes.py &amp; utils.py'
+    """
+    # Order matters: escape & first to avoid double-escaping
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 def strip_markdown(text: str) -> str:
     """
     Strip markdown formatting characters from text.
+
+    DEPRECATED: Use strip_html() for HTML-formatted messages.
 
     Use this when text will be wrapped in markdown formatting to avoid nested/invalid markdown.
 
@@ -82,6 +109,31 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r'`(.*?)`', r'\1', text)
     # Remove remaining single * or _
     text = text.replace('*', '').replace('_', '')
+    return text
+
+
+def strip_html(text: str) -> str:
+    """
+    Strip HTML tags from text for plain-text services (e.g., Pushover).
+
+    Use this when converting HTML-formatted Telegram messages to plain text
+    for services that don't support HTML.
+
+    Args:
+        text: Text with HTML tags
+
+    Returns:
+        Plain text with HTML tags removed
+
+    Example:
+        >>> strip_html("File: <code>handler_classes.py</code> & <b>utils.py</b>")
+        'File: handler_classes.py & utils.py'
+    """
+    import re
+    # Remove all HTML tags
+    text = re.sub(r'<[^>]*>', '', text)
+    # Decode HTML entities
+    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
     return text
 
 

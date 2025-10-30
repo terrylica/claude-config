@@ -5,7 +5,7 @@
 
 ⚠️ **User Responsibility**: Verify these URLs are current before relying on information
 
----
+______________________________________________________________________
 
 ## Core Custom Symbol Functions
 
@@ -22,7 +22,7 @@
 
 **Relevance**: Required for creating forex custom symbols before importing tick/bar data
 
----
+______________________________________________________________________
 
 ### 2. CustomTicksReplace()
 
@@ -39,7 +39,7 @@
 
 **Relevance**: Primary method for importing tick data in batches
 
----
+______________________________________________________________________
 
 ### 3. CustomTicksAdd()
 
@@ -56,7 +56,7 @@
 
 **Relevance**: Alternative to Replace for streaming data (not batch import)
 
----
+______________________________________________________________________
 
 ### 4. CustomRatesUpdate()
 
@@ -73,7 +73,7 @@
 
 **Relevance**: Primary method for importing bar data (alternative to ticks)
 
----
+______________________________________________________________________
 
 ## Data Structures
 
@@ -92,7 +92,7 @@
 
 **Relevance**: Defines CSV → MqlTick mapping for tick imports
 
----
+______________________________________________________________________
 
 ### 6. MqlRates Structure
 
@@ -106,7 +106,7 @@
 
 **Relevance**: Defines CSV → MqlRates mapping for bar imports
 
----
+______________________________________________________________________
 
 ## File Operations
 
@@ -118,14 +118,14 @@
 
 - File opening flags: FILE_READ, FILE_WRITE, FILE_CSV, FILE_COMMON
 - FILE_COMMON behavior: shared folder for terminal + tester
-- Path conventions: Terminal\Common\Files
+- Path conventions: Terminal\\Common\\Files
 - Encoding options (CP_UTF8)
 
 **Key Finding**: FILE_COMMON places files in shared location accessible to both live terminal and Strategy Tester
 
 **Relevance**: Required for MQL5 CSV import scripts
 
----
+______________________________________________________________________
 
 ## Workflow Documentation
 
@@ -137,12 +137,12 @@
 
 - Complete custom symbol API reference
 - Workflow: create → load data → test
-- Data storage location: bases\Custom\...
+- Data storage location: bases\\Custom...
 - Symbol property management
 
 **Relevance**: High-level overview of custom symbol ecosystem
 
----
+______________________________________________________________________
 
 ### 9. Custom Symbols Tutorial (Book)
 
@@ -157,7 +157,7 @@
 
 **Relevance**: Practical guidance beyond API reference
 
----
+______________________________________________________________________
 
 ## Additional Resources
 
@@ -173,7 +173,7 @@
 
 **Relevance**: Understanding tester behavior with custom data
 
----
+______________________________________________________________________
 
 ### 11. Custom Instruments GUI (MetaTrader 5 Help)
 
@@ -188,7 +188,7 @@
 
 **Relevance**: Alternative to programmatic import (good for testing)
 
----
+______________________________________________________________________
 
 ### 12. FileOpen() Function Reference
 
@@ -201,7 +201,7 @@
 
 **Relevance**: Comprehensive file handling documentation
 
----
+______________________________________________________________________
 
 ## Community Resources (Unofficial)
 
@@ -220,7 +220,7 @@
 
 **Caveat**: Validate forum advice against official docs
 
----
+______________________________________________________________________
 
 ### 14. MQL5 Article: Advanced Custom Symbol Techniques
 
@@ -236,7 +236,7 @@
 
 **Relevance**: Advanced patterns beyond basic import
 
----
+______________________________________________________________________
 
 ### 15. MQL5 Community Logging Framework
 
@@ -250,7 +250,7 @@
 
 **Relevance**: Debugging data import scripts
 
----
+______________________________________________________________________
 
 ## Documentation Version Notes
 
@@ -265,7 +265,7 @@
 
 **Recommendation**: Always check "Updated" date on mql5.com documentation pages
 
----
+______________________________________________________________________
 
 ## Verification Checklist
 
@@ -280,10 +280,10 @@ When using this skill, verify:
 **If documentation is outdated**:
 
 1. Search mql5.com for updated article
-2. Check MetaEditor built-in help (F1)
-3. Post in MQL5 forum for clarification
+1. Check MetaEditor built-in help (F1)
+1. Post in MQL5 forum for clarification
 
----
+______________________________________________________________________
 
 ## Missing Documentation (Known Gaps)
 
@@ -309,7 +309,7 @@ When using this skill, verify:
 
 **Workaround**: Inferred rules documented in [VALIDATION.md](/Users/terryli/.claude/skills/mql5-data-ingestion-research/VALIDATION.md)
 
----
+______________________________________________________________________
 
 ## Source Changelog
 

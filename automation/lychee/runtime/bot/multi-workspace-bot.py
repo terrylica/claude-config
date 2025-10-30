@@ -178,7 +178,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         ctx = resolve_callback_data(query.data)
     except ValueError as e:
-        await query.edit_message_text(text=f"❌ {e}", parse_mode="Markdown")
+        await query.edit_message_text(text=f"❌ {e}", parse_mode="HTML")
         return
 
     workspace_id = ctx["workspace_id"]
@@ -260,11 +260,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emoji = config["emoji"]
 
     await query.edit_message_text(
-        text=f"{emoji} **Action Received**: {action}\n\n"
-             f"Workspace: `{workspace_id}`\n"
-             f"Session: `{session_id}`\n\n"
+        text=f"{emoji} <b>Action Received</b>: {action}\n\n"
+             f"Workspace: <code>{workspace_id}</code>\n"
+             f"Session: <code>{session_id}</code>\n\n"
              f"Processing...",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
     print(f"✅ Routed to workspace: {workspace_id}")

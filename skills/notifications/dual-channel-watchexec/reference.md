@@ -41,6 +41,7 @@ ESCAPED=$(echo "$text" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 ```
 
 **Why this works**:
+
 - HTML only treats `&`, `<`, `>` as special
 - Markdown requires escaping 40+ chars (`.`, `-`, `_`, `*`, etc.)
 - Simpler = more reliable
@@ -48,6 +49,7 @@ ESCAPED=$(echo "$text" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 #### 2. Heredoc Variable Expansion
 
 **WRONG** (literal `$MESSAGE` sent):
+
 ```bash
 cat > "$FILE" <<'MSGEOF'
 $MESSAGE
@@ -55,6 +57,7 @@ MSGEOF
 ```
 
 **CORRECT** (variable expanded):
+
 ```bash
 cat > "$FILE" <<MSGEOF
 $MESSAGE
@@ -84,6 +87,7 @@ req = urllib.request.Request(
 ```
 
 **Why Python + temp file**:
+
 - Avoids bash quote escaping complexity
 - Handles Unicode properly
 - Reliable JSON encoding
@@ -111,6 +115,7 @@ esac
 ```
 
 **Pushover Priority Levels**:
+
 - `0`: Normal (respects quiet hours, default sound)
 - `1`: High (bypasses quiet hours, requires acknowledgment)
 - `2`: Emergency (repeats until acknowledged)
@@ -140,6 +145,7 @@ ARCHIVE_EOF
 ```
 
 **Why archive**:
+
 - Post-mortem debugging (what was actually sent?)
 - Audit trail
 - Reproducing Telegram 400 errors
@@ -172,9 +178,10 @@ fi
 ```
 
 **State transitions**:
+
 1. First run: `startup` → notify, create marker
-2. watchexec restart (exit=0): `code_change` → notify
-3. Process crash (exit≠0): `crash` → notify with context
+1. watchexec restart (exit=0): `code_change` → notify
+1. Process crash (exit≠0): `crash` → notify with context
 
 ### File Change Detection (macOS Compatible)
 
@@ -193,6 +200,7 @@ fi
 ```
 
 **Platform compatibility**:
+
 - macOS: `stat -f %m` (BSD stat)
 - Linux: `stat -c %Y` (GNU stat)
 - Fallback with `||` ensures portability
@@ -216,6 +224,7 @@ fi
 ```
 
 **Why last N lines**:
+
 - Crash often has error at end of log
 - Keeps notification message short
 - Full logs available on server for deep debugging
@@ -345,15 +354,15 @@ watchexec \
 
 ### HTML Tags Supported by Telegram
 
-| Tag | Purpose | Example |
-|-----|---------|---------|
-| `<b>` | Bold | `<b>Alert</b>` |
-| `<strong>` | Bold (alt) | `<strong>Alert</strong>` |
-| `<i>` | Italic | `<i>monitoring</i>` |
-| `<em>` | Italic (alt) | `<em>monitoring</em>` |
-| `<code>` | Inline code | `<code>file.py</code>` |
-| `<pre>` | Code block | `<pre>error log</pre>` |
-| `<a href="">` | Link | `<a href="https://...">Link</a>` |
+| Tag           | Purpose      | Example                          |
+| ------------- | ------------ | -------------------------------- |
+| `<b>`         | Bold         | `<b>Alert</b>`                   |
+| `<strong>`    | Bold (alt)   | `<strong>Alert</strong>`         |
+| `<i>`         | Italic       | `<i>monitoring</i>`              |
+| `<em>`        | Italic (alt) | `<em>monitoring</em>`            |
+| `<code>`      | Inline code  | `<code>file.py</code>`           |
+| `<pre>`       | Code block   | `<pre>error log</pre>`           |
+| `<a href="">` | Link         | `<a href="https://...">Link</a>` |
 
 **Not supported**: `<h1>`, `<div>`, `<span>`, CSS, JavaScript
 
@@ -471,12 +480,14 @@ MAIN_SCRIPT=./crash-test.py ./bot-wrapper.sh
 **Symptoms**: HTTP 400 error, no message received
 
 **Common causes**:
+
 1. Unescaped HTML entities (`&`, `<`, `>`)
-2. Unclosed HTML tags (`<b>text` without `</b>`)
-3. Unsupported HTML tags (`<div>`, `<h1>`)
-4. Message too long (>4096 chars)
+1. Unclosed HTML tags (`<b>text` without `</b>`)
+1. Unsupported HTML tags (`<div>`, `<h1>`)
+1. Message too long (>4096 chars)
 
 **Debug**:
+
 ```bash
 # Check archived message
 cat logs/notification-archive/$(ls -t logs/notification-archive/ | head -1)
@@ -490,6 +501,7 @@ echo "$MESSAGE" | grep -E '<[^>]*$'  # Check for unclosed tags
 **Symptoms**: Empty Trigger/Action fields
 
 **Check**:
+
 ```bash
 # Test stat command
 stat -f %m ./src/test.py  # macOS
@@ -505,6 +517,7 @@ cat /tmp/watchexec_info_*.json
 ### Credentials Not Loading
 
 **Check environment**:
+
 ```bash
 # Are variables set?
 echo "$TELEGRAM_BOT_TOKEN"
@@ -520,6 +533,7 @@ security find-generic-password -s 'telegram-bot-token' -a "$USER" -w
 ### No Notifications Received
 
 **Check**:
+
 ```bash
 # Telegram bot token valid?
 curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe"
@@ -539,24 +553,24 @@ curl -s \
 
 From production deployment (2025-10-29):
 
-| Operation | Latency | Notes |
-|-----------|---------|-------|
-| Message archiving | ~5ms | File write to logs/ |
-| HTML escaping | <1ms | sed operations |
-| Telegram API call | 200-500ms | Network dependent |
-| Pushover API call | 100-300ms | Network dependent |
-| **Total overhead** | **300-800ms** | Per notification |
+| Operation          | Latency       | Notes               |
+| ------------------ | ------------- | ------------------- |
+| Message archiving  | ~5ms          | File write to logs/ |
+| HTML escaping      | \<1ms         | sed operations      |
+| Telegram API call  | 200-500ms     | Network dependent   |
+| Pushover API call  | 100-300ms     | Network dependent   |
+| **Total overhead** | **300-800ms** | Per notification    |
 
 **Fire-and-forget**: Notifications run in background (`&`), so process restart not delayed.
 
 ## Security Best Practices
 
 1. **Never log credentials**: Secrets should only exist in memory
-2. **Restrict archive permissions**: `chmod 700 logs/notification-archive/`
-3. **No secrets in filenames**: File paths appear in messages
-4. **Use read-only API scopes**: Limit bot permissions
-5. **Rotate credentials**: Use Doppler or similar for automated rotation
-6. **Validate inputs**: Sanitize any user-provided data before archiving
+1. **Restrict archive permissions**: `chmod 700 logs/notification-archive/`
+1. **No secrets in filenames**: File paths appear in messages
+1. **Use read-only API scopes**: Limit bot permissions
+1. **Rotate credentials**: Use Doppler or similar for automated rotation
+1. **Validate inputs**: Sanitize any user-provided data before archiving
 
 ## Real-World Output Example
 
@@ -618,7 +632,7 @@ Production deployment results:
 - ✅ 100+ notifications sent successfully
 - ✅ 0 formatting errors (after HTML migration)
 - ✅ 100% dual-channel delivery
-- ✅ File detection: 95% accuracy (5% missing due to rapid restart <60s window)
+- ✅ File detection: 95% accuracy (5% missing due to rapid restart \<60s window)
 - ✅ Average latency: 400ms per notification
 - ✅ Zero blocking (fire-and-forget background execution)
 

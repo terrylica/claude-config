@@ -3,7 +3,7 @@
 **Status**: 🔬 Research | ⚠️ Not Tested in MT5
 **Purpose**: Pre-import validation to catch format errors before MT5 ingestion
 
----
+______________________________________________________________________
 
 ## Validation Philosophy
 
@@ -16,11 +16,11 @@
 **Validation Stages**:
 
 1. **Format validation**: CSV structure, column types
-2. **Data quality**: Value ranges, consistency checks
-3. **MT5 compatibility**: Specific MT5 constraints
-4. **Smoke test**: Small dataset trial import
+1. **Data quality**: Value ranges, consistency checks
+1. **MT5 compatibility**: Specific MT5 constraints
+1. **Smoke test**: Small dataset trial import
 
----
+______________________________________________________________________
 
 ## Stage 1: Format Validation
 
@@ -62,7 +62,7 @@ def validate_csv_structure(filepath: str, format_type: str) -> tuple[bool, str]:
 
 **Validation**: Column names match expected format
 
----
+______________________________________________________________________
 
 ## Stage 2: Data Quality Checks
 
@@ -176,7 +176,7 @@ def validate_bar_data(df: pd.DataFrame) -> list[str]:
     return errors
 ```
 
----
+______________________________________________________________________
 
 ## Stage 3: MT5-Specific Compatibility
 
@@ -234,7 +234,7 @@ def check_file_size(filepath: str, format_type: str) -> list[str]:
     return errors
 ```
 
----
+______________________________________________________________________
 
 ## Stage 4: Smoke Test (Small Dataset)
 
@@ -256,12 +256,12 @@ def create_smoke_test_csv(df: pd.DataFrame, format_type: str, output_path: str) 
 **Workflow**:
 
 1. Validate full dataset (Stages 1-3)
-2. Export first 10K rows as `test_import.csv`
-3. Import via MT5 GUI or script
-4. Verify in Strategy Tester
-5. If successful, import full dataset
+1. Export first 10K rows as `test_import.csv`
+1. Import via MT5 GUI or script
+1. Verify in Strategy Tester
+1. If successful, import full dataset
 
----
+______________________________________________________________________
 
 ## Complete Validation Script
 
@@ -370,7 +370,7 @@ python validate_mt5_data.py exness_eurusd_2024.csv --type ticks --pair EURUSD
 python validate_mt5_data.py gbpusd_m1_2024.csv --type bars --pair GBPUSD
 ```
 
----
+______________________________________________________________________
 
 ## Common Errors and Fixes
 
@@ -420,7 +420,7 @@ df['High'] = df[['Open', 'High', 'Close']].max(axis=1)
 df['Low'] = df[['Open', 'Low', 'Close']].min(axis=1)
 ```
 
----
+______________________________________________________________________
 
 ## Validation Status Tracking
 
@@ -451,7 +451,7 @@ validated_by: Terry Li
 validated_at: 2025-10-27 20:00:00 UTC
 ```
 
----
+______________________________________________________________________
 
 ## Changelog
 

@@ -1,8 +1,6 @@
----
-name: latex-tables
-description: Create modern LaTeX tables with tabularray package for fixed-width columns, proper alignment, and clean syntax. Use when creating tables, formatting table layouts, working with column widths, or migrating from old tabular/tabularx packages.
-allowed-tools: Read, Edit, Bash
----
+______________________________________________________________________
+
+## name: latex-tables description: Create modern LaTeX tables with tabularray package for fixed-width columns, proper alignment, and clean syntax. Use when creating tables, formatting table layouts, working with column widths, or migrating from old tabular/tabularx packages. allowed-tools: Read, Edit, Bash
 
 # LaTeX Tables with tabularray Skill
 
@@ -26,7 +24,7 @@ allowed-tools: Read, Edit, Bash
 - ✅ Better performance than legacy packages
 - ✅ Part of TeX Live 2025
 
----
+______________________________________________________________________
 
 ## Installation
 
@@ -51,7 +49,7 @@ sudo tlmgr install tabularray
 \end{document}
 ```
 
----
+______________________________________________________________________
 
 ## Common Table Patterns
 
@@ -129,19 +127,19 @@ sudo tlmgr install tabularray
 \end{tblr}
 ```
 
----
+______________________________________________________________________
 
 ## Column Specification (colspec)
 
 ### Alignment Options
 
-| Code | Meaning |
-| --- | --- |
-| `l` | Left-aligned |
-| `c` | Centered |
-| `r` | Right-aligned |
-| `X` | Flexible width (expands to fill) |
-| `Q[width]` | Fixed width with wrapping |
+| Code       | Meaning                          |
+| ---------- | -------------------------------- |
+| `l`        | Left-aligned                     |
+| `c`        | Centered                         |
+| `r`        | Right-aligned                    |
+| `X`        | Flexible width (expands to fill) |
+| `Q[width]` | Fixed width with wrapping        |
 
 ### Examples
 
@@ -162,7 +160,7 @@ colspec = {Q[2cm] X Q[2cm]}
 colspec = {Q[2cm,l] Q[3cm,c] Q[2cm,r]}
 ```
 
----
+______________________________________________________________________
 
 ## Lines and Borders
 
@@ -196,7 +194,7 @@ colspec = {Q[2cm,l] Q[3cm,c] Q[2cm,r]}
 }
 ```
 
----
+______________________________________________________________________
 
 ## Multi-Page Tables
 
@@ -215,7 +213,7 @@ For tables spanning multiple pages:
 \end{longtblr}
 ```
 
----
+______________________________________________________________________
 
 ## Common Issues
 
@@ -278,7 +276,7 @@ Q[3cm, c]
 Q[3cm, r]
 ```
 
----
+______________________________________________________________________
 
 ## Migration from Old Packages
 
@@ -321,18 +319,18 @@ Q[3cm, r]
 \end{tblr}
 ```
 
----
+______________________________________________________________________
 
 ## Best Practices
 
 1. **Use Q[width] for fixed columns** instead of p{width}
-2. **Specify widths explicitly** when text might overflow
-3. **Use X for flexible columns** that should expand
-4. **Style headers with row{1}** instead of manual formatting
-5. **Use colspec** for column properties, not inline commands
-6. **Check package version**: `kpsewhich tabularray.sty` (should be recent)
+1. **Specify widths explicitly** when text might overflow
+1. **Use X for flexible columns** that should expand
+1. **Style headers with row{1}** instead of manual formatting
+1. **Use colspec** for column properties, not inline commands
+1. **Check package version**: `kpsewhich tabularray.sty` (should be recent)
 
----
+______________________________________________________________________
 
 ## Quick Reference Card
 
@@ -362,7 +360,7 @@ Q[3cm, r]
 \end{tblr}
 ```
 
----
+______________________________________________________________________
 
 ## See Also
 

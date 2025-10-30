@@ -21,14 +21,14 @@
 
 **Remaining Scope**: 22h (Phases 2-8) - Multi-session execution required
 
----
+______________________________________________________________________
 
 ## Quick Start
 
 **Current Blockers**: 0 - All fixes complete ✅
 **Time to Migrate**: 25.5 hours base + 4.5h buffer = 30 hours (4-5 days execution)
 
----
+______________________________________________________________________
 
 ## Pre-Migration Fixes ✅ COMPLETE (Applied 2025-10-25)
 
@@ -70,7 +70,7 @@
 
 - `/Users/terryli/.claude/automation/lychee/runtime/hook/session-start-tracker.sh`
 
----
+______________________________________________________________________
 
 ### ✅ Fix 2: Workflow Calculator (Complete)
 
@@ -92,7 +92,7 @@ uv run ~/.claude/automation/lychee/runtime/lib/calculate_workflows.py \
 # Should output: ["lychee-autofix", "fix-docstrings", "prune-legacy"]
 ```
 
----
+______________________________________________________________________
 
 ### ✅ Fix 3: Update OpenAPI Spec (COMPLETE)
 
@@ -172,7 +172,7 @@ x-implementation-findings:
     impact: "Schema updated with workspace_path, git_status, lychee_status fields"
 ```
 
----
+______________________________________________________________________
 
 ### ✅ Fix 4: Update Migration Plan (COMPLETE)
 
@@ -269,7 +269,7 @@ selection = {
 | **Buffer (issues)** | 5.5h | **30h** |
 ```
 
----
+______________________________________________________________________
 
 ## Pre-Migration Checklist
 
@@ -285,7 +285,7 @@ After applying all fixes above:
 
 **Once all checked**: Proceed to Phase 0 below
 
----
+______________________________________________________________________
 
 ## Phase 0: Pre-Migration Validation
 
@@ -328,7 +328,7 @@ git tag -a v3.0.1-verified -m "Pre-migration state verified"
 - [ ] SQLite database accessible
 - [ ] Git tag v3.0.1-verified created
 
----
+______________________________________________________________________
 
 ## Phase 1: Create Workflow Registry
 
@@ -345,12 +345,13 @@ touch state/workflows.json
 ```
 
 2. **Populate with 4 workflows** (copy from spec or plan):
+
    - lychee-autofix
    - prune-legacy
    - fix-docstrings
    - rename-variables
 
-3. **Validate JSON**:
+1. **Validate JSON**:
 
 ```bash
 jq . state/workflows.json > /dev/null && echo "✅ Valid JSON"
@@ -380,7 +381,7 @@ rm state/workflows.json
 
 **Commit**: `git commit -m "feat(v4): add workflow registry with 4 workflows"`
 
----
+______________________________________________________________________
 
 ## Phase 2: Refactor Hook (Dual-Mode)
 
@@ -432,7 +433,7 @@ rm -rf state/summaries/
 
 **Commit**: `git commit -m "feat(v4): hook emits session summaries with dual-mode"`
 
----
+______________________________________________________________________
 
 ## Phase 3: Refactor Bot (Workflow Menu)
 
@@ -458,7 +459,7 @@ rm -rf state/selections/
 
 **Commit**: `git commit -m "feat(v4): bot loads registry and displays workflow menu"`
 
----
+______________________________________________________________________
 
 ## Phase 4: Refactor Orchestrator
 
@@ -483,7 +484,7 @@ rm -rf state/executions/
 
 **Commit**: `git commit -m "feat(v4): orchestrator executes workflows from registry"`
 
----
+______________________________________________________________________
 
 ## Phase 5: Integration Testing
 
@@ -493,9 +494,9 @@ rm -rf state/executions/
 ### Test Scenarios
 
 1. Session with 0 errors → Summary sent, workflows menu shown
-2. Session with lychee errors → Lychee workflow available
-3. Multi-workflow selection → Dependencies resolved
-4. End-to-end correlation tracking → All events logged
+1. Session with lychee errors → Lychee workflow available
+1. Multi-workflow selection → Dependencies resolved
+1. End-to-end correlation tracking → All events logged
 
 See MIGRATION_v3_to_v4_PLAN_v2.md Phase 5 for detailed test procedures
 
@@ -508,7 +509,7 @@ See MIGRATION_v3_to_v4_PLAN_v2.md Phase 5 for detailed test procedures
 
 **No rollback needed** - fix issues and re-test
 
----
+______________________________________________________________________
 
 ## Phase 6: Directory Rename & Services
 
@@ -556,7 +557,7 @@ git mv telegram-workflows lychee
 
 **Commit**: `git commit -m "refactor: rename automation/lychee → automation/telegram-workflows"`
 
----
+______________________________________________________________________
 
 ## Phase 7: Remove Dual Mode
 
@@ -574,7 +575,7 @@ Remove backward compatibility:
 
 **Commit**: `git commit -m "refactor(v4): remove dual-mode backward compatibility"`
 
----
+______________________________________________________________________
 
 ## Phase 8: Documentation & Release
 
@@ -589,25 +590,25 @@ Remove backward compatibility:
 **Commit**: `git commit -m "docs: update all documentation to v4.0.0"`
 **Tag**: `git tag -a v4.0.0 -m "Release v4.0.0: Telegram Workflows System"`
 
----
+______________________________________________________________________
 
 ## Quick Reference
 
 ### Timeline Summary
 
-| Phase | Est | Actual | Status |
-| --- | --- | --- | --- |
-| **Fixes** | 3-4h | 2h | ✅ Complete |
-| Phase 0 | 0.5h | 0.3h | ✅ Complete |
-| Phase 1 | 1.5h | 0.25h | ✅ Complete |
-| Phase 2 | 3.5h | - | ⏳ Next |
-| Phase 3 | 4h | - | Pending |
-| Phase 4 | 5h | - | Pending |
-| Phase 5 | 3h | - | Pending |
-| Phase 6 | 1.5h | - | Pending |
-| Phase 7 | 2h | - | Pending |
-| Phase 8 | 3h | - | Pending |
-| Buffer | 5h | - | Pending |
+| Phase     | Est  | Actual | Status      |
+| --------- | ---- | ------ | ----------- |
+| **Fixes** | 3-4h | 2h     | ✅ Complete |
+| Phase 0   | 0.5h | 0.3h   | ✅ Complete |
+| Phase 1   | 1.5h | 0.25h  | ✅ Complete |
+| Phase 2   | 3.5h | -      | ⏳ Next     |
+| Phase 3   | 4h   | -      | Pending     |
+| Phase 4   | 5h   | -      | Pending     |
+| Phase 5   | 3h   | -      | Pending     |
+| Phase 6   | 1.5h | -      | Pending     |
+| Phase 7   | 2h   | -      | Pending     |
+| Phase 8   | 3h   | -      | Pending     |
+| Buffer    | 5h   | -      | Pending     |
 
 **Completed**: 2.55h of 33h (7.7%) | **Remaining**: 30.45h (Phases 2-8)
 
@@ -623,7 +624,7 @@ Remove backward compatibility:
 - Full rollback: See MIGRATION_v3_to_v4_PLAN_v2.md lines 1550-1590
 - Verification audit: See archive/verification-2025-10-25/
 
----
+______________________________________________________________________
 
 **Status**: ✅ Phases 0-1 complete (2025-10-25)
 
@@ -642,7 +643,7 @@ Remove backward compatibility:
 
 **Next Session**: Phase 2 - Refactor hook (3-3.5h estimated)
 
----
+______________________________________________________________________
 
 ## Phase 2 Continuation Plan
 
@@ -657,12 +658,12 @@ Remove backward compatibility:
 **Tasks** (from MIGRATION_v3_to_v4_PLAN_v2.md lines 313-458):
 
 1. Add git status extraction (5 commands: branch, modified, untracked, staged, ahead/behind)
-2. Add session duration tracking (read timestamp from SessionStart hook)
-3. Calculate available workflows (using calculate_workflows.py)
-4. Create write_session_summary() function
-5. Create state/summaries/ directory
-6. Update hook logic to emit BOTH formats (dual-mode)
-7. Test with injected summary
+1. Add session duration tracking (read timestamp from SessionStart hook)
+1. Calculate available workflows (using calculate_workflows.py)
+1. Create write_session_summary() function
+1. Create state/summaries/ directory
+1. Update hook logic to emit BOTH formats (dual-mode)
+1. Test with injected summary
 
 **Key File**: `/Users/terryli/.claude/automation/lychee/runtime/hook/check-links-hybrid.sh ` (446 lines)
 

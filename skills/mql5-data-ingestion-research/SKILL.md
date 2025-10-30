@@ -5,7 +5,7 @@
 **Last Updated**: 2025-10-27
 **Research Context**: Exness tick data → MetaTrader 5 ingestion pipeline
 
----
+______________________________________________________________________
 
 ## ⚠️ CRITICAL: VALIDATION STATUS
 
@@ -30,17 +30,17 @@
 - After community review of format compliance
 - Move validated content to operational skill: `mql5-data-ingestion`
 
----
+______________________________________________________________________
 
 ## Purpose
 
 This skill documents research findings for converting forex tick data (specifically from `exness-data-preprocess` package) into MetaTrader 5-compatible formats for:
 
 1. **Backtesting** trading strategies on historical tick data
-2. **Custom symbol creation** with real tick-level granularity
-3. **Strategy Tester** execution with "Every tick based on real ticks" mode
+1. **Custom symbol creation** with real tick-level granularity
+1. **Strategy Tester** execution with "Every tick based on real ticks" mode
 
----
+______________________________________________________________________
 
 ## Activation Context
 
@@ -65,7 +65,7 @@ This skill activates when you discuss:
 - Production data pipelines (validate first)
 - MQL5 indicator/EA development (use `mql5-article-extractor` skill)
 
----
+______________________________________________________________________
 
 ## Skill Contents
 
@@ -97,7 +97,7 @@ This skill activates when you discuss:
 - Community forum references
 - Version-specific considerations
 
----
+______________________________________________________________________
 
 ## Key Research Findings
 
@@ -139,7 +139,7 @@ Files in `Terminal\Common\Files` are accessible to both:
 
 **Source**: [`FileOpen()` Documentation](https://www.mql5.com/en/docs/files/fileopen)
 
----
+______________________________________________________________________
 
 ## Recommended Workflow (Unvalidated)
 
@@ -151,7 +151,7 @@ Files in `Terminal\Common\Files` are accessible to both:
    df = processor.query_ticks("EURUSD", variant="raw_spread", start_date="2024-01-01")
    ```
 
-2. Transform to MT5 CSV format:
+1. Transform to MT5 CSV format:
 
    ```python
    # Convert to unix_ms, ensure bid/ask/last columns
@@ -160,7 +160,7 @@ Files in `Terminal\Common\Files` are accessible to both:
    df[['unix_ms', 'bid', 'ask', 'last', 'volume']].to_csv('ticks.csv', index=False)
    ```
 
-3. Validate format (see [VALIDATION.md](/Users/terryli/.claude/skills/mql5-data-ingestion-research/VALIDATION.md))
+1. Validate format (see [VALIDATION.md](/Users/terryli/.claude/skills/mql5-data-ingestion-research/VALIDATION.md))
 
 ### Phase 2: MT5 Import (Requires Validation)
 
@@ -176,11 +176,11 @@ CustomTicksReplace("EURUSD.EXNESS", from_ms, to_ms, ticks_array);
 ### Phase 3: Strategy Tester Setup
 
 1. Open Strategy Tester
-2. Select custom symbol: `EURUSD.EXNESS`
-3. Choose: "Every tick based on real ticks"
-4. Run backtest
+1. Select custom symbol: `EURUSD.EXNESS`
+1. Choose: "Every tick based on real ticks"
+1. Run backtest
 
----
+______________________________________________________________________
 
 ## Known Gaps Requiring Validation
 
@@ -214,7 +214,7 @@ CustomTicksReplace("EURUSD.EXNESS", from_ms, to_ms, ticks_array);
 
 **Validation Needed**: Test default vs explicit configuration
 
----
+______________________________________________________________________
 
 ## Migration Path: Research → Production
 
@@ -244,7 +244,7 @@ mql5-data-ingestion/
 - [ ] Documentation reviewed by MT5 expert
 - [ ] Performance benchmarks documented
 
----
+______________________________________________________________________
 
 ## Support & Contributions
 
@@ -259,7 +259,7 @@ mql5-data-ingestion/
 
 **Found Errors**: Update `SOURCES.md` with corrected documentation URLs
 
----
+______________________________________________________________________
 
 ## Related Skills
 
@@ -268,7 +268,7 @@ mql5-data-ingestion/
   - Supports both user articles and official documentation extraction
 - `python/api-documentation`: Pydantic model documentation (for exness-data-preprocess)
 
----
+______________________________________________________________________
 
 ## Changelog
 

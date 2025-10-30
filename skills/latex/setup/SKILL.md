@@ -1,8 +1,6 @@
----
-name: latex-setup
-description: Install and configure complete LaTeX development environment on macOS with MacTeX, Skim viewer, and SyncTeX support. Use when setting up new machine, installing LaTeX distribution, configuring PDF viewer, or troubleshooting package installations.
-allowed-tools: Read, Edit, Bash
----
+______________________________________________________________________
+
+## name: latex-setup description: Install and configure complete LaTeX development environment on macOS with MacTeX, Skim viewer, and SyncTeX support. Use when setting up new machine, installing LaTeX distribution, configuring PDF viewer, or troubleshooting package installations. allowed-tools: Read, Edit, Bash
 
 # LaTeX Environment Setup Skill
 
@@ -18,13 +16,13 @@ allowed-tools: Read, Edit, Bash
 
 ## Recommended Stack
 
-| Component | Purpose | Status |
-| --- | --- | --- |
-| **MacTeX 2025** | Full LaTeX distribution (TeX Live 2025) | ✅ Recommended |
-| **Skim 1.7.11** | PDF viewer with SyncTeX support | ✅ macOS only |
-| **TeXShop 5.57** | Integrated LaTeX IDE (optional) | ✅ Native macOS |
+| Component        | Purpose                                 | Status          |
+| ---------------- | --------------------------------------- | --------------- |
+| **MacTeX 2025**  | Full LaTeX distribution (TeX Live 2025) | ✅ Recommended  |
+| **Skim 1.7.11**  | PDF viewer with SyncTeX support         | ✅ macOS only   |
+| **TeXShop 5.57** | Integrated LaTeX IDE (optional)         | ✅ Native macOS |
 
----
+______________________________________________________________________
 
 ## Installation
 
@@ -61,7 +59,7 @@ brew install --cask skim
 # - Auto-reload on PDF changes
 ```
 
----
+______________________________________________________________________
 
 ## Verification
 
@@ -109,7 +107,7 @@ pdflatex test.tex
 ls test.pdf
 ```
 
----
+______________________________________________________________________
 
 ## Package Management
 
@@ -145,7 +143,7 @@ tlmgr search --global tabularray
 tlmgr list --only-installed
 ```
 
----
+______________________________________________________________________
 
 ## Skim Configuration
 
@@ -164,9 +162,9 @@ latexmk -pdf document.tex
 ### Skim Preferences
 
 1. **Skim → Preferences → Sync**
-2. **Preset:** Custom
-3. **Command:** Path to your editor
-4. **Arguments:** Depends on editor (e.g., for VS Code: `--goto %file:%line`)
+1. **Preset:** Custom
+1. **Command:** Path to your editor
+1. **Arguments:** Depends on editor (e.g., for VS Code: `--goto %file:%line`)
 
 **For Helix:**
 
@@ -175,7 +173,7 @@ Command: /usr/local/bin/hx
 Arguments: %file:%line
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -217,7 +215,7 @@ sudo tlmgr install <package-name>
 sudo chown -R $(whoami):staff /usr/local/texlive/2025/texmf-var
 ```
 
----
+______________________________________________________________________
 
 ## Post-Installation Checklist
 
@@ -230,7 +228,7 @@ sudo chown -R $(whoami):staff /usr/local/texlive/2025/texmf-var
 - [ ] Add `/Library/TeX/texbin` to PATH if needed
 - [ ] Test package installation: `sudo tlmgr install <package>`
 
----
+______________________________________________________________________
 
 ## See Also
 

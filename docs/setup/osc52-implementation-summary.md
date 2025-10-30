@@ -11,11 +11,11 @@ A transparent clipboard bridge enabling Claude Code CLI `/export` command to cop
 **Solution**: Create fake `xclip` at `~/.local/bin/xclip` that:
 
 1. Accepts same CLI arguments as real xclip
-2. Reads stdin (the data to copy)
-3. Base64 encodes it
-4. Wraps in OSC 52 escape sequence
-5. Double-wraps if inside tmux (detected via `$TMUX` env var)
-6. **Outputs to stderr (`>&2`)** not `/dev/tty`
+1. Reads stdin (the data to copy)
+1. Base64 encodes it
+1. Wraps in OSC 52 escape sequence
+1. Double-wraps if inside tmux (detected via `$TMUX` env var)
+1. **Outputs to stderr (`>&2`)** not `/dev/tty`
 
 ## Critical Discovery: `>&2` vs `/dev/tty`
 
@@ -41,10 +41,10 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ### Why It Works
 
 1. **stderr (fd 2) always available** - even in non-interactive contexts
-2. **Terminal emulators read both stdout and stderr** for control sequences
-3. **Escape sequences are invisible** - terminal interprets them, doesn't display
-4. **Claude Code doesn't suppress stderr** - it displays tool output streams
-5. **Ghostty receives sequence** regardless of which stream carries it
+1. **Terminal emulators read both stdout and stderr** for control sequences
+1. **Escape sequences are invisible** - terminal interprets them, doesn't display
+1. **Claude Code doesn't suppress stderr** - it displays tool output streams
+1. **Ghostty receives sequence** regardless of which stream carries it
 
 ## Data Flow
 
@@ -112,16 +112,19 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ### New Files
 
 1. **`~/.local/bin/xclip`** (remote Linux)
+
    - xclip-compatible wrapper
    - Emits OSC 52 to stderr
    - Handles tmux detection and wrapping
 
-2. **`~/.claude/docs/setup/ssh-clipboard-osc52.md`**
+1. **`~/.claude/docs/setup/ssh-clipboard-osc52.md`**
+
    - Complete setup guide
    - Testing procedures
    - Troubleshooting tips
 
-3. **`~/.claude/docs/setup/osc52-deep-dive.md`**
+1. **`~/.claude/docs/setup/osc52-deep-dive.md`**
+
    - Technical deep dive
    - Protocol details
    - Architecture diagrams
@@ -130,15 +133,18 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 ### Modified Files
 
 1. **`~/.zshrc`** (remote Linux)
+
    - Added `osc52-copy()` function
    - Added `pbcopy` alias for interactive use
 
-2. **`~/.claude/CLAUDE.md`**
+1. **`~/.claude/CLAUDE.md`**
+
    - Added "SSH Clipboard Integration (OSC 52)" section
    - Concise reference with links to detailed docs
    - Emphasized critical `>&2` vs `/dev/tty` detail
 
-3. **`~/.claude/docs/setup/terminal-setup.md`**
+1. **`~/.claude/docs/setup/terminal-setup.md`**
+
    - Added reference to OSC 52 setup
    - Quick setup instructions
 
@@ -237,10 +243,10 @@ Following `~/.claude/` hub-and-spoke pattern:
 ### Design Principles Applied
 
 1. **Link Farm**: CLAUDE.md contains only essentials + links
-2. **Single Source of Truth**: Detailed docs in proper locations
-3. **Hub-and-Spoke**: Central index points to module-specific docs
-4. **Machine-Readable**: OpenAPI specs for integrations (not needed here)
-5. **Separation**: Config (`~/.local/bin/`) separate from docs (`~/.claude/docs/`)
+1. **Single Source of Truth**: Detailed docs in proper locations
+1. **Hub-and-Spoke**: Central index points to module-specific docs
+1. **Machine-Readable**: OpenAPI specs for integrations (not needed here)
+1. **Separation**: Config (`~/.local/bin/`) separate from docs (`~/.claude/docs/`)
 
 ## Key Learnings for Future Reference
 
@@ -271,8 +277,8 @@ Terminal emulators **scan all streams** for escape sequences. Choose the stream 
 When working through multiplexers (tmux, screen):
 
 1. Check if inside multiplexer (env var)
-2. Apply appropriate wrapping
-3. Let multiplexer pass through to terminal
+1. Apply appropriate wrapping
+1. Let multiplexer pass through to terminal
 
 Don't try to bypass the multiplexer—work with it.
 
@@ -281,10 +287,10 @@ Don't try to bypass the multiplexer—work with it.
 To intercept system commands:
 
 1. Create wrapper in `~/.local/bin/`
-2. Ensure `~/.local/bin/` early in PATH
-3. Preserve CLI compatibility (parse arguments)
-4. Implement alternate backend (OSC 52 vs X11)
-5. Make transparent to caller
+1. Ensure `~/.local/bin/` early in PATH
+1. Preserve CLI compatibility (parse arguments)
+1. Implement alternate backend (OSC 52 vs X11)
+1. Make transparent to caller
 
 This pattern works for:
 
@@ -325,11 +331,11 @@ The solution cannot be simplified further:
 **Each component essential**:
 
 1. **xclip wrapper** → intercepts Claude Code call
-2. **OSC 52** → terminal-native clipboard protocol
-3. **Base64** → encoding for binary safety
-4. **tmux wrapping** → passthrough for multiplexer
-5. **stderr** → guaranteed stream in subprocess
-6. **Ghostty config** → enables clipboard acceptance
+1. **OSC 52** → terminal-native clipboard protocol
+1. **Base64** → encoding for binary safety
+1. **tmux wrapping** → passthrough for multiplexer
+1. **stderr** → guaranteed stream in subprocess
+1. **Ghostty config** → enables clipboard acceptance
 
 Remove any one → solution breaks.
 
@@ -368,9 +374,9 @@ Remove any one → solution breaks.
 ### For other use cases:
 
 1. **Paste support**: Add OSC 52 read capability (if terminal supports)
-2. **Selection targets**: Support primary selection (`-selection primary`)
-3. **Clipboard history**: Log copies to file for recovery
-4. **Notification**: Pushover alert on large clipboard operations
+1. **Selection targets**: Support primary selection (`-selection primary`)
+1. **Clipboard history**: Log copies to file for recovery
+1. **Notification**: Pushover alert on large clipboard operations
 
 ### For other tools:
 
@@ -380,7 +386,7 @@ Remove any one → solution breaks.
 
 Same architecture applies to all clipboard tools—just need to match CLI interface.
 
----
+______________________________________________________________________
 
 ## Bottom Line
 

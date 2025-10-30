@@ -1,8 +1,6 @@
----
-name: latex-build
-description: Build and compile LaTeX documents using latexmk with live preview, dependency tracking, and automatic rebuilds. Use when setting up build workflows, enabling live preview, troubleshooting compilation, or automating multi-file projects.
-allowed-tools: Read, Edit, Bash
----
+______________________________________________________________________
+
+## name: latex-build description: Build and compile LaTeX documents using latexmk with live preview, dependency tracking, and automatic rebuilds. Use when setting up build workflows, enabling live preview, troubleshooting compilation, or automating multi-file projects. allowed-tools: Read, Edit, Bash
 
 # LaTeX Build Automation Skill
 
@@ -27,7 +25,7 @@ allowed-tools: Read, Edit, Bash
 - ✅ Works with Skim for SyncTeX auto-reload
 - ✅ Bundled with MacTeX (no separate install needed)
 
----
+______________________________________________________________________
 
 ## Basic Usage
 
@@ -55,7 +53,7 @@ latexmk -pvc -pdf document.tex
 
 **Stop watching:** Press `Ctrl+C`
 
----
+______________________________________________________________________
 
 ## Common Commands
 
@@ -108,7 +106,7 @@ latexmk -pdfxe document.tex
 latexmk -pdf -verbose document.tex
 ```
 
----
+______________________________________________________________________
 
 ## Live Preview Workflow
 
@@ -134,7 +132,7 @@ latexmk -pvc -pdf -view=pdf document.tex
 latexmk -pvc -pdf -view=none document.tex
 ```
 
----
+______________________________________________________________________
 
 ## Multi-File Projects
 
@@ -183,7 +181,7 @@ latexmk -pvc -pdf main.tex
 # Change figure → automatic rebuild
 ```
 
----
+______________________________________________________________________
 
 ## Makefile Integration
 
@@ -214,7 +212,7 @@ make watch    # Live preview
 make clean    # Remove artifacts
 ```
 
----
+______________________________________________________________________
 
 ## Configuration (.latexmkrc)
 
@@ -249,7 +247,7 @@ latexmk -pvc main.tex
 # Uses settings from .latexmkrc
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -272,8 +270,8 @@ export PATH="/Library/TeX/texbin:$PATH"
 **Check Skim preferences:**
 
 1. Skim → Preferences → Sync
-2. Check "Check for file changes"
-3. Check "Reload automatically"
+1. Check "Check for file changes"
+1. Check "Reload automatically"
 
 **Verify SyncTeX enabled:**
 
@@ -322,7 +320,7 @@ latexmk -C
 latexmk -pdf document.tex
 ```
 
----
+______________________________________________________________________
 
 ## Advanced Patterns
 
@@ -369,7 +367,7 @@ else
 fi
 ```
 
----
+______________________________________________________________________
 
 ## Build Checklist
 
@@ -382,7 +380,7 @@ fi
 - [ ] Create .latexmkrc for project-specific settings (optional)
 - [ ] Test clean: `latexmk -c` removes artifacts
 
----
+______________________________________________________________________
 
 ## Quick Reference Card
 
@@ -407,7 +405,7 @@ latexmk -gg -pdf document.tex
 latexmk -pdf -interaction=nonstopmode document.tex
 ```
 
----
+______________________________________________________________________
 
 ## See Also
 

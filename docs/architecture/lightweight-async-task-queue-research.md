@@ -4,7 +4,7 @@
 **Context**: Coordinating bash stop hooks → Python Telegram bot → Python orchestrator → Claude CLI subprocess
 **Current Approach**: File-based JSON polling with 5-second intervals
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
@@ -20,36 +20,36 @@ After comprehensive research of Python async task queue systems that don't requi
 
 **Alternative**: For even simpler needs, **litequeue** offers a minimal single-file implementation, but with limited adoption and inactive maintenance status.
 
----
+______________________________________________________________________
 
 ## Library Comparison Matrix
 
-| Library | Async Support | Storage Backend | Maintenance | Cross-Process | Bash Integration | Performance |
-| --- | --- | --- | --- | --- | --- | --- |
-| **persist-queue** | ✅ Native (v1.1.0+) | SQLite3/File/MySQL | ✅ Active | ✅ Yes | ✅ Direct SQLite | ⭐⭐⭐⭐⭐ 2-4x faster with WAL |
-| **litequeue** | ⚠️ Manual wrapper | SQLite3 | ⚠️ Inactive | ✅ Yes | ✅ Direct SQLite | ⭐⭐⭐ Lightweight |
-| **aiodiskqueue** | ✅ Native | SQLite3/DbmEngine | ✅ Active | ✅ Yes | ⚠️ Requires Python client | ⭐⭐⭐⭐ 3x slower than DbmEngine |
-| **Huey** | ⚠️ Partial (result polling) | Redis/SQLite/Memory | ✅ Active | ✅ Yes | ⚠️ Requires worker daemon | ⭐⭐⭐⭐ Good with SQLite |
-| **taskiq** | ✅ Native | Redis/RabbitMQ/NATS | ✅ Active | ✅ Yes | ❌ No file backend | N/A - requires broker |
-| **SAQ** | ✅ Native | Redis/Postgres | ✅ Active | ✅ Yes | ❌ No file backend | ⭐⭐⭐⭐⭐ Fastest (but needs Redis) |
-| **Dramatiq** | ⚠️ async-dramatiq fork | Redis/RabbitMQ | ✅ Active | ✅ Yes | ❌ No SQLite backend | ⭐⭐⭐⭐ Fast with Redis |
-| **ARQ** | ✅ Native | Redis only | ⚠️ Maintenance mode | ✅ Yes | ❌ Redis required | ⭐⭐⭐⭐⭐ Very fast |
+| Library           | Async Support               | Storage Backend     | Maintenance         | Cross-Process | Bash Integration          | Performance                          |
+| ----------------- | --------------------------- | ------------------- | ------------------- | ------------- | ------------------------- | ------------------------------------ |
+| **persist-queue** | ✅ Native (v1.1.0+)         | SQLite3/File/MySQL  | ✅ Active           | ✅ Yes        | ✅ Direct SQLite          | ⭐⭐⭐⭐⭐ 2-4x faster with WAL      |
+| **litequeue**     | ⚠️ Manual wrapper           | SQLite3             | ⚠️ Inactive         | ✅ Yes        | ✅ Direct SQLite          | ⭐⭐⭐ Lightweight                   |
+| **aiodiskqueue**  | ✅ Native                   | SQLite3/DbmEngine   | ✅ Active           | ✅ Yes        | ⚠️ Requires Python client | ⭐⭐⭐⭐ 3x slower than DbmEngine    |
+| **Huey**          | ⚠️ Partial (result polling) | Redis/SQLite/Memory | ✅ Active           | ✅ Yes        | ⚠️ Requires worker daemon | ⭐⭐⭐⭐ Good with SQLite            |
+| **taskiq**        | ✅ Native                   | Redis/RabbitMQ/NATS | ✅ Active           | ✅ Yes        | ❌ No file backend        | N/A - requires broker                |
+| **SAQ**           | ✅ Native                   | Redis/Postgres      | ✅ Active           | ✅ Yes        | ❌ No file backend        | ⭐⭐⭐⭐⭐ Fastest (but needs Redis) |
+| **Dramatiq**      | ⚠️ async-dramatiq fork      | Redis/RabbitMQ      | ✅ Active           | ✅ Yes        | ❌ No SQLite backend      | ⭐⭐⭐⭐ Fast with Redis             |
+| **ARQ**           | ✅ Native                   | Redis only          | ⚠️ Maintenance mode | ✅ Yes        | ❌ Redis required         | ⭐⭐⭐⭐⭐ Very fast                 |
 
 **Legend**: ✅ Full support | ⚠️ Partial/workaround needed | ❌ Not supported
 
----
+______________________________________________________________________
 
 ## Recommended Solution: persist-queue + SQLite
 
 ### Why persist-queue?
 
 1. **Battle-tested**: Active since 2016, used in production environments
-2. **Async-first**: Native asyncio.Queue-compatible API (v1.1.0+)
-3. **Performance**: 2-4x faster than v0.3.1 with SQLite WAL mode enabled
-4. **Flexible serialization**: Pickle (default), msgpack, cbor, JSON
-5. **Cross-process**: SQLite handles locking and coordination automatically
-6. **Crash-resistant**: WAL mode ensures durability even during failures
-7. **No daemon required**: Unlike Huey, no separate worker process needed
+1. **Async-first**: Native asyncio.Queue-compatible API (v1.1.0+)
+1. **Performance**: 2-4x faster than v0.3.1 with SQLite WAL mode enabled
+1. **Flexible serialization**: Pickle (default), msgpack, cbor, JSON
+1. **Cross-process**: SQLite handles locking and coordination automatically
+1. **Crash-resistant**: WAL mode ensures durability even during failures
+1. **No daemon required**: Unlike Huey, no separate worker process needed
 
 ### Architecture Diagram
 
@@ -98,12 +98,12 @@ After comprehensive research of Python async task queue systems that don't requi
 ### Key Features for This Use Case
 
 1. **Deduplication**: Use task IDs as SQLite primary keys (prevents duplicates)
-2. **Task States**: Implement status column (pending/in_progress/completed/failed)
-3. **Long-running tasks**: Queue stores metadata, subprocess handles execution
-4. **Crash recovery**: Tasks remain in queue if orchestrator crashes
-5. **No polling overhead**: Can combine with file watching for instant triggering
+1. **Task States**: Implement status column (pending/in_progress/completed/failed)
+1. **Long-running tasks**: Queue stores metadata, subprocess handles execution
+1. **Crash recovery**: Tasks remain in queue if orchestrator crashes
+1. **No polling overhead**: Can combine with file watching for instant triggering
 
----
+______________________________________________________________________
 
 ## Code Examples
 
@@ -494,7 +494,7 @@ if __name__ == "__main__":
     asyncio.run(process_approval_queue())
 ```
 
----
+______________________________________________________________________
 
 ## Performance Implications
 
@@ -518,24 +518,24 @@ if __name__ == "__main__":
 
 ### Benchmark Comparison
 
-| Metric | File-Based | SQLite Queue | Improvement |
-| --- | --- | --- | --- |
-| Enqueue latency | ~5ms | ~2ms | **2.5x faster** |
-| Dequeue latency | 0-5000ms | 0-1000ms | **5x faster (avg)** |
-| Concurrent writers | Prone to conflicts | Serialized by SQLite | **100% reliable** |
-| Concurrent readers | Multiple file reads | WAL mode allows parallel | **Zero blocking** |
-| Crash recovery | Manual | Automatic | **Infinite improvement** |
+| Metric             | File-Based          | SQLite Queue             | Improvement              |
+| ------------------ | ------------------- | ------------------------ | ------------------------ |
+| Enqueue latency    | ~5ms                | ~2ms                     | **2.5x faster**          |
+| Dequeue latency    | 0-5000ms            | 0-1000ms                 | **5x faster (avg)**      |
+| Concurrent writers | Prone to conflicts  | Serialized by SQLite     | **100% reliable**        |
+| Concurrent readers | Multiple file reads | WAL mode allows parallel | **Zero blocking**        |
+| Crash recovery     | Manual              | Automatic                | **Infinite improvement** |
 
----
+______________________________________________________________________
 
 ## Migration Path from File-Based Approach
 
 ### Phase 1: Parallel Operation (Low Risk)
 
 1. Deploy queue-based system alongside existing file-based system
-2. Both systems run simultaneously for 1-2 weeks
-3. Monitor for discrepancies
-4. Validate crash recovery behavior
+1. Both systems run simultaneously for 1-2 weeks
+1. Monitor for discrepancies
+1. Validate crash recovery behavior
 
 **Changes**:
 
@@ -546,8 +546,8 @@ if __name__ == "__main__":
 ### Phase 2: Queue-Primary (Medium Risk)
 
 1. Make queue the primary data source
-2. Keep file-based as fallback
-3. Monitor for 1 week
+1. Keep file-based as fallback
+1. Monitor for 1 week
 
 **Changes**:
 
@@ -558,8 +558,8 @@ if __name__ == "__main__":
 ### Phase 3: Queue-Only (Cleanup)
 
 1. Remove file-based code paths
-2. Delete legacy directories
-3. Update documentation
+1. Delete legacy directories
+1. Update documentation
 
 **Changes**:
 
@@ -634,7 +634,7 @@ if __name__ == "__main__":
     sys.exit(migrate_notifications())
 ```
 
----
+______________________________________________________________________
 
 ## Alternative Solutions Considered
 
@@ -705,36 +705,36 @@ if __name__ == "__main__":
 
 **Verdict**: Could be combined with persist-queue for event-driven dequeue triggering.
 
----
+______________________________________________________________________
 
 ## Recommended Implementation Strategy
 
 ### Immediate (Week 1)
 
 1. **Create queue helpers module** (`/Users/terryli/.claude/automation/lychee/runtime/lib/queue_helpers.py`)
-2. **Add Python wrapper for stop hook** to enqueue tasks
-3. **Test SQLite queue independently** with manual task injection
+1. **Add Python wrapper for stop hook** to enqueue tasks
+1. **Test SQLite queue independently** with manual task injection
 
 ### Short-term (Week 2-3)
 
 1. **Update bot to read from queue** (keep file scanning as fallback)
-2. **Update orchestrator to use AckQueue** for crash recovery
-3. **Deploy in parallel mode** (both file + queue active)
+1. **Update orchestrator to use AckQueue** for crash recovery
+1. **Deploy in parallel mode** (both file + queue active)
 
 ### Medium-term (Week 4-6)
 
 1. **Monitor for issues** in production
-2. **Gradual rollout** to queue-only mode
-3. **Remove file-based code paths**
+1. **Gradual rollout** to queue-only mode
+1. **Remove file-based code paths**
 
 ### Long-term Optimizations
 
 1. **Add watchdog for event-driven dequeue** (eliminate polling latency)
-2. **Implement task priorities** via separate queues
-3. **Add task retry policies** with exponential backoff
-4. **Create monitoring dashboard** for queue metrics
+1. **Implement task priorities** via separate queues
+1. **Add task retry policies** with exponential backoff
+1. **Create monitoring dashboard** for queue metrics
 
----
+______________________________________________________________________
 
 ## SQLite WAL Mode Primer
 
@@ -771,7 +771,7 @@ queue = SQLiteQueue(
 
 **Verdict**: Perfect for local disk workloads (which this is).
 
----
+______________________________________________________________________
 
 ## Deduplication Strategies
 
@@ -828,7 +828,7 @@ def is_duplicate(task_id: str) -> bool:
     return cursor.fetchone() is not None
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting Common Issues
 
@@ -888,7 +888,7 @@ except Exception:
     queue.nack(task_id)  # Return to queue for retry
 ```
 
----
+______________________________________________________________________
 
 ## Comparison to Current Implementation
 
@@ -940,7 +940,7 @@ while True:
 - Built-in deduplication via UNIQUE constraints
 - Clean database storage
 
----
+______________________________________________________________________
 
 ## Resources & References
 
@@ -962,31 +962,31 @@ while True:
 - Huey: https://github.com/coleifer/huey (too heavyweight)
 - taskiq: https://github.com/taskiq-python/taskiq (requires broker)
 
----
+______________________________________________________________________
 
 ## Conclusion
 
 For this specific use case (bash → Python async → subprocess coordination), **persist-queue with SQLite backend** provides the best balance of:
 
 1. **Simplicity**: Drop-in replacement for file-based approach
-2. **Reliability**: ACID guarantees, WAL mode, crash recovery
-3. **Performance**: 2-4x faster than file-based polling
-4. **Maintainability**: Battle-tested library with active development
-5. **Bash Integration**: Direct SQLite CLI access (no Python overhead)
+1. **Reliability**: ACID guarantees, WAL mode, crash recovery
+1. **Performance**: 2-4x faster than file-based polling
+1. **Maintainability**: Battle-tested library with active development
+1. **Bash Integration**: Direct SQLite CLI access (no Python overhead)
 
 The migration path is straightforward, risks are low (parallel operation phase), and the performance improvements are significant.
 
 **Next Steps**:
 
 1. Create `/Users/terryli/.claude/automation/lychee/runtime/lib/queue_helpers.py`
-2. Add Python wrapper for stop hook task enqueuing
-3. Test queue independently with manual task injection
-4. Deploy in parallel mode (file + queue)
-5. Monitor for 1-2 weeks
-6. Switch to queue-only mode
-7. Remove file-based code paths
+1. Add Python wrapper for stop hook task enqueuing
+1. Test queue independently with manual task injection
+1. Deploy in parallel mode (file + queue)
+1. Monitor for 1-2 weeks
+1. Switch to queue-only mode
+1. Remove file-based code paths
 
----
+______________________________________________________________________
 
 **Research completed**: 2025-10-25
 **Recommendation**: Proceed with persist-queue implementation

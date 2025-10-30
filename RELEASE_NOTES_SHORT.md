@@ -10,10 +10,10 @@
 
 - Version 2.7.0 → 2.8.0
 
----
+______________________________________________________________________
 
 **Full Changelog**: https://github.com/terrylica/claude-config/compare/v2.7.0...v2.8.0
 
----
+______________________________________________________________________
 
 _Full changelog: [CHANGELOG.md](https://github.com/terrylica/claude-config/blob/v2.8.0/CHANGELOG.md)_

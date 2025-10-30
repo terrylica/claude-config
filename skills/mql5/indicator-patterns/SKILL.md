@@ -1,8 +1,6 @@
----
-name: mql5-indicator-patterns
-description: MQL5 visual indicator construction patterns and debugging. Use when developing custom MQL5 indicators with visual plots, handling bar recalculation, debugging blank/invisible indicator displays, working with indicator buffers, or fixing display scale issues. Covers IndicatorSetDouble, INDICATOR_MINIMUM, INDICATOR_MAXIMUM, DRAW_LINE, INDICATOR_DATA, INDICATOR_CALCULATIONS, rolling window state management, and bar recalculation patterns.
-allowed-tools: Read, Grep, Edit, Write
----
+______________________________________________________________________
+
+## name: mql5-indicator-patterns description: MQL5 visual indicator construction patterns and debugging. Use when developing custom MQL5 indicators with visual plots, handling bar recalculation, debugging blank/invisible indicator displays, working with indicator buffers, or fixing display scale issues. Covers IndicatorSetDouble, INDICATOR_MINIMUM, INDICATOR_MAXIMUM, DRAW_LINE, INDICATOR_DATA, INDICATOR_CALCULATIONS, rolling window state management, and bar recalculation patterns. allowed-tools: Read, Grep, Edit, Write
 
 # MQL5 Visual Indicator Patterns
 
@@ -39,7 +37,7 @@ int OnInit()
 
 **Reference**: MQL5 forum threads 135340, 137233, 154523 document this limitation
 
----
+______________________________________________________________________
 
 ## Part 2: Buffer Architecture Patterns
 
@@ -74,7 +72,7 @@ int OnInit()
 - Track intermediate calculation steps
 - Maintain rolling window state
 
----
+______________________________________________________________________
 
 ## Part 3: Bar Recalculation Pattern
 
@@ -137,7 +135,7 @@ int OnCalculate(const int rates_total, const int prev_calculated, ...)
 - Static `last_processed_bar` tracks position
 - Only slide window on NEW bars
 
----
+______________________________________________________________________
 
 ## Part 4: Rolling Window State Management
 
@@ -177,7 +175,7 @@ if(prev_calculated == 0 || start == StartCalcPosition)
 - Prime window with initial N values
 - Update incrementally thereafter
 
----
+______________________________________________________________________
 
 ## Part 5: PLOT_DRAW_BEGIN Calculation
 
@@ -212,7 +210,7 @@ int OnInit()
 - Matches bars to ensure alignment with base indicator
 - Required for composite indicators
 
----
+______________________________________________________________________
 
 ## Part 6: Common Pitfalls & Solutions
 
@@ -247,7 +245,7 @@ ArraySetAsSeries(BufHidden, false);
 
 MQL5 defaults to reverse indexing (series) - override for clarity.
 
----
+______________________________________________________________________
 
 ## Part 7: Complete Example Template
 
@@ -379,46 +377,51 @@ int OnCalculate(const int rates_total,
 }
 ```
 
----
+______________________________________________________________________
 
 ## Part 8: Debugging Checklist
 
 When indicator not displaying correctly:
 
 1. **Check scale**:
+
    - [ ] Added `IndicatorSetDouble(INDICATOR_MINIMUM/MAXIMUM)`?
    - [ ] Range appropriate for data values?
 
-2. **Check buffers**:
+1. **Check buffers**:
+
    - [ ] `indicator_buffers` >= `indicator_plots`?
    - [ ] Hidden buffers for tracking old values?
    - [ ] `ArraySetAsSeries(buffer, false)` for all buffers?
 
-3. **Check warmup**:
+1. **Check warmup**:
+
    - [ ] `PLOT_DRAW_BEGIN` calculated correctly?
    - [ ] Early bars initialized to `EMPTY_VALUE`?
 
-4. **Check recalculation**:
+1. **Check recalculation**:
+
    - [ ] Bar detection logic (`is_new_bar`)?
    - [ ] Old value subtraction before adding new?
    - [ ] `last_processed_bar` tracking working?
 
-5. **Check data flow**:
+1. **Check data flow**:
+
    - [ ] Base indicator handle valid?
    - [ ] `CopyBuffer` returning expected count?
    - [ ] No `EMPTY_VALUE` in calculated range?
 
----
+______________________________________________________________________
 
 ## Summary
 
 **Key patterns for production MQL5 indicators**:
 
 1. **Explicit scale** for small values (< 1.0 range)
-2. **Hidden buffers** for recalculation tracking
-3. **New bar detection** prevents rolling window drift
-4. **Static variables** maintain state efficiently
-5. **Proper warmup** calculation prevents misalignment
-6. **Forward indexing** for code clarity
+1. **Hidden buffers** for recalculation tracking
+1. **New bar detection** prevents rolling window drift
+1. **Static variables** maintain state efficiently
+1. **Proper warmup** calculation prevents misalignment
+1. **Forward indexing** for code clarity
 
 These patterns solve the most common indicator development issues encountered in real-world MT5 development.

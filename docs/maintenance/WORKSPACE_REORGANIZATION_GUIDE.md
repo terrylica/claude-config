@@ -5,7 +5,7 @@
 **Created**: 2025-10-23
 **Approach**: Conservative, documentation-first, phased execution
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
@@ -29,22 +29,22 @@ This guide provides **step-by-step instructions** for executing the workspace re
 - Automated health checks
 - Comprehensive documentation
 
----
+______________________________________________________________________
 
 ## Quick Reference
 
-| Phase | Risk | Duration | Deliverable |
-| --- | --- | --- | --- |
-| **Phase 1: Documentation** | Minimal | 8h | Complete specs & docs |
-| **Phase 2: Safe Cleanup** | Low | 2h | Remove backups, fix anomalies |
-| **Phase 3: Root Cleanup** | Medium | 3h | Move root scripts |
-| **Phase 4: System Consolidation** | Medium | 4h | Organize system artifacts |
-| **Phase 5: Archival** | Low | 2h | Archive old artifacts |
-| **Phase 6: Advanced (Optional)** | Medium | 3h | uv migration, etc. |
+| Phase                             | Risk    | Duration | Deliverable                   |
+| --------------------------------- | ------- | -------- | ----------------------------- |
+| **Phase 1: Documentation**        | Minimal | 8h       | Complete specs & docs         |
+| **Phase 2: Safe Cleanup**         | Low     | 2h       | Remove backups, fix anomalies |
+| **Phase 3: Root Cleanup**         | Medium  | 3h       | Move root scripts             |
+| **Phase 4: System Consolidation** | Medium  | 4h       | Organize system artifacts     |
+| **Phase 5: Archival**             | Low     | 2h       | Archive old artifacts         |
+| **Phase 6: Advanced (Optional)**  | Medium  | 3h       | uv migration, etc.            |
 
 **Total Duration**: 22 hours (can be done incrementally)
 
----
+______________________________________________________________________
 
 ## Phase 1: Documentation & Specification (COMPLETED)
 
@@ -55,21 +55,21 @@ This guide provides **step-by-step instructions** for executing the workspace re
 ### Deliverables Created
 
 1. ✅ `/specifications/workspace-reorganization.yaml` - Target architecture
-2. ✅ `/specifications/reorg-move-map.yaml` - Complete file move mapping
-3. ✅ `/specifications/reorg-cleanup-targets.yaml` - Cleanup targets
-4. ✅ `/specifications/workspace-health-check.yaml` - Validation spec
-5. ✅ `/docs/standards/TOOL_ORGANIZATION.md` - Tool taxonomy
-6. ✅ `/docs/maintenance/ARTIFACT_RETENTION.md` - Retention policies
-7. ✅ `/docs/maintenance/REORGANIZATION_ROLLBACK.md` - Rollback procedures
-8. ✅ `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md` - This guide
-9. ✅ `/tools/tool-manifest.yaml` - Tool registry
-10. ✅ Execution checklists (pre/phase/post)
+1. ✅ `/specifications/reorg-move-map.yaml` - Complete file move mapping
+1. ✅ `/specifications/reorg-cleanup-targets.yaml` - Cleanup targets
+1. ✅ `/specifications/workspace-health-check.yaml` - Validation spec
+1. ✅ `/docs/standards/TOOL_ORGANIZATION.md` - Tool taxonomy
+1. ✅ `/docs/maintenance/ARTIFACT_RETENTION.md` - Retention policies
+1. ✅ `/docs/maintenance/REORGANIZATION_ROLLBACK.md` - Rollback procedures
+1. ✅ `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md` - This guide
+1. ✅ `/tools/tool-manifest.yaml` - Tool registry
+1. ✅ Execution checklists (pre/phase/post)
 
 ### Next Steps
 
 Review all documentation before proceeding to Phase 2.
 
----
+______________________________________________________________________
 
 ## Phase 2: Safe Cleanup
 
@@ -84,11 +84,13 @@ Execute `/specifications/reorg-execution-checklists.yaml` → `pre_migration_che
 ###Operations
 
 1. **Delete backup files** (after git verification):
+
    - `/statusline.sh.backup`
    - `/archive/sage-sync-legacy/sage-sync.original`
    - `/automation/cns/cns_hook_entry.sh.backup`
 
-2. **Fix nested directory**:
+1. **Fix nested directory**:
+
    - Move `/.claude/settings.local.json` → `/system/settings.local.json`
    - Remove empty `/.claude/` directory
 
@@ -131,7 +133,7 @@ git commit -m "refactor(workspace): phase-2 safe cleanup - remove backups, fix n
 git reset --hard HEAD~1
 ```
 
----
+______________________________________________________________________
 
 ## Phase 3: Root Cleanup
 
@@ -142,10 +144,12 @@ git reset --hard HEAD~1
 ### Operations
 
 1. **Create tool subdirectories**:
+
    - `/tools/bin/`
    - `/tools/config/`
 
-2. **Move root scripts**:
+1. **Move root scripts**:
+
    - `/install-all-tools` → `/tools/bin/install-all-tools.sh`
    - `/disable-pyright.sh` → `/tools/config/disable-pyright.sh`
    - `/instant-sync-option.sh` → `/archive/legacy/instant-sync-option.sh`
@@ -197,7 +201,7 @@ git commit -m "refactor(workspace): phase-3 root cleanup - move scripts to tools
 
 See `/docs/maintenance/REORGANIZATION_ROLLBACK.md` → Phase 3
 
----
+______________________________________________________________________
 
 ## Phase 4: System Consolidation ⚠️ HIGH RISK
 
@@ -218,9 +222,9 @@ This phase moves directories that Claude Code may actively use:
 ### If Proceeding
 
 1. **Full workspace backup** (not just git)
-2. **Test in isolated environment first**
-3. **Have rollback procedure ready**
-4. **Monitor Claude Code behavior closely**
+1. **Test in isolated environment first**
+1. **Have rollback procedure ready**
+1. **Monitor Claude Code behavior closely**
 
 ### Execution (CAUTIOUS)
 
@@ -259,7 +263,7 @@ git commit -m "refactor(workspace): phase-4 system consolidation - organize runt
 
 See `/docs/maintenance/REORGANIZATION_ROLLBACK.md` → Phase 4 (CRITICAL section)
 
----
+______________________________________________________________________
 
 ## Phase 5: Artifact Archival
 
@@ -303,7 +307,7 @@ git commit -m "chore(workspace): phase-5 archival - compress old artifacts"
 du -sh shell-snapshots/ debug/ file-history/ archive/
 ```
 
----
+______________________________________________________________________
 
 ## Phase 6: Advanced (Optional)
 
@@ -314,14 +318,14 @@ du -sh shell-snapshots/ debug/ file-history/ archive/
 ### Operations
 
 1. Migrate gfm-link-checker from .venv to uv
-2. Archive old CHANGELOG entries (optional)
-3. Document statusline.sh usage (optional)
+1. Archive old CHANGELOG entries (optional)
+1. Document statusline.sh usage (optional)
 
 ### Recommendation
 
 **Skip this phase initially**. Focus on Phases 1-5 first. Revisit Phase 6 after validating reorganization success.
 
----
+______________________________________________________________________
 
 ## Post-Reorganization
 
@@ -363,7 +367,7 @@ gfm-check docs/
 - Monthly artifact archival
 - Update documentation as needed
 
----
+______________________________________________________________________
 
 ## Maintenance
 
@@ -375,13 +379,14 @@ gfm-check docs/
    /tools/maintenance/archive-artifacts.sh  # Create this script
    ```
 
-2. **Health Check**:
+1. **Health Check**:
 
    ```bash
    /tools/bin/workspace-health-check.sh
    ```
 
-3. **Tool Manifest Update**:
+1. **Tool Manifest Update**:
+
    - Review `/tools/tool-manifest.yaml`
    - Update for any new/removed tools
 
@@ -395,20 +400,20 @@ gfm-check docs/
 
 See `/docs/maintenance/ARTIFACT_RETENTION.md` for automation details.
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Claude Code won't start**: Rollback Phase 4
-2. **Tools not found**: Check symlinks and PATH
-3. **Documentation links broken**: Run gfm-check and fix
-4. **Artifact archival failed**: Check compression, disk space
+1. **Tools not found**: Check symlinks and PATH
+1. **Documentation links broken**: Run gfm-check and fix
+1. **Artifact archival failed**: Check compression, disk space
 
 See `/docs/maintenance/REORGANIZATION_ROLLBACK.md` for detailed troubleshooting.
 
----
+______________________________________________________________________
 
 ## Success Criteria
 
@@ -425,7 +430,7 @@ After reorganization, verify:
 - [ ] Space recovery achieved (~150-200 MB)
 - [ ] Monitoring and maintenance automated
 
----
+______________________________________________________________________
 
 ## Reference
 
@@ -455,7 +460,7 @@ git reset --hard HEAD~1
 /tools/rollback-restore.sh --backup=/path/to/backup.tar.gz
 ```
 
----
+______________________________________________________________________
 
 **Status**: Ready for phased execution
 **Next Step**: Review all documentation, then execute Phase 2

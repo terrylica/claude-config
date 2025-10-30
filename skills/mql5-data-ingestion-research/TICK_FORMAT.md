@@ -3,7 +3,7 @@
 **Status**: 🔬 Research | ⚠️ Not Tested
 **Source**: [MqlTick Structure](https://www.mql5.com/en/docs/constants/structures/mqltick)
 
----
+______________________________________________________________________
 
 ## CSV Format for CustomTicksReplace()
 
@@ -19,27 +19,27 @@ unix_ms,bid,ask,last,volume_real
 **Columns**:
 
 1. `unix_ms` (int64): Unix timestamp in **milliseconds** since epoch
-2. `bid` (double): Bid price (0 if not applicable)
-3. `ask` (double): Ask price (0 if not applicable)
-4. `last` (double): Last trade price (0 if not applicable)
-5. `volume_real` (double): Trade volume (0 if not applicable)
+1. `bid` (double): Bid price (0 if not applicable)
+1. `ask` (double): Ask price (0 if not applicable)
+1. `last` (double): Last trade price (0 if not applicable)
+1. `volume_real` (double): Trade volume (0 if not applicable)
 
 ### Field Requirements
 
-| Field | Required | Type | Constraints | Default if Missing |
-| --- | --- | --- | --- | --- |
-| `unix_ms` | ✅ YES | int64 | > 0, strictly ascending | N/A (import fails) |
-| `bid` | ⚠️ Conditional | double | ≥ 0, if >0 then `ask` should be set | 0 (MT5 infers no bid) |
-| `ask` | ⚠️ Conditional | double | ≥ 0, if >0 then `bid` ≤ `ask` | 0 (MT5 infers no ask) |
-| `last` | ⚠️ Conditional | double | ≥ 0 | 0 (MT5 infers no last) |
-| `volume_real` | ❌ NO | double | ≥ 0 | 0 |
+| Field         | Required       | Type   | Constraints                         | Default if Missing     |
+| ------------- | -------------- | ------ | ----------------------------------- | ---------------------- |
+| `unix_ms`     | ✅ YES         | int64  | > 0, strictly ascending             | N/A (import fails)     |
+| `bid`         | ⚠️ Conditional | double | ≥ 0, if >0 then `ask` should be set | 0 (MT5 infers no bid)  |
+| `ask`         | ⚠️ Conditional | double | ≥ 0, if >0 then `bid` ≤ `ask`       | 0 (MT5 infers no ask)  |
+| `last`        | ⚠️ Conditional | double | ≥ 0                                 | 0 (MT5 infers no last) |
+| `volume_real` | ❌ NO          | double | ≥ 0                                 | 0                      |
 
 **Conditional Logic**:
 
 - At least ONE of `bid`, `ask`, or `last` MUST be > 0 per tick
 - If both `bid` and `ask` > 0, then `bid ≤ ask` must hold
 
----
+______________________________________________________________________
 
 ## MqlTick Structure Mapping
 
@@ -69,16 +69,16 @@ struct MqlTick {
 
 When you provide ticks via `CustomTicksReplace()`, MT5 sets flags:
 
-| Condition | Flag Set | Meaning |
-| --- | --- | --- |
-| `bid > 0` | `TICK_FLAG_BID` | Bid price changed |
-| `ask > 0` | `TICK_FLAG_ASK` | Ask price changed |
-| `last > 0` | `TICK_FLAG_LAST` | Last price (trade) changed |
-| `volume_real > 0` | `TICK_FLAG_VOLUME` | Volume present |
+| Condition         | Flag Set           | Meaning                    |
+| ----------------- | ------------------ | -------------------------- |
+| `bid > 0`         | `TICK_FLAG_BID`    | Bid price changed          |
+| `ask > 0`         | `TICK_FLAG_ASK`    | Ask price changed          |
+| `last > 0`        | `TICK_FLAG_LAST`   | Last price (trade) changed |
+| `volume_real > 0` | `TICK_FLAG_VOLUME` | Volume present             |
 
 **Source**: Inferred from [CustomTicksAdd() behavior](https://www.mql5.com/en/book/advanced/custom_symbols/custom_symbols_ticks)
 
----
+______________________________________________________________________
 
 ## Forex Tick Data Specifics (Exness Use Case)
 
@@ -146,7 +146,7 @@ df['last'] = 0
 
 **Caveat**: This **manufactures** spread and loses true bid/ask dynamics. Use raw_spread variant if available.
 
----
+______________________________________________________________________
 
 ## Validation Rules (Pre-Import)
 
@@ -188,7 +188,7 @@ def validate_finite(df: pd.DataFrame) -> bool:
     return df[cols].applymap(np.isfinite).all().all()
 ```
 
----
+______________________________________________________________________
 
 ## Performance Considerations (Unvalidated)
 
@@ -236,7 +236,7 @@ if(fill > 0) {
 
 **Validation Needed**: Measure actual memory usage in MT5
 
----
+______________________________________________________________________
 
 ## Edge Cases (Require Testing)
 
@@ -264,32 +264,34 @@ if(fill > 0) {
 
 **Recommendation**: Filter out closed-market ticks before import
 
----
+______________________________________________________________________
 
 ## GUI Import Alternative (Manual Testing)
 
 For small datasets, use MT5 GUI instead of MQL5 scripts:
 
 1. **Create Custom Symbol**:
+
    - Symbols → Create Custom Symbol
    - Set name: `EURUSD.EXNESS`
    - Set properties: Digits=5, Contract Size=100000
 
-2. **Prepare CSV** (same format):
+1. **Prepare CSV** (same format):
 
    ```csv
    Date,Time,Bid,Ask,Last,Volume
    2024.01.02,00:00:01.234,1.10456,1.10458,0,0
    ```
 
-3. **Import via GUI**:
+1. **Import via GUI**:
+
    - Select symbol → Ticks tab → Import Ticks
    - Map columns: Date+Time → Time, Bid → Bid, etc.
    - Click Import
 
 **Limitation**: GUI is manual; not suitable for millions of ticks
 
----
+______________________________________________________________________
 
 ## Changelog
 

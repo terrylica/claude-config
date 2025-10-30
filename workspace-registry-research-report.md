@@ -3,7 +3,7 @@
 **Date**: 2025-10-25
 **Focus**: Battle-tested patterns from production tools (2024-2025)
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
@@ -14,7 +14,7 @@ This report analyzes modern patterns for workspace/project registry and discover
 - **Storage**: SQLite with FTS5 provides optimal metadata indexing and query performance
 - **Migration**: Phased approach from static JSON to SQLite with backward compatibility
 
----
+______________________________________________________________________
 
 ## 1. How Other Tools Handle Multi-Project Registries
 
@@ -236,10 +236,10 @@ source_env ../shared/.envrc
 **Lifecycle**:
 
 1. Change directory
-2. direnv hook detects `.envrc`
-3. If authorized, load into bash sub-shell
-4. Export variables to current shell
-5. Unload when leaving directory
+1. direnv hook detects `.envrc`
+1. If authorized, load into bash sub-shell
+1. Export variables to current shell
+1. Unload when leaving directory
 
 **Lessons**:
 
@@ -310,8 +310,8 @@ rust 1.70.0
 - Shims in `~/.asdf/shims/` added to PATH once
 - Each shim is a bash script that:
   1. Looks up current directory's `.tool-versions`
-  2. Selects appropriate version
-  3. Delegates to real binary
+  1. Selects appropriate version
+  1. Delegates to real binary
 
 **Lessons**:
 
@@ -348,22 +348,22 @@ rust 1.70.0
 - Case-insensitive improves usability
 - Hidden file option respects minimalist preferences
 
----
+______________________________________________________________________
 
 ## 2. Workspace Identity Schemes
 
 ### 2.1 Comparison Matrix
 
-| Scheme | Bits | Collision Resistance | Human Readable | Sortable | Global Unique | Content Based |
-| --- | --- | --- | --- | --- | --- | --- |
-| **UUID v4** | 128 | 50% @ 2.7×10¹⁸ | ❌ | ❌ | ✅ | ❌ |
-| **UUID v7** | 128 | 50% @ 2.7×10¹⁸ | ❌ | ✅ | ✅ | ❌ |
-| **ULID** | 128 | 50% @ 2.7×10¹⁸ | ⚠️ | ✅ | ✅ | ❌ |
-| **NanoID** | ~126 | 50% @ ~10¹⁸ | ⚠️ | ❌ | ✅ | ❌ |
-| **SHA-256 (full)** | 256 | 50% @ 2¹²⁸ | ❌ | ❌ | ❌ | ✅ |
-| **SHA-256 (128-bit)** | 128 | 50% @ 2⁶⁴ | ❌ | ❌ | ❌ | ✅ |
-| **SHA-256 (64-bit)** | 64 | 50% @ 2³² (~4B) | ❌ | ❌ | ❌ | ✅ |
-| **SHA-256 (32-bit)** | 32 | 50% @ 2¹⁶ (~64K) | ❌ | ❌ | ❌ | ✅ |
+| Scheme                | Bits | Collision Resistance | Human Readable | Sortable | Global Unique | Content Based |
+| --------------------- | ---- | -------------------- | -------------- | -------- | ------------- | ------------- |
+| **UUID v4**           | 128  | 50% @ 2.7×10¹⁸       | ❌             | ❌       | ✅            | ❌            |
+| **UUID v7**           | 128  | 50% @ 2.7×10¹⁸       | ❌             | ✅       | ✅            | ❌            |
+| **ULID**              | 128  | 50% @ 2.7×10¹⁸       | ⚠️             | ✅       | ✅            | ❌            |
+| **NanoID**            | ~126 | 50% @ ~10¹⁸          | ⚠️             | ❌       | ✅            | ❌            |
+| **SHA-256 (full)**    | 256  | 50% @ 2¹²⁸           | ❌             | ❌       | ❌            | ✅            |
+| **SHA-256 (128-bit)** | 128  | 50% @ 2⁶⁴            | ❌             | ❌       | ❌            | ✅            |
+| **SHA-256 (64-bit)**  | 64   | 50% @ 2³² (~4B)      | ❌             | ❌       | ❌            | ✅            |
+| **SHA-256 (32-bit)**  | 32   | 50% @ 2¹⁶ (~64K)     | ❌             | ❌       | ❌            | ✅            |
 
 ### 2.2 Collision Probability Analysis
 
@@ -381,12 +381,12 @@ where:
 
 **Practical Numbers**:
 
-| Bits | 50% Collision @ | 1 in 1B @ | Safe Up To |
-| --- | --- | --- | --- |
-| 32 | 65,536 | 1,933 | 1,000 |
-| 64 | 4.3 billion | 103 million | 10 million |
-| 128 | 2.7×10¹⁸ | 103 trillion | 1 trillion |
-| 256 | 2.7×10³⁸ | 10⁶³ | 10⁶⁰ |
+| Bits | 50% Collision @ | 1 in 1B @    | Safe Up To |
+| ---- | --------------- | ------------ | ---------- |
+| 32   | 65,536          | 1,933        | 1,000      |
+| 64   | 4.3 billion     | 103 million  | 10 million |
+| 128  | 2.7×10¹⁸        | 103 trillion | 1 trillion |
+| 256  | 2.7×10³⁸        | 10⁶³         | 10⁶⁰       |
 
 **Current Problem**: 8-char hex (32-bit) SHA-256 truncation
 
@@ -479,17 +479,17 @@ def workspace_id_from_path(path: Path) -> str:
 
 **Recommendation**: Use pure ULID for stability, store human-readable name as metadata.
 
----
+______________________________________________________________________
 
 ## 3. Auto-Discovery Patterns
 
 ### 3.1 File System Watching vs Periodic Scanning
 
-| Approach | Pros | Cons | Best For |
-| --- | --- | --- | --- |
-| **File System Watching** | Real-time updates, no polling overhead | Complex setup, platform-specific APIs, high memory (150MB for 500K files), queue overflow risk | Active development with frequent workspace creation |
-| **Periodic Scanning** | Simple, cross-platform, low memory | Stale data between scans, CPU spikes during scan | Infrequent workspace changes, embedded/resource-constrained |
-| **On-Demand Scanning** | Zero overhead when idle, always fresh data | Slight delay on first access | CLI tools, most development workflows |
+| Approach                 | Pros                                       | Cons                                                                                           | Best For                                                    |
+| ------------------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| **File System Watching** | Real-time updates, no polling overhead     | Complex setup, platform-specific APIs, high memory (150MB for 500K files), queue overflow risk | Active development with frequent workspace creation         |
+| **Periodic Scanning**    | Simple, cross-platform, low memory         | Stale data between scans, CPU spikes during scan                                               | Infrequent workspace changes, embedded/resource-constrained |
+| **On-Demand Scanning**   | Zero overhead when idle, always fresh data | Slight delay on first access                                                                   | CLI tools, most development workflows                       |
 
 **Recommendation**: On-demand scanning with SQLite caching (hybrid approach).
 
@@ -726,18 +726,18 @@ observer.join()
 
 **Recommendation**: Use for daemon-based systems, skip for CLI tools.
 
----
+______________________________________________________________________
 
 ## 4. Workspace Metadata Storage
 
 ### 4.1 SQLite vs DuckDB vs File-based
 
-| Storage | Performance | Query Features | Size | Use Case |
-| --- | --- | --- | --- | --- |
-| **SQLite** | Point queries: ✅✅✅<br>Aggregations: ⚠️ | Full-text search (FTS5), transactions, indexes | ~1.5MB | OLTP workloads, metadata registry |
-| **DuckDB** | Point queries: ⚠️<br>Aggregations: ✅✅✅ | Analytical queries, columnar storage | ~30MB | Data analysis, logs |
-| **JSON files** | Single file: ✅✅<br>Search: ❌ | Manual parsing | ~KB-MB | Simple configs |
-| **YAML files** | Single file: ✅✅<br>Search: ❌ | Manual parsing | ~KB-MB | Human-editable configs |
+| Storage        | Performance                               | Query Features                                 | Size   | Use Case                          |
+| -------------- | ----------------------------------------- | ---------------------------------------------- | ------ | --------------------------------- |
+| **SQLite**     | Point queries: ✅✅✅<br>Aggregations: ⚠️ | Full-text search (FTS5), transactions, indexes | ~1.5MB | OLTP workloads, metadata registry |
+| **DuckDB**     | Point queries: ⚠️<br>Aggregations: ✅✅✅ | Analytical queries, columnar storage           | ~30MB  | Data analysis, logs               |
+| **JSON files** | Single file: ✅✅<br>Search: ❌           | Manual parsing                                 | ~KB-MB | Simple configs                    |
+| **YAML files** | Single file: ✅✅<br>Search: ❌           | Manual parsing                                 | ~KB-MB | Human-editable configs            |
 
 **Recommendation**: SQLite for workspace registry.
 
@@ -1027,7 +1027,7 @@ def migrate_json_to_sqlite():
 - Update documentation
 - Add validation checks
 
----
+______________________________________________________________________
 
 ## 5. Code Examples
 
@@ -1709,7 +1709,7 @@ if __name__ == "__main__":
         print(entry)
 ```
 
----
+______________________________________________________________________
 
 ## 6. Migration Path from Static JSON Registry
 
@@ -1724,22 +1724,22 @@ if __name__ == "__main__":
 **Problems**:
 
 1. Collision risk with 65K+ workspaces
-2. No metadata tracking
-3. No lifecycle events
-4. Manual maintenance
+1. No metadata tracking
+1. No lifecycle events
+1. Manual maintenance
 
 ### 6.2 Migration Strategy
 
 **Timeline**: 6 weeks
 
-| Phase | Duration | Activities | Risk |
-| --- | --- | --- | --- |
-| **1. Preparation** | Week 1 | Schema design, testing, backup plan | Low |
-| **2. Dual-Write** | Week 2-3 | Write to both JSON and SQLite | Medium |
-| **3. Dual-Read** | Week 4 | Read from SQLite, fallback to JSON | Medium |
-| **4. Migration** | Week 5 | Bulk migrate JSON to SQLite | High |
-| **5. Validation** | Week 6 | Verify integrity, remove JSON code | Low |
-| **6. Cleanup** | Week 7+ | Documentation, monitoring | Low |
+| Phase              | Duration | Activities                          | Risk   |
+| ------------------ | -------- | ----------------------------------- | ------ |
+| **1. Preparation** | Week 1   | Schema design, testing, backup plan | Low    |
+| **2. Dual-Write**  | Week 2-3 | Write to both JSON and SQLite       | Medium |
+| **3. Dual-Read**   | Week 4   | Read from SQLite, fallback to JSON  | Medium |
+| **4. Migration**   | Week 5   | Bulk migrate JSON to SQLite         | High   |
+| **5. Validation**  | Week 6   | Verify integrity, remove JSON code  | Low    |
+| **6. Cleanup**     | Week 7+  | Documentation, monitoring           | Low    |
 
 ### 6.3 Migration Implementation
 
@@ -2050,7 +2050,7 @@ git checkout main
 - Verify all tests pass before production migration
 - Keep JSON registry for 30 days post-migration
 
----
+______________________________________________________________________
 
 ## 7. Performance Benchmarks
 
@@ -2154,7 +2154,7 @@ def benchmark_queries(db_path: str, n_iterations: int = 1000):
 # FTS search: 12,000 queries/sec
 ```
 
----
+______________________________________________________________________
 
 ## 8. Recommendations Summary
 
@@ -2198,11 +2198,11 @@ def benchmark_queries(db_path: str, n_iterations: int = 1000):
 **Phased approach** (6 weeks):
 
 1. Preparation + testing
-2. Dual-write (JSON + SQLite)
-3. Dual-read (SQLite primary, JSON fallback)
-4. Bulk migration with verification
-5. Validation + monitoring
-6. Cleanup + documentation
+1. Dual-write (JSON + SQLite)
+1. Dual-read (SQLite primary, JSON fallback)
+1. Bulk migration with verification
+1. Validation + monitoring
+1. Cleanup + documentation
 
 ### 8.6 Implementation Priorities
 
@@ -2227,7 +2227,7 @@ def benchmark_queries(db_path: str, n_iterations: int = 1000):
 - Remove JSON code
 - Update documentation
 
----
+______________________________________________________________________
 
 ## 9. References
 
@@ -2261,33 +2261,33 @@ All code examples in this report are production-ready with:
 - Docstrings
 - Usage examples
 
----
+______________________________________________________________________
 
 ## Appendix A: Collision Probability Tables
 
 ### A.1 Hash Truncation Safety
 
 | Hash Bits | Safe Workspace Count | 50% Collision @ | 1-in-1B Collision @ |
-| --- | --- | --- | --- |
-| 32 | 1,000 | 65,536 | 1,933 |
-| 64 | 10,000,000 | 4.3 billion | 103 million |
-| 96 | 1 trillion | 2.8×10¹⁴ | 6.7 billion |
-| 128 | 1 quintillion | 2.7×10¹⁸ | 103 trillion |
-| 256 | 10⁶⁰ | 2.7×10³⁸ | 10⁶³ |
+| --------- | -------------------- | --------------- | ------------------- |
+| 32        | 1,000                | 65,536          | 1,933               |
+| 64        | 10,000,000           | 4.3 billion     | 103 million         |
+| 96        | 1 trillion           | 2.8×10¹⁴        | 6.7 billion         |
+| 128       | 1 quintillion        | 2.7×10¹⁸        | 103 trillion        |
+| 256       | 10⁶⁰                 | 2.7×10³⁸        | 10⁶³                |
 
 ### A.2 Current System (8-char hex = 32-bit)
 
 | Workspaces | Collision Probability |
-| --- | --- |
-| 100 | 0.00012% |
-| 1,000 | 0.012% |
-| 10,000 | 1.16% |
-| 65,536 | 50% |
-| 100,000 | 77% |
+| ---------- | --------------------- |
+| 100        | 0.00012%              |
+| 1,000      | 0.012%                |
+| 10,000     | 1.16%                 |
+| 65,536     | 50%                   |
+| 100,000    | 77%                   |
 
 **Conclusion**: Current 32-bit scheme unsafe beyond 10K workspaces.
 
----
+______________________________________________________________________
 
 ## Appendix B: Sample Queries
 
@@ -2337,6 +2337,6 @@ GROUP BY event_type, day
 ORDER BY day DESC;
 ```
 
----
+______________________________________________________________________
 
 **End of Report**

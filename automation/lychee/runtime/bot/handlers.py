@@ -45,7 +45,7 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
             "• Validation was run before progressive disclosure was implemented\n"
             "• Results file was manually deleted\n"
             "• Workspace path changed",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 
@@ -56,8 +56,8 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
         await query.message.reply_text(
             f"❌ Failed to parse lychee JSON output\n\n"
             f"Error: {e}\n\n"
-            f"File: `{json_results}`",
-            parse_mode="Markdown"
+            f"File: <code>{json_results}</code>",
+            parse_mode="HTML"
         )
         raise  # Fail-fast
 
@@ -68,7 +68,7 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
         await query.message.reply_text(
             "✅ No detailed errors found\n\n"
             "The error_map is empty. All links may have been fixed.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 
@@ -99,8 +99,8 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
         details_text = details_text[:3800] + "\n\n... (truncated)"
 
     await query.message.reply_text(
-        f"📋 **Detailed Error Breakdown**\n{details_text}",
-        parse_mode='Markdown'
+        f"📋 <b>Detailed Error Breakdown</b>\n{details_text}",
+        parse_mode='HTML'
     )
 
     print(f"📋 Sent detailed breakdown for session {session_id}")
@@ -146,7 +146,7 @@ async def handle_workflow_selection(
             text="✏️ Custom Prompt\n\n"
                  "Custom workflow prompts will be available in Phase 4.\n"
                  "For now, please select a preset workflow.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 
@@ -246,7 +246,7 @@ async def handle_workflow_selection(
     sent_message = await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=initial_message,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     message_id = sent_message.message_id
 

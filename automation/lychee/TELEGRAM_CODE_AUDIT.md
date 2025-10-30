@@ -3,7 +3,7 @@
 **Date**: 2025-10-27
 **Purpose**: Identify all Telegram-related code, specifications, and potential cleanup targets
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
@@ -12,12 +12,12 @@
 **Key Findings**:
 
 1. ✅ **Active runtime code properly consolidated** in `automation/lychee/runtime/`
-2. ⚠️ **Specifications scattered** between global `/specifications/` and `automation/lychee/specifications/`
-3. ⚠️ **Logs scattered** in global `/logs/` instead of `automation/lychee/logs/`
-4. ✅ **Archive properly organized** - deprecated code clearly separated
-5. ⚠️ **Markdown documentation duplicated** - TELEGRAM_IMPROVEMENTS_PLAN.md superseded by YAML spec
+1. ⚠️ **Specifications scattered** between global `/specifications/` and `automation/lychee/specifications/`
+1. ⚠️ **Logs scattered** in global `/logs/` instead of `automation/lychee/logs/`
+1. ✅ **Archive properly organized** - deprecated code clearly separated
+1. ⚠️ **Markdown documentation duplicated** - TELEGRAM_IMPROVEMENTS_PLAN.md superseded by YAML spec
 
----
+______________________________________________________________________
 
 ## 1. Active Runtime Code (Properly Organized)
 
@@ -46,7 +46,7 @@
 
 **Status**: ✅ Well-organized, no cleanup needed
 
----
+______________________________________________________________________
 
 ## 2. Specifications (SCATTERED - CONSOLIDATION NEEDED)
 
@@ -71,7 +71,7 @@ telegram-bot-improvements.yaml                 (NEW, v1.1.0, P1+P2 SSoT)
 - ⚠️ **MOVE** the two global YAML specs into `automation/lychee/specifications/`
 - Update all references in code/docs
 
----
+______________________________________________________________________
 
 ## 3. State Files (Active)
 
@@ -88,7 +88,7 @@ events.db                                      (SQLite event store)
 
 **Status**: ✅ Properly located, no cleanup needed
 
----
+______________________________________________________________________
 
 ## 4. Setup Scripts (Active)
 
@@ -105,7 +105,7 @@ events.db                                      (SQLite event store)
 
 **Status**: ✅ Properly organized
 
----
+______________________________________________________________________
 
 ## 5. Logs (SCATTERED - CONSOLIDATION NEEDED)
 
@@ -124,7 +124,7 @@ telegram-handler.error.log                     (1.9MB, Oct 24)
 - ⚠️ **MOVE** telegram logs from global `/logs/` to `automation/lychee/logs/`
 - Update bot logging configuration
 
----
+______________________________________________________________________
 
 ## 6. Archive (Properly Organized)
 
@@ -140,7 +140,7 @@ telegram-handler.error.log                     (1.9MB, Oct 24)
 
 **Status**: ✅ Properly archived, no cleanup needed
 
----
+______________________________________________________________________
 
 ## 7. Documentation (DUPLICATION - CLEANUP NEEDED)
 
@@ -166,7 +166,7 @@ automation/lychee/README.md                        (Main README)
 - ⚠️ **PRUNE** `TELEGRAM_IMPROVEMENTS_PLAN.md` - superseded by SSoT YAML spec
 - Update it to reference `specifications/telegram-bot-improvements.yaml` instead
 
----
+______________________________________________________________________
 
 ## 8. Testing
 
@@ -180,7 +180,7 @@ inject-results.sh                              (Result injection)
 
 **Status**: ✅ Properly organized
 
----
+______________________________________________________________________
 
 ## 9. Configuration
 
@@ -194,7 +194,7 @@ inject-results.sh                              (Result injection)
 
 **Status**: ✅ No telegram-specific config issues
 
----
+______________________________________________________________________
 
 ## Consolidation Plan
 
@@ -207,11 +207,13 @@ inject-results.sh                              (Result injection)
       /Users/terryli/.claude/automation/lychee/specifications/
    ```
 
-2. **Prune superseded markdown**
+1. **Prune superseded markdown**
+
    - Update `TELEGRAM_IMPROVEMENTS_PLAN.md` to reference SSoT YAML
    - Or delete if fully superseded
 
-3. **Consolidate logs**
+1. **Consolidate logs**
+
    ```bash
    mkdir -p /Users/terryli/.claude/automation/lychee/logs
    mv /Users/terryli/.claude/logs/telegram-*.log \
@@ -221,9 +223,11 @@ inject-results.sh                              (Result injection)
 ### MEDIUM PRIORITY
 
 4. **Update bot logging paths**
+
    - Change log file paths in bot to use `automation/lychee/logs/`
 
-5. **Remove backup file**
+1. **Remove backup file**
+
    - Delete `multi-workspace-bot.py.backup` after confirming P1+P2 stability
 
 ### LOW PRIORITY
@@ -231,19 +235,19 @@ inject-results.sh                              (Result injection)
 6. **Verify archive completeness**
    - Confirm no active code accidentally in `archive/`
 
----
+______________________________________________________________________
 
 ## Outside Lychee Folder
 
 ### Global Areas with Telegram References
 
 1. **`/Users/terryli/.claude/specifications/`** (2 YAML files) - MOVE to lychee
-2. **`/Users/terryli/.claude/logs/`** (2 log files) - MOVE to lychee
-3. **`/Users/terryli/.claude/docs/architecture/`** - General architecture docs (mentions telegram in task queue context)
+1. **`/Users/terryli/.claude/logs/`** (2 log files) - MOVE to lychee
+1. **`/Users/terryli/.claude/docs/architecture/`** - General architecture docs (mentions telegram in task queue context)
 
 **Status**: Only specifications and logs need consolidation
 
----
+______________________________________________________________________
 
 ## Dangling/Forgotten Components
 
@@ -258,10 +262,10 @@ inject-results.sh                              (Result injection)
 ⚠️ **Minor organization issues**:
 
 1. Specifications split between global and lychee
-2. Logs in global `/logs/` instead of lychee
-3. Markdown docs duplicate YAML specs
+1. Logs in global `/logs/` instead of lychee
+1. Markdown docs duplicate YAML specs
 
----
+______________________________________________________________________
 
 ## Implementation Checklist
 
@@ -287,7 +291,7 @@ inject-results.sh                              (Result injection)
 - [ ] Remove `multi-workspace-bot.py.backup`
 - [ ] Prune outdated markdown docs if fully superseded
 
----
+______________________________________________________________________
 
 ## Conclusion
 
@@ -298,8 +302,8 @@ inject-results.sh                              (Result injection)
 **Recommended Actions**:
 
 1. Consolidate specifications into lychee folder
-2. Consolidate logs into lychee folder
-3. Update markdown docs to reference YAML SSoT
-4. Minor path updates in bot configuration
+1. Consolidate logs into lychee folder
+1. Update markdown docs to reference YAML SSoT
+1. Minor path updates in bot configuration
 
 **Risk**: Low - All changes are organizational, no logic changes required

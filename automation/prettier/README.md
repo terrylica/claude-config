@@ -4,17 +4,17 @@
 
 **Status**: ✅ Active (October 2025)
 
----
+______________________________________________________________________
 
 ## How It Works
 
 1. **Trigger**: Claude Code invokes Stop hooks after main agent finishes responding
-2. **Execution**: Script spawns background Prettier process with `{ work } &` pattern
-3. **Exit**: Script exits immediately (< 10ms) - no user-visible delay
-4. **Formatting**: Background process formats all .md files in workspace
-5. **Result**: Files are formatted and ready for next git commit
+1. **Execution**: Script spawns background Prettier process with `{ work } &` pattern
+1. **Exit**: Script exits immediately (< 10ms) - no user-visible delay
+1. **Formatting**: Background process formats all .md files in workspace
+1. **Result**: Files are formatted and ready for next git commit
 
----
+______________________________________________________________________
 
 ## Architecture
 
@@ -58,11 +58,11 @@ exit 0  # Immediate exit
 **Hook Order**:
 
 1. CNS notification hook (sends notification)
-2. Prettier formatting hook (formats markdown)
+1. Prettier formatting hook (formats markdown)
 
 Both execute asynchronously - neither blocks Claude Code.
 
----
+______________________________________________________________________
 
 ## Configuration
 
@@ -86,7 +86,7 @@ Both execute asynchronously - neither blocks Claude Code.
 - `**/file-history/**` - Claude Code history
 - `**/plugins/**` - Plugin files
 
----
+______________________________________________________________________
 
 ## Testing
 
@@ -116,7 +116,7 @@ cat test.md
 # Should show properly formatted markdown
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -164,14 +164,14 @@ cat ~/.claude/.prettierrc
 prettier --write --prose-wrap preserve README.md
 ```
 
----
+______________________________________________________________________
 
 ## Related Specifications
 
 - [prettier-markdown-formatting.yaml](/Users/terryli/.claude/specifications/prettier-markdown-formatting.yaml) - Complete technical specification
 - [cns-conversation-notification-system.yaml](/Users/terryli/.claude/specifications/cns-conversation-notification-system.yaml) - CNS stop hook (same pattern)
 
----
+______________________________________________________________________
 
 ## Version History
 

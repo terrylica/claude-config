@@ -23,7 +23,7 @@ CNS provides dual-output notifications when Claude Code completes responses: loc
 - **Git-based Credentials**: Pushover credentials in cns_config.json (team-shared, zero-setup deployment)
 - **Text-to-Speech**: Folder name announcement with tmux context detection
 - **Volume Control**: Configurable notification volume (local audio only)
-- **Async Processing**: Fire-and-forget background processing (<10ms hook execution)
+- **Async Processing**: Fire-and-forget background processing (\<10ms hook execution)
 - **Cross-platform**: macOS (audio + Pushover), Linux (Pushover only)
 
 ### 📱 Pushover Notification Format
@@ -69,8 +69,8 @@ Message:
 ### Credential Priority
 
 1. **CNS config** (`.claude/automation/cns/config/cns_config.json`) - Primary, git-based
-2. **Local override** (`~/.pushover_config`) - Optional, not in git
-3. **macOS Keychain** - Legacy fallback
+1. **Local override** (`~/.pushover_config`) - Optional, not in git
+1. **macOS Keychain** - Legacy fallback
 
 ## Command Detection
 
@@ -98,13 +98,13 @@ Message:
 
 ## System Requirements
 
-**Platform**: Unix-like systems (macOS, Linux)  
+**Platform**: Unix-like systems (macOS, Linux)\
 **Dependencies**:
 
 - Common: `jq`
 - Audio (macOS): `afplay` OR Audio (Linux): `paplay`/`aplay`
 - Clipboard (macOS): `pbcopy` OR Clipboard (Linux): `xclip`/`xsel`
-- Text-to-Speech (macOS): `say` OR Speech (Linux): `espeak`/`festival`  
+- Text-to-Speech (macOS): `say` OR Speech (Linux): `espeak`/`festival`\
   **Shell**: POSIX-compliant shells (zsh, bash)
 
 > **Note**: Uses Unix conventions (`$HOME`, `/tmp/`) - not Windows-compatible

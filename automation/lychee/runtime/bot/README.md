@@ -65,12 +65,12 @@ cd /Users/terryli/.claude/automation/lychee/runtime/bot
 
 ### Comparison with Alternatives
 
-| Tool | Language | .gitignore | Debouncing | Cross-Platform | Speed |
-| --- | --- | --- | --- | --- | --- |
-| **watchexec** | Rust | ✅ Auto | ✅ 50ms | ✅ Yes | ⚡ Very Fast |
-| watchfiles | Rust+Py | ❌ Manual | ✅ Yes | ✅ Yes | ⚡ Fast |
-| nodemon | Node.js | ❌ Manual | ✅ Yes | ✅ Yes | 🐌 Slower |
-| entr | C | ❌ None | ❌ No | ⚠️ Unix only | ⚡ Fast |
+| Tool          | Language | .gitignore | Debouncing | Cross-Platform | Speed        |
+| ------------- | -------- | ---------- | ---------- | -------------- | ------------ |
+| **watchexec** | Rust     | ✅ Auto    | ✅ 50ms    | ✅ Yes         | ⚡ Very Fast |
+| watchfiles    | Rust+Py  | ❌ Manual  | ✅ Yes     | ✅ Yes         | ⚡ Fast      |
+| nodemon       | Node.js  | ❌ Manual  | ✅ Yes     | ✅ Yes         | 🐌 Slower    |
+| entr          | C        | ❌ None    | ❌ No      | ⚠️ Unix only   | ⚡ Fast      |
 
 ### Why watchexec Won (2025 State-of-the-Art)
 
@@ -178,13 +178,14 @@ All context persists throughout workflow lifecycle!
    which watchexec  # Should be /opt/homebrew/bin/watchexec
    ```
 
-2. **Install if missing**:
+1. **Install if missing**:
 
    ```bash
    brew install watchexec
    ```
 
-3. **Test version**:
+1. **Test version**:
+
    ```bash
    watchexec --version  # Should be 2.3.2+
    ```
@@ -197,13 +198,14 @@ All context persists throughout workflow lifecycle!
    ./bot-service.sh status
    ```
 
-2. **View error logs**:
+1. **View error logs**:
 
    ```bash
    cat /tmp/telegram-bot-error.log
    ```
 
-3. **Verify doppler config**:
+1. **Verify doppler config**:
+
    ```bash
    doppler run --project claude-config --config dev -- env | grep TOKEN
    ```
@@ -228,10 +230,10 @@ Restart clean:
 ### Making Code Changes
 
 1. **Edit files** in `bot/`, `lib/`, or `orchestrator/`
-2. **Save** - watchexec detects change automatically
-3. **Wait 100ms** - debouncing period
-4. **Bot restarts** - new code loaded (takes ~2-3s)
-5. **Test** - send Telegram message to verify
+1. **Save** - watchexec detects change automatically
+1. **Wait 100ms** - debouncing period
+1. **Bot restarts** - new code loaded (takes ~2-3s)
+1. **Test** - send Telegram message to verify
 
 **No manual restart needed!** ⚡
 
@@ -312,10 +314,10 @@ Current: v4.1.0 (watchexec auto-reload + launchd production setup)
 
 ### Development vs Production
 
-| Environment | Auto-Reload | Tool | When to Use |
-| --- | --- | --- | --- |
-| **Development** | ✅ Enabled | watchexec | Your local machine, active coding |
-| **Production** | ❌ Disabled | launchd | Always-on service, stable releases |
+| Environment     | Auto-Reload | Tool      | When to Use                        |
+| --------------- | ----------- | --------- | ---------------------------------- |
+| **Development** | ✅ Enabled  | watchexec | Your local machine, active coding  |
+| **Production**  | ❌ Disabled | launchd   | Always-on service, stable releases |
 
 ### Why Auto-Reload in Development?
 

@@ -50,10 +50,10 @@ Your system has SSH keys for multiple accounts:
 When you run git commands from `~/.claude`:
 
 1. SSH reads the config
-2. Match directive checks if PWD contains `/.claude`
-3. Automatically uses `id_ed25519_tainora`
-4. Authenticates as `tainora` to GitHub
-5. Git operations succeed over SSH
+1. Match directive checks if PWD contains `/.claude`
+1. Automatically uses `id_ed25519_tainora`
+1. Authenticates as `tainora` to GitHub
+1. Git operations succeed over SSH
 
 ### Authentication Flow
 
@@ -106,8 +106,8 @@ git remote -v
 For complete account separation, consider:
 
 1. Generate new SSH key: `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_terrylica`
-2. Add to GitHub account (Settings → SSH Keys)
-3. Update SSH config to use new key for .claude directory
+1. Add to GitHub account (Settings → SSH Keys)
+1. Update SSH config to use new key for .claude directory
 
 Current setup works perfectly with tainora's key as a bridge.
 

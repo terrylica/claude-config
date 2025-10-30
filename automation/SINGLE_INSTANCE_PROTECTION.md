@@ -4,19 +4,19 @@
 **Created**: 2025-10-27
 **Purpose**: Prevent multiple process instances and file caching issues
 
----
+______________________________________________________________________
 
 ## The Problem
 
 We encountered critical production issues:
 
 1. **Multiple bot instances** - 3 Telegram bots running simultaneously, wasting resources
-2. **Cached hook files** - Bash processes kept old file versions open for 24+ hours
-3. **Stale processes** - Process from Oct 26 still running on Oct 27, using inode 86071856 (old file) instead of 86304987 (current file)
+1. **Cached hook files** - Bash processes kept old file versions open for 24+ hours
+1. **Stale processes** - Process from Oct 26 still running on Oct 27, using inode 86071856 (old file) instead of 86304987 (current file)
 
 This caused the "Stop hook error" to persist despite all fixes being in place.
 
----
+______________________________________________________________________
 
 ## The Solution
 
@@ -50,10 +50,10 @@ ensure_single_instance "my-script" --kill-existing
 **How it works**:
 
 1. **Check PID file** - Look for `/Users/terryli/.claude/automation/run/my-script.pid`
-2. **Verify process** - Don't just check PID existence, verify it's actually our script (handles PID reuse)
-3. **Clean stale PIDs** - If process not running or is different script, remove PID file
-4. **Atomic write** - Use `flock` to ensure no race conditions
-5. **Register cleanup** - Set `trap` to remove PID file on exit
+1. **Verify process** - Don't just check PID existence, verify it's actually our script (handles PID reuse)
+1. **Clean stale PIDs** - If process not running or is different script, remove PID file
+1. **Atomic write** - Use `flock` to ensure no race conditions
+1. **Register cleanup** - Set `trap` to remove PID file on exit
 
 ### 2. Stale Hook Cleanup
 
@@ -71,9 +71,9 @@ cleanup_stale_hooks
 **How it works**:
 
 1. Find all processes matching hook patterns
-2. Calculate process age from start time
-3. Kill processes older than 1 hour (3600 seconds)
-4. Log actions to `/tmp/hook-cleanup.log`
+1. Calculate process age from start time
+1. Kill processes older than 1 hour (3600 seconds)
+1. Log actions to `/tmp/hook-cleanup.log`
 
 ### 3. Telegram Bot Launcher
 
@@ -94,16 +94,16 @@ start-telegram-bot
 - Uses PID file: `/Users/terryli/.claude/automation/run/telegram-bot.pid`
 - Ensures clean startup every time
 
----
+______________________________________________________________________
 
 ## Integration Status
 
 ### ✅ Implemented
 
 1. **Single-instance library** - Core functionality complete
-2. **Bot launcher** - `/Users/terryli/.local/bin/start-telegram-bot`
-3. **Stale hook cleanup** - Integrated into `check-links-hybrid.sh`
-4. **PID directory** - Auto-created at `/Users/terryli/.claude/automation/run/`
+1. **Bot launcher** - `/Users/terryli/.local/bin/start-telegram-bot`
+1. **Stale hook cleanup** - Integrated into `check-links-hybrid.sh`
+1. **PID directory** - Auto-created at `/Users/terryli/.claude/automation/run/`
 
 ### 🔄 In Progress
 
@@ -112,10 +112,10 @@ start-telegram-bot
 ### 📋 Recommended (Optional)
 
 1. **System service** - Run bot as macOS LaunchAgent for auto-restart
-2. **Monitoring** - Alert if PID file cleanup happens frequently
-3. **Metrics** - Track process age distribution
+1. **Monitoring** - Alert if PID file cleanup happens frequently
+1. **Metrics** - Track process age distribution
 
----
+______________________________________________________________________
 
 ## File Caching Explanation
 
@@ -124,8 +124,8 @@ start-telegram-bot
 When bash executes a script with `bash /path/to/script.sh`, it:
 
 1. **Opens the file** (gets file descriptor, e.g., FD 255)
-2. **Stores inode reference** (e.g., inode 86071856)
-3. **Reads from inode** - NOT from the path
+1. **Stores inode reference** (e.g., inode 86071856)
+1. **Reads from inode** - NOT from the path
 
 If you edit the file:
 
@@ -152,7 +152,7 @@ Current file: Oct 27 14:43
 - If a hook process lives > 1 hour, it's definitely stale
 - Balance between safety (don't kill active hooks) and freshness
 
----
+______________________________________________________________________
 
 ## Testing
 
@@ -198,7 +198,7 @@ lsof | grep "check-links-hybrid.sh"
 # Should show only recent processes or none
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -246,7 +246,7 @@ ps -p <PID> -o pid,lstart,command
 pkill -9 -f "check-links-hybrid"
 ```
 
----
+______________________________________________________________________
 
 ## Future Enhancements
 
@@ -326,7 +326,7 @@ RestartSec=10
 WantedBy=default.target
 ```
 
----
+______________________________________________________________________
 
 ## References
 
@@ -335,7 +335,7 @@ WantedBy=default.target
 - **Bash traps**: https://tldp.org/LDP/Bash-Beginners-Guide/html/sect_12_02.html
 - **Process verification**: Prevents PID reuse issues (PID wraps at 99999 on macOS)
 
----
+______________________________________________________________________
 
 **Document Version**: 1.0.0
 **Last Updated**: 2025-10-27

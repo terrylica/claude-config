@@ -2,7 +2,7 @@
 
 Complete tool preferences and package standards for the workspace.
 
----
+______________________________________________________________________
 
 ## Core Development Stack
 
@@ -29,7 +29,7 @@ uv run --active python -m mypackage.module
 uv pip install -e .
 ```
 
----
+______________________________________________________________________
 
 ### Rust Stack
 
@@ -50,7 +50,7 @@ uv pip install -e .
 chmod +x .git/hooks/pre-commit && pre-commit install
 ```
 
----
+______________________________________________________________________
 
 ### Container Runtime
 
@@ -58,7 +58,7 @@ chmod +x .git/hooks/pre-commit && pre-commit install
 - **CLI**: Docker CLI (Homebrew)
 - **Removed**: Docker Desktop (31 GB bloat)
 
----
+______________________________________________________________________
 
 ## Package Preferences
 
@@ -77,7 +77,7 @@ chmod +x .git/hooks/pre-commit && pre-commit install
 
 - `Read`, `LS`, `Glob`, `Grep`
 
----
+______________________________________________________________________
 
 ## Specialized Tools
 
@@ -100,7 +100,7 @@ chmod +x .git/hooks/pre-commit && pre-commit install
 - `torch`
 - `cupy`
 
----
+______________________________________________________________________
 
 ## Document Processing
 
@@ -116,7 +116,7 @@ chmod +x .git/hooks/pre-commit && pre-commit install
 - **LaTeX** with `tabularray` package
 - See: [`latex-workflow.md`](latex-workflow.md)
 
----
+______________________________________________________________________
 
 ## Finance & Trading Tools
 
@@ -130,7 +130,7 @@ chmod +x .git/hooks/pre-commit && pre-commit install
 
 **Pattern**: Reference talipp (github.com/nardew/talipp) for O(1) incremental updates when rolling metrics required
 
----
+______________________________________________________________________
 
 ## Data Storage
 
@@ -140,7 +140,7 @@ chmod +x .git/hooks/pre-commit && pre-commit install
 - **Configuration**: YAML, TOML
 - **Machine-Readable Specs**: OpenAPI 3.1.1, JSON Schema
 
----
+______________________________________________________________________
 
 ## Documentation Standards
 

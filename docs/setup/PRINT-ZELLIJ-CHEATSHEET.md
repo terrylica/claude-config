@@ -17,21 +17,21 @@ open ~/.claude/docs/setup/zellij-cheatsheet.md
 ### macOS (Quick Method)
 
 1. Open the markdown file in a browser or application
-2. Press `Cmd + P` to open print dialog
-3. Click "PDF" dropdown in bottom-left
-4. Select "Save as PDF"
-5. Choose location and filename
-6. Click "Save"
+1. Press `Cmd + P` to open print dialog
+1. Click "PDF" dropdown in bottom-left
+1. Select "Save as PDF"
+1. Choose location and filename
+1. Click "Save"
 
 ### macOS (Browser Method)
 
 1. Open the file in your browser (Firefox, Safari, Chrome)
-2. Press `Cmd + P`
-3. In the print dialog:
+1. Press `Cmd + P`
+1. In the print dialog:
    - Destination: "Save as PDF"
    - Format: Portrait or Landscape
    - Margins: Normal or Narrow (for more content)
-4. Click "Save"
+1. Click "Save"
 
 ### Convert to HTML First (Better Formatting)
 
@@ -59,7 +59,7 @@ Print the PDF and:
 - Add to a binder with other documentation
 - Share with team members
 
----
+______________________________________________________________________
 
 ## Alternative: Quick Terminal Reference
 
@@ -73,7 +73,7 @@ cat ~/.claude/docs/setup/zellij-cheatsheet.md | less
 glow ~/.claude/docs/setup/zellij-cheatsheet.md
 ```
 
----
+______________________________________________________________________
 
 **File Location**: `~/.claude/docs/setup/zellij-cheatsheet.md`
 **Related Documentation**: `~/.claude/docs/setup/zellij-session-recovery.md`

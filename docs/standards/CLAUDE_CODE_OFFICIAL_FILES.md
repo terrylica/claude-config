@@ -69,6 +69,6 @@ You can safely:
 - Modify auto-generated session files
 - Break the Claude Code directory structure
 
----
+______________________________________________________________________
 
 **Remember**: When in doubt, check this document before making structural changes to the `.claude` directory.

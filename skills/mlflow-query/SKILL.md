@@ -1,14 +1,12 @@
----
-name: mlflow-query
-description: Query MLflow tracking server for experiment runs, metrics, parameters, and artifacts. Use when searching for best models, comparing experiments, detecting overfitting, analyzing training metrics, filtering by hyperparameters, or exporting run data. Triggers - mlflow, experiment, runs, metrics, parameters, artifacts, model performance, training history, hyperparameter search, overfitting detection.
-allowed-tools: Read, Bash, Grep, Glob
----
+______________________________________________________________________
+
+## name: mlflow-query description: Query MLflow tracking server for experiment runs, metrics, parameters, and artifacts. Use when searching for best models, comparing experiments, detecting overfitting, analyzing training metrics, filtering by hyperparameters, or exporting run data. Triggers - mlflow, experiment, runs, metrics, parameters, artifacts, model performance, training history, hyperparameter search, overfitting detection. allowed-tools: Read, Bash, Grep, Glob
 
 # MLflow Query Skill
 
 **Query and analyze MLflow experiment tracking data within defined boundaries.**
 
----
+______________________________________________________________________
 
 ## ⚠️ Skill Activation - What Can I Help You With?
 
@@ -19,11 +17,11 @@ allowed-tools: Read, Bash, Grep, Glob
 **Read-Only Query Operations:**
 
 1. **Find Best Models** - Search experiments and rank by metrics (accuracy, loss, custom metrics)
-2. **Compare Runs** - Side-by-side comparison of hyperparameters and metrics
-3. **Filter Runs** - Filter by metrics, parameters, tags, status (AND-only filters)
-4. **Export Data** - Export run data to CSV/JSON for analysis
-5. **Detect Issues** - Identify overfitting (train vs test gaps), failed runs, anomalies
-6. **List Resources** - Show experiments, runs, artifacts available
+1. **Compare Runs** - Side-by-side comparison of hyperparameters and metrics
+1. **Filter Runs** - Filter by metrics, parameters, tags, status (AND-only filters)
+1. **Export Data** - Export run data to CSV/JSON for analysis
+1. **Detect Issues** - Identify overfitting (train vs test gaps), failed runs, anomalies
+1. **List Resources** - Show experiments, runs, artifacts available
 
 **Available Commands:**
 
@@ -62,7 +60,7 @@ allowed-tools: Read, Bash, Grep, Glob
 - ❌ Network exfiltration (WebFetch blocked by allowed-tools)
 - ❌ Arbitrary code execution
 
----
+______________________________________________________________________
 
 ## 🎯 How Would You Like to Proceed?
 
@@ -111,7 +109,7 @@ allowed-tools: Read, Bash, Grep, Glob
 
 - Describe what you're looking for, I'll guide you through available options
 
----
+______________________________________________________________________
 
 ## 📋 Prerequisites Check
 
@@ -163,7 +161,7 @@ uvx mlflow experiments search | head -5
 
 **Expected**: List of experiments (not an error)
 
----
+______________________________________________________________________
 
 ## 🔧 Understanding Constraints (MLflow Limitations)
 
@@ -254,7 +252,7 @@ for entry in history:
 
 Usage: `uv run get_history.py`
 
----
+______________________________________________________________________
 
 ## 📖 Common Workflows (Guided)
 
@@ -263,8 +261,8 @@ Usage: `uv run get_history.py`
 **Input Questions:**
 
 1. What experiment ID? (or experiment name)
-2. What metric to optimize? (e.g., accuracy, f1_score, loss)
-3. Higher is better or lower is better?
+1. What metric to optimize? (e.g., accuracy, f1_score, loss)
+1. Higher is better or lower is better?
 
 **Example:**
 
@@ -300,8 +298,8 @@ doppler run --project claude-config --config dev -- bash -c \
 **Input Questions:**
 
 1. What experiment ID?
-2. What run IDs to compare? (or filter criteria)
-3. What fields to compare? (metrics/params/both)
+1. What run IDs to compare? (or filter criteria)
+1. What fields to compare? (metrics/params/both)
 
 **Example:**
 
@@ -326,9 +324,9 @@ grep -E "abc123|def456|ghi789" /tmp/exp1.csv | \
 **Input Questions:**
 
 1. What experiment ID?
-2. What train metric? (e.g., train_accuracy)
-3. What test metric? (e.g., test_accuracy)
-4. What gap threshold? (default: 0.05 = 5%)
+1. What train metric? (e.g., train_accuracy)
+1. What test metric? (e.g., test_accuracy)
+1. What gap threshold? (default: 0.05 = 5%)
 
 **Example:**
 
@@ -363,8 +361,8 @@ awk -F',' 'NR>1 {
 **Input Questions:**
 
 1. What experiment ID?
-2. Output format? (CSV recommended for large data)
-3. Output location? (default: /tmp/)
+1. Output format? (CSV recommended for large data)
+1. Output location? (default: /tmp/)
 
 **Example:**
 
@@ -388,8 +386,8 @@ head -3 /tmp/crypto_backtest.csv
 **Input Questions:**
 
 1. What experiment ID?
-2. Filter conditions? (AND-only, examples provided)
-3. How many results? (default: all)
+1. Filter conditions? (AND-only, examples provided)
+1. How many results? (default: all)
 
 **Valid filter patterns:**
 
@@ -452,7 +450,7 @@ doppler run --project claude-config --config dev -- bash -c \
    uvx mlflow runs describe --run-id <RUN_ID>'
 ```
 
----
+______________________________________________________________________
 
 ## 🔐 Security & Credential Patterns
 
@@ -514,7 +512,7 @@ uvx mlflow runs list --experiment-id 1
 
 **⚠️ Security Warning**: Credentials visible in shell history and process list. Use Doppler for production.
 
----
+______________________________________________________________________
 
 ## 🛠️ Troubleshooting Common Issues
 
@@ -532,11 +530,11 @@ ConnectionRefusedError: [Errno 61] Connection refused
    ```bash
    curl http://mlflow.example.com:5000/health
    ```
-2. Is tracking URI correct?
+1. Is tracking URI correct?
    ```bash
    echo $MLFLOW_TRACKING_URI
    ```
-3. Firewall blocking port?
+1. Firewall blocking port?
 
 **Fix:**
 
@@ -558,7 +556,7 @@ HTTPError: 401 Client Error: Unauthorized
    ```bash
    doppler secrets --project claude-config --config dev | grep MLFLOW
    ```
-2. Is URI formatted correctly?
+1. Is URI formatted correctly?
    ```bash
    # Should be: http://USERNAME:PASSWORD@HOST:PORT
    echo $MLFLOW_TRACKING_URI
@@ -584,14 +582,17 @@ MlflowException: Invalid filter string
 **Common mistakes:**
 
 1. **Using OR** (not supported)
+
    - ❌ `"param = 'A' OR param = 'B'"`
    - ✅ Run two queries and merge
 
-2. **Unquoted parameter values**
+1. **Unquoted parameter values**
+
    - ❌ `"params.learning_rate = 0.001"` (number, but params are strings!)
    - ✅ `"params.learning_rate = '0.001'"` (quoted)
 
-3. **Invalid operators**
+1. **Invalid operators**
+
    - ❌ `"metrics.accuracy BETWEEN 0.8 AND 0.9"`
    - ✅ `"metrics.accuracy > 0.8 AND metrics.accuracy < 0.9"`
 
@@ -616,7 +617,7 @@ mlflow runs list --experiment-id 999
    ```bash
    mlflow experiments search | grep 999
    ```
-2. Are there runs in this experiment?
+1. Are there runs in this experiment?
    ```bash
    mlflow runs list --experiment-id 999 | wc -l
    ```
@@ -641,7 +642,7 @@ Error: unknown command "list" for "doppler projects"
    ```bash
    doppler --version
    ```
-2. Are you authenticated?
+1. Are you authenticated?
    ```bash
    doppler whoami
    ```
@@ -652,27 +653,27 @@ Error: unknown command "list" for "doppler projects"
 - Login: `doppler login`
 - Verify project: `doppler projects`
 
----
+______________________________________________________________________
 
 ## 📊 Capability Matrix (Quick Reference)
 
-| Capability | Supported | Method | Constraints |
-| --- | --- | --- | --- |
-| **List experiments** | ✅ | `mlflow experiments search` | None |
-| **List runs** | ✅ | `mlflow runs list` | Table output (parse or export CSV) |
-| **Get run details** | ✅ | `mlflow runs describe` | JSON output, complete data |
-| **Filter by metrics** | ✅ | Manual grep/awk | AND-only in Python API |
-| **Filter by params** | ⚠️ | Manual grep/awk + quote values | AND-only, params are strings |
-| **OR filters** | ❌ | Run multiple queries | MLflow limitation |
-| **Export CSV** | ✅ | `mlflow experiments csv` | Efficient for bulk |
-| **Metric history** | ❌ CLI / ✅ Python | Use Python API | CLI doesn't support time-series |
-| **Aggregation** | ❌ | Client-side (awk/python) | No SUM/AVG in MLflow |
-| **Create runs** | ❌ | Out of scope | Read-only skill |
-| **Modify runs** | ❌ | Out of scope | Read-only skill |
-| **Streaming** | ❌ | Pagination | Poll-based only |
-| **Doppler creds** | ✅ | Atomic secrets pattern | Recommended for production |
+| Capability            | Supported          | Method                         | Constraints                        |
+| --------------------- | ------------------ | ------------------------------ | ---------------------------------- |
+| **List experiments**  | ✅                 | `mlflow experiments search`    | None                               |
+| **List runs**         | ✅                 | `mlflow runs list`             | Table output (parse or export CSV) |
+| **Get run details**   | ✅                 | `mlflow runs describe`         | JSON output, complete data         |
+| **Filter by metrics** | ✅                 | Manual grep/awk                | AND-only in Python API             |
+| **Filter by params**  | ⚠️                 | Manual grep/awk + quote values | AND-only, params are strings       |
+| **OR filters**        | ❌                 | Run multiple queries           | MLflow limitation                  |
+| **Export CSV**        | ✅                 | `mlflow experiments csv`       | Efficient for bulk                 |
+| **Metric history**    | ❌ CLI / ✅ Python | Use Python API                 | CLI doesn't support time-series    |
+| **Aggregation**       | ❌                 | Client-side (awk/python)       | No SUM/AVG in MLflow               |
+| **Create runs**       | ❌                 | Out of scope                   | Read-only skill                    |
+| **Modify runs**       | ❌                 | Out of scope                   | Read-only skill                    |
+| **Streaming**         | ❌                 | Pagination                     | Poll-based only                    |
+| **Doppler creds**     | ✅                 | Atomic secrets pattern         | Recommended for production         |
 
----
+______________________________________________________________________
 
 ## 🎓 Summary
 
@@ -699,9 +700,9 @@ Error: unknown command "list" for "doppler projects"
 **Next Steps:**
 
 1. Choose a workflow from "How Would You Like to Proceed?" section
-2. Verify prerequisites
-3. Follow guided steps
-4. Ask questions if you encounter constraints
+1. Verify prerequisites
+1. Follow guided steps
+1. Ask questions if you encounter constraints
 
 **Ready to proceed? Tell me:**
 

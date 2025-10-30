@@ -10,13 +10,13 @@ For orchestrating Telegram bot → file watching → Claude CLI invocation → n
 
 ### Quick Comparison Matrix
 
-| Approach | Deploy | Extend | Simple | Score | Best For |
-| --- | --- | --- | --- | --- | --- |
-| **SQLite + Huey** | 1 | 4 | 2 | 5 | **Starting simple, growing** |
-| Asyncio Event Bus | 1 | 3 | 2 | 4 | Embedded, single-process |
-| Redis Streams | 3 | 5 | 3 | 3 | Already have Redis, need scale |
-| State Machine + SQLite | 2 | 4 | 3 | 4 | Complex multi-step workflows |
-| MCP Server | 3 | 4 | 4 | 2 | Future, wait for maturity |
+| Approach               | Deploy | Extend | Simple | Score | Best For                       |
+| ---------------------- | ------ | ------ | ------ | ----- | ------------------------------ |
+| **SQLite + Huey**      | 1      | 4      | 2      | 5     | **Starting simple, growing**   |
+| Asyncio Event Bus      | 1      | 3      | 2      | 4     | Embedded, single-process       |
+| Redis Streams          | 3      | 5      | 3      | 3     | Already have Redis, need scale |
+| State Machine + SQLite | 2      | 4      | 3      | 4     | Complex multi-step workflows   |
+| MCP Server             | 3      | 4      | 4      | 2     | Future, wait for maturity      |
 
 **Scoring**: 1 = simplest/best, 5 = most complex/worst (except Extend and Score where higher is better)
 
@@ -111,10 +111,10 @@ class WorkflowHandler(FileSystemEventHandler):
 ### Growth Path
 
 1. **Start (2 workflows)**: Single SQLite file, single worker
-2. **Add workflows (3-5)**: New `@huey.task()` functions
-3. **Scale workers**: Multiple worker processes
-4. **Upgrade backend**: Switch to Redis if concurrency needed
-5. **Task pipelines**: Chain tasks with `.then()` or manual orchestration
+1. **Add workflows (3-5)**: New `@huey.task()` functions
+1. **Scale workers**: Multiple worker processes
+1. **Upgrade backend**: Switch to Redis if concurrency needed
+1. **Task pipelines**: Chain tasks with `.then()` or manual orchestration
 
 ### Deployment Complexity: 1/5
 
@@ -135,7 +135,7 @@ class WorkflowHandler(FileSystemEventHandler):
 - Familiar task queue patterns
 - Minimal boilerplate
 
----
+______________________________________________________________________
 
 ## Approach 2: Asyncio-Native Event Bus
 
@@ -221,14 +221,14 @@ bus.handlers['file.changed'] = [handle_file_change]
 ### Growth Path
 
 1. **Start**: Single event bus, few handlers
-2. **Add workflows**: Register new event types and handlers
-3. **Complex flows**: Chain events (handler emits new events)
-4. **State tracking**: Add JSON/SQLite persistence layer
-5. **Concurrency**: Use semaphores to limit parallel execution
+1. **Add workflows**: Register new event types and handlers
+1. **Complex flows**: Chain events (handler emits new events)
+1. **State tracking**: Add JSON/SQLite persistence layer
+1. **Concurrency**: Use semaphores to limit parallel execution
 
 ### Deployment: 1/5 | Extensibility: 3/5 | Simplicity: 2/5
 
----
+______________________________________________________________________
 
 ## Approach 3: Redis Streams
 
@@ -319,15 +319,15 @@ def process_events():
 ### Growth Path
 
 1. **Start**: Single Redis instance, single stream
-2. **Add workflows**: Create new streams per workflow type
-3. **Scale workers**: Add consumers to existing groups
-4. **Parallel stages**: Multiple consumer groups on same stream
+1. **Add workflows**: Create new streams per workflow type
+1. **Scale workers**: Add consumers to existing groups
+1. **Parallel stages**: Multiple consumer groups on same stream
 
 ### Deployment: 3/5 | Extensibility: 5/5 | Simplicity: 3/5
 
 **Recommendation**: Only if you already have Redis infrastructure.
 
----
+______________________________________________________________________
 
 ## Approach 4: State Machine + SQLite Hybrid
 
@@ -421,16 +421,16 @@ class WorkflowModel:
 ### Growth Path
 
 1. **Start**: Define 2 state machines for current workflows
-2. **Add workflows**: Create new state machine classes
-3. **Shared states**: Use hierarchical state machines
-4. **Complex flows**: Nested states and parallel machines
-5. **Visualization**: Generate state diagrams for documentation
+1. **Add workflows**: Create new state machine classes
+1. **Shared states**: Use hierarchical state machines
+1. **Complex flows**: Nested states and parallel machines
+1. **Visualization**: Generate state diagrams for documentation
 
 ### Deployment: 2/5 | Extensibility: 4/5 | Simplicity: 3/5
 
 **Best combined with**: Huey for async task execution + watchdog for file events
 
----
+______________________________________________________________________
 
 ## Approach 5: Model Context Protocol (MCP) Server
 
@@ -462,7 +462,7 @@ Use MCP server architecture for workflow state and notifications - emerging stan
 
 ### Deployment: 3/5 | Extensibility: 4/5 | Simplicity: 4/5 | Score: 2/5
 
----
+______________________________________________________________________
 
 ## Decision Tree
 
@@ -488,7 +488,7 @@ Q5: Already have Redis infrastructure?
   NO  → SQLite + Huey ⭐ RECOMMENDED
 ```
 
----
+______________________________________________________________________
 
 ## Implementation Roadmap
 
@@ -526,63 +526,63 @@ Q5: Already have Redis infrastructure?
 - Consider Redis backend if concurrency issues
 - Evaluate Prefect/Temporal if >10 workflows
 
----
+______________________________________________________________________
 
 ## Detailed Comparison
 
 ### Deployment Complexity
 
-| Approach | Requirements | Setup Time |
-| --- | --- | --- |
-| SQLite + Huey | Single file, no services | 30 min |
-| Asyncio | Pure Python, no dependencies | 1 hour |
-| Redis Streams | Redis server (local or remote) | 2 hours |
-| State Machine | SQLite + library | 1 hour |
-| MCP | MCP server process, documentation | 4+ hours |
+| Approach      | Requirements                      | Setup Time |
+| ------------- | --------------------------------- | ---------- |
+| SQLite + Huey | Single file, no services          | 30 min     |
+| Asyncio       | Pure Python, no dependencies      | 1 hour     |
+| Redis Streams | Redis server (local or remote)    | 2 hours    |
+| State Machine | SQLite + library                  | 1 hour     |
+| MCP           | MCP server process, documentation | 4+ hours   |
 
 ### Persistence
 
-| Approach | Method | Durability |
-| --- | --- | --- |
-| SQLite + Huey | SQLite ACID guarantees | Excellent |
-| Asyncio | Manual (JSON/YAML) | Fair |
-| Redis Streams | Redis AOF/RDB (memory-based) | Good |
-| State Machine | SQLite state tables | Excellent |
-| MCP | Backend-dependent | Unknown |
+| Approach      | Method                       | Durability |
+| ------------- | ---------------------------- | ---------- |
+| SQLite + Huey | SQLite ACID guarantees       | Excellent  |
+| Asyncio       | Manual (JSON/YAML)           | Fair       |
+| Redis Streams | Redis AOF/RDB (memory-based) | Good       |
+| State Machine | SQLite state tables          | Excellent  |
+| MCP           | Backend-dependent            | Unknown    |
 
 ### Distribution
 
-| Approach | Capability |
-| --- | --- |
-| SQLite + Huey | Single machine\* |
-| Asyncio | Single process only |
-| Redis Streams | Multi-worker native |
-| State Machine | Single machine |
-| MCP | Implementation-specific |
+| Approach      | Capability              |
+| ------------- | ----------------------- |
+| SQLite + Huey | Single machine\*        |
+| Asyncio       | Single process only     |
+| Redis Streams | Multi-worker native     |
+| State Machine | Single machine          |
+| MCP           | Implementation-specific |
 
 \*Can switch Huey to Redis backend for distribution
 
 ### Learning Curve
 
-| Approach | Difficulty | Prerequisites |
-| --- | --- | --- |
-| SQLite + Huey | Low | Task queue patterns |
-| Asyncio | Medium | async/await knowledge |
-| Redis Streams | Medium | Redis concepts |
-| State Machine | Medium | State machine design |
-| MCP | High | New protocol, limited examples |
+| Approach      | Difficulty | Prerequisites                  |
+| ------------- | ---------- | ------------------------------ |
+| SQLite + Huey | Low        | Task queue patterns            |
+| Asyncio       | Medium     | async/await knowledge          |
+| Redis Streams | Medium     | Redis concepts                 |
+| State Machine | Medium     | State machine design           |
+| MCP           | High       | New protocol, limited examples |
 
 ### Debugging & Monitoring
 
-| Approach | Tools | Quality |
-| --- | --- | --- |
-| SQLite + Huey | sqlite3 CLI, inspect queue | Excellent |
-| Asyncio | Python debugger, print/logging | Good |
-| Redis Streams | Redis CLI, XINFO commands | Good |
-| State Machine | Visual diagrams + SQL queries | Excellent |
-| MCP | TBD - tooling immature | Unknown |
+| Approach      | Tools                          | Quality   |
+| ------------- | ------------------------------ | --------- |
+| SQLite + Huey | sqlite3 CLI, inspect queue     | Excellent |
+| Asyncio       | Python debugger, print/logging | Good      |
+| Redis Streams | Redis CLI, XINFO commands      | Good      |
+| State Machine | Visual diagrams + SQL queries  | Excellent |
+| MCP           | TBD - tooling immature         | Unknown   |
 
----
+______________________________________________________________________
 
 ## Recommended Python Libraries
 
@@ -609,7 +609,7 @@ Q5: Already have Redis infrastructure?
 - **transitions** (`uv pip install transitions`) - Lightweight state machine (recommended)
 - **python-statemachine** (`uv pip install python-statemachine`) - Alternative implementation
 
----
+______________________________________________________________________
 
 ## Key Findings from Research
 
@@ -655,7 +655,7 @@ Q5: Already have Redis infrastructure?
 - No persistence without additional work
 - Perfect for embedded, single-process workflows
 
----
+______________________________________________________________________
 
 ## Final Recommendation
 
@@ -700,7 +700,7 @@ File watcher (watchdog) → Huey task queue (SQLite) → Workers → Notificatio
 - **MCP Server**: Too immature, revisit Q2-Q3 2026
 - **NATS.io**: Requires external server, overkill for this use case
 
----
+______________________________________________________________________
 
 ## Additional Resources
 
@@ -711,6 +711,6 @@ File watcher (watchdog) → Huey task queue (SQLite) → Workers → Notificatio
 - Watchdog Documentation: https://python-watchdog.readthedocs.io/
 - MCP Specification: https://modelcontextprotocol.io/docs/concepts/architecture
 
----
+______________________________________________________________________
 
 **Next Steps**: Review the full OpenAPI specification at [`/Users/terryli/.claude/specifications/lightweight-workflow-orchestration-research.yaml`](/Users/terryli/.claude/specifications/lightweight-workflow-orchestration-research.yaml) for complete implementation examples and detailed analysis.

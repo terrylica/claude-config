@@ -4,19 +4,19 @@
 
 **Status**: ✅ Installed and configured (October 2025)
 
----
+______________________________________________________________________
 
 ## Stack Overview
 
-| Component | Version | Purpose |
-| --- | --- | --- |
-| **MacTeX** | 2025 (TeX Live 2025) | Full LaTeX distribution |
-| **latexmk** | 4.86a (Dec 2024) | Build automation, live preview |
-| **Skim** | 1.7.11 | PDF viewer with SyncTeX |
-| **TeXShop** | 5.57 (2025) | Integrated LaTeX IDE |
-| **tabularray** | Latest (TeX Live 2025) | Modern table system |
+| Component      | Version                | Purpose                        |
+| -------------- | ---------------------- | ------------------------------ |
+| **MacTeX**     | 2025 (TeX Live 2025)   | Full LaTeX distribution        |
+| **latexmk**    | 4.86a (Dec 2024)       | Build automation, live preview |
+| **Skim**       | 1.7.11                 | PDF viewer with SyncTeX        |
+| **TeXShop**    | 5.57 (2025)            | Integrated LaTeX IDE           |
+| **tabularray** | Latest (TeX Live 2025) | Modern table system            |
 
----
+______________________________________________________________________
 
 ## Why This Stack?
 
@@ -47,7 +47,7 @@
 - Replaces old packages (tabular, tabularx, longtable, booktabs)
 - **Critical**: Proper fixed-width column support
 
----
+______________________________________________________________________
 
 ## Installation
 
@@ -88,7 +88,7 @@ defaults write -app Skim SKAutoReloadFileUpdate -boolean true
 brew install --cask texshop
 ```
 
----
+______________________________________________________________________
 
 ## Configuration
 
@@ -119,7 +119,7 @@ $force_mode = 1;  # Force completion even with errors
 
 **Global config**: Copy to `~/.latexmkrc` for all projects
 
----
+______________________________________________________________________
 
 ## Usage
 
@@ -135,13 +135,13 @@ latexmk -pdf -pvc document.tex
 This will:
 
 1. Compile your document
-2. Open it in Skim
-3. Watch for changes and auto-recompile
-4. Skim auto-updates when PDF changes
+1. Open it in Skim
+1. Watch for changes and auto-recompile
+1. Skim auto-updates when PDF changes
 
 #### Edit in Helix/VS Code/any editor
 
-- Save file → automatic recompilation (typically <1 second)
+- Save file → automatic recompilation (typically \<1 second)
 - Skim updates instantly
 
 #### Stop watching:
@@ -163,14 +163,14 @@ latexmk -c document.tex  # Keep PDF
 latexmk -C document.tex  # Remove PDF too
 ```
 
----
+______________________________________________________________________
 
 ### Workflow 2: TeXShop (Integrated IDE)
 
 1. Open `.tex` file in TeXShop
-2. Two windows appear: Editor (left) + PDF preview (right)
-3. Click "Typeset" button (or `Cmd+T`)
-4. Preview updates automatically
+1. Two windows appear: Editor (left) + PDF preview (right)
+1. Click "Typeset" button (or `Cmd+T`)
+1. Preview updates automatically
 
 **Advantages**:
 
@@ -183,7 +183,7 @@ latexmk -C document.tex  # Remove PDF too
 - Manual typesetting (not continuous)
 - Less flexible than Helix/VS Code
 
----
+______________________________________________________________________
 
 ## Table Alignment: Critical Best Practices
 
@@ -225,11 +225,11 @@ latexmk -C document.tex  # Remove PDF too
 ### Key Principles
 
 1. **Use `p{width}` for columns that must align vertically**
-2. **Use `X[align]` for flexible columns**
-3. **Define widths with `\newlength` for consistency**
-4. **Never use `X[width,align]` syntax** - it's unreliable
+1. **Use `X[align]` for flexible columns**
+1. **Define widths with `\newlength` for consistency**
+1. **Never use `X[width,align]` syntax** - it's unreliable
 
----
+______________________________________________________________________
 
 ## SyncTeX: Forward and Inverse Search
 
@@ -254,7 +254,7 @@ This highlights the PDF location for line 42 in your `.tex` file.
 **In Skim**:
 
 1. `Cmd+Shift+Click` on any text in PDF
-2. Your editor jumps to corresponding line in `.tex` file
+1. Your editor jumps to corresponding line in `.tex` file
 
 **Configuration** (Skim → Preferences → Sync):
 
@@ -262,7 +262,7 @@ This highlights the PDF location for line 42 in your `.tex` file.
 - Command: `/opt/homebrew/bin/hx` (for Helix)
 - Arguments: `%file:%line`
 
----
+______________________________________________________________________
 
 ## Editor Integration
 
@@ -300,7 +300,7 @@ Use: **VimTeX** plugin
 - Full latexmk integration
 - SyncTeX with Skim works out-of-box
 
----
+______________________________________________________________________
 
 ## Common LaTeX Packages for Cheat Sheets
 
@@ -321,7 +321,7 @@ Use: **VimTeX** plugin
 \pagestyle{empty}
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -366,7 +366,7 @@ latexmk -C document.tex  # Remove all generated files
 latexmk -pdf -pvc document.tex  # Rebuild from scratch
 ```
 
----
+______________________________________________________________________
 
 ## Version Control: .gitignore for LaTeX
 
@@ -391,7 +391,7 @@ latexmk -pdf -pvc document.tex  # Rebuild from scratch
 !.latexmkrc
 ```
 
----
+______________________________________________________________________
 
 ## Resources
 
@@ -401,7 +401,7 @@ latexmk -pdf -pvc document.tex  # Rebuild from scratch
 - **SyncTeX docs**: `texdoc synctex`
 - **TeXShop**: Bundled documentation in Help menu
 
----
+______________________________________________________________________
 
 ## Real-World Example: Ghostty Cheat Sheet
 
@@ -426,15 +426,15 @@ cd /tmp
 latexmk -pdf -pvc ghostty-keybindings-fixed.tex
 ```
 
-Edit in Helix → Save → See changes in <1 second
+Edit in Helix → Save → See changes in \<1 second
 
----
+______________________________________________________________________
 
 ## Summary
 
 This LaTeX workflow provides:
 
-✅ **Fast**: Compilation typically <1 second
+✅ **Fast**: Compilation typically \<1 second
 ✅ **Precise**: Pixel-perfect table alignment with tabularray
 ✅ **Interactive**: SyncTeX forward/inverse search
 ✅ **Future-proof**: All tools actively maintained (2024-2025)

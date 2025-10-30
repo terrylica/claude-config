@@ -2,7 +2,7 @@
 
 Source: `docs/standards/CLAUDE_SESSION_STORAGE_STANDARD.md` (verified 2025-08-12)
 
----
+______________________________________________________________________
 
 ## ✅ Successful Recovery Process
 
@@ -11,11 +11,11 @@ Source: `docs/standards/CLAUDE_SESSION_STORAGE_STANDARD.md` (verified 2025-08-12
 **Recovery Steps**:
 
 1. Removed legacy symlink: `rm ~/.claude/projects` (was pointing to `system/sessions`)
-2. Created official directory: `mkdir -p ~/.claude/projects`
-3. Migrated all sessions with timestamp preservation using custom recovery script
-4. Result: All sessions properly organized in official format
+1. Created official directory: `mkdir -p ~/.claude/projects`
+1. Migrated all sessions with timestamp preservation using custom recovery script
+1. Result: All sessions properly organized in official format
 
----
+______________________________________________________________________
 
 ## 🚨 Critical Pitfall: HOME Environment Variable
 
@@ -55,7 +55,7 @@ echo "test" | claude --dangerously-skip-permissions --model sonnet
 
 **Prevention**: Check IDE/terminal settings (Cursor, VS Code) that may override HOME variable.
 
----
+______________________________________________________________________
 
 ## 🔍 Session Creation Troubleshooting
 
@@ -99,7 +99,7 @@ find ~/.claude/projects -name "*.jsonl" | wc -l
 find /tmp -name "*.jsonl" -path "*/.claude/projects/*" -newermt "1 hour ago" 2>/dev/null
 ```
 
----
+______________________________________________________________________
 
 ## 📋 Session Resume Behavior
 
@@ -123,7 +123,7 @@ find ~/.claude/projects -name "*.jsonl" -type f -newermt "1 day ago"
 head -n 1 ~/.claude/projects/*/*.jsonl | python -m json.tool
 ```
 
----
+______________________________________________________________________
 
 ## 🛠️ Recovery Script Reference
 
@@ -134,12 +134,12 @@ Created `/home/tca/.claude/tools/session-recovery.sh` for systematic session mig
 - Maps platform-specific paths to official format
 - Safe to run multiple times (idempotent)
 
----
+______________________________________________________________________
 
 ## 🎯 Key Learnings
 
 1. **Official format works perfectly** - Docker test confirmed `~/.claude/projects/` is correct
-2. **Environment matters more than file structure** - Wrong HOME breaks everything
-3. **IDE terminals can override environment** - Check Cursor/VS Code settings
-4. **Sessions are resumable only if incomplete** - Completed sessions won't show in `claude -r`
-5. **Original wrapper is sufficient** - No custom wrapper needed, just fix environment
+1. **Environment matters more than file structure** - Wrong HOME breaks everything
+1. **IDE terminals can override environment** - Check Cursor/VS Code settings
+1. **Sessions are resumable only if incomplete** - Completed sessions won't show in `claude -r`
+1. **Original wrapper is sufficient** - No custom wrapper needed, just fix environment

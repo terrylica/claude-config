@@ -256,12 +256,12 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 ### Update Procedures
 
 1. **CNS System Updates**: Modify `automation/cns/conversation_handler.sh` (168 lines)
-2. **Configuration Changes**: Update `automation/cns/config/cns_config.json`
-3. **Hook Architecture**: Maintain async fire-and-forget pattern in all hooks
-4. **Command System**: Add new slash commands to `commands/` directory
-5. **Utility Scripts**: Add tools to `bin/` for manual operations
-6. **Development Tools**: Extend `tools/` for new workspace utilities
-7. **Testing**: Use `bin/cns-notify` for manual CNS functionality verification
+1. **Configuration Changes**: Update `automation/cns/config/cns_config.json`
+1. **Hook Architecture**: Maintain async fire-and-forget pattern in all hooks
+1. **Command System**: Add new slash commands to `commands/` directory
+1. **Utility Scripts**: Add tools to `bin/` for manual operations
+1. **Development Tools**: Extend `tools/` for new workspace utilities
+1. **Testing**: Use `bin/cns-notify` for manual CNS functionality verification
 
 ## SR&ED Integration
 
@@ -307,7 +307,7 @@ tar -czf claude-config-$(date +%Y%m%d).tar.gz \
 - System-managed files excluded via `.gitignore`
 - Architecture documentation versioned with changes
 
----
+______________________________________________________________________
 
 ## Workspace Reorganization Plan
 
@@ -368,15 +368,20 @@ The proposed reorganization enhances the existing structure:
 ### Reorganization Phases
 
 1. **Phase 1: Documentation** ✅ Complete (October 2025)
+
    - All specifications and guides created
    - Tool manifest documented
    - Target architecture defined
 
-2. **Phase 2: Safe Cleanup** - Remove backup files, fix anomalies
-3. **Phase 3: Root Cleanup** - Move root scripts to tools/
-4. **Phase 4: System Consolidation** ⚠️ High Risk - Move runtime artifacts
-5. **Phase 5: Archival** - Compress old artifacts (30-day policy)
-6. **Phase 6: Advanced** - Optional uv migration
+1. **Phase 2: Safe Cleanup** - Remove backup files, fix anomalies
+
+1. **Phase 3: Root Cleanup** - Move root scripts to tools/
+
+1. **Phase 4: System Consolidation** ⚠️ High Risk - Move runtime artifacts
+
+1. **Phase 5: Archival** - Compress old artifacts (30-day policy)
+
+1. **Phase 6: Advanced** - Optional uv migration
 
 ### Conservative Approach
 
@@ -414,13 +419,13 @@ Expected space savings: ~150-200 MB initially, ongoing management
 42 validation checks across 8 categories:
 
 1. File organization (8 checks)
-2. Tool validation (6 checks)
-3. Symlink integrity (4 checks)
-4. Hook validation (5 checks)
-5. Documentation links (3 checks)
-6. Permission validation (4 checks)
-7. Artifact management (6 checks)
-8. Git health (6 checks)
+1. Tool validation (6 checks)
+1. Symlink integrity (4 checks)
+1. Hook validation (5 checks)
+1. Documentation links (3 checks)
+1. Permission validation (4 checks)
+1. Artifact management (6 checks)
+1. Git health (6 checks)
 
 Automation target: `/tools/bin/workspace-health-check.sh`
 
@@ -433,7 +438,7 @@ Automation target: `/tools/bin/workspace-health-check.sh`
 
 For detailed execution instructions, see `/docs/maintenance/WORKSPACE_REORGANIZATION_GUIDE.md`.
 
----
+______________________________________________________________________
 
 **Last Updated**: October 23, 2025 (Architecture version 2.2, Reorganization plan v1.0.0)
 **Architecture Version**: 2.2 - CNS Purification & Async Architecture Complete

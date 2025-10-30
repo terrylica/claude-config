@@ -75,8 +75,8 @@ ssh zerotier-remote "~/bin/syncthing --no-browser --no-restart > ~/syncthing.log
 ### 2. Configure Shared Folder (via Web Interface)
 
 1. Open http://localhost:8384
-2. Add folder: `/Users/terryli/eon/nt/` → Share with GPU workstation
-3. Accept on remote side
+1. Add folder: `/Users/terryli/eon/nt/` → Share with GPU workstation
+1. Accept on remote side
 
 ### 3. Start Development Session
 
@@ -213,9 +213,9 @@ ping -c 3 172.25.253.142
 - ✅ **Recovery options** if one machine fails
 - ✅ **Complete audit trail** of all changes
 
----
+______________________________________________________________________
 
-**Status**: Ready for bidirectional development workflow  
-**Primary Environment**: GPU workstation with Claude Code  
-**Backup Environment**: macOS with automatic sync  
+**Status**: Ready for bidirectional development workflow\
+**Primary Environment**: GPU workstation with Claude Code\
+**Backup Environment**: macOS with automatic sync\
 **Sync Direction**: Both directions, automatic, ~10-second delay

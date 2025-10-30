@@ -1,14 +1,14 @@
 # SAGE Aliases Tool - Global Setup
 
-**Tool**: SAGE development aliases and productivity commands  
-**Location**: `~/.claude/tools/sage-aliases/`  
+**Tool**: SAGE development aliases and productivity commands\
+**Location**: `~/.claude/tools/sage-aliases/`\
 **Access**: Global commands via `~/.local/bin` (industry standard)
 
 ## Installation Status
 
-✅ **Tool Structure**: Complete directory organization  
-✅ **Universal Commands**: `gpu`, `sage-dev`, `sage-status` executables  
-✅ **Alias Categories**: 4 organized alias files  
+✅ **Tool Structure**: Complete directory organization\
+✅ **Universal Commands**: `gpu`, `sage-dev`, `sage-status` executables\
+✅ **Alias Categories**: 4 organized alias files\
 ✅ **Documentation**: Complete usage guide
 
 ## Universal Access Commands
@@ -88,8 +88,8 @@ source ~/.claude/tools/sage-aliases/aliases/sage-development.sh
 The old shell configuration referencing loose files can be:
 
 1. **Removed** (use universal commands only)
-2. **Updated** to reference new organized structure
-3. **Kept minimal** with selective sourcing
+1. **Updated** to reference new organized structure
+1. **Kept minimal** with selective sourcing
 
 ## Usage Verification
 
@@ -142,8 +142,8 @@ source ~/.claude/tools/sage-aliases/aliases/gpu-workstation.sh
 ## Next Steps
 
 1. **Test universal commands**: Verify `gpu`, `sage-dev`, `sage-status` work
-2. **Clean old references**: Remove loose file sources from shell config
-3. **Use in development**: Integrate commands into daily SAGE workflow
-4. **Extend as needed**: Add new commands to `bin/` directory
+1. **Clean old references**: Remove loose file sources from shell config
+1. **Use in development**: Integrate commands into daily SAGE workflow
+1. **Extend as needed**: Add new commands to `bin/` directory
 
 **Status**: Production ready with universal access following `.claude/tools` convention

@@ -220,11 +220,13 @@ Time: $TIMESTAMP
 PID: $PID
 Exit: $EXIT_CODE"
 
-    # Add file change info if available
+    # Add file change info if available (strip HTML tags for plain text)
     if [[ -n "$CHANGED_FILES" ]]; then
+        # Strip HTML tags: <code>text</code> → text
+        CHANGED_FILES_PLAIN=$(echo "$CHANGED_FILES" | sed 's/<[^>]*>//g')
         PUSHOVER_MESSAGE="$PUSHOVER_MESSAGE
 
-File Change: $CHANGED_FILES"
+File Change: $CHANGED_FILES_PLAIN"
     fi
 
     # Add crash preview if available (first 2 lines only for Pushover)

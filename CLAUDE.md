@@ -6,7 +6,7 @@
 
 **Quick Links**: [Tools](tools/) | [Specifications](specifications/) | [Automation](automation/) | [Agents](docs/agents/AGENTS.md) | [Docs](docs/)
 
----
+______________________________________________________________________
 
 ## Conventions
 

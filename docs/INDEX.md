@@ -3,7 +3,7 @@
 **Hub-and-Spoke Documentation Architecture**
 Central navigation point for all workspace documentation with direct links to module-specific guides.
 
----
+______________________________________________________________________
 
 ## **🏗️ Core Architecture**
 
@@ -73,7 +73,7 @@ Central navigation point for all workspace documentation with direct links to mo
 - **[Legacy Archive Notice](../LEGACY_ARCHIVE_NOTICE.md)** - Information about archived legacy systems
 - **[Official File Standards](standards/CLAUDE_CODE_OFFICIAL_FILES.md)** - File management guidelines
 
----
+______________________________________________________________________
 
 ## **🔍 Quick Navigation**
 
@@ -89,6 +89,6 @@ Central navigation point for all workspace documentation with direct links to mo
 - **Development**: [Agent Registry](agents/AGENTS.md) → [Tool Installation](../install-all-tools) → [SAGE Aliases](../sage-aliases/)
 - **Maintenance**: [Reports](reports/) → [Legacy Management](../LEGACY_ARCHIVE_NOTICE.md) → [Standards](standards/)
 
----
+______________________________________________________________________
 
 **Navigation Tip**: Each section maintains its own detailed README with module-specific information while this index provides workspace-wide navigation.

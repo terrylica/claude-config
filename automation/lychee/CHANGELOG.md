@@ -318,7 +318,7 @@
 ### 🚀 Features
 
 - _(shells,zellij)_ Configure Zellij session recovery in zsh
-- _(skills)_ [**breaking**] Implement hierarchical global skills architecture
+- _(skills)_ \[**breaking**\] Implement hierarchical global skills architecture
 
 ### 📚 Documentation
 

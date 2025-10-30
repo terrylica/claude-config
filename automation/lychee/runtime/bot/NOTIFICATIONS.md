@@ -40,11 +40,11 @@ Sends notifications to both Telegram and Pushover.
 
 **Notification Types**:
 
-| Reason        | Emoji | Priority | Description              |
-| ------------- | ----- | -------- | ------------------------ |
-| `startup`     | 🚀    | normal   | Initial bot start        |
+| Reason        | Emoji | Priority | Description                  |
+| ------------- | ----- | -------- | ---------------------------- |
+| `startup`     | 🚀    | normal   | Initial bot start            |
 | `code_change` | 🔄    | normal   | Automatic reload (watchexec) |
-| `crash`       | 💥    | high     | Unexpected termination   |
+| `crash`       | 💥    | high     | Unexpected termination       |
 
 **Location**: `/Users/terryli/.claude/automation/lychee/runtime/bot/notify-restart.sh`
 
@@ -62,7 +62,7 @@ Loaded from Doppler secrets (via `doppler run`):
 Multi-source fallback (priority order):
 
 1. **Git-based config** (preferred): `~/.claude/automation/cns/config/cns_config.json`
-2. **macOS Keychain** (fallback): `security find-generic-password`
+1. **macOS Keychain** (fallback): `security find-generic-password`
 
 See `/Users/terryli/.claude/specifications/pushover-integration.yaml` for details.
 
@@ -172,14 +172,15 @@ Exit: 0
    tail -50 /Users/terryli/.claude/automation/lychee/logs/bot-notifications.log
    ```
 
-2. **Verify credentials**:
+1. **Verify credentials**:
 
    ```bash
    doppler run --project claude-config --config dev -- printenv | grep TELEGRAM
    jq '.pushover' ~/.claude/automation/cns/config/cns_config.json
    ```
 
-3. **Test manually**:
+1. **Test manually**:
+
    ```bash
    /Users/terryli/.claude/automation/lychee/runtime/bot/notify-restart.sh startup 0
    ```
@@ -192,7 +193,8 @@ Exit: 0
    ps aux | grep watchexec | grep -v grep
    ```
 
-2. **Check bot wrapper process**:
+1. **Check bot wrapper process**:
+
    ```bash
    ps aux | grep bot-wrapper | grep -v grep
    ```

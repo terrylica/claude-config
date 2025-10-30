@@ -12,7 +12,7 @@ doppler run -p claude-config -c dev -- uv run auth-telegram.py
 **When prompted:**
 
 1. `Enter confirmation code:` → Enter the code sent to your Telegram app
-2. If prompted: `Enter your password:` → Enter your 2FA password
+1. If prompted: `Enter your password:` → Enter your 2FA password
 
 **Success indicator:**
 

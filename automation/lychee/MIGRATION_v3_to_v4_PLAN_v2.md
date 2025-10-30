@@ -10,7 +10,7 @@
 **Completion Report**: [`MIGRATION_COMPLETE.md`](/Users/terryli/.claude/automation/lychee/MIGRATION_COMPLETE.md)
 **Integration Tests**: [`tests/INTEGRATION_TESTS.md`](/Users/terryli/.claude/automation/lychee/tests/INTEGRATION_TESTS.md)
 
----
+______________________________________________________________________
 
 ## Implementation Summary
 
@@ -37,23 +37,23 @@
 
 **Status**: Ready for v4.0.0 release tag
 
----
+______________________________________________________________________
 
 ## Changes from v1
 
 **Critical Fixes**:
 
 1. ✅ Reordered phases: Code refactoring before directory rename
-2. ✅ Registry location clarified: `state/workflows.json` (per spec)
-3. ✅ Added dual-mode backward compatibility during migration
-4. ✅ Service management explicitly documented
-5. ✅ Testing after each phase (not just at end)
-6. ✅ Complete rollback procedures per phase
-7. ✅ Pre-migration state cleanup validation
+1. ✅ Registry location clarified: `state/workflows.json` (per spec)
+1. ✅ Added dual-mode backward compatibility during migration
+1. ✅ Service management explicitly documented
+1. ✅ Testing after each phase (not just at end)
+1. ✅ Complete rollback procedures per phase
+1. ✅ Pre-migration state cleanup validation
 
 **Timeline Adjusted**: 10.5h → 30h total (25.5h base + 4.5h buffer, 3-day execution recommended)
 
----
+______________________________________________________________________
 
 ## Executive Summary
 
@@ -62,16 +62,16 @@
 **Key Changes**:
 
 1. **Workflow Registry**: Dynamically loaded plugins at `state/workflows.json`
-2. **Session Summaries**: Always sent (even 0 errors), provide workflow menu
-3. **Hybrid UI**: Preset buttons + custom prompt option
-4. **Smart Orchestration**: Dependency resolution for multi-workflow execution
-5. **Directory Rename**: `automation/lychee/` → `automation/telegram-workflows/` (LAST step)
+1. **Session Summaries**: Always sent (even 0 errors), provide workflow menu
+1. **Hybrid UI**: Preset buttons + custom prompt option
+1. **Smart Orchestration**: Dependency resolution for multi-workflow execution
+1. **Directory Rename**: `automation/lychee/` → `automation/telegram-workflows/` (LAST step)
 
 **Migration Strategy**: Dual-mode compatibility → All code changes → Test thoroughly → Rename atomically
 
 **Risk Level**: MEDIUM (with proper execution of this plan)
 
----
+______________________________________________________________________
 
 ## Pre-Migration Requirements
 
@@ -162,7 +162,7 @@ else
 fi
 ```
 
----
+______________________________________________________________________
 
 ## Migration Phases (Revised)
 
@@ -182,7 +182,7 @@ fi
 
 **Next**: Create git tag before Phase 1
 
----
+______________________________________________________________________
 
 ### Phase 1: Create Workflow Registry ✅ COMPLETE
 
@@ -203,14 +203,15 @@ fi
    touch state/workflows.json
    ```
 
-2. **Populate Registry** with 5 workflows:
+1. **Populate Registry** with 5 workflows:
+
    - `lychee-autofix` (migrate from v3 hardcoded logic)
    - `prune-legacy` (remove unused code)
    - `fix-docstrings` (standardize docs)
    - `rename-variables` (improve naming)
    - `custom-prompt` (user-specified - DEFER to v4.1.0 per security audit)
 
-3. **Validate Schema**
+1. **Validate Schema**
 
    ```bash
    # Install jsonschema if needed
@@ -235,7 +236,7 @@ fi
    "
    ```
 
-4. **Validate Jinja2 Templates**
+1. **Validate Jinja2 Templates**
 
    ```python
    # validate-templates.py
@@ -340,7 +341,7 @@ git checkout state/workflows.json  # If committed
 
 **Commit Point**: `git commit -m "feat(v4): add workflow registry with 4 initial workflows"`
 
----
+______________________________________________________________________
 
 ### Phase 2: Refactor Hook (Dual-Mode Session Summaries) ✅ COMPLETE
 
@@ -366,7 +367,7 @@ git checkout state/workflows.json  # If committed
    staged_files=$(git status --porcelain 2>/dev/null | grep "^M" | wc -l | tr -d ' ')
    ```
 
-2. **Add Session Duration Tracking** (using SessionStart hook timestamp)
+1. **Add Session Duration Tracking** (using SessionStart hook timestamp)
 
    ```bash
    # Calculate session duration from timestamp file
@@ -392,7 +393,7 @@ git checkout state/workflows.json  # If committed
 
    **Note**: Requires SessionStart hook at `runtime/hook/session-start-tracker.sh` configured in `~/.claude/settings.json`
 
-3. **Calculate Available Workflows** (using helper script)
+1. **Calculate Available Workflows** (using helper script)
 
    ```bash
    # Calculate available workflows using helper
@@ -410,7 +411,7 @@ git checkout state/workflows.json  # If committed
 
    **Note**: Requires `runtime/lib/calculate_workflows.py` helper script
 
-4. **Create SessionSummary Writer** (new function)
+1. **Create SessionSummary Writer** (new function)
 
    ```bash
    write_session_summary() {
@@ -447,13 +448,13 @@ git checkout state/workflows.json  # If committed
    }
    ```
 
-5. **Create Summaries Directory**
+1. **Create Summaries Directory**
 
    ```bash
    mkdir -p state/summaries
    ```
 
-6. **Update Hook Logic (Dual Mode)**
+1. **Update Hook Logic (Dual Mode)**
 
    ```bash
    # OLD: Only emit if errors > 0
@@ -484,7 +485,8 @@ git checkout state/workflows.json  # If committed
        "{\"error_count\": $broken_links_count, \"summary_file\": \"$summary_file\"}"
    ```
 
-7. **Update Bot Startup Logic**
+1. **Update Bot Startup Logic**
+
    ```bash
    # Hook should ALWAYS start bot now (not just on errors)
    if [[ "$bot_running" == "false" ]]; then
@@ -537,7 +539,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
 
 **Commit Point**: `git commit -m "feat(v4): hook emits session summaries in dual mode"`
 
----
+______________________________________________________________________
 
 ### Phase 3: Refactor Bot (Workflow Menu UI) ✅ COMPLETE
 
@@ -574,7 +576,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
    load_workflow_registry()
    ```
 
-2. **Create Summary Handler** (watches `state/summaries/`)
+1. **Create Summary Handler** (watches `state/summaries/`)
 
    ```python
    from watchfiles import watch
@@ -614,7 +616,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
        summary_path.unlink()
    ```
 
-3. **Implement Trigger Filtering**
+1. **Implement Trigger Filtering**
 
    ```python
    def filter_workflows_by_triggers(summary: dict) -> list:
@@ -642,7 +644,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
        return available
    ```
 
-4. **Build Dynamic Keyboard**
+1. **Build Dynamic Keyboard**
 
    ```python
    def build_workflow_keyboard(workflows: list) -> InlineKeyboardMarkup:
@@ -675,7 +677,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
        return InlineKeyboardMarkup(buttons)
    ```
 
-5. **Handle Workflow Selection**
+1. **Handle Workflow Selection**
 
    ```python
    async def handle_workflow_selection(update: Update, context: CallbackContext):
@@ -726,7 +728,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type='summary.cr
        log_event(summary['correlation_id'], ..., "selection.received", {...})
    ```
 
-6. **Maintain Old Notification Handler** (dual mode)
+1. **Maintain Old Notification Handler** (dual mode)
 
    ```python
    # Keep existing watch_notifications() for v3 compatibility
@@ -808,7 +810,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
 
 **Commit Point**: `git commit -m "feat(v4): bot loads registry and displays workflow menu"`
 
----
+______________________________________________________________________
 
 ### Phase 4: Refactor Orchestrator (Workflow Execution) ✅ COMPLETE
 
@@ -847,7 +849,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
    load_workflow_registry()
    ```
 
-2. **Create Selection Handler** (watches `state/selections/`)
+1. **Create Selection Handler** (watches `state/selections/`)
 
    ```python
    async def watch_selections():
@@ -877,7 +879,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
        selection_path.unlink()
    ```
 
-3. **Implement Smart Dependency Resolution**
+1. **Implement Smart Dependency Resolution**
 
    ```python
    def resolve_dependencies(workflow_ids: list) -> list:
@@ -917,7 +919,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
        return order
    ```
 
-4. **Implement Workflow Execution**
+1. **Implement Workflow Execution**
 
    ```python
    from jinja2 import Template
@@ -987,7 +989,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type IN ('summar
        )
    ```
 
-5. **Maintain Old Approval Handler** (dual mode)
+1. **Maintain Old Approval Handler** (dual mode)
 
    ```python
    # Keep existing watch_approvals() for v3 compatibility
@@ -1060,7 +1062,7 @@ sqlite3 state/events.db "DELETE FROM session_events WHERE event_type LIKE 'execu
 
 **Commit Point**: `git commit -m "feat(v4): orchestrator executes workflows from registry"`
 
----
+______________________________________________________________________
 
 ### Phase 5: Integration Testing ⏸️ DEFERRED
 
@@ -1175,7 +1177,7 @@ ORDER BY timestamp;
 
 **Resolution**: Fix issues before proceeding to Phase 6
 
----
+______________________________________________________________________
 
 ### Phase 6: Service Management & Directory Rename ⏸️ DEFERRED
 
@@ -1207,7 +1209,7 @@ ORDER BY timestamp;
    ps aux | grep "[m]ulti-workspace-orchestrator" || echo "✅ Orchestrator stopped"
    ```
 
-2. **Rename Directory (Atomic)**
+1. **Rename Directory (Atomic)**
 
    ```bash
    # Create git tag before rename
@@ -1222,7 +1224,7 @@ ORDER BY timestamp;
    git status
    ```
 
-3. **Update Absolute Paths in Code**
+1. **Update Absolute Paths in Code**
 
    ```bash
    cd telegram-workflows
@@ -1237,7 +1239,7 @@ ORDER BY timestamp;
    grep -r "automation/lychee" . --exclude-dir=.git || echo "✅ No old paths remain"
    ```
 
-4. **Update Launchd Plists**
+1. **Update Launchd Plists**
 
    ```bash
    # Bot plist
@@ -1252,7 +1254,7 @@ ORDER BY timestamp;
    grep "telegram-workflows" ~/Library/LaunchAgents/com.user.lychee.*.plist
    ```
 
-5. **Reload Launchd**
+1. **Reload Launchd**
 
    ```bash
    # Unload old plists
@@ -1267,7 +1269,7 @@ ORDER BY timestamp;
    launchctl list | grep lychee
    ```
 
-6. **Start Services**
+1. **Start Services**
 
    ```bash
    echo "🚀 Starting services..."
@@ -1288,7 +1290,8 @@ ORDER BY timestamp;
    tail -20 ~/.claude/logs/orchestrator.log
    ```
 
-7. **Commit Rename**
+1. **Commit Rename**
+
    ```bash
    git add -A
    git commit -m "refactor: rename automation/lychee → automation/telegram-workflows"
@@ -1344,7 +1347,7 @@ launchctl start com.user.lychee.telegram-handler
 
 **Commit Point**: Rename committed, services running with new paths
 
----
+______________________________________________________________________
 
 ### Phase 7: Remove Dual Mode & Cleanup ⏸️ DEFERRED
 
@@ -1375,7 +1378,7 @@ launchctl start com.user.lychee.telegram-handler
        )
    ```
 
-2. **Remove Old Approval Handler from Orchestrator**
+1. **Remove Old Approval Handler from Orchestrator**
 
    ```python
    # Delete watch_approvals() function
@@ -1386,7 +1389,7 @@ launchctl start com.user.lychee.telegram-handler
        await watch_selections()  # v4 only
    ```
 
-3. **Remove Old Notification Emission from Hook**
+1. **Remove Old Notification Emission from Hook**
 
    ```bash
    # Delete write_notification() function
@@ -1397,7 +1400,7 @@ launchctl start com.user.lychee.telegram-handler
    # Do NOT emit notification anymore
    ```
 
-4. **Remove Old State Directories** (optional - keep for rollback safety)
+1. **Remove Old State Directories** (optional - keep for rollback safety)
 
    ```bash
    # Option A: Keep for 30 days (recommended)
@@ -1413,7 +1416,7 @@ launchctl start com.user.lychee.telegram-handler
    # rm -rf state/notifications state/approvals state/completions
    ```
 
-5. **Update SQLite Event Types** (optional)
+1. **Update SQLite Event Types** (optional)
 
    ```sql
    -- Create view for backward compatibility queries
@@ -1438,7 +1441,7 @@ launchctl start com.user.lychee.telegram-handler
    FROM session_events;
    ```
 
-6. **Archive Legacy Code**
+1. **Archive Legacy Code**
 
    ```bash
    mkdir -p archive/v3-code
@@ -1452,7 +1455,8 @@ launchctl start com.user.lychee.telegram-handler
        archive/v3-code/check-links-hybrid-v3.sh
    ```
 
-7. **Commit Cleanup**
+1. **Commit Cleanup**
+
    ```bash
    git add -A
    git commit -m "refactor(v4): remove dual-mode backward compatibility"
@@ -1484,7 +1488,7 @@ launchctl restart com.user.lychee.telegram-handler
 
 **Commit Point**: v4.0.0 finalized, no backward compatibility
 
----
+______________________________________________________________________
 
 ### Phase 8: Documentation & Release ✅ PARTIAL
 
@@ -1511,30 +1515,34 @@ launchctl restart com.user.lychee.telegram-handler
 #### Tasks
 
 1. **Update README.md**
+
    - Change version: 3.0.1 → 4.0.0
    - Update directory structure diagram
    - Update state files table (summaries, selections, executions)
    - Add workflow registry documentation
    - Update process model: "Workflow-driven orchestration"
 
-2. **Update COMPLETE_WORKFLOW.md**
+1. **Update COMPLETE_WORKFLOW.md**
+
    - Add session summary phase
    - Document workflow menu UI
    - Show multi-workflow execution
    - Update event types
 
-3. **Update CONTRIBUTING.md**
+1. **Update CONTRIBUTING.md**
+
    - Add workflow plugin guide
    - Document registry schema
    - Update file paths
    - Add template validation steps
 
-4. **Create New Documentation**
+1. **Create New Documentation**
+
    - `WORKFLOW_PLUGIN_GUIDE.md`: How to add new workflows
    - `MIGRATION_v3_to_v4.md`: Complete migration guide (this document)
    - `docs/WORKFLOW_REGISTRY.md`: Registry schema reference
 
-5. **Update Version History**
+1. **Update Version History**
 
    ```markdown
    ## v4.0.0 (2025-10-25)
@@ -1557,7 +1565,7 @@ launchctl restart com.user.lychee.telegram-handler
    **Migration**: See MIGRATION_v3_to_v4.md
    ```
 
-6. **Create Git Release Tag**
+1. **Create Git Release Tag**
 
    ```bash
    # Tag release
@@ -1570,7 +1578,8 @@ launchctl restart com.user.lychee.telegram-handler
    # git push origin v4.0.0
    ```
 
-7. **Create Release Summary**
+1. **Create Release Summary**
+
    ```bash
    # File: RELEASE_v4.0.0.md
    # - Migration checklist
@@ -1590,7 +1599,7 @@ launchctl restart com.user.lychee.telegram-handler
 
 **Commit Point**: `git commit -m "docs: update all documentation to v4.0.0"`
 
----
+______________________________________________________________________
 
 ## Post-Migration Verification
 
@@ -1651,7 +1660,7 @@ jq '.workflows | length' state/workflows.json  # Should match workflow count
 grep -r "lychee-autofix" runtime/ | wc -l  # Should be 0 (only in registry)
 ```
 
----
+______________________________________________________________________
 
 ## Rollback Procedures
 
@@ -1699,18 +1708,18 @@ launchctl start com.user.lychee.telegram-handler
 
 ### Phase-Specific Rollback
 
-| Phase | Rollback Command |
-| --- | --- |
-| 1 | `rm state/workflows.json` |
-| 2 | `git checkout runtime/hook/; rm -rf state/summaries` |
-| 3 | `git checkout runtime/bot/; rm -rf state/selections` |
-| 4 | `git checkout runtime/orchestrator/; rm -rf state/executions` |
-| 5 | Fix failing tests, don't rollback |
-| 6 | `git mv telegram-workflows lychee; restart services` |
-| 7 | `git revert HEAD` |
-| 8 | `git revert HEAD` (docs only) |
+| Phase | Rollback Command                                              |
+| ----- | ------------------------------------------------------------- |
+| 1     | `rm state/workflows.json`                                     |
+| 2     | `git checkout runtime/hook/; rm -rf state/summaries`          |
+| 3     | `git checkout runtime/bot/; rm -rf state/selections`          |
+| 4     | `git checkout runtime/orchestrator/; rm -rf state/executions` |
+| 5     | Fix failing tests, don't rollback                             |
+| 6     | `git mv telegram-workflows lychee; restart services`          |
+| 7     | `git revert HEAD`                                             |
+| 8     | `git revert HEAD` (docs only)                                 |
 
----
+______________________________________________________________________
 
 ## Timeline & Dependencies
 
@@ -1736,18 +1745,18 @@ Phase 1 (registry) ← 1-1.5h
 
 ### Timeline
 
-| Phase | Duration | Cumulative |
-| --- | --- | --- |
-| Phase 0: Preparation | 2h | 2h ✅ |
-| Phase 1: Registry | 1.5h | 3.5h |
-| Phase 2: Hook | 3.5h | 7h |
-| Phase 3: Bot | 4h | 11h |
-| Phase 4: Orchestrator | 5h | 16h |
-| Phase 5: Testing | 3h | 19h |
-| Phase 6: Rename + Services | 1.5h | 20.5h |
-| Phase 7: Cleanup | 2h | 22.5h |
-| Phase 8: Documentation | 3h | 25.5h |
-| **Buffer (issues)** | 4.5h | **30h** |
+| Phase                      | Duration | Cumulative |
+| -------------------------- | -------- | ---------- |
+| Phase 0: Preparation       | 2h       | 2h ✅      |
+| Phase 1: Registry          | 1.5h     | 3.5h       |
+| Phase 2: Hook              | 3.5h     | 7h         |
+| Phase 3: Bot               | 4h       | 11h        |
+| Phase 4: Orchestrator      | 5h       | 16h        |
+| Phase 5: Testing           | 3h       | 19h        |
+| Phase 6: Rename + Services | 1.5h     | 20.5h      |
+| Phase 7: Cleanup           | 2h       | 22.5h      |
+| Phase 8: Documentation     | 3h       | 25.5h      |
+| **Buffer (issues)**        | 4.5h     | **30h**    |
 
 **Realistic Estimate**: 2-3 days (allowing for breaks, debugging, careful testing)
 
@@ -1757,42 +1766,42 @@ Phase 1 (registry) ← 1-1.5h
 - **Day 2**: Phases 5-6 (testing + rename)
 - **Day 3**: Phases 7-8 (cleanup + docs)
 
----
+______________________________________________________________________
 
 ## Risk Assessment
 
 ### Risk Matrix
 
-| Phase | Risk | Impact | Mitigation |
-| --- | --- | --- | --- |
-| 1 | LOW | LOW | JSON validation before commit |
-| 2 | MEDIUM | MEDIUM | Dual mode, test after completion |
-| 3 | HIGH | HIGH | Dual mode, test extensively |
-| 4 | HIGH | HIGH | Dual mode, template validation |
-| 5 | MEDIUM | HIGH | Comprehensive test scenarios |
-| 6 | MEDIUM | HIGH | Service management, git mv |
-| 7 | LOW | MEDIUM | Keep archives, test after removal |
-| 8 | LOW | LOW | Documentation only |
+| Phase | Risk   | Impact | Mitigation                        |
+| ----- | ------ | ------ | --------------------------------- |
+| 1     | LOW    | LOW    | JSON validation before commit     |
+| 2     | MEDIUM | MEDIUM | Dual mode, test after completion  |
+| 3     | HIGH   | HIGH   | Dual mode, test extensively       |
+| 4     | HIGH   | HIGH   | Dual mode, template validation    |
+| 5     | MEDIUM | HIGH   | Comprehensive test scenarios      |
+| 6     | MEDIUM | HIGH   | Service management, git mv        |
+| 7     | LOW    | MEDIUM | Keep archives, test after removal |
+| 8     | LOW    | LOW    | Documentation only                |
 
 ### Critical Success Factors
 
 1. ✅ Pre-migration state validation passes
-2. ✅ Dual-mode implementation prevents breakage
-3. ✅ Testing after each phase catches issues early
-4. ✅ Service management prevents downtime
-5. ✅ Git tags enable quick rollback
+1. ✅ Dual-mode implementation prevents breakage
+1. ✅ Testing after each phase catches issues early
+1. ✅ Service management prevents downtime
+1. ✅ Git tags enable quick rollback
 
----
+______________________________________________________________________
 
 ## Next Steps (Post-Implementation)
 
 **v4.0.0 Release Finalization**:
 
 1. [ ] Create CHANGELOG.md entry for v4.0.0
-2. [ ] Create git tag `v4.0.0`
-3. [ ] Final commit and push
-4. [ ] Optional: Execute manual integration tests from `tests/INTEGRATION_TESTS.md`
-5. [ ] Optional: Monitor production usage
+1. [ ] Create git tag `v4.0.0`
+1. [ ] Final commit and push
+1. [ ] Optional: Execute manual integration tests from `tests/INTEGRATION_TESTS.md`
+1. [ ] Optional: Monitor production usage
 
 **Future Enhancements** (v4.1.0+):
 
@@ -1804,6 +1813,6 @@ Phase 1 (registry) ← 1-1.5h
 
 **Status**: ✅ **MIGRATION COMPLETE** - Phases 0-4 delivered, v4.0.0 ready for release
 
----
+______________________________________________________________________
 
 **Migration Plan v2.1** - Implementation complete, reflects actual results

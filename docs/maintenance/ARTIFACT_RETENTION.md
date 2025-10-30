@@ -5,7 +5,7 @@
 **Created**: 2025-10-23
 **Purpose**: Define lifecycle management for runtime artifacts to prevent unbounded growth
 
----
+______________________________________________________________________
 
 ## Overview
 
@@ -13,18 +13,18 @@ The `~/.claude/` workspace accumulates runtime artifacts from Claude Code sessio
 
 ### Current State (as of 2025-10-23)
 
-| Artifact Type | Location | Size | File Count | Growth Rate |
-| --- | --- | --- | --- | --- |
-| Shell Snapshots | `/shell-snapshots/` | 69 MB | 371 files | ~2-3 MB/week |
-| Debug Logs | `/debug/` | 57 MB | Unknown | ~1-2 MB/week |
-| File History | `/file-history/` | 63 MB | ~300 UUIDs | ~1-2 MB/week |
-| Task Tracking | `/todos/` | 3.6 MB | 60+ files | ~100 KB/week |
-| Session History | `/history.jsonl` | 1.2 MB | 1 file | ~50 KB/week |
-| **Total** |  | **~210 MB** | **700+ files** | **~5-8 MB/week** |
+| Artifact Type   | Location            | Size        | File Count     | Growth Rate      |
+| --------------- | ------------------- | ----------- | -------------- | ---------------- |
+| Shell Snapshots | `/shell-snapshots/` | 69 MB       | 371 files      | ~2-3 MB/week     |
+| Debug Logs      | `/debug/`           | 57 MB       | Unknown        | ~1-2 MB/week     |
+| File History    | `/file-history/`    | 63 MB       | ~300 UUIDs     | ~1-2 MB/week     |
+| Task Tracking   | `/todos/`           | 3.6 MB      | 60+ files      | ~100 KB/week     |
+| Session History | `/history.jsonl`    | 1.2 MB      | 1 file         | ~50 KB/week      |
+| **Total**       |                     | **~210 MB** | **700+ files** | **~5-8 MB/week** |
 
 **Projected Growth**: Without management, artifacts will reach **~500 MB within 6 months**.
 
----
+______________________________________________________________________
 
 ## Retention Policies
 
@@ -48,7 +48,7 @@ find /Users/terryli/.claude/shell-snapshots/ \
   -type f -mtime +30
 ```
 
----
+______________________________________________________________________
 
 ### Policy 2: Compression on Archive
 
@@ -76,7 +76,7 @@ tar -czf archive/shell-snapshots-2025-10.tar.gz \
 - JSON data (file history, todos): **60-70% reduction**
 - Mixed content: **70-80% reduction**
 
----
+______________________________________________________________________
 
 ### Policy 3: Verification Before Deletion
 
@@ -87,10 +87,10 @@ tar -czf archive/shell-snapshots-2025-10.tar.gz \
 **Verification Steps**:
 
 1. Create compressed archive
-2. Verify archive integrity: `tar -tzf archive.tar.gz > /dev/null`
-3. Compare file counts: `tar -tzf archive.tar.gz | wc -l`
-4. Test extraction: `tar -xzf archive.tar.gz -C /tmp/test/`
-5. Only then delete originals
+1. Verify archive integrity: `tar -tzf archive.tar.gz > /dev/null`
+1. Compare file counts: `tar -tzf archive.tar.gz | wc -l`
+1. Test extraction: `tar -xzf archive.tar.gz -C /tmp/test/`
+1. Only then delete originals
 
 **Implementation**:
 
@@ -104,7 +104,7 @@ else
 fi
 ```
 
----
+______________________________________________________________________
 
 ## Artifact Categories & Policies
 
@@ -116,11 +116,11 @@ fi
 
 #### Retention Policy
 
-| Age | Action | Location |
-| --- | --- | --- |
-| 0-30 days | **Keep** | `/shell-snapshots/` |
-| 30-90 days | **Archive** | `/archive/shell-snapshots-YYYY-MM.tar.gz` |
-| 90+ days | **Delete archive** (optional) | N/A |
+| Age        | Action                        | Location                                  |
+| ---------- | ----------------------------- | ----------------------------------------- |
+| 0-30 days  | **Keep**                      | `/shell-snapshots/`                       |
+| 30-90 days | **Archive**                   | `/archive/shell-snapshots-YYYY-MM.tar.gz` |
+| 90+ days   | **Delete archive** (optional) | N/A                                       |
 
 #### Archival Process
 
@@ -162,7 +162,7 @@ fi
 **Schedule**: First day of each month
 **Script**: `/tools/maintenance/archive-shell-snapshots.sh`
 
----
+______________________________________________________________________
 
 ### 2. Debug Logs (`/debug/` → `/system/debug/`)
 
@@ -172,11 +172,11 @@ fi
 
 #### Retention Policy
 
-| Age | Action | Location |
-| --- | --- | --- |
-| 0-30 days | **Keep** | `/system/debug/` |
-| 30-180 days | **Archive** | `/archive/debug-logs-YYYY-MM.tar.gz` |
-| 180+ days | **Delete archive** | N/A |
+| Age         | Action             | Location                             |
+| ----------- | ------------------ | ------------------------------------ |
+| 0-30 days   | **Keep**           | `/system/debug/`                     |
+| 30-180 days | **Archive**        | `/archive/debug-logs-YYYY-MM.tar.gz` |
+| 180+ days   | **Delete archive** | N/A                                  |
 
 #### Special Considerations
 
@@ -196,7 +196,7 @@ find /system/debug/ -name "*error*.log" -mtime +180 | \
     tar -czf archive/debug-error-logs-$(date +%Y-%m).tar.gz -T -
 ```
 
----
+______________________________________________________________________
 
 ### 3. File History (`/file-history/` → `/system/file-history/`)
 
@@ -206,11 +206,11 @@ find /system/debug/ -name "*error*.log" -mtime +180 | \
 
 #### Retention Policy
 
-| Age | Action | Location |
-| --- | --- | --- |
-| 0-30 days | **Keep** | `/system/file-history/` |
-| 30-90 days | **Archive** | `/archive/file-history-YYYY-MM.tar.gz` |
-| 90+ days | **Delete archive** | N/A |
+| Age        | Action             | Location                               |
+| ---------- | ------------------ | -------------------------------------- |
+| 0-30 days  | **Keep**           | `/system/file-history/`                |
+| 30-90 days | **Archive**        | `/archive/file-history-YYYY-MM.tar.gz` |
+| 90+ days   | **Delete archive** | N/A                                    |
 
 #### Critical Warning
 
@@ -234,7 +234,7 @@ find /system/file-history/ -type d -mindepth 1 -maxdepth 1 -mtime +30 | \
 echo "Test file history in Claude Code before deleting originals"
 ```
 
----
+______________________________________________________________________
 
 ### 4. Task Tracking (`/todos/` → `/system/todos/`)
 
@@ -244,11 +244,11 @@ echo "Test file history in Claude Code before deleting originals"
 
 #### Retention Policy
 
-| Age | Action | Location |
-| --- | --- | --- |
-| 0-7 days | **Keep** | `/system/todos/` |
-| 7-30 days | **Archive** | `/archive/todos-YYYY-MM.tar.gz` |
-| 30+ days | **Delete archive** | N/A |
+| Age       | Action             | Location                        |
+| --------- | ------------------ | ------------------------------- |
+| 0-7 days  | **Keep**           | `/system/todos/`                |
+| 7-30 days | **Archive**        | `/archive/todos-YYYY-MM.tar.gz` |
+| 30+ days  | **Delete archive** | N/A                             |
 
 #### Notes
 
@@ -256,7 +256,7 @@ echo "Test file history in Claude Code before deleting originals"
 - Once session complete, task files rarely needed
 - Shorter retention (7 days) appropriate
 
----
+______________________________________________________________________
 
 ### 5. Session History (`/history.jsonl` → `/system/history/session-history.jsonl`)
 
@@ -268,11 +268,11 @@ echo "Test file history in Claude Code before deleting originals"
 
 **Special case**: Single growing file, not directory
 
-| Size | Action |
-| --- | --- |
-| < 5 MB | **Keep as-is** |
-| 5-10 MB | **Rotate and archive** |
-| 10+ MB | **Split into monthly archives** |
+| Size    | Action                          |
+| ------- | ------------------------------- |
+| < 5 MB  | **Keep as-is**                  |
+| 5-10 MB | **Rotate and archive**          |
+| 10+ MB  | **Split into monthly archives** |
 
 #### Rotation Process
 
@@ -285,7 +285,7 @@ if [ $(stat -f%z history.jsonl) -gt 5242880 ]; then
 fi
 ```
 
----
+______________________________________________________________________
 
 ## Archival Directory Structure
 
@@ -396,7 +396,7 @@ crontab -e
 
 **Schedule**: First day of each month at 2:00 AM
 
----
+______________________________________________________________________
 
 ## Manual Archival Procedure
 
@@ -438,7 +438,7 @@ tar -tzf archive/shell-snapshots-2025-10.tar.gz > /dev/null && \
 du -sh shell-snapshots/ debug/ file-history/ todos/
 ```
 
----
+______________________________________________________________________
 
 ## Monitoring & Alerts
 
@@ -470,7 +470,7 @@ if [ "$FILE_HISTORY" -gt "$THRESHOLD" ]; then
 fi
 ```
 
----
+______________________________________________________________________
 
 ## Rollback & Recovery
 
@@ -491,12 +491,12 @@ tar -xzf archive/debug-logs-2025-10.tar.gz \
 If archival caused issues:
 
 1. **Stop archival**: Kill any running archival processes
-2. **Restore from backup**: Use emergency backup
-3. **Extract archives**: Restore from compressed archives
-4. **Verify systems**: Test Claude Code functionality
-5. **Document issue**: Record in `/docs/maintenance/REORGANIZATION_ISSUES.md`
+1. **Restore from backup**: Use emergency backup
+1. **Extract archives**: Restore from compressed archives
+1. **Verify systems**: Test Claude Code functionality
+1. **Document issue**: Record in `/docs/maintenance/REORGANIZATION_ISSUES.md`
 
----
+______________________________________________________________________
 
 ## Best Practices
 
@@ -519,7 +519,7 @@ If archival caused issues:
 ❌ Archive active debugging sessions
 ❌ Delete archives prematurely
 
----
+______________________________________________________________________
 
 ## Related Documentation
 
@@ -528,18 +528,18 @@ If archival caused issues:
 - [Reorganization Move Map](/specifications/reorg-move-map.yaml) - File moves
 - [Workspace Health Check](/specifications/workspace-health-check.yaml) - Validation
 
----
+______________________________________________________________________
 
 ## Implementation Timeline
 
-| Phase | Action | Timeline |
-| --- | --- | --- |
-| **Phase 1** | Create archival scripts | Week 1 |
-| **Phase 2** | Test manual archival | Week 1 |
-| **Phase 3** | Set up automation | Week 2 |
-| **Phase 4** | Monitor and adjust | Ongoing |
+| Phase       | Action                  | Timeline |
+| ----------- | ----------------------- | -------- |
+| **Phase 1** | Create archival scripts | Week 1   |
+| **Phase 2** | Test manual archival    | Week 1   |
+| **Phase 3** | Set up automation       | Week 2   |
+| **Phase 4** | Monitor and adjust      | Ongoing  |
 
----
+______________________________________________________________________
 
 **Status**: Proposed policy for workspace reorganization
 **Next Steps**: Create archival scripts, test thoroughly, implement automation
