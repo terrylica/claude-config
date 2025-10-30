@@ -1,0 +1,189 @@
+openapi: 3.1.1
+info:
+  title: PID Management psutil Migration
+  version: 1.0.0
+  description: |
+    Migration from custom os.kill-based process detection to industry-standard psutil library.
+
+    Context: bot_utils.py uses os.kill(pid, 0) for stale PID detection, which has edge cases
+    (PID reuse, zombie processes). psutil is the industry standard (Docker, AWS CLI, monitoring tools).
+
+    Research: /Users/terryli/.claude/docs/architecture/process-management-tools-research.md
+
+  x-slos:
+    availability:
+      target: "99.9%"
+      metric: "Bot startup success rate (no false PID conflicts)"
+      measurement: "Track FileExistsError exceptions where process isn't actually running"
+
+    correctness:
+      target: "100%"
+      metric: "Accurate process detection (no false positives/negatives)"
+      measurement: |
+        - Zero false conflicts from PID reuse (unrelated process with same PID)
+        - Zero false conflicts from zombie processes
+        - Zero missed conflicts from actual running bot instances
+
+    observability:
+      target: "100% error visibility"
+      metric: "All PID conflicts logged with process details"
+      measurement: |
+        - Log PID, cmdline, and process status for all conflicts
+        - Archive conflict details for post-mortem analysis
+
+    maintainability:
+      target: "< 100 lines for PID management"
+      metric: "Code complexity and dependency count"
+      measurement: |
+        - Use established library (psutil) instead of custom logic
+        - Clear separation of concerns (detection vs. file management)
+
+paths: {}  # No API endpoints, internal library
+
+components:
+  schemas:
+    PIDFileState:
+      type: object
+      required:
+        - pid
+        - process_name
+        - cmdline
+        - status
+      properties:
+        pid:
+          type: integer
+          description: Process ID from PID file
+        process_name:
+          type: string
+          description: Process name from psutil.Process.name()
+        cmdline:
+          type: array
+          items:
+            type: string
+          description: Full command line from psutil.Process.cmdline()
+        status:
+          type: string
+          enum: [running, sleeping, disk-sleep, zombie, stopped, tracing-stop, dead]
+          description: Process status from psutil.Process.status()
+        exists:
+          type: boolean
+          description: Whether process exists (psutil.pid_exists)
+        is_bot:
+          type: boolean
+          description: Whether process is actually our bot (cmdline verification)
+
+x-implementation:
+  phases:
+    phase_1_psutil_integration:
+      version: "5.2.0"
+      description: "Add psutil dependency and replace os.kill with psutil-based detection"
+      scope:
+        - Add psutil>=7.0.0 to inline dependencies (PEP 723)
+        - Create is_bot_running() helper function
+        - Replace os.kill(pid, 0) with psutil.pid_exists()
+        - Add cmdline verification to prevent PID reuse
+        - Update error messages with process details
+
+      files_modified:
+        - /Users/terryli/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py
+        - /Users/terryli/.claude/automation/lychee/runtime/lib/bot_utils.py
+
+      validation_criteria:
+        - Bot starts successfully with clean PID file
+        - Bot detects actual running instance and fails with clear error
+        - Bot cleans up stale PID file from dead process
+        - Bot handles corrupted PID file gracefully
+        - All process conflicts logged with cmdline details
+
+      rollback_plan: "Revert to v5.1.1 (git checkout v5.1.1)"
+
+    phase_2_fcntl_locking:
+      version: "5.3.0"
+      description: "Optional: Migrate to fcntl-based locking for automatic crash cleanup"
+      status: "deferred"
+      reason: "Phase 1 sufficient for current use case; fcntl adds fd management complexity"
+      scope:
+        - Replace O_EXCL file creation with fcntl.flock()
+        - Keep file descriptor open for lock lifetime
+        - Automatic lock release on crash (kernel cleanup)
+
+      when_to_revisit:
+        - Observing stale PID files in production despite psutil checks
+        - Deploying to environments with aggressive process killing (containers)
+        - Need stronger guarantees for multi-instance prevention
+
+x-implementation-findings:
+  current_implementation_analysis:
+    strengths:
+      - Atomic creation with O_CREAT | O_EXCL (correct approach)
+      - Stale PID detection implemented (os.kill signal 0)
+      - Proper cleanup on graceful exit
+      - Race condition awareness (v5.1.1 fix)
+
+    edge_cases:
+      - pid_reuse: "New unrelated process could have same PID as dead bot"
+      - zombie_processes: "os.kill(pid, 0) returns True for zombie processes"
+      - access_denied: "No verification that PID belongs to our bot"
+
+    migration_rationale:
+      - psutil is industry standard (Docker, AWS CLI, monitoring tools)
+      - Cross-platform (macOS, Linux, Windows)
+      - Actively maintained (v7.1.3, 2024)
+      - Better than os.kill - provides process metadata
+      - Can verify process identity via cmdline
+
+  dependency_evaluation:
+    psutil:
+      status: "recommended"
+      version: ">=7.0.0"
+      license: "BSD-3-Clause"
+      maintenance: "Active (2024)"
+      size: "~500KB"
+      python_versions: "3.6-3.12+"
+      cross_platform: true
+      alternatives_considered:
+        python-daemon: "Deprecated, known bugs with stale locks"
+        pid_package: "Abandoned (July 2020), no Python 3.9+ support"
+        supervisord: "Overkill, external daemon required"
+        systemd: "Linux-only, not suitable for macOS development"
+
+x-testing:
+  scenarios:
+    clean_startup:
+      description: "Bot starts with no existing PID file"
+      expected: "Creates PID file, logs success"
+
+    actual_conflict:
+      description: "Bot starts while another instance is running"
+      expected: "Detects running bot via cmdline, raises FileExistsError, logs details"
+
+    stale_pidfile:
+      description: "Bot starts with PID file from dead process"
+      expected: "Detects stale PID via psutil, removes file, creates new PID file"
+
+    pid_reuse:
+      description: "Bot starts with PID file where unrelated process has same PID"
+      expected: "Detects different cmdline, treats as stale, creates new PID file"
+
+    corrupted_pidfile:
+      description: "Bot starts with corrupted PID file (invalid content)"
+      expected: "Catches ValueError, removes corrupted file, creates new PID file"
+
+    zombie_process:
+      description: "Bot starts with PID file where process is zombie"
+      expected: "Detects zombie status via psutil.Process.status(), treats as stale"
+
+x-rollout:
+  strategy: "Feature flag with validation"
+  steps:
+    - Implement psutil-based detection in bot_utils.py
+    - Add comprehensive logging for all code paths
+    - Test all scenarios (clean, conflict, stale, reuse, corrupted)
+    - Validate bot restarts cleanly with file edits (watchexec)
+    - Tag v5.2.0 and create GitHub release
+
+  rollback_triggers:
+    - Bot fails to start with clean PID file
+    - False positives (bot kills itself when it's the only instance)
+    - False negatives (bot starts when another instance is running)
+    - Increased crash rate or errors in production

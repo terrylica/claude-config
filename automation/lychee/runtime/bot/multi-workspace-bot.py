@@ -4,6 +4,7 @@
 # dependencies = [
 #     "python-telegram-bot[rate-limiter]>=21.0",
 #     "jsonschema>=4.0.0",
+#     "psutil>=7.0.0",
 # ]
 # ///
 """
@@ -14,8 +15,13 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 5.0.0
+Version: 5.2.0
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
+
+Changes from v5.0.0:
+- Migrate to psutil for PID management (industry-standard approach)
+- Add cmdline verification to prevent PID reuse false positives
+- Better process detection (handles zombie processes, access denied errors)
 
 Changes from v4.9.0:
 - Extract async services to bot_services.py (-183 lines)
@@ -323,7 +329,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 5.0.0")
+    print(f"Version: 5.2.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")
