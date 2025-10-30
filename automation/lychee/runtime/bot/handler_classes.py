@@ -418,10 +418,49 @@ class WorkflowExecutionHandler(BaseHandler):
                     print(f"   🗑️  Progress tracking cleaned up (memory only)")
 
             else:
-                # No active progress tracking - this shouldn't happen in normal operation
+                # No active progress tracking - send fallback notification
                 print(f"   ⚠️  WARNING: No progress tracking found for {progress_key}")
-                print(f"   Execution completion will not be sent (single-message mode requires tracking)")
-                print(f"   This may indicate the workflow selection didn't initialize tracking properly")
+                print(f"   Sending fallback notification (new message without progress context)")
+
+                # Build fallback message (without git status or progress context)
+                status_emoji_map = {"success": "✅", "error": "❌", "timeout": "⏱️"}
+                status_emoji = status_emoji_map.get(status, "❓")
+
+                # Extract summary from execution
+                summary = "Workflow completed"
+                if status == "success" and execution.get("stdout"):
+                    stdout = execution["stdout"].strip()
+                    if stdout:
+                        lines = [l.strip() for l in stdout.split('\n') if l.strip()]
+                        summary = lines[0] if lines else "Workflow completed"
+                        if len(summary) > 100:
+                            summary = summary[:97] + "..."
+
+                # Compact session + debug log line
+                headless_session_id = execution.get("headless_session_id")
+                if headless_session_id:
+                    session_debug_line = f"session={session_id} | headless={headless_session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+                else:
+                    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+
+                fallback_message = (
+                    f"📨 **Workflow Completed** (recovered execution)\n\n"
+                    f"{status_emoji} **Workflow**: {workflow_name}\n"
+                    f"**Workspace**: `{workspace_id}`\n"
+                    f"`{session_debug_line}`\n"
+                    f"**Status**: {status}\n"
+                    f"**Duration**: {duration}s\n"
+                    f"**Output**: {summary}\n\n"
+                    f"ℹ️ _Progress tracking was lost (bot restart or crash). This is a fallback notification._"
+                )
+
+                # Send new message (not updating existing message)
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=fallback_message,
+                    parse_mode="Markdown"
+                )
+                print(f"   ✅ Fallback notification sent")
 
             print(f"📤 ✅ Sent execution completion for {workspace_id} ({session_id}): {workflow_name}")
             update_activity()  # Track activity for idle timeout

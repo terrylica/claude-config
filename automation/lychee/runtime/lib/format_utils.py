@@ -51,8 +51,13 @@ def escape_markdown(text: str) -> str:
 
     Returns:
         Text with markdown characters escaped
+
+    Note:
+        Square brackets [] are NOT escaped because they only have special meaning
+        in Telegram Markdown when used in link syntax [text](url). Standalone
+        brackets should be displayed as-is.
     """
-    return text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+    return text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
 
 
 def strip_markdown(text: str) -> str:
