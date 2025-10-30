@@ -38,18 +38,22 @@ if [[ -f "$WATCHEXEC_INFO_FILE" ]]; then
         CREATED_PATH=$(jq -r '.watchexec.created_path // ""' "$WATCHEXEC_INFO_FILE" 2>/dev/null || echo "")
         REMOVED_PATH=$(jq -r '.watchexec.removed_path // ""' "$WATCHEXEC_INFO_FILE" 2>/dev/null || echo "")
 
-        # Build file change summary
+        # Build file change summary (HTML format - escape <, >, &)
         if [[ -n "$WRITTEN_PATH" ]]; then
-            CHANGED_FILES="Modified: $(basename "$WRITTEN_PATH")"
+            FILENAME=$(basename "$WRITTEN_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            CHANGED_FILES="Modified: <code>$FILENAME</code>"
             TRIGGER_PATH="$WRITTEN_PATH"
         elif [[ -n "$CREATED_PATH" ]]; then
-            CHANGED_FILES="Created: $(basename "$CREATED_PATH")"
+            FILENAME=$(basename "$CREATED_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            CHANGED_FILES="Created: <code>$FILENAME</code>"
             TRIGGER_PATH="$CREATED_PATH"
         elif [[ -n "$REMOVED_PATH" ]]; then
-            CHANGED_FILES="Deleted: $(basename "$REMOVED_PATH")"
+            FILENAME=$(basename "$REMOVED_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            CHANGED_FILES="Deleted: <code>$FILENAME</code>"
             TRIGGER_PATH="$REMOVED_PATH"
         elif [[ -n "$COMMON_PATH" ]]; then
-            CHANGED_FILES="Changed: $(basename "$COMMON_PATH")"
+            FILENAME=$(basename "$COMMON_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            CHANGED_FILES="Changed: <code>$FILENAME</code>"
             TRIGGER_PATH="$COMMON_PATH"
         else
             # No file detected - show generic watchexec restart
@@ -57,13 +61,12 @@ if [[ -f "$WATCHEXEC_INFO_FILE" ]]; then
             TRIGGER_PATH="(file detection failed - check within 30s window)"
         fi
 
-        # Don't escape anything - the path is already in backticks in the message
-        # Backticks protect the content from markdown parsing
-        TRIGGER_PATH_ESCAPED="$TRIGGER_PATH"
+        # HTML escape the full path
+        TRIGGER_PATH_ESCAPED=$(echo "$TRIGGER_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
         WATCHEXEC_DETAILS="
-**Trigger**: \`$TRIGGER_PATH_ESCAPED\`
-**Action**: $CHANGED_FILES"
+<b>Trigger</b>: <code>$TRIGGER_PATH_ESCAPED</code>
+<b>Action</b>: $CHANGED_FILES"
     else
         WATCHEXEC_DETAILS="
 _Watchexec info available (jq not installed)_"
@@ -75,14 +78,13 @@ CRASH_INFO=""
 if [[ -f "$CRASH_CONTEXT_FILE" ]]; then
     echo "💥 Crash context available"
 
-    # Read last error lines
-    CRASH_PREVIEW=$(tail -5 "$CRASH_CONTEXT_FILE" 2>/dev/null | sed 's/^/> /' || echo "> (no context)")
+    # Read last error lines and HTML escape them
+    CRASH_PREVIEW=$(tail -5 "$CRASH_CONTEXT_FILE" 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' || echo "(no context)")
 
     CRASH_INFO="
-**Last Log Lines**:
-\`\`\`
-$CRASH_PREVIEW
-\`\`\`"
+
+<b>Last Log Lines</b>:
+<pre>$CRASH_PREVIEW</pre>"
 fi
 
 # Determine restart type and emoji
@@ -108,15 +110,15 @@ else
     PUSHOVER_SOUND="cosmic"
 fi
 
-# Build detailed message
-MESSAGE="$EMOJI **Telegram Bot $STATUS**
+# Build detailed message (HTML format)
+MESSAGE="$EMOJI <b>Telegram Bot $STATUS</b>
 
-**Host**: \`$HOSTNAME_SHORT\`
-**Time**: $TIMESTAMP
-**PID**: $PID
-**Exit Code**: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO
+<b>Host</b>: <code>$HOSTNAME_SHORT</code>
+<b>Time</b>: $TIMESTAMP
+<b>PID</b>: $PID
+<b>Exit Code</b>: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO
 
-\\_Monitoring: watchexec\\_"
+<i>Monitoring: watchexec</i>"
 
 # Save message to persistent file for debugging
 MESSAGE_ARCHIVE_DIR="/Users/terryli/.claude/automation/lychee/logs/notification-archive"
@@ -180,7 +182,7 @@ url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 data = {
     'chat_id': chat_id,
     'text': message,
-    'parse_mode': 'Markdown'
+    'parse_mode': 'HTML'
 }
 
 try:
