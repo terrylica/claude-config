@@ -127,8 +127,9 @@ else
     PUSHOVER_SOUND="cosmic"
 fi
 
-# Build session debug line (matches format from message_builders.py)
-SESSION_DEBUG_LINE="session=$CLAUDE_SESSION_ID | 🐛 debug=~/.claude/debug/\${session}.txt"
+# Build session debug lines (two lines, no emoji - matches format from message_builders.py)
+SESSION_DEBUG_LINE="session=$CLAUDE_SESSION_ID
+debug=~/.claude/debug/\${session}.txt"
 
 # Build message (Markdown format, simplified like other Telegram messages)
 if [[ "$REASON" == "crash" ]]; then

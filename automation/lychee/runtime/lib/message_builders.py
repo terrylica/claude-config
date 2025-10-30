@@ -90,8 +90,8 @@ def build_workflow_start_message(
     if lychee_details:
         lychee_details = escape_markdown(lychee_details)
 
-    # Compact session + debug log line
-    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+    # Session + debug log lines (two lines, no emoji)
+    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
 
     markdown_message = (
         f"{prompt_line}{emoji} **{last_response}**\n\n"
@@ -142,8 +142,8 @@ def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
         title = "Unknown Status"
         status_line = f"**Status**: {status}"
 
-    # Compact session + debug log line
-    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+    # Session + debug log lines (two lines, no emoji)
+    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
 
     markdown_message = f"""{emoji} {status_emoji} **{title}**
 

@@ -129,8 +129,8 @@ class NotificationHandler(BaseHandler):
             if details_lines:
                 files_section = f"\n\nFiles affected:\n" + '\n'.join(details_lines)
 
-            # Compact session + debug log line
-            session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+            # Session + debug log lines (two lines, no emoji)
+            session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
 
             markdown_message = f"""{emoji} **Link Validation** - {ws_name}
 
@@ -374,9 +374,9 @@ class WorkflowExecutionHandler(BaseHandler):
                 # Compact session + debug log line (show both original + headless if present)
                 headless_session_id = execution.get("headless_session_id")
                 if headless_session_id:
-                    session_debug_line = f"session={session_id} | headless={headless_session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+                    session_debug_line = f"session={session_id}\nheadless={headless_session_id}\ndebug=~/.claude/debug/${{session}}.txt"
                 else:
-                    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+                    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
 
                 # Build original context section (user prompt + assistant response)
                 original_context = ""
@@ -438,12 +438,12 @@ class WorkflowExecutionHandler(BaseHandler):
                         if len(summary) > 100:
                             summary = summary[:97] + "..."
 
-                # Compact session + debug log line
+                # Session + debug log lines (two or three lines, no emoji)
                 headless_session_id = execution.get("headless_session_id")
                 if headless_session_id:
-                    session_debug_line = f"session={session_id} | headless={headless_session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+                    session_debug_line = f"session={session_id}\nheadless={headless_session_id}\ndebug=~/.claude/debug/${{session}}.txt"
                 else:
-                    session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+                    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
 
                 markdown_fallback = (
                     f"📨 **Workflow Completed** (recovered execution)\n\n"
@@ -655,7 +655,7 @@ class SummaryHandler(BaseHandler):
             prompt_line = f"❓ _{user_prompt.replace(chr(10), ' ').strip()}_\n" if user_prompt else ""
 
             # Compact session + debug log line
-            session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+            session_debug_line = f"session={session_id} • 🐛 debug=~/.claude/debug/${{session}}.txt"
 
             # Display response with preserved formatting
             markdown_message = f"""{prompt_line}{emoji} {last_response}

@@ -159,8 +159,8 @@ async def progress_poller(
                 # Compact git status (always show all counters)
                 git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
-                # Compact session + debug log line
-                session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
+                # Session + debug log lines (two lines, no emoji)
+                session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
 
                 markdown_progress = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
