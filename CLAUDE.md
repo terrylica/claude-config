@@ -95,8 +95,13 @@
 
 ## Automation
 
-**Telegram**: Pyrogram (one-time auth → persistent session) - [`automation/lychee/`](/Users/terryli/.claude/automation/lychee/)
-**Credentials**: Doppler `claude-config/dev` - [`DOPPLER_SECRETS.md`](/Users/terryli/.claude/automation/lychee/DOPPLER_SECRETS.md)
+**Telegram Bot**: Multi-workspace workflow orchestration
+- **Development**: ALWAYS start with watchexec: `/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh `
+- **Auto-reload**: Enabled (100ms debounce, monitors `bot/`, `lib/`, `orchestrator/`)
+- **Verification**: `ps aux | grep watchexec | grep bot` should show process
+- **Credentials**: Doppler `claude-config/dev`
+- **⚠️ NEVER**: Start bot directly without watchexec in development
+- **Documentation**: [`automation/lychee/runtime/bot/README.md`](/Users/terryli/.claude/automation/lychee/runtime/bot/README.md)
 
 ## Terminal & Shell Configuration
 
