@@ -93,9 +93,9 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
     "$NOTIFY_SCRIPT" "$REASON" 0 "$WATCHEXEC_INFO_FILE" &
 fi
 
-# Run the bot and capture exit code and stderr
+# Run the bot with doppler and capture exit code and stderr
 EXIT_CODE=0
-uv run "$BOT_SCRIPT" 2> >(tee -a "$CRASH_LOG" >&2) || EXIT_CODE=$?
+doppler run --project claude-config --config dev -- uv run "$BOT_SCRIPT" 2> >(tee -a "$CRASH_LOG" >&2) || EXIT_CODE=$?
 
 # Send restart notification if bot exited abnormally
 if [[ $EXIT_CODE -ne 0 ]]; then

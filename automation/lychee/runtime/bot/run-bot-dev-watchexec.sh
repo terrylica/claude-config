@@ -15,6 +15,7 @@ set -euo pipefail
 
 BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOT_SCRIPT="$BOT_DIR/multi-workspace-bot.py"
+BOT_WRAPPER="$BOT_DIR/bot-wrapper.sh"
 WATCH_DIRS=(
     "$BOT_DIR"
     "$BOT_DIR/../lib"
@@ -53,12 +54,13 @@ for dir in "${WATCH_DIRS[@]}"; do
     WATCH_ARGS+=("--watch" "$dir")
 done
 
-# Run bot with watchexec
+# Run bot with watchexec and notification wrapper
 # --restart: Kill and restart the process on changes
 # --exts: Only watch .py files
 # --debounce: Wait 100ms before restarting (accounts for multi-file saves)
 # --stop-signal: Send SIGTERM for graceful shutdown
 # --stop-timeout: Wait 5s for graceful shutdown before SIGKILL
+# Uses bot-wrapper.sh which sends Telegram notifications on startup/restart/crash
 exec watchexec \
     "${WATCH_ARGS[@]}" \
     --exts py \
@@ -66,4 +68,4 @@ exec watchexec \
     --debounce 100ms \
     --stop-signal SIGTERM \
     --stop-timeout 5s \
-    -- doppler run --project claude-config --config dev -- uv run "$BOT_SCRIPT"
+    -- "$BOT_WRAPPER"
