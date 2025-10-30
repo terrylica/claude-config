@@ -1,3 +1,44 @@
+## [5.2.0] - 2025-10-29
+
+### 🚀 Features
+
+- _(bot)_ Migrate PID management to psutil (industry-standard)
+- _(bot)_ Add cmdline verification to prevent PID reuse false positives
+- _(bot)_ Add process details to error messages (PID + command line)
+
+### 🐛 Bug Fixes
+
+- _(bot)_ Fix FileExistsError incorrectly caught as corrupted PID file
+
+### 📚 Documentation
+
+- Add process management tools research document (650+ lines)
+- Add PID management migration specification (OpenAPI 3.1.1)
+
+### ✅ Testing
+
+- Validate clean startup scenario
+- Validate actual conflict detection
+- Validate stale PID cleanup
+- Validate watchexec restarts (zero crashes)
+
+## [5.1.1] - 2025-10-29
+
+### 🐛 Bug Fixes
+
+- _(bot)_ Add stale PID file detection for watchexec restart race conditions
+
+## [5.1.0] - 2025-10-29
+
+### 🚀 Features
+
+- _(bot)_ Migrate all Telegram messages to HTML mode (14 instances)
+- _(skills)_ Create dual-channel watchexec notifications skill
+
+### 🐛 Bug Fixes
+
+- _(bot)_ Strip HTML tags for Pushover messages (plain text only)
+
 ## [5.0.0] - 2025-10-29
 
 ### 🚜 Refactor
