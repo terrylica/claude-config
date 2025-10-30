@@ -57,8 +57,9 @@ if [[ -f "$WATCHEXEC_INFO_FILE" ]]; then
             TRIGGER_PATH="(file detection failed - check within 30s window)"
         fi
 
-        # Escape markdown special characters in file paths
-        TRIGGER_PATH_ESCAPED=$(echo "$TRIGGER_PATH" | sed 's/[_*`\[]/\\&/g')
+        # Don't escape anything - the path is already in backticks in the message
+        # Backticks protect the content from markdown parsing
+        TRIGGER_PATH_ESCAPED="$TRIGGER_PATH"
 
         WATCHEXEC_DETAILS="
 **Trigger**: \`$TRIGGER_PATH_ESCAPED\`
