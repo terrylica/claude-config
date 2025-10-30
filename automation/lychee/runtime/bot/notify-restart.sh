@@ -157,7 +157,7 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     # Use Python for reliable Telegram API call
     # Create temp file for message to avoid escaping issues
     MESSAGE_FILE="/tmp/telegram_message_$$.txt"
-    cat > "$MESSAGE_FILE" <<'MSGEOF'
+    cat > "$MESSAGE_FILE" <<MSGEOF
 $MESSAGE
 MSGEOF
 
