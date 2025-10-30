@@ -82,8 +82,9 @@ def build_workflow_start_message(
         last_response = escape_markdown(last_response)
 
     # Build message with full context
-    # Replace newlines with spaces to keep italic formatting on single line
-    prompt_line = f"❓ _{user_prompt.replace('\n', ' ').strip()}_\n" if user_prompt else ""
+    # Use plain text without markdown formatting to avoid MarkdownV2 parsing issues
+    # Replace newlines with spaces for single-line display
+    prompt_line = f"❓ {user_prompt.replace('\n', ' ').strip()}\n" if user_prompt else ""
 
     # Escape lychee details
     lychee_details = lychee_status.get('details', 'Not run')
@@ -91,12 +92,15 @@ def build_workflow_start_message(
         lychee_details = escape_markdown(lychee_details)
 
     # Session + debug log lines (two lines, no emoji)
-    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+    # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
+    session_line = f"`session={session_id}`"
+    debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
 
     markdown_message = (
         f"{prompt_line}{emoji} **{last_response}**\n\n"
         f"`{repo_display}` | `{working_dir}`\n"
-        f"`{session_debug_line}` ({duration}s)\n"
+        f"{session_line}\n"
+        f"{debug_line} ({duration}s)\n"
         f"**↯**: `{git_branch}` | {git_compact}{git_porcelain_display}\n\n"
         f"**Lychee**: {lychee_details}\n\n"
         f"⏳ **Workflow: {workflow_name}**\n"
@@ -143,12 +147,15 @@ def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
         status_line = f"**Status**: {status}"
 
     # Session + debug log lines (two lines, no emoji)
-    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+    # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
+    session_line = f"`session={session_id}`"
+    debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
 
     markdown_message = f"""{emoji} {status_emoji} **{title}**
 
 **Workspace**: `{workspace_id}`
-`{session_debug_line}`
+{session_line}
+{debug_line}
 {status_line}
 
 **Summary**:

@@ -130,12 +130,15 @@ class NotificationHandler(BaseHandler):
                 files_section = f"\n\nFiles affected:\n" + '\n'.join(details_lines)
 
             # Session + debug log lines (two lines, no emoji)
-            session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+            # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
+            session_line = f"`session={session_id}`"
+            debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
 
             markdown_message = f"""{emoji} **Link Validation** - {ws_name}
 
 **Workspace**: `{workspace_path}`
-`{session_debug_line}`
+{session_line}
+{debug_line}
 
 {details}{files_section}
 
@@ -371,18 +374,25 @@ class WorkflowExecutionHandler(BaseHandler):
                 # Compact git status (always show all counters)
                 git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
-                # Compact session + debug log line (show both original + headless if present)
+                # Session + debug log lines (show both original + headless if present)
+                # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
                 headless_session_id = execution.get("headless_session_id")
                 if headless_session_id:
-                    session_debug_line = f"session={session_id}\nheadless={headless_session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+                    session_line = f"`session={session_id}`"
+                    headless_line = f"`headless={headless_session_id}`"
+                    debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
+                    session_debug_lines = f"{session_line}\n{headless_line}\n{debug_line}"
                 else:
-                    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+                    session_line = f"`session={session_id}`"
+                    debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
+                    session_debug_lines = f"{session_line}\n{debug_line}"
 
                 # Build original context section (user prompt + assistant response)
                 original_context = ""
                 if user_prompt and last_response:
-                    # Replace newlines with spaces to keep italic formatting on single line
-                    original_context = f"❓ _{user_prompt.replace(chr(10), ' ').strip()}_\n{emoji} **{last_response}**\n\n"
+                    # Use plain text without markdown formatting to avoid MarkdownV2 parsing issues
+                    # Replace newlines with spaces for single-line display
+                    original_context = f"❓ {user_prompt.replace(chr(10), ' ').strip()}\n{emoji} **{last_response}**\n\n"
 
                 markdown_caption = (
                     f"{original_context}"  # Preserve original conversation context
@@ -391,7 +401,7 @@ class WorkflowExecutionHandler(BaseHandler):
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**↯**: {git_status_line}\n\n"
-                    f"`{session_debug_line}`\n"
+                    f"{session_debug_lines}\n"
                     f"**Status**: {status}\n"
                     f"**Duration**: {duration}s\n"
                     f"**Output**: {summary}"
@@ -439,17 +449,23 @@ class WorkflowExecutionHandler(BaseHandler):
                             summary = summary[:97] + "..."
 
                 # Session + debug log lines (two or three lines, no emoji)
+                # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
                 headless_session_id = execution.get("headless_session_id")
                 if headless_session_id:
-                    session_debug_line = f"session={session_id}\nheadless={headless_session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+                    session_line = f"`session={session_id}`"
+                    headless_line = f"`headless={headless_session_id}`"
+                    debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
+                    session_debug_lines = f"{session_line}\n{headless_line}\n{debug_line}"
                 else:
-                    session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+                    session_line = f"`session={session_id}`"
+                    debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
+                    session_debug_lines = f"{session_line}\n{debug_line}"
 
                 markdown_fallback = (
                     f"📨 **Workflow Completed** (recovered execution)\n\n"
                     f"{status_emoji} **Workflow**: {workflow_name}\n"
                     f"**Workspace**: `{workspace_id}`\n"
-                    f"`{session_debug_line}`\n"
+                    f"{session_debug_lines}\n"
                     f"**Status**: {status}\n"
                     f"**Duration**: {duration}s\n"
                     f"**Output**: {summary}\n\n"
@@ -651,17 +667,21 @@ class SummaryHandler(BaseHandler):
             lychee_details = lychee_status.get('details', 'Not run')
 
             # Build message with user prompt as first line if available
-            # Replace newlines with spaces to keep italic formatting on single line
-            prompt_line = f"❓ _{user_prompt.replace(chr(10), ' ').strip()}_\n" if user_prompt else ""
+            # Use plain text without markdown formatting to avoid MarkdownV2 parsing issues
+            # Replace newlines with spaces for single-line display
+            prompt_line = f"❓ {user_prompt.replace(chr(10), ' ').strip()}\n" if user_prompt else ""
 
-            # Compact session + debug log line
-            session_debug_line = f"session={session_id} • 🐛 debug=~/.claude/debug/${{session}}.txt"
+            # Session + debug log lines (two lines, no emoji)
+            # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
+            session_line = f"`session={session_id}`"
+            debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
 
             # Display response with preserved formatting
             markdown_message = f"""{prompt_line}{emoji} {last_response}
 
 `{repo_display}` | `{working_dir}`
-`{session_debug_line}` ({duration}s)
+{session_line}
+{debug_line} ({duration}s)
 **↯**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
 
 **Lychee**: {lychee_details}

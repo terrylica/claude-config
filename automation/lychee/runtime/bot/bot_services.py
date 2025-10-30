@@ -160,7 +160,9 @@ async def progress_poller(
                 git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
                 # Session + debug log lines (two lines, no emoji)
-                session_debug_line = f"session={session_id}\ndebug=~/.claude/debug/${{session}}.txt"
+                # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
+                session_line = f"`session={session_id}`"
+                debug_line = f"`debug=~/.claude/debug/${{session}}.txt`"
 
                 markdown_progress = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
@@ -168,7 +170,8 @@ async def progress_poller(
                     f"**Directory**: `{working_dir}`\n"
                     f"**Branch**: `{git_branch}`\n"
                     f"**↯**: {git_status_line}\n\n"
-                    f"`{session_debug_line}`\n"
+                    f"{session_line}\n"
+                    f"{debug_line}\n"
                     f"**Stage**: {stage}\n"
                     f"**Progress**: {progress_percent}%\n"
                     f"**Status**: {message}"
