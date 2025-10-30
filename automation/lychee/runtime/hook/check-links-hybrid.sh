@@ -520,70 +520,18 @@ fi
             }
 
         # =====================================================================
-        # Phase 2 - v4.0.0: v3 Notification DISABLED (v4 workflow menu replaces it)
+        # Phase 2 - v4.0.0: v3 Notification System Removed (v5.5.2)
         # =====================================================================
-        # v4 SessionSummary + workflow menu provides superior UX:
-        # - Always shows (not just on errors)
+        # v3 notification system (error-only) was replaced by v4 SessionSummary
+        # + workflow menu pattern in Phase 2 v4.0.0. Code was disabled with
+        # `if false` and has now been archived.
+        #
+        # Archive location: automation/lychee/archive/v5.5.0-legacy-notification-system/
+        #
+        # v4 SessionSummary provides superior UX:
+        # - Shows on EVERY session (not just errors)
         # - Multi-workflow support (not just lychee)
-        # - More context (git status, session info)
-        # v3 notification emission disabled to prevent duplicate Telegram messages
-
-        # Only notify if errors found (v3 behavior) - DISABLED
-        if false && [[ "$error_count" -gt 0 ]]; then
-            {
-                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  Errors detected → Emitting notification"
-                echo "   → Workspace hash: $workspace_hash"
-                echo "   → Session ID: $session_id"
-                echo "   → Error count: $error_count"
-            } >> "$log_file" 2>&1
-
-            # Create notification request
-            notification_file="$HOME/.claude/automation/lychee/state/notifications/notify_${session_id}_${workspace_hash}.json"
-
-            {
-                echo "   → Notification file: $notification_file"
-            } >> "$log_file" 2>&1
-
-            # Prepare error_details as JSON string (for progressive disclosure)
-            error_details_json=$(echo "$file_error_map" | jq -Rs '.' 2>/dev/null || echo '""')
-
-            cat > "$notification_file" <<EOF
-{
-  "workspace_path": "$workspace_dir",
-  "session_id": "$session_id",
-  "error_count": $error_count,
-  "details": "Found $error_count broken link(s) in workspace",
-  "error_details": $error_details_json,
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "correlation_id": "$CORRELATION_ID"
-}
-EOF
-
-            {
-                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📤 Notification file written successfully"
-                echo "   → File size: $(ls -lh "$notification_file" | awk '{print $5}')"
-                echo "   → File content:"
-                cat "$notification_file" | sed 's/^/     /'
-            } >> "$log_file" 2>&1
-
-            # Log notification created event
-            "$HOME/.claude/automation/lychee/runtime/lib/event_logger.py" \
-                "$CORRELATION_ID" \
-                "$workspace_hash" \
-                "$session_id" \
-                "hook" \
-                "notification.created" \
-                "{\"error_count\": $error_count, \"notification_file\": \"$notification_file\"}" \
-                >> /dev/null 2>> "$log_file" || {
-                    echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ Failed to log notification.created event" >> "$log_file" 2>&1
-                    exit 1
-                }
-
-        else
-            {
-                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ No errors found → No notification needed (v3 backward compat)"
-            } >> "$log_file" 2>&1
-        fi
+        # - More context (git status, session duration, available workflows)
 
         # =====================================================================
         # Phase 5 - Bot Management: Continuous Process via Watchexec

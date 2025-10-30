@@ -1,3 +1,38 @@
+## [5.5.2] - 2025-10-30
+
+### 🧹 Cleanup
+
+- _(hook)_ Remove disabled v3 notification system dead code (53 lines)
+- Archive legacy notification code with comprehensive documentation
+- v3 error-only notifications were replaced by v4 SessionSummary + workflow menu in Phase 2
+
+### 📁 Archive
+
+**Location**: `automation/lychee/archive/v5.5.0-legacy-notification-system/`
+
+**Contents**:
+- `README.md` - Comprehensive archive documentation
+- `MIGRATION.md` - v3 → v4 migration timeline and patterns
+- `legacy-notification-code.sh` - Archived code (53 lines from check-links-hybrid.sh)
+
+### 🏗️ System Audit Results
+
+All state directories confirmed as active:
+- ✅ `callbacks/` - 300 files (callback query state)
+- ✅ `completions/` - Orchestrator workflow completions
+- ✅ `executions/` - Orchestrator workflow results
+- ✅ `selections/` - Bot workflow selections
+- ✅ `approvals/` - Bot user approval workflow
+- ✅ `summaries/` - Hook SessionSummary files (consumed by bot)
+- ✅ `progress/` - 20 files (progress streaming)
+- ✅ `session_timestamps/` - 73 files (session duration tracking)
+- ✅ `tracking/` - 1 file (progress state persistence)
+- ⚠️ `notifications/` - Empty (bot monitors but hook doesn't create)
+
+### 📚 Rationale
+
+The v3 notification code was disabled since v4.0.0 Phase 2 with `if false &&` to prevent duplicate Telegram messages. The code has been dead for multiple releases and is now safely archived with full restoration instructions.
+
 ## [5.5.1] - 2025-10-30
 
 ### 🐛 Bug Fixes
