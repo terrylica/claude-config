@@ -51,7 +51,10 @@ def log_event(
 
 def create_pid_file(pid_file_path: Path) -> None:
     """
-    Create PID file atomically.
+    Create PID file atomically with stale PID cleanup.
+
+    Handles watchexec restart race condition by checking if existing PID is actually running.
+    If the process is dead (stale PID file), removes it and creates a new one.
 
     Args:
         pid_file_path: Path to PID file
@@ -69,9 +72,45 @@ def create_pid_file(pid_file_path: Path) -> None:
         finally:
             os.close(fd)
     except FileExistsError:
-        print(f"❌ PID file already exists: {pid_file_path}", file=sys.stderr)
-        print(f"   Another bot instance is likely running", file=sys.stderr)
-        raise
+        # PID file exists - check if process is actually running
+        try:
+            stored_pid = int(pid_file_path.read_text().strip())
+
+            # Check if process is running by sending signal 0 (no-op)
+            try:
+                os.kill(stored_pid, 0)
+                # Process is running - this is a real conflict
+                print(f"❌ PID file already exists: {pid_file_path}", file=sys.stderr)
+                print(f"   Another bot instance is running (PID: {stored_pid})", file=sys.stderr)
+                raise
+            except OSError:
+                # Process is NOT running - stale PID file from previous crash/restart
+                print(f"⚠️  Found stale PID file (PID {stored_pid} is not running)")
+                print(f"   Removing stale PID file and retrying...")
+                pid_file_path.unlink()
+
+                # Retry creating PID file (recursive call, but only once)
+                fd = os.open(str(pid_file_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                try:
+                    os.write(fd, f"{os.getpid()}\n".encode())
+                    print(f"✅ Created PID file after cleanup: {pid_file_path} (PID: {os.getpid()})")
+                finally:
+                    os.close(fd)
+
+        except (ValueError, IOError) as e:
+            # Corrupted PID file - remove and retry
+            print(f"⚠️  Corrupted PID file: {e}")
+            print(f"   Removing corrupted PID file and retrying...")
+            pid_file_path.unlink()
+
+            # Retry creating PID file
+            fd = os.open(str(pid_file_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            try:
+                os.write(fd, f"{os.getpid()}\n".encode())
+                print(f"✅ Created PID file after cleanup: {pid_file_path} (PID: {os.getpid()})")
+            finally:
+                os.close(fd)
+
     except Exception as e:
         print(f"❌ Failed to create PID file: {type(e).__name__}: {e}", file=sys.stderr)
         raise
