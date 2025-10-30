@@ -22,7 +22,8 @@ from format_utils import (
     escape_markdown,  # DEPRECATED: Use escape_html
     escape_html,
     truncate_markdown_safe,
-    extract_conversation_from_transcript
+    extract_conversation_from_transcript,
+    convert_to_telegram_markdown
 )
 from bot_utils import log_event
 from message_builders import (
@@ -131,15 +132,16 @@ class NotificationHandler(BaseHandler):
             # Compact session + debug log line
             session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
-            message = f"""{emoji} <b>Link Validation</b> - {ws_name}
+            markdown_message = f"""{emoji} **Link Validation** - {ws_name}
 
-<b>Workspace</b>: <code>{workspace_path}</code>
-<code>{session_debug_line}</code>
+**Workspace**: `{workspace_path}`
+`{session_debug_line}`
 
 {details}{files_section}
 
 Choose action:
 """
+            message = convert_to_telegram_markdown(markdown_message)
 
             # Create buttons with hash-mapped callbacks (including correlation_id)
             keyboard = [
@@ -184,7 +186,7 @@ Choose action:
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="HTML"
+                parse_mode="MarkdownV2"
             )
 
             print(f"📤 Sent notification for {workspace_id} ({session_id})")
@@ -252,7 +254,7 @@ class CompletionHandler(BaseHandler):
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
-                parse_mode="HTML"
+                parse_mode="MarkdownV2"
             )
 
             print(f"📤 ✅ Sent completion for {workspace_id} ({session_id})")
@@ -377,25 +379,23 @@ class WorkflowExecutionHandler(BaseHandler):
                     session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
                 # Build original context section (user prompt + assistant response)
-                # Escape HTML characters for Telegram display
                 original_context = ""
                 if user_prompt and last_response:
-                    escaped_prompt = escape_html(user_prompt)
-                    escaped_response = escape_html(last_response)
-                    original_context = f"❓ <i>{escaped_prompt}</i>\n{emoji} <b>{escaped_response}</b>\n\n"
+                    original_context = f"❓ _{user_prompt}_\n{emoji} **{last_response}**\n\n"
 
-                final_caption = (
+                markdown_caption = (
                     f"{original_context}"  # Preserve original conversation context
-                    f"{status_emoji} <b>Workflow: {workflow_name}</b>\n\n"
-                    f"<b>Repository</b>: <code>{repo_display}</code>\n"
-                    f"<b>Directory</b>: <code>{working_dir}</code>\n"
-                    f"<b>Branch</b>: <code>{git_branch}</code>\n"
-                    f"<b>↯</b>: {git_status_line}\n\n"
-                    f"<code>{session_debug_line}</code>\n"
-                    f"<b>Status</b>: {status}\n"
-                    f"<b>Duration</b>: {duration}s\n"
-                    f"<b>Output</b>: {summary}"
+                    f"{status_emoji} **Workflow: {workflow_name}**\n\n"
+                    f"**Repository**: `{repo_display}`\n"
+                    f"**Directory**: `{working_dir}`\n"
+                    f"**Branch**: `{git_branch}`\n"
+                    f"**↯**: {git_status_line}\n\n"
+                    f"`{session_debug_line}`\n"
+                    f"**Status**: {status}\n"
+                    f"**Duration**: {duration}s\n"
+                    f"**Output**: {summary}"
                 )
+                final_caption = convert_to_telegram_markdown(markdown_caption)
 
                 # Update message text with final status
                 print(f"   📝 Updating message with final status...")
@@ -403,7 +403,7 @@ class WorkflowExecutionHandler(BaseHandler):
                     chat_id=self.chat_id,
                     message_id=message_id,
                     text=final_caption,
-                    parse_mode="HTML"
+                    parse_mode="MarkdownV2"
                 )
                 print(f"   ✅ Message updated successfully")
 
@@ -444,22 +444,23 @@ class WorkflowExecutionHandler(BaseHandler):
                 else:
                     session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
-                fallback_message = (
-                    f"📨 <b>Workflow Completed</b> (recovered execution)\n\n"
-                    f"{status_emoji} <b>Workflow</b>: {workflow_name}\n"
-                    f"<b>Workspace</b>: <code>{workspace_id}</code>\n"
-                    f"<code>{session_debug_line}</code>\n"
-                    f"<b>Status</b>: {status}\n"
-                    f"<b>Duration</b>: {duration}s\n"
-                    f"<b>Output</b>: {summary}\n\n"
-                    f"ℹ️ <i>Progress tracking was lost (bot restart or crash). This is a fallback notification.</i>"
+                markdown_fallback = (
+                    f"📨 **Workflow Completed** (recovered execution)\n\n"
+                    f"{status_emoji} **Workflow**: {workflow_name}\n"
+                    f"**Workspace**: `{workspace_id}`\n"
+                    f"`{session_debug_line}`\n"
+                    f"**Status**: {status}\n"
+                    f"**Duration**: {duration}s\n"
+                    f"**Output**: {summary}\n\n"
+                    f"ℹ️ _Progress tracking was lost (bot restart or crash). This is a fallback notification._"
                 )
+                fallback_message = convert_to_telegram_markdown(markdown_fallback)
 
                 # Send new message (not updating existing message)
                 await self.bot.send_message(
                     chat_id=self.chat_id,
                     text=fallback_message,
-                    parse_mode="HTML"
+                    parse_mode="MarkdownV2"
                 )
                 print(f"   ✅ Fallback notification sent")
 
@@ -627,9 +628,6 @@ class SummaryHandler(BaseHandler):
                 user_result = truncate_markdown_safe(user_prompt, max_length=100)
                 user_prompt = user_result['text']
                 print(f"   🔍 DEBUG AFTER truncate: {repr(user_prompt[:150])}")
-                # Escape for display in italic (avoid nested HTML)
-                user_prompt = escape_html(user_prompt)
-                print(f"   🔍 DEBUG AFTER escape: {repr(user_prompt[:150])}")
 
             # Process last response with markdown safety (truncate-first pattern from CCR)
             # This preserves Claude's original formatting (bold, code, italic)
@@ -648,28 +646,27 @@ class SummaryHandler(BaseHandler):
             # Show all counters even when zero for clarity
             git_compact = format_git_status_compact(modified, staged, untracked)
 
-            # Escape lychee details for HTML
+            # Get lychee details
             lychee_details = lychee_status.get('details', 'Not run')
-            lychee_details = escape_html(lychee_details)
 
             # Build message with user prompt as first line if available
-            prompt_line = f"❓ <i>{user_prompt}</i>\n" if user_prompt else ""
+            prompt_line = f"❓ _{user_prompt}_\n" if user_prompt else ""
 
             # Compact session + debug log line
             session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
-            # Display response with preserved HTML (not wrapped in additional bold)
-            # This allows Claude's original <b>bold</b>, <code>code</code>, <i>italic</i> to render
-            message = f"""{prompt_line}{emoji} {last_response}
+            # Display response with preserved formatting
+            markdown_message = f"""{prompt_line}{emoji} {last_response}
 
-<code>{repo_display}</code> | <code>{working_dir}</code>
-<code>{session_debug_line}</code> ({duration}s)
-<b>↯</b>: <code>{git_status.get('branch', 'unknown')}</code> | {git_compact}{git_porcelain_display}
+`{repo_display}` | `{working_dir}`
+`{session_debug_line}` ({duration}s)
+**↯**: `{git_status.get('branch', 'unknown')}` | {git_compact}{git_porcelain_display}
 
-<b>Lychee</b>: {lychee_details}
+**Lychee**: {lychee_details}
 
-<b>Available Workflows</b> ({len(available_workflows)}):
+**Available Workflows** ({len(available_workflows)}):
 """
+            message = convert_to_telegram_markdown(markdown_message)
 
             # Build dynamic keyboard
             print(f"   🔍 DEBUG: Before _build_workflow_keyboard, workspace_id={workspace_id}")
@@ -687,7 +684,7 @@ class SummaryHandler(BaseHandler):
                 chat_id=self.chat_id,
                 text=message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="HTML"
+                parse_mode="MarkdownV2"
             )
             print(f"   ✅ Telegram API responded: message_id={sent_message.message_id}, chat_id={sent_message.chat_id}")
 

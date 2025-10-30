@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 
 import bot_state
 from workspace_helpers import compute_workspace_hash
-from format_utils import get_workspace_config
+from format_utils import get_workspace_config, convert_to_telegram_markdown
 from bot_utils import log_event
 from message_builders import build_workflow_start_message
 
@@ -39,13 +39,16 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
     json_results = Path(workspace_path) / ".lychee-results.json"
 
     if not json_results.exists():
-        await query.message.reply_text(
+        markdown_msg = (
             "❌ Detailed results not available\n\n"
             "The lychee JSON output file was not found. This may happen if:\n"
             "• Validation was run before progressive disclosure was implemented\n"
             "• Results file was manually deleted\n"
-            "• Workspace path changed",
-            parse_mode="HTML"
+            "• Workspace path changed"
+        )
+        await query.message.reply_text(
+            convert_to_telegram_markdown(markdown_msg),
+            parse_mode="MarkdownV2"
         )
         return
 
@@ -53,11 +56,14 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
         with open(json_results, 'r') as f:
             lychee_data = json.load(f)
     except json.JSONDecodeError as e:
-        await query.message.reply_text(
+        markdown_msg = (
             f"❌ Failed to parse lychee JSON output\n\n"
             f"Error: {e}\n\n"
-            f"File: <code>{json_results}</code>",
-            parse_mode="HTML"
+            f"File: `{json_results}`"
+        )
+        await query.message.reply_text(
+            convert_to_telegram_markdown(markdown_msg),
+            parse_mode="MarkdownV2"
         )
         raise  # Fail-fast
 
@@ -65,10 +71,13 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
     error_map = lychee_data.get("error_map", {})
 
     if not error_map:
-        await query.message.reply_text(
+        markdown_msg = (
             "✅ No detailed errors found\n\n"
-            "The error_map is empty. All links may have been fixed.",
-            parse_mode="HTML"
+            "The error_map is empty. All links may have been fixed."
+        )
+        await query.message.reply_text(
+            convert_to_telegram_markdown(markdown_msg),
+            parse_mode="MarkdownV2"
         )
         return
 
@@ -98,9 +107,10 @@ async def handle_view_details(query, workspace_path: str, session_id: str, corre
     if len(details_text) > 3800:
         details_text = details_text[:3800] + "\n\n... (truncated)"
 
+    markdown_msg = f"📋 **Detailed Error Breakdown**\n{details_text}"
     await query.message.reply_text(
-        f"📋 <b>Detailed Error Breakdown</b>\n{details_text}",
-        parse_mode='HTML'
+        convert_to_telegram_markdown(markdown_msg),
+        parse_mode='MarkdownV2'
     )
 
     print(f"📋 Sent detailed breakdown for session {session_id}")
@@ -142,11 +152,14 @@ async def handle_workflow_selection(
     if action == "custom_prompt":
         # TODO Phase 4: Implement custom prompt handler
         # For now, acknowledge and return
+        markdown_msg = (
+            "✏️ Custom Prompt\n\n"
+            "Custom workflow prompts will be available in Phase 4.\n"
+            "For now, please select a preset workflow."
+        )
         await query.edit_message_text(
-            text="✏️ Custom Prompt\n\n"
-                 "Custom workflow prompts will be available in Phase 4.\n"
-                 "For now, please select a preset workflow.",
-            parse_mode="HTML"
+            text=convert_to_telegram_markdown(markdown_msg),
+            parse_mode="MarkdownV2"
         )
         return
 
@@ -246,7 +259,7 @@ async def handle_workflow_selection(
     sent_message = await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=initial_message,
-        parse_mode="HTML"
+        parse_mode="MarkdownV2"
     )
     message_id = sent_message.message_id
 

@@ -16,8 +16,13 @@ Presents dynamic workflow menu based on trigger conditions.
 Polls Telegram API for button clicks with idle timeout.
 Auto-shuts down after 10 minutes of inactivity.
 
-Version: 5.3.0
+Version: 5.4.0
 Specification: ~/.claude/specifications/telegram-workflows-orchestration-v4.yaml
+
+Changes from v5.3.0:
+- Convert all messages from HTML to MarkdownV2 format (Phase 2)
+- Update all parse_mode from HTML to MarkdownV2
+- Enable code block styling with gray background in Telegram
 
 Changes from v5.2.0:
 - Add telegramify-markdown library for MarkdownV2 support
@@ -110,7 +115,8 @@ from format_utils import (
     strip_markdown,
     truncate_markdown_safe,
     extract_conversation_from_transcript,
-    get_workspace_config
+    get_workspace_config,
+    convert_to_telegram_markdown
 )
 from workflow_utils import (
     load_workflow_registry,
@@ -190,7 +196,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         ctx = resolve_callback_data(query.data)
     except ValueError as e:
-        await query.edit_message_text(text=f"❌ {e}", parse_mode="HTML")
+        await query.edit_message_text(
+            text=convert_to_telegram_markdown(f"❌ {e}"),
+            parse_mode="MarkdownV2"
+        )
         return
 
     workspace_id = ctx["workspace_id"]
@@ -271,12 +280,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = get_workspace_config(workspace_id=workspace_id)
     emoji = config["emoji"]
 
+    markdown_msg = (
+        f"{emoji} **Action Received**: {action}\n\n"
+        f"Workspace: `{workspace_id}`\n"
+        f"Session: `{session_id}`\n\n"
+        f"Processing..."
+    )
     await query.edit_message_text(
-        text=f"{emoji} <b>Action Received</b>: {action}\n\n"
-             f"Workspace: <code>{workspace_id}</code>\n"
-             f"Session: <code>{session_id}</code>\n\n"
-             f"Processing...",
-        parse_mode="HTML"
+        text=convert_to_telegram_markdown(markdown_msg),
+        parse_mode="MarkdownV2"
     )
 
     print(f"✅ Routed to workspace: {workspace_id}")
@@ -335,7 +347,7 @@ async def main() -> int:
     print("=" * 70)
     print("Multi-Workspace Telegram Bot - Workflow Orchestration Mode")
     print("=" * 70)
-    print(f"Version: 5.3.0")
+    print(f"Version: 5.4.0")
     print(f"PID: {os.getpid()}")
     print(f"PID file: {PID_FILE}")
     print(f"Idle timeout: {IDLE_TIMEOUT_SECONDS}s ({IDLE_TIMEOUT_SECONDS // 60} minutes)")

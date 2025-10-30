@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from telegram.ext import Application
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
-from format_utils import format_git_status_compact, format_repo_display
+from format_utils import format_git_status_compact, format_repo_display, convert_to_telegram_markdown
 from file_processors import scan_and_process
 from handler_classes import (
     NotificationHandler,
@@ -162,7 +162,7 @@ async def progress_poller(
                 # Compact session + debug log line
                 session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
-                progress_text = (
+                markdown_progress = (
                     f"{emoji} **Workflow: {workflow_name}**\n\n"
                     f"**Repository**: `{repo_display}`\n"
                     f"**Directory**: `{working_dir}`\n"
@@ -173,6 +173,7 @@ async def progress_poller(
                     f"**Progress**: {progress_percent}%\n"
                     f"**Status**: {message}"
                 )
+                progress_text = convert_to_telegram_markdown(markdown_progress)
 
                 # Update message text
                 try:
@@ -180,7 +181,7 @@ async def progress_poller(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=progress_text,
-                        parse_mode="HTML"
+                        parse_mode="MarkdownV2"
                     )
                     print(f"   ✅ Message updated successfully")
                 except Exception as edit_error:

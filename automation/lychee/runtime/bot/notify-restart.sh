@@ -56,22 +56,22 @@ if [[ -f "$WATCHEXEC_INFO_FILE" ]]; then
         CREATED_PATH=$(jq -r '.watchexec.created_path // ""' "$WATCHEXEC_INFO_FILE" 2>/dev/null || echo "")
         REMOVED_PATH=$(jq -r '.watchexec.removed_path // ""' "$WATCHEXEC_INFO_FILE" 2>/dev/null || echo "")
 
-        # Build file change summary (HTML format - escape <, >, &)
+        # Build file change summary (Markdown format)
         if [[ -n "$WRITTEN_PATH" ]]; then
-            FILENAME=$(basename "$WRITTEN_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            CHANGED_FILES="Modified: <code>$FILENAME</code>"
+            FILENAME=$(basename "$WRITTEN_PATH")
+            CHANGED_FILES="Modified: \`$FILENAME\`"
             TRIGGER_PATH="$WRITTEN_PATH"
         elif [[ -n "$CREATED_PATH" ]]; then
-            FILENAME=$(basename "$CREATED_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            CHANGED_FILES="Created: <code>$FILENAME</code>"
+            FILENAME=$(basename "$CREATED_PATH")
+            CHANGED_FILES="Created: \`$FILENAME\`"
             TRIGGER_PATH="$CREATED_PATH"
         elif [[ -n "$REMOVED_PATH" ]]; then
-            FILENAME=$(basename "$REMOVED_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            CHANGED_FILES="Deleted: <code>$FILENAME</code>"
+            FILENAME=$(basename "$REMOVED_PATH")
+            CHANGED_FILES="Deleted: \`$FILENAME\`"
             TRIGGER_PATH="$REMOVED_PATH"
         elif [[ -n "$COMMON_PATH" ]]; then
-            FILENAME=$(basename "$COMMON_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            CHANGED_FILES="Changed: <code>$FILENAME</code>"
+            FILENAME=$(basename "$COMMON_PATH")
+            CHANGED_FILES="Changed: \`$FILENAME\`"
             TRIGGER_PATH="$COMMON_PATH"
         else
             # No file detected - show generic watchexec restart
@@ -79,12 +79,9 @@ if [[ -f "$WATCHEXEC_INFO_FILE" ]]; then
             TRIGGER_PATH="(file detection failed - check within 30s window)"
         fi
 
-        # HTML escape the full path
-        TRIGGER_PATH_ESCAPED=$(echo "$TRIGGER_PATH" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-
         WATCHEXEC_DETAILS="
-<b>Trigger</b>: <code>$TRIGGER_PATH_ESCAPED</code>
-<b>Action</b>: $CHANGED_FILES"
+**Trigger**: \`$TRIGGER_PATH\`
+**Action**: $CHANGED_FILES"
     else
         WATCHEXEC_DETAILS="
 _Watchexec info available (jq not installed)_"
@@ -96,13 +93,15 @@ CRASH_INFO=""
 if [[ -f "$CRASH_CONTEXT_FILE" ]]; then
     echo "💥 Crash context available"
 
-    # Read last error lines and HTML escape them
-    CRASH_PREVIEW=$(tail -5 "$CRASH_CONTEXT_FILE" 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' || echo "(no context)")
+    # Read last error lines
+    CRASH_PREVIEW=$(tail -5 "$CRASH_CONTEXT_FILE" 2>/dev/null || echo "(no context)")
 
     CRASH_INFO="
 
-<b>Last Log Lines</b>:
-<pre>$CRASH_PREVIEW</pre>"
+**Last Log Lines**:
+\`\`\`
+$CRASH_PREVIEW
+\`\`\`"
 fi
 
 # Determine restart type and emoji
@@ -131,33 +130,33 @@ fi
 # Build session debug line (matches format from message_builders.py)
 SESSION_DEBUG_LINE="session=$CLAUDE_SESSION_ID | 🐛 debug=~/.claude/debug/\${session}.txt"
 
-# Build message (HTML format, simplified like other Telegram messages)
+# Build message (Markdown format, simplified like other Telegram messages)
 if [[ "$REASON" == "crash" ]]; then
     # For crashes, show exit code and crash details
-    MESSAGE="$EMOJI <b>Bot $STATUS</b>
+    MESSAGE="$EMOJI **Bot $STATUS**
 
-<b>Directory</b>: <code>$WORKING_DIR</code>
-<b>Branch</b>: <code>$GIT_BRANCH</code>
-<code>$SESSION_DEBUG_LINE</code>
+**Directory**: \`$WORKING_DIR\`
+**Branch**: \`$GIT_BRANCH\`
+\`$SESSION_DEBUG_LINE\`
 
-<b>Exit Code</b>: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO"
+**Exit Code**: $EXIT_CODE$WATCHEXEC_DETAILS$CRASH_INFO"
 else
     # For normal restarts, simplified format (no exit code, no host, no monitoring)
     if [[ -n "$WATCHEXEC_DETAILS" ]]; then
         # Code change restart - show trigger and action
-        MESSAGE="$EMOJI <b>Bot $STATUS</b>
+        MESSAGE="$EMOJI **Bot $STATUS**
 
-<b>Directory</b>: <code>$WORKING_DIR</code>
-<b>Branch</b>: <code>$GIT_BRANCH</code>
-<code>$SESSION_DEBUG_LINE</code>
+**Directory**: \`$WORKING_DIR\`
+**Branch**: \`$GIT_BRANCH\`
+\`$SESSION_DEBUG_LINE\`
 $WATCHEXEC_DETAILS"
     else
         # Startup or other reason
-        MESSAGE="$EMOJI <b>Bot $STATUS</b>
+        MESSAGE="$EMOJI **Bot $STATUS**
 
-<b>Directory</b>: <code>$WORKING_DIR</code>
-<b>Branch</b>: <code>$GIT_BRANCH</code>
-<code>$SESSION_DEBUG_LINE</code>"
+**Directory**: \`$WORKING_DIR\`
+**Branch**: \`$GIT_BRANCH\`
+\`$SESSION_DEBUG_LINE\`"
     fi
 fi
 
@@ -217,13 +216,21 @@ chat_id = os.environ.get('TELEGRAM_CHAT_ID')
 
 # Read message from file to avoid shell escaping issues
 with open(sys.argv[1], 'r') as f:
-    message = f.read()
+    markdown_message = f.read()
+
+# Convert Markdown to Telegram MarkdownV2
+try:
+    import telegramify_markdown
+    message = telegramify_markdown.markdownify(markdown_message)
+except ImportError:
+    print('   ⚠️  telegramify-markdown not installed, using raw markdown (may cause errors)')
+    message = markdown_message
 
 url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 data = {
     'chat_id': chat_id,
     'text': message,
-    'parse_mode': 'HTML'
+    'parse_mode': 'MarkdownV2'
 }
 
 try:

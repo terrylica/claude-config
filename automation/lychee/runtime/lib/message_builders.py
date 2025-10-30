@@ -11,7 +11,8 @@ from typing import Dict, Any
 from format_utils import (
     format_git_status_compact,
     format_repo_display,
-    escape_markdown
+    escape_markdown,
+    convert_to_telegram_markdown
 )
 
 
@@ -91,7 +92,7 @@ def build_workflow_start_message(
     # Compact session + debug log line
     session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
-    return (
+    markdown_message = (
         f"{prompt_line}{emoji} **{last_response}**\n\n"
         f"`{repo_display}` | `{working_dir}`\n"
         f"`{session_debug_line}` ({duration}s)\n"
@@ -101,6 +102,7 @@ def build_workflow_start_message(
         f"**Stage**: starting | **Progress**: 0%\n"
         f"**Status**: Starting..."
     )
+    return convert_to_telegram_markdown(markdown_message)
 
 
 def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
@@ -142,7 +144,7 @@ def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
     # Compact session + debug log line
     session_debug_line = f"session={session_id} | 🐛 debug=~/.claude/debug/${{session}}.txt"
 
-    message = f"""{emoji} {status_emoji} **{title}**
+    markdown_message = f"""{emoji} {status_emoji} **{title}**
 
 **Workspace**: `{workspace_id}`
 `{session_debug_line}`
@@ -169,7 +171,7 @@ def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
             if len(readable_content) > 500:
                 readable_content = readable_content[:500] + "..."
 
-            message += f"\n**Details**:\n```\n{readable_content}\n```"
+            markdown_message += f"\n**Details**:\n```\n{readable_content}\n```"
 
     # Add stderr for error cases (truncated to avoid huge messages)
     if status == "error" and completion.get("stderr"):
@@ -179,9 +181,9 @@ def build_completion_message(completion: Dict[str, Any], emoji: str) -> str:
             if len(stderr) > 500:
                 stderr = stderr[:500] + "..."
 
-            message += f"\n**Error**:\n```\n{stderr}\n```"
+            markdown_message += f"\n**Error**:\n```\n{stderr}\n```"
 
-    return message
+    return convert_to_telegram_markdown(markdown_message)
 
 
 def build_execution_message(execution: Dict[str, Any], emoji: str, workflow_name: str) -> str:
@@ -228,7 +230,7 @@ def build_execution_message(execution: Dict[str, Any], emoji: str, workflow_name
     # Debug log path
     debug_log = f"~/.claude/debug/{session_id}.txt"
 
-    message = f"""{emoji} {status_emoji} **{title}**
+    markdown_message = f"""{emoji} {status_emoji} **{title}**
 
 **Workflow**: {full_workflow_name}
 **Workspace**: `{workspace_id}`
@@ -258,7 +260,7 @@ def build_execution_message(execution: Dict[str, Any], emoji: str, workflow_name
             if len(summary) > 200:
                 summary = summary[:200] + "..."
 
-            message += f"\n**Summary**: {summary}"
+            markdown_message += f"\n**Summary**: {summary}"
 
     # Add stderr for error cases (truncated)
     if status == "error" and execution.get("stderr"):
@@ -272,6 +274,6 @@ def build_execution_message(execution: Dict[str, Any], emoji: str, workflow_name
             if len(error_preview) > 200:
                 error_preview = error_preview[:200] + "..."
 
-            message += f"\n**Error**: {error_preview}"
+            markdown_message += f"\n**Error**: {error_preview}"
 
-    return message
+    return convert_to_telegram_markdown(markdown_message)
