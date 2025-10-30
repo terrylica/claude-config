@@ -1,3 +1,22 @@
+## [5.3.0] - 2025-10-30
+
+### 🚀 Features
+
+- _(bot)_ Add telegramify-markdown library for MarkdownV2 support
+- _(bot)_ Create convert_to_telegram_markdown() helper function
+
+### ✅ Testing
+
+- Validate inline code conversion (backticks → styled code)
+- Validate multi-line code blocks (triple backticks → styled block)
+- Validate special character escaping (40+ chars)
+- Validate mixed formatting (bold + code + links)
+
+### 📚 Documentation
+
+- Add Telegram MarkdownV2 migration specification (OpenAPI 3.1.1)
+- Update dual-channel-watchexec skill documentation
+
 ## [5.2.0] - 2025-10-29
 
 ### 🚀 Features
