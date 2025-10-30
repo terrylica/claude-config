@@ -127,9 +127,11 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
     fi
 
     # Extract last user prompt (the question that triggered the response)
-    # User messages have content as string, not array: {role: "user", content: "text"}
+    # Skip tool_result messages (content is array) and system messages (content starts with <)
+    # Only extract actual user text prompts (content is string)
     last_user_prompt=$(tac "$transcript_file" | \
-        jq -r '.message | select(.role == "user") | .content' 2>/dev/null | \
+        jq -r 'select(.message.role == "user") | select(.message.content | type == "string") | .message.content' 2>/dev/null | \
+        grep -v "^<" | grep -v "^Caveat:" | \
         head -1 | \
         head -c 150)  # Limit to 150 chars
 
