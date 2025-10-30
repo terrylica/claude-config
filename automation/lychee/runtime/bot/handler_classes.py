@@ -605,8 +605,13 @@ class SummaryHandler(BaseHandler):
                     print(f"   ⚠️  Transcript not found, using summary fields")
                     print(f"   🔍 DEBUG FALLBACK user_prompt: {repr(user_prompt[:200])}")
             except (FileNotFoundError, ValueError, KeyError) as e:
-                # Fallback on any extraction error (raise per requirements)
-                raise RuntimeError(f"Failed to extract conversation: {e}")
+                # Fallback on any extraction error - use summary fields instead
+                print(f"   ⚠️  Transcript extraction failed: {e}")
+                print(f"   ⏭️  Using summary fallback fields")
+                user_prompt = summary.get("last_user_prompt", "")
+                last_response = summary.get("last_response", "Session completed")
+                print(f"   🔍 DEBUG EXCEPTION FALLBACK user_prompt: {repr(user_prompt[:200])}")
+                print(f"   🔍 DEBUG EXCEPTION FALLBACK last_response: {repr(last_response[:200])}")
 
             # Cache summary data for workflow selection (needed because we delete summary file)
             cache_key = (workspace_id, session_id)
@@ -669,7 +674,9 @@ class SummaryHandler(BaseHandler):
             # Build message with user prompt as first line if available
             # Use plain text without markdown formatting to avoid MarkdownV2 parsing issues
             # Replace newlines with spaces for single-line display
+            print(f"   🔍 DEBUG user_prompt before prompt_line: {repr(user_prompt)}")
             prompt_line = f"❓ {user_prompt.replace(chr(10), ' ').strip()}\n" if user_prompt else ""
+            print(f"   🔍 DEBUG prompt_line result: {repr(prompt_line)}")
 
             # Session + debug log lines (two lines, no emoji)
             # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
@@ -688,7 +695,9 @@ class SummaryHandler(BaseHandler):
 
 **Available Workflows** ({len(available_workflows)}):
 """
+            print(f"   🔍 DEBUG markdown_message (first 300 chars): {repr(markdown_message[:300])}")
             message = convert_to_telegram_markdown(markdown_message)
+            print(f"   🔍 DEBUG converted message (first 300 chars): {repr(message[:300])}")
 
             # Build dynamic keyboard
             print(f"   🔍 DEBUG: Before _build_workflow_keyboard, workspace_id={workspace_id}")

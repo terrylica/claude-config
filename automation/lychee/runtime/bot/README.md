@@ -11,20 +11,56 @@ Workflow orchestration bot for Claude CLI sessions with progress streaming.
 
 ## Quick Start
 
-### Development Mode ⭐ **RECOMMENDED**
+### ⭐ New: Managed Development Mode (v5.6.0+)
+
+**Industry-standard lifecycle management** with singleton enforcement:
+
+```bash
+# Start bot (refuses if already running)
+./bot-dev.sh start
+
+# Check status (process tree, uptime, memory, logs)
+./bot-dev.sh status
+
+# Restart bot (clean stop + start)
+./bot-dev.sh restart
+
+# Stop bot (graceful shutdown)
+./bot-dev.sh stop
+```
+
+**Features**:
+
+- ✅ **Singleton enforcement** - Prevents duplicate instances
+- ✅ **Process tree visibility** - See watchexec + bot hierarchy
+- ✅ **Clean lifecycle** - Proper start/stop/restart commands
+- ✅ **Health checks** - PID validation, stale file cleanup
+- ✅ **Auto-reload** - Watchexec monitors `.py` files (100ms debounce)
+- ✅ **Graceful shutdown** - SIGTERM with 10s timeout
+
+**Shell Aliases** (after sourcing `~/.claude/sage-aliases/aliases/bot-management.sh`):
+
+```bash
+bot start       # Start development server
+bot stop        # Stop development server
+bot restart     # Restart development server
+bot status      # Show full status
+bot-logs        # Tail live logs
+bot-reload      # Restart + tail logs
+```
+
+### Development Mode (Legacy)
+
+Direct watchexec execution (no lifecycle management):
 
 ```bash
 cd /Users/terryli/.claude/automation/lychee/runtime/bot
 ./run-bot-dev-watchexec.sh
 ```
 
-**Features**:
+**⚠️ Not Recommended**: No singleton enforcement, manual PID management required.
 
-- ✅ Auto-restarts on `.py` file changes
-- ✅ Rust-based watchexec (faster than nodemon)
-- ✅ Respects `.gitignore` automatically
-- ✅ Built-in debouncing (100ms)
-- ✅ Graceful restarts (SIGTERM → SIGKILL)
+**Use Cases**: Initial development, debugging watchexec configuration.
 
 ### Production Mode (launchd Service)
 

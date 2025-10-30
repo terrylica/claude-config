@@ -96,6 +96,7 @@
 ## Automation
 
 **Telegram Bot**: Multi-workspace workflow orchestration
+
 - **Development**: ALWAYS start with watchexec: `/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh `
 - **Auto-reload**: Enabled (100ms debounce, monitors `bot/`, `lib/`, `orchestrator/`)
 - **Verification**: `ps aux | grep watchexec | grep bot` should show process

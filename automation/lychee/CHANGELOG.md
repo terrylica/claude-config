@@ -1,3 +1,147 @@
+## [5.6.0] - 2025-10-30
+
+### ✨ New Features
+
+- _(bot)_ Add comprehensive bot lifecycle management system (`bot-dev.sh`)
+- Singleton enforcement for watchexec process (prevents multiple instances)
+- Industry-standard service commands: `start`, `stop`, `restart`, `status`
+- Process tree visibility and health checks
+- PID file management for both watchexec and bot processes
+
+### 🐛 Bug Fixes
+
+- _(bot)_ Fix recurring multiple instance conflicts
+- Prevent duplicate watchexec processes from manual restarts
+- Add orphaned process detection and cleanup
+- Proper graceful shutdown with timeout handling
+
+### 🏗️ Architecture
+
+**Problem**: Two-layer process management with only one-layer protection
+
+| Layer | Process | Before | After |
+|-------|---------|--------|-------|
+| Service | watchexec | ❌ No PID management | ✅ PID file + singleton |
+| Wrapper | doppler + uv | ❌ No protection | ✅ Managed by watchexec |
+| Bot | Python script | ✅ Had PID file | ✅ Unchanged |
+
+**Root Cause**: Only Python bot had singleton enforcement. Nothing prevented running startup script twice → 2 watchexec processes → resource conflicts, failed restarts, PID file thrashing.
+
+### 🛠️ Solution
+
+Created `/Users/terryli/.claude/automation/lychee/runtime/bot/bot-dev.sh ` with:
+
+1. **Singleton Enforcement**
+   - Creates `watchexec.pid` on start
+   - Refuses to start if already running
+   - Detects and cleans stale PID files
+   - Handles PID reuse and orphaned processes
+
+2. **Service Commands**
+   ```bash
+   bot-dev.sh start    # Start (refuses if already running)
+   bot-dev.sh stop     # Clean shutdown (SIGTERM → wait → SIGKILL)
+   bot-dev.sh restart  # Stop + Start
+   bot-dev.sh status   # Process tree, uptime, memory, logs
+   ```
+
+3. **Process Tree Management**
+   - Tracks watchexec PID separately from bot PID
+   - Shows full process hierarchy in status
+   - Handles graceful shutdown with 10s timeout
+   - Force-kills if graceful shutdown fails
+
+4. **Health Checks**
+   - Verifies processes are actually running (not zombie/reused PIDs)
+   - Validates command line matches expected process
+   - Shows recent log activity
+   - Detects bot initialization failures
+
+### 📚 Usage
+
+**Before** (Ad-hoc, error-prone):
+```bash
+# Start
+nohup run-bot-dev-watchexec.sh &  # ❌ No singleton check!
+
+# Stop
+pkill watchexec  # ❌ Might kill wrong process!
+
+# Status
+ps aux | grep watchexec  # ❌ Manual inspection
+```
+
+**After** (Managed, safe):
+```bash
+bot-dev.sh start   # ✅ Refuses if already running
+bot-dev.sh stop    # ✅ Clean shutdown
+bot-dev.sh status  # ✅ Full visibility
+bot-dev.sh restart # ✅ Clean cycle
+```
+
+### 🎯 Impact
+
+- **Zero duplicate instances**: Singleton enforcement at watchexec level
+- **Clean lifecycle**: Proper start/stop/restart commands
+- **Full visibility**: Process tree, uptime, memory, logs in one command
+- **Production-ready**: Same patterns as systemd/Docker/launchd services
+- **No more confusion**: Clear error messages, helpful command suggestions
+
+### 🔧 Technical Details
+
+**PID File Locations**:
+- Watchexec: `/Users/terryli/.claude/automation/lychee/state/watchexec.pid `
+- Bot: `/Users/terryli/.claude/automation/lychee/state/bot.pid `
+
+**Process Tree** (Normal, Expected):
+```
+watchexec (PID from watchexec.pid)
+  └─> bot-wrapper.sh
+      └─> doppler run
+          └─> uv run
+              └─> python3 multi-workspace-bot.py (PID from bot.pid)
+```
+
+These 4 PIDs are NORMAL (parent→child chain), not multiple instances!
+
+**Shutdown Sequence**:
+1. Send SIGTERM to watchexec
+2. Watchexec propagates signal to children
+3. Wait up to 10 seconds for graceful shutdown
+4. Force SIGKILL if timeout exceeded
+5. Clean up PID files
+
+### 🚀 Next Steps
+
+Consider adding shell alias:
+```bash
+alias bot='~/.claude/automation/lychee/runtime/bot/bot-dev.sh'
+```
+
+Then use: `bot start`, `bot stop`, `bot status`, `bot restart`
+
+## [5.5.3] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(bot)_ Disable idle timeout for development mode (bot now runs continuously)
+- Fix bot not processing pending summaries after idle shutdown
+- Watchexec only restarts on file changes, not on clean exits
+
+### 🔍 Root Cause
+
+Bot had 30-minute idle timeout → Clean exit (code 0) → Watchexec didn't restart → Pending summaries not processed until manual restart
+
+### 🛠️ Solution
+
+- Set `IDLE_TIMEOUT_SECONDS = 0` (disabled) for development
+- Production can set `BOT_IDLE_TIMEOUT` environment variable
+- Idle timeout monitor now respects 0 as "disabled"
+
+### 📚 Impact
+
+Bot will now run continuously under watchexec and process all summary files immediately. No more missed Telegram notifications.
+
 ## [5.5.2] - 2025-10-30
 
 ### 🧹 Cleanup
