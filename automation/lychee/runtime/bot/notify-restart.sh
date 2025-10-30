@@ -29,8 +29,12 @@ PID="$$"
 CLAUDE_SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
 if [[ -z "$CLAUDE_SESSION_ID" ]]; then
     # Try to get most recent session from Claude Code debug dir
-    LATEST_SESSION=$(ls -t ~/.claude/debug/*.txt 2>/dev/null | head -1 | xargs -I {} basename {} .txt 2>/dev/null || echo "unknown")
-    CLAUDE_SESSION_ID="$LATEST_SESSION"
+    LATEST_SESSION_FILE=$(ls -t ~/.claude/debug/*.txt 2>/dev/null | head -1)
+    if [[ -n "$LATEST_SESSION_FILE" ]]; then
+        CLAUDE_SESSION_ID=$(basename "$LATEST_SESSION_FILE" .txt)
+    else
+        CLAUDE_SESSION_ID="unknown"
+    fi
 fi
 
 # Get git branch and working directory
