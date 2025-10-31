@@ -201,9 +201,13 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         # Extract last user prompt (handles both string and array content formats)
         # Array format: {"content": [{"type": "text", "text": "message"}]}
         # String format: {"content": "message"}  (legacy)
-        # Note: Get first user message with actual text content (not just tool_result)
+        # Note: Skip Telegram notification echoes (multi-line blocks starting with ``` and ending with ```)
         last_user_prompt=$(echo "$tac_output_user" | \
             jq -r 'select(.message.role == "user") |
+                   select(if (.message.content | type) == "array" then
+                       # Skip messages with tool_result (debugging commands)
+                       ([.message.content[] | select(.type == "tool_result")] | length == 0)
+                   else true end) |
                    if (.message.content | type) == "string" then
                        .message.content
                    elif (.message.content | type) == "array" then
@@ -212,7 +216,9 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
                    else
                        empty
                    end' | \
-            grep -v "^\`\`\`" | grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
+            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
+            sed '/^```$/,/^```$/d' | \
+            grep -v "^$" | \
             head -1 | \
             head -c 500) || {
             {

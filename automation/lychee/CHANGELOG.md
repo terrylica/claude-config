@@ -2,11 +2,11 @@
 
 ### 🐛 Bug Fixes
 
-- _(hook)_ Fix Stop hook extracting Telegram echoes instead of user prompts
-  - Root cause: Telegram notification echoes appear first in tac-reversed transcript, `first()` or `head -1` selected echo instead of actual prompt
-  - Impact: Multi-line prompts showed empty or "```" in Telegram notifications
-  - Session affected: 906b0590 (6-line prompt → "❓", test prompt → "```")
-  - Fix: Added `grep -v "^\`\`\`"` to filter out Telegram echoes starting with code blocks
+- _(hook)_ Fix Stop hook extracting quoted Telegram notifications instead of user prompts
+  - Root cause: Users quote Telegram notifications when reporting issues, extraction logic selected quoted notification instead of actual comment
+  - Impact: User comments like "still the same" showed as "❓" in Telegram notifications
+  - Session affected: 906b0590 (user said "still the same" but notification showed "❓")
+  - Fix: Filter tool_result messages + remove code blocks with `sed '/^```$/,/^```$/d'`
 
 ### 🏗️ Architecture
 
@@ -30,30 +30,38 @@ head -c 150
 
 **Broken Fix (v5.13.1 initial)**:
 
-```bash
+````bash
 jq 'first(select(.message.role == "user")) | \  # Selects Telegram echo
     if array then join("\n") else . end' | \
 grep ... | \
 head -c 500
 # Result: "```" (from Telegram echo)
-```
+````
 
 **Correct Fix (v5.13.1 final)**:
 
 ```bash
-jq 'select(.message.role == "user") | \
-    if array then join("\n") else . end' | \
-grep -v "^\`\`\`" | \  # NEW: Filter out Telegram echoes
+jq 'select(.message.role == "user") |
+    select(if (.message.content | type) == "array" then
+        # Skip messages with tool_result (debugging commands)
+        ([.message.content[] | select(.type == "tool_result")] | length == 0)
+    else true end) |
+    if (.message.content | type) == "string" then .message.content
+    elif (.message.content | type) == "array" then
+        ([.message.content[] | select(.type == "text") | .text] | join("\n"))
+    else empty end' | \
 grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
-head -1 | \             # Now gets first TEXT line, not echo
+sed '/^```$/,/^```$/d' | \  # NEW: Remove quoted code blocks
+grep -v "^$" | \
+head -1 | \
 head -c 500
 ```
 
 **Key Changes**:
 
-1. `grep -v "^\`\`\`"` - Exclude Telegram notification echoes
-2. Keep `select()` (not `first()`) - Output all user messages, then filter
-3. `head -1` after grep filters - Get first actual text line
+1. Filter `tool_result` messages (debugging commands) in jq
+2. `sed '/^```$/,/^```$/d'` - Remove entire code block ranges (quoted notifications)
+3. Extract text after filtering, not before
 
 - jq with `select()` outputs MULTIPLE messages (one per user message in transcript)
 - Each message content can be MULTI-LINE
