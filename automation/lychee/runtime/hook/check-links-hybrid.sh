@@ -228,7 +228,7 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
                 else
                     empty
                 end' | \
-            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
+            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | grep -v "^[❓🔗]" | \
             awk 'NF {print; exit}' | \
             head -c 500) || {
             {
