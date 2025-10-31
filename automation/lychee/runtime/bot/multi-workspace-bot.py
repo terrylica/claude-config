@@ -66,7 +66,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes, AIORateLimiter
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, AIORateLimiter, PicklePersistence
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -84,6 +84,7 @@ PROGRESS_DIR = STATE_DIR / "progress"  # Phase 4 - P2 streaming progress
 TRACKING_DIR = STATE_DIR / "tracking"  # Phase 4 - Progress tracking persistence
 DEDUP_DIR = STATE_DIR / "deduplication"  # v5.10.0 - Content deduplication persistence
 PID_FILE = STATE_DIR / "bot.pid"
+PERSISTENCE_FILE = STATE_DIR / "bot_persistence.pickle"  # v5.13.0 - Conversation state persistence
 WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -398,7 +399,7 @@ async def main() -> int:
         bot_state.last_activity_time = asyncio.get_event_loop().time()
         print(f"⏱️  Activity timer initialized")
 
-        # Initialize Telegram bot with AIORateLimiter
+        # Initialize Telegram bot with AIORateLimiter and PicklePersistence
         print("\n📱 Initializing Telegram bot...")
         rate_limiter = AIORateLimiter(
             overall_max_rate=30,    # 30 requests/sec overall (Telegram limit)
@@ -407,10 +408,15 @@ async def main() -> int:
             group_time_period=60,   # 60 second window
             max_retries=3           # Retry 3 times on RetryAfter
         )
+
+        # v5.13.0: PicklePersistence for conversation state across restarts
+        persistence = PicklePersistence(filepath=str(PERSISTENCE_FILE))
+
         app = (
             Application.builder()
             .token(BOT_TOKEN)
             .rate_limiter(rate_limiter)
+            .persistence(persistence)
             .build()
         )
         app.add_handler(CallbackQueryHandler(handle_callback))

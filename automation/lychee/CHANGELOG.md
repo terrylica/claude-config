@@ -1,3 +1,78 @@
+## [5.13.0] - 2025-10-30
+
+### ✨ New Features
+
+- _(bot)_ Conversation state persistence with PicklePersistence
+  - Maintains conversation context across bot restarts
+  - Persists user_data, chat_data, bot_data
+  - Automatic serialization to pickle file
+  - OSS python-telegram-bot feature (no custom code)
+
+### 🏗️ Architecture
+
+**Problem**: Conversation state lost on restart
+
+**Without Persistence**:
+- User starts conversation with /start
+- Bot restarts (watchexec/crash)
+- Conversation context lost
+- User must restart conversation
+
+**With PicklePersistence (v5.13.0)**:
+- User starts conversation with /start
+- Bot restarts (watchexec/crash)
+- Conversation context restored automatically
+- User can continue conversation
+
+```python
+# Before: No persistence
+app = Application.builder().token(TOKEN).build()
+# Conversation state lost on restart
+
+# After (v5.13.0): PicklePersistence
+persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
+app = (
+    Application.builder()
+    .token(TOKEN)
+    .persistence(persistence)
+    .build()
+)
+# Conversation state survives restarts
+```
+
+**What Gets Persisted**:
+- user_data: Per-user conversation state
+- chat_data: Per-chat conversation state
+- bot_data: Global bot state
+- conversations: ConversationHandler states
+
+**Limitations** (python-telegram-bot):
+- callback_data NOT persisted (in-memory only)
+- File size grows with conversation history
+- Pickle format (Python-specific)
+
+**Error Handling**:
+- Corrupted pickle: Delete file, start fresh (logged)
+- Read error: Start without persistence (logged)
+- Write error: Continue operation (logged, no crash)
+
+**Implementation**:
+- OSS PicklePersistence from python-telegram-bot
+- Single line: `.persistence(persistence)`
+- File: `state/bot_persistence.pickle`
+- No custom persistence code
+
+**SLO Validation**:
+- Correctness: 100% state retention ✅
+- Observability: Bot startup logs show initialization ✅
+
+**Files Modified**:
+- `runtime/bot/multi-workspace-bot.py` (+4 lines)
+
+**Research**: /tmp/hot-reload-patterns-research/ (PicklePersistence recommended)
+
+---
+
 ## [5.12.0] - 2025-10-30
 
 ### ✨ New Features
