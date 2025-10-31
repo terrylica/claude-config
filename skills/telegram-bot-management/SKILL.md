@@ -1,119 +1,247 @@
 ---
 name: telegram-bot-management
-description: Telegram bot development workflow, startup procedures, and watchexec auto-reload. Use when user mentions telegram bot, lychee automation, bot startup, bot restart, watchexec, or bot development.
+description: Telegram bot production management, monitoring, and troubleshooting. Use when user mentions telegram bot, lychee automation, bot status, bot restart, or bot monitoring.
 ---
 
 # Telegram Bot Management
 
-Multi-workspace Telegram bot workflow orchestration with auto-reload development mode.
+Multi-workspace Telegram bot workflow orchestration with full supervision (launchd + watchexec).
 
 ## Critical Rules
 
-**⚠️ NEVER start bot without watchexec in development**
+**Production Mode Only** - As of v5.8.0, there is only one way to run the bot.
 
-## Startup Procedure
+## Bot Management Commands
 
-### Development Mode (RECOMMENDED)
-
-```bash
-# Correct way - with auto-reload
-/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh
-```
-
-**Features:**
-- ✅ Auto-restarts on `.py` file changes (100ms debounce)
-- ✅ Monitors: `bot/`, `lib/`, `orchestrator/` directories
-- ✅ Graceful shutdown (SIGTERM → 5s timeout → SIGKILL)
-- ✅ Respects `.gitignore` automatically
-
-### Verification
-
-Check if running correctly:
+### Check Status
 
 ```bash
-# Should show watchexec process
-ps aux | grep watchexec | grep bot
-
-# Should show bot process under watchexec
-ps aux | grep multi-workspace-bot
+bot-service.sh status
+# Or use alias
+bot status
 ```
 
-### Common Mistakes
+Shows:
+- launchd supervision status
+- watchexec process (PID, uptime, memory)
+- Bot process (PID, uptime, memory)
+- Full process tree
+- Recent log activity
 
-❌ **WRONG**: `doppler run --project claude-config --config dev -- uv run multi-workspace-bot.py`
-- No auto-reload
-- Manual restart required for code changes
-- Easy to forget to restart
-
-✅ **CORRECT**: Use `run-bot-dev-watchexec.sh` wrapper script
-
-## Stopping the Bot
+### View Logs
 
 ```bash
-# Kill watchexec (will stop bot gracefully)
-pkill watchexec
-
-# Or kill bot directly (watchexec will restart it)
-pkill -f multi-workspace-bot.py
+bot-service.sh logs
+# Or use alias
+bot logs
 ```
 
-## Production Mode
+Tails all logs:
+- Launchd logs (supervision layer)
+- Bot logs (application layer)
 
-For production deployment (auto-start on login):
+### Restart Bot
+
+```bash
+bot-service.sh restart
+# Or use alias
+bot restart
+```
+
+**Rarely needed** - Code changes auto-reload via watchexec!
+
+### Stop Bot
+
+```bash
+bot-service.sh stop
+# Or use alias
+bot stop
+```
+
+Temporarily stops the bot. Use `bot start` to resume.
+
+### Start Bot
+
+```bash
+bot-service.sh start
+# Or use alias
+bot start
+```
+
+Resumes bot after temporary stop.
+
+## Installation (One-Time)
 
 ```bash
 cd /Users/terryli/.claude/automation/lychee/runtime/bot
-
-# Install launchd service
 ./bot-service.sh install
-
-# Check status
-./bot-service.sh status
-
-# View logs
-./bot-service.sh logs
 ```
+
+This:
+- Installs launchd service
+- Auto-starts on login
+- Auto-restarts on crashes
+- Auto-reloads on code changes
+
+## Architecture
+
+```
+launchd (macOS top supervisor)
+  └─> run-bot-prod-watchexec.sh
+      └─> watchexec (file watcher, auto-reload)
+          └─> bot-wrapper-prod.sh (crash detection)
+              └─> doppler run
+                  └─> uv run
+                      └─> python3 multi-workspace-bot.py
+```
+
+**Every layer is monitored and supervised.**
+
+## Auto-Reload Feature
+
+**Code changes trigger automatic reload:**
+
+1. Edit `.py` file in `bot/`, `lib/`, or `orchestrator/`
+2. Save file
+3. watchexec detects change (100ms debounce)
+4. Bot restarts automatically (~2-3 seconds)
+5. New code is loaded
+
+**No manual restart needed!**
+
+## Health Monitoring
+
+### Layer 1: launchd
+- Monitors: watchexec crashes
+- Action: Auto-restart watchexec
+- Alerts: System logs
+
+### Layer 2: watchexec
+- Monitors: Bot crashes
+- Action: Auto-restart bot
+- Alerts: Automatic (no intervention needed)
+
+### Layer 3: bot-wrapper-prod
+- Monitors: Crash loops (5+ restarts/60s)
+- Action: Telegram alert with full context
+- Alerts: Telegram (critical)
+
+### Layer 4: bot
+- Monitors: Internal errors
+- Action: Telegram alert
+- Alerts: Telegram (errors)
 
 ## Troubleshooting
 
-### Bot not auto-restarting on code changes
+### Bot Not Running
 
-**Cause**: Not running under watchexec
-**Fix**: Kill bot, restart with `run-bot-dev-watchexec.sh`
-
-### PID file lock error
-
-**Cause**: Previous bot process still running
-**Fix**:
 ```bash
-pkill -9 -f multi-workspace-bot.py
-rm -f ~/.claude/automation/lychee/state/bot.pid
-# Then restart with watchexec script
+# Check status
+bot status
+
+# If not running, check launchd
+launchctl list | grep telegram-bot
+
+# Reinstall if needed
+bot uninstall
+bot install
 ```
 
-### Multiple bot instances
+### Crash Loop Alert
 
-**Cause**: Started bot multiple times without watchexec
-**Fix**:
+If you receive "CRITICAL: Crash Loop Detected" in Telegram:
+
+1. Check Telegram alert for error context
+2. Review logs: `bot logs`
+3. Fix the issue in code
+4. Save file (auto-reloads)
+5. Restart counter resets after 5 min stability
+
+### Code Changes Not Reloading
+
 ```bash
-# Kill all instances
-pkill -9 watchexec
-pkill -9 -f multi-workspace-bot.py
-rm -f ~/.claude/automation/lychee/state/bot.pid
+# Verify watchexec is running
+bot status  # Should show watchexec process
 
-# Start fresh
-/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh
+# Check watched directories
+ps aux | grep watchexec  # Should show --watch paths
+
+# Manual restart if needed
+bot restart
+```
+
+### Multiple PIDs Normal
+
+When you run `bot status`, you'll see 6-7 PIDs:
+
+```
+launchd (PID 1)
+  └─> run-bot-prod-watchexec.sh (PID XXXXX)
+      └─> watchexec (PID XXXXX)
+          └─> bot-wrapper-prod.sh (PID XXXXX)
+              └─> doppler (PID XXXXX)
+                  └─> uv (PID XXXXX)
+                      └─> python3 (PID XXXXX)
+```
+
+**This is NORMAL!** It's a parent→child process chain, not multiple instances.
+
+### PID File Errors
+
+```bash
+# Clean stale PID files
+rm -f ~/.claude/automation/lychee/state/bot.pid
+rm -f ~/.claude/automation/lychee/state/watchexec.pid
+
+# Restart bot
+bot restart
 ```
 
 ## File Locations
 
 - **Bot script**: `/Users/terryli/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py`
-- **Dev wrapper**: `/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh`
 - **Service manager**: `/Users/terryli/.claude/automation/lychee/runtime/bot/bot-service.sh`
-- **PID file**: `/Users/terryli/.claude/automation/lychee/state/bot.pid`
-- **Logs**: Check `ps` output or `/tmp/bot-watchexec*.log`
+- **Production runner**: `/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-prod-watchexec.sh`
+- **Crash monitor**: `/Users/terryli/.claude/automation/lychee/runtime/bot/bot-wrapper-prod.sh`
+- **PID files**: `/Users/terryli/.claude/automation/lychee/state/{watchexec,bot}.pid`
+- **Launchd logs**: `~/.claude/automation/lychee/logs/telegram-bot-launchd*.log`
+- **Bot logs**: `~/.claude/automation/lychee/logs/telegram-handler.log`
+
+## Shell Aliases
+
+After sourcing `~/.claude/sage-aliases/aliases/bot-management.sh`:
+
+```bash
+bot status          # Show status
+bot logs            # Tail logs
+bot restart         # Restart service
+bot stop            # Stop service
+bot start           # Start service
+bot-pids            # Show PIDs
+bot-state-count     # State directory stats
+bot-logs-errors     # Show recent errors
+```
 
 ## References
 
 - **Bot README**: `/Users/terryli/.claude/automation/lychee/runtime/bot/README.md`
-- **CLAUDE.md Automation section**: Always start with watchexec wrapper
+- **CHANGELOG**: `/Users/terryli/.claude/automation/lychee/CHANGELOG.md`
+- **CLAUDE.md**: Always use production mode (launchd + watchexec)
+
+## Version History
+
+- **v5.8.0** (2025-10-30): Production-only mode
+- **v5.7.0** (2025-10-30): Full supervision (launchd + watchexec)
+- **v5.6.0** (2025-10-30): Dev lifecycle management (archived)
+
+## Important Notes
+
+**No Development Mode** - As of v5.8.0, production mode provides all features:
+- Auto-reload for rapid iteration (dev need)
+- Full supervision for reliability (prod need)
+- Crash detection for debugging (dev need)
+- Always-on operation (prod need)
+
+**Always Running** - The bot runs continuously. To stop completely:
+- Temporary: `bot stop`
+- Permanent: `bot uninstall`

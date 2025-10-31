@@ -534,15 +534,15 @@ fi
         # - More context (git status, session duration, available workflows)
 
         # =====================================================================
-        # Phase 5 - Bot Management: Continuous Process via Watchexec
+        # Phase 5 - Bot Management: Continuous Process via launchd + watchexec
         # =====================================================================
-        # Bot should be running continuously via watchexec (run-bot-dev-watchexec.sh)
+        # Bot runs continuously as launchd service (production mode)
         # This hook only creates summary files - bot picks them up automatically
 
         {
             echo ""
             echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ SessionSummary created - bot will pick it up automatically"
-            echo "   → Bot should be running via: ~/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh"
+            echo "   → Bot managed by launchd service (check status: bot-service.sh status)"
         } >> "$log_file" 2>&1
     else
         # No markdown files found - still emit SessionSummary (v4.0.0)
