@@ -1,3 +1,13 @@
+## [5.13.3] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(hook)_ Skip messages starting with code fence (quoted Telegram notifications)
+  - Root cause: `first()` selected messages quoting Telegram notifications (start with "```"), sed removed code block leaving quoted text
+  - Impact: Extracted "This is the telegram message..." instead of actual prompt "I'm asking you to send me a feedback..."
+  - Fix: Added `startswith("```") | not` filter in jq before `first()` selection
+  - Removed sed code block removal (no longer needed, filtered at source)
+
 ## [5.13.2] - 2025-10-30
 
 ### 🐛 Bug Fixes
