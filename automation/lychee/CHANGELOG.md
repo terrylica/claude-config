@@ -2,47 +2,59 @@
 
 ### 🐛 Bug Fixes
 
-- _(hook)_ Fix Stop hook truncating multi-line user prompts
-  - Root cause: `tail -1` + `head -1` discarded multi-line content
-  - Impact: Multi-line prompts showed only one line in Telegram notifications
-  - Session affected: 906b0590 (6-line prompt → 1-line "❓")
-  - Fix iterations: 2 (first fix still had `head -1`, now removed)
+- _(hook)_ Fix Stop hook extracting Telegram echoes instead of user prompts
+  - Root cause: Telegram notification echoes appear first in tac-reversed transcript, `first()` or `head -1` selected echo instead of actual prompt
+  - Impact: Multi-line prompts showed empty or "```" in Telegram notifications
+  - Session affected: 906b0590 (6-line prompt → "❓", test prompt → "```")
+  - Fix: Added `grep -v "^\`\`\`"` to filter out Telegram echoes starting with code blocks
 
 ### 🏗️ Architecture
 
-**Data Flow Issue**: Line-based truncation destroyed multi-line prompts
+**Data Flow Issue**: Transcript contains both user prompts AND Telegram notification echoes
+
+**Problem Sequence**:
+
+1. User sends prompt: "hello as a test. what time is it now in vancouver"
+2. Stop hook processes, sends Telegram notification
+3. Telegram notification echoed back to transcript (starts with "```")
+4. `tac` reverses transcript → Telegram echo appears FIRST (more recent)
+5. `first()` or `head -1` selects the echo instead of actual prompt
 
 **Original (v5.13.0)**:
+
 ```bash
 jq 'select(.message.role == "user") | ...' | \
-grep ... | \
 tail -1 | \           # BUG: Takes LAST LINE across ALL messages
 head -c 150
 ```
 
-**First Fix Attempt (broken)**:
+**Broken Fix (v5.13.1 initial)**:
+
 ```bash
-jq 'select(.message.role == "user") | ...' | \
+jq 'first(select(.message.role == "user")) | \  # Selects Telegram echo
+    if array then join("\n") else . end' | \
 grep ... | \
-head -1 | \           # STILL WRONG: Takes FIRST LINE only
+head -c 500
+# Result: "```" (from Telegram echo)
+```
+
+**Correct Fix (v5.13.1 final)**:
+
+```bash
+jq 'select(.message.role == "user") | \
+    if array then join("\n") else . end' | \
+grep -v "^\`\`\`" | \  # NEW: Filter out Telegram echoes
+grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
+head -1 | \             # Now gets first TEXT line, not echo
 head -c 500
 ```
 
-**Correct Fix (v5.13.1)**:
-```bash
-jq 'first(select(.message.role == "user")) | \  # Get first message only
-    if array then join("\n") else . end' | \    # Preserve newlines
-grep ... | \
-head -c 500                                      # No line truncation
-```
-
 **Key Changes**:
-1. `first(select(...))` - jq outputs only ONE message (not multiple)
-2. `join("\n")` - preserves newlines in array content (not `join(" ")`)
-3. **Removed `head -1`** - no line truncation, preserve multi-line
-4. Removed `head -1` from cleanup step (line 231)
 
-**Why Both Fixes Were Needed**:
+1. `grep -v "^\`\`\`"` - Exclude Telegram notification echoes
+2. Keep `select()` (not `first()`) - Output all user messages, then filter
+3. `head -1` after grep filters - Get first actual text line
+
 - jq with `select()` outputs MULTIPLE messages (one per user message in transcript)
 - Each message content can be MULTI-LINE
 - `tail -1` took last LINE across all output (wrong)
@@ -51,11 +63,13 @@ head -c 500                                      # No line truncation
 - No `head -1` preserves all lines of that message
 
 **Validation**:
+
 - Test with 6-line prompt (original failing case)
 - Verify all lines preserved up to 500 char limit
 - Check Telegram shows full prompt, not truncated
 
 **Files Modified**:
+
 - `automation/lychee/runtime/hook/check-links-hybrid.sh` (jq + grep pipeline)
 
 **Debug Protocol**: Data-First → Traced jq output → Fixed at source

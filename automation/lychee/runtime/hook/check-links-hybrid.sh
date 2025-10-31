@@ -201,17 +201,19 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         # Extract last user prompt (handles both string and array content formats)
         # Array format: {"content": [{"type": "text", "text": "message"}]}
         # String format: {"content": "message"}  (legacy)
-        # Note: Use first() to get only first user message, preserve all lines
+        # Note: Get first user message with actual text content (not just tool_result)
         last_user_prompt=$(echo "$tac_output_user" | \
-            jq -r 'first(select(.message.role == "user")) |
+            jq -r 'select(.message.role == "user") |
                    if (.message.content | type) == "string" then
                        .message.content
                    elif (.message.content | type) == "array" then
-                       [.message.content[] | select(.type == "text") | .text] | join("\n")
+                       # Extract text parts, filter out tool_result entries
+                       ([.message.content[] | select(.type == "text") | .text] | join("\n"))
                    else
                        empty
                    end' | \
-            grep -v "^<" | grep -v "^Caveat:" | grep -v "^$" | \
+            grep -v "^\`\`\`" | grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
+            head -1 | \
             head -c 500) || {
             {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: User prompt pipeline failed!"
