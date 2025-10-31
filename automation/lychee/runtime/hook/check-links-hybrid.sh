@@ -201,19 +201,18 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         # Extract last user prompt (handles both string and array content formats)
         # Array format: {"content": [{"type": "text", "text": "message"}]}
         # String format: {"content": "message"}  (legacy)
-        # Note: Using tail -1 on jq output instead of head -1 since input is already reversed by tac
+        # Note: Use first() to get only first user message, preserve all lines
         last_user_prompt=$(echo "$tac_output_user" | \
-            jq -r 'select(.message.role == "user") |
+            jq -r 'first(select(.message.role == "user")) |
                    if (.message.content | type) == "string" then
                        .message.content
                    elif (.message.content | type) == "array" then
-                       [.message.content[] | select(.type == "text") | .text] | join(" ")
+                       [.message.content[] | select(.type == "text") | .text] | join("\n")
                    else
                        empty
                    end' | \
             grep -v "^<" | grep -v "^Caveat:" | grep -v "^$" | \
-            tail -1 | \
-            head -c 150) || {
+            head -c 500) || {
             {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: User prompt pipeline failed!"
             } >> "$log_file"
@@ -226,10 +225,11 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         } >> "$log_file"
     fi
 
-    # Clean up user prompt
+    # Clean up user prompt (preserve multi-line, trim whitespace)
     if [[ -n "$last_user_prompt" ]]; then
-        last_user_prompt=$(echo "$last_user_prompt" | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ Extracted user prompt: ${last_user_prompt:0:60}..." >> "$log_file"
+        last_user_prompt=$(echo "$last_user_prompt" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        prompt_preview=$(echo "$last_user_prompt" | head -c 60 | tr '\n' '␤')
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ Extracted user prompt: ${prompt_preview}..." >> "$log_file"
     else
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ⚠️  No user prompt found in transcript" >> "$log_file"
     fi

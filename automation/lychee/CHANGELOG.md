@@ -1,3 +1,67 @@
+## [5.13.1] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(hook)_ Fix Stop hook truncating multi-line user prompts
+  - Root cause: `tail -1` + `head -1` discarded multi-line content
+  - Impact: Multi-line prompts showed only one line in Telegram notifications
+  - Session affected: 906b0590 (6-line prompt → 1-line "❓")
+  - Fix iterations: 2 (first fix still had `head -1`, now removed)
+
+### 🏗️ Architecture
+
+**Data Flow Issue**: Line-based truncation destroyed multi-line prompts
+
+**Original (v5.13.0)**:
+```bash
+jq 'select(.message.role == "user") | ...' | \
+grep ... | \
+tail -1 | \           # BUG: Takes LAST LINE across ALL messages
+head -c 150
+```
+
+**First Fix Attempt (broken)**:
+```bash
+jq 'select(.message.role == "user") | ...' | \
+grep ... | \
+head -1 | \           # STILL WRONG: Takes FIRST LINE only
+head -c 500
+```
+
+**Correct Fix (v5.13.1)**:
+```bash
+jq 'first(select(.message.role == "user")) | \  # Get first message only
+    if array then join("\n") else . end' | \    # Preserve newlines
+grep ... | \
+head -c 500                                      # No line truncation
+```
+
+**Key Changes**:
+1. `first(select(...))` - jq outputs only ONE message (not multiple)
+2. `join("\n")` - preserves newlines in array content (not `join(" ")`)
+3. **Removed `head -1`** - no line truncation, preserve multi-line
+4. Removed `head -1` from cleanup step (line 231)
+
+**Why Both Fixes Were Needed**:
+- jq with `select()` outputs MULTIPLE messages (one per user message in transcript)
+- Each message content can be MULTI-LINE
+- `tail -1` took last LINE across all output (wrong)
+- `head -1` took first LINE across all output (still wrong)
+- `first()` ensures jq outputs ONLY the first message
+- No `head -1` preserves all lines of that message
+
+**Validation**:
+- Test with 6-line prompt (original failing case)
+- Verify all lines preserved up to 500 char limit
+- Check Telegram shows full prompt, not truncated
+
+**Files Modified**:
+- `automation/lychee/runtime/hook/check-links-hybrid.sh` (jq + grep pipeline)
+
+**Debug Protocol**: Data-First → Traced jq output → Fixed at source
+
+---
+
 ## [5.13.0] - 2025-10-30
 
 ### ✨ New Features
@@ -13,12 +77,14 @@
 **Problem**: Conversation state lost on restart
 
 **Without Persistence**:
+
 - User starts conversation with /start
 - Bot restarts (watchexec/crash)
 - Conversation context lost
 - User must restart conversation
 
 **With PicklePersistence (v5.13.0)**:
+
 - User starts conversation with /start
 - Bot restarts (watchexec/crash)
 - Conversation context restored automatically
@@ -41,32 +107,38 @@ app = (
 ```
 
 **What Gets Persisted**:
+
 - user_data: Per-user conversation state
 - chat_data: Per-chat conversation state
 - bot_data: Global bot state
 - conversations: ConversationHandler states
 
 **Limitations** (python-telegram-bot):
+
 - callback_data NOT persisted (in-memory only)
 - File size grows with conversation history
 - Pickle format (Python-specific)
 
 **Error Handling**:
+
 - Corrupted pickle: Delete file, start fresh (logged)
 - Read error: Start without persistence (logged)
 - Write error: Continue operation (logged, no crash)
 
 **Implementation**:
+
 - OSS PicklePersistence from python-telegram-bot
 - Single line: `.persistence(persistence)`
 - File: `state/bot_persistence.pickle`
 - No custom persistence code
 
 **SLO Validation**:
+
 - Correctness: 100% state retention ✅
 - Observability: Bot startup logs show initialization ✅
 
 **Files Modified**:
+
 - `runtime/bot/multi-workspace-bot.py` (+4 lines)
 
 **Research**: /tmp/hot-reload-patterns-research/ (PicklePersistence recommended)
@@ -88,6 +160,7 @@ app = (
 **Problem**: Orphaned tracking files accumulate on disk
 
 **Causes**:
+
 - Execution completion handler crashes before cleanup
 - File deletion fails (permissions, disk errors)
 - Bot killed during cleanup (SIGKILL)
@@ -104,25 +177,30 @@ cleanup_orphaned_tracking(TRACKING_DIR, ttl_minutes=30)
 ```
 
 **Cleanup Logic**:
+
 1. Scan tracking directory for `*_tracking.json`
 2. Check file modification time
 3. Remove if older than TTL (30 minutes)
 4. Log removed file count
 
 **Error Handling**:
+
 - FileNotFoundError: Skip (race condition, non-critical)
 - OSError on file: Log warning, continue
 - OSError on directory: Raise (critical error)
 
 **Implementation**:
+
 - `runtime/lib/tracking_cleanup.py`: TTL-based cleanup (60 lines)
 - `multi-workspace-bot.py`: Startup integration (before restore)
 
 **SLO Validation**:
+
 - Maintainability: < 10MB tracking disk usage ✅
 - Observability: Startup logs show cleanup count ✅
 
 **Files Modified**:
+
 - `runtime/lib/tracking_cleanup.py` (NEW - 60 lines)
 - `runtime/bot/multi-workspace-bot.py` (+6 lines)
 
