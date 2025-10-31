@@ -6,19 +6,11 @@
     <key>Label</key>
     <string>com.terryli.telegram-bot</string>
 
-    <!-- Program Configuration -->
+    <!-- Program Configuration: Run watchexec (not bot directly!) -->
+    <!-- launchd supervises watchexec, watchexec supervises bot -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/doppler</string>
-        <string>run</string>
-        <string>--project</string>
-        <string>claude-config</string>
-        <string>--config</string>
-        <string>dev</string>
-        <string>--</string>
-        <string>/opt/homebrew/bin/uv</string>
-        <string>run</string>
-        <string>/Users/terryli/.claude/automation/lychee/runtime/bot/multi-workspace-bot.py</string>
+        <string>/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-prod-watchexec.sh</string>
     </array>
 
     <!-- Working Directory -->
@@ -31,24 +23,25 @@
 
     <key>KeepAlive</key>
     <dict>
-        <!-- Restart if process crashes -->
+        <!-- Always keep watchexec running -->
         <key>SuccessfulExit</key>
         <false/>
-        <!-- Restart after 10s if process exits -->
+        <!-- Restart if watchexec crashes -->
         <key>Crashed</key>
         <true/>
     </dict>
 
     <!-- Restart throttling (prevent rapid restart loops) -->
+    <!-- If watchexec crashes 3+ times in 10s, something is seriously wrong -->
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
     <!-- Logging -->
     <key>StandardOutPath</key>
-    <string>/tmp/telegram-bot.log</string>
+    <string>/Users/terryli/.claude/automation/lychee/logs/telegram-bot-launchd.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/telegram-bot-error.log</string>
+    <string>/Users/terryli/.claude/automation/lychee/logs/telegram-bot-launchd-error.log</string>
 
     <!-- Environment Variables -->
     <key>EnvironmentVariables</key>
@@ -57,22 +50,32 @@
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
         <string>/Users/terryli</string>
+        <!-- Production mode: disable idle timeout -->
+        <key>BOT_IDLE_TIMEOUT</key>
+        <string>0</string>
+        <!-- Alert mode: enable health monitoring -->
+        <key>BOT_HEALTH_MONITORING</key>
+        <string>1</string>
     </dict>
 
-    <!-- Process Priority (optional, lower = higher priority) -->
+    <!-- Process Priority (normal priority for background service) -->
     <key>Nice</key>
     <integer>0</integer>
 
-    <!-- Resource Limits (optional) -->
+    <!-- Resource Limits -->
     <key>SoftResourceLimits</key>
     <dict>
-        <!-- Max 1GB memory -->
+        <!-- Max 1GB memory for entire watchexec tree -->
         <key>MemoryLimit</key>
         <integer>1073741824</integer>
     </dict>
 
-    <!-- Exit Timeout -->
+    <!-- Exit Timeout (give watchexec time to shutdown gracefully) -->
     <key>ExitTimeOut</key>
-    <integer>5</integer>
+    <integer>10</integer>
+
+    <!-- Run after network is available (bot needs internet) -->
+    <key>LaunchOnlyOnce</key>
+    <false/>
 </dict>
 </plist>

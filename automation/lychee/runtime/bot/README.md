@@ -62,32 +62,44 @@ cd /Users/terryli/.claude/automation/lychee/runtime/bot
 
 **Use Cases**: Initial development, debugging watchexec configuration.
 
-### Production Mode (launchd Service)
+### Production Mode (launchd + watchexec)
 
-Install as system service:
+**⭐ New in v5.7.0**: Production mode now includes watchexec for auto-reload!
+
+Install as supervised system service:
 
 ```bash
 cd /Users/terryli/.claude/automation/lychee/runtime/bot
 ./bot-service.sh install
 ```
 
+**Architecture**:
+```
+launchd (top supervisor)
+  └─> watchexec (file watcher, auto-reload)
+      └─> bot-wrapper (crash detection, alerts)
+          └─> bot (actual process)
+```
+
 **Features**:
 
-- ✅ Auto-starts on login
-- ✅ Auto-restarts on crashes (10s throttle)
-- ✅ Native macOS daemon manager
-- ✅ Logs to `/tmp/telegram-bot.log`
+- ✅ **Auto-start on login** - Survives reboots
+- ✅ **Auto-restart on crashes** - launchd supervises watchexec (10s throttle)
+- ✅ **Auto-reload on code changes** - watchexec monitors `.py` files
+- ✅ **Crash loop detection** - Alerts if 5+ restarts in 60s
+- ✅ **Multi-layer alerts** - Telegram notifications on failures
+- ✅ **Full supervision chain** - Every layer monitored
 
 **Service Management**:
 
 ```bash
-# Check status
+# Check status (shows full process tree)
 ./bot-service.sh status
 
-# View logs
+# View logs (launchd + bot logs)
 ./bot-service.sh logs
 
-# Restart after code changes
+# Restart entire supervision chain
 ./bot-service.sh restart
 
 # Stop service
@@ -96,6 +108,8 @@ cd /Users/terryli/.claude/automation/lychee/runtime/bot
 # Uninstall service
 ./bot-service.sh uninstall
 ```
+
+**Note**: Code changes (`.py` files) trigger automatic reload via watchexec. No manual restart needed!
 
 ## Why watchexec? (Rust-based File Watcher)
 

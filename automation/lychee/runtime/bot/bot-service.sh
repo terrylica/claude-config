@@ -95,11 +95,28 @@ status_service() {
         launchctl print "gui/$(id -u)/$SERVICE_NAME" | grep -E "state|pid|last exit"
         echo ""
 
-        # Check if process is running
-        PID=$(launchctl print "gui/$(id -u)/$SERVICE_NAME" | grep -o 'pid = [0-9]*' | awk '{print $3}')
-        if [[ -n "$PID" ]]; then
-            echo "✅ Service is RUNNING (PID: $PID)"
-            ps -p "$PID" -o pid,ppid,state,etime,rss,command
+        # Check if watchexec process is running (launchd supervises watchexec now)
+        WATCHEXEC_PID=$(launchctl print "gui/$(id -u)/$SERVICE_NAME" | grep -o 'pid = [0-9]*' | awk '{print $3}')
+        if [[ -n "$WATCHEXEC_PID" ]]; then
+            echo "✅ Service is RUNNING"
+            echo ""
+            echo "Architecture: launchd → watchexec → bot"
+            echo ""
+            echo "Watchexec Process (supervised by launchd):"
+            ps -p "$WATCHEXEC_PID" -o pid,ppid,state,etime,rss,command | head -2
+            echo ""
+
+            # Try to find bot process (child of watchexec tree)
+            BOT_PID=$(pgrep -f "multi-workspace-bot.py" 2>/dev/null || echo "")
+            if [[ -n "$BOT_PID" ]]; then
+                echo "Bot Process (supervised by watchexec):"
+                ps -p "$BOT_PID" -o pid,ppid,state,etime,rss,command | head -2
+                echo ""
+                echo "Full Process Tree:"
+                ps -o pid,ppid,state,etime,rss,command | grep -E "(watchexec|multi-workspace-bot|doppler.*bot|uv.*bot)" | grep -v grep | head -10
+            else
+                echo "⚠️  Bot process not found (watchexec may be restarting it)"
+            fi
         else
             echo "⚠️  Service is LOADED but NOT RUNNING"
         fi
@@ -113,12 +130,33 @@ status_service() {
 tail_logs() {
     echo "📜 Tailing logs (Ctrl+C to stop)..."
     echo ""
-    tail -f /tmp/telegram-bot.log /tmp/telegram-bot-error.log 2>/dev/null
+    echo "Logs:"
+    echo "  - Launchd: ~/.claude/automation/lychee/logs/telegram-bot-launchd.log"
+    echo "  - Bot: ~/.claude/automation/lychee/logs/telegram-handler.log"
+    echo ""
+    tail -f "$HOME/.claude/automation/lychee/logs/telegram-bot-launchd.log" \
+            "$HOME/.claude/automation/lychee/logs/telegram-bot-launchd-error.log" \
+            "$HOME/.claude/automation/lychee/logs/telegram-handler.log" 2>/dev/null
 }
 
 show_help() {
     cat <<EOF
 Telegram Bot Service Manager (launchd)
+
+Production mode with full supervision and auto-reload.
+
+Architecture:
+    launchd (top supervisor)
+      └─> watchexec (file watcher, auto-reload)
+          └─> bot-wrapper (crash detection, alerts)
+              └─> bot (actual process)
+
+Features:
+    ✅ Auto-start on login
+    ✅ Auto-restart on crashes (10s throttle)
+    ✅ Auto-reload on .py file changes (watchexec)
+    ✅ Crash alerts via Telegram
+    ✅ Full supervision chain
 
 Usage: $0 <command>
 
@@ -128,25 +166,28 @@ Commands:
     start       Start the service
     stop        Stop the service
     restart     Restart the service
-    status      Show service status
+    status      Show service status (full process tree)
     logs        Tail service logs
     help        Show this help message
 
 Examples:
-    # Install service (auto-starts on login)
+    # Install service (auto-starts on login, runs continuously)
     $0 install
 
-    # Check if service is running
+    # Check if service is running (shows launchd + watchexec + bot)
     $0 status
 
     # View logs in real-time
     $0 logs
 
-    # Restart after code changes
+    # Restart after major changes (code changes auto-reload via watchexec)
     $0 restart
 
     # Uninstall service
     $0 uninstall
+
+Note: Code changes (.py files) trigger automatic reload via watchexec.
+      No need to restart manually for code updates!
 EOF
 }
 

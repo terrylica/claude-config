@@ -1,3 +1,167 @@
+## [5.7.0] - 2025-10-30
+
+### ✨ New Features
+
+- _(bot)_ Add full supervision chain: launchd → watchexec → bot
+- Production mode now has auto-reload capability (watchexec)
+- Crash loop detection with restart rate monitoring
+- Multi-layer health monitoring and alerting
+
+### 🏗️ Architecture: Production Supervision
+
+**Problem**: Production mode (launchd) ran bot directly → No auto-reload
+
+**Before**:
+```
+Development: watchexec → bot (auto-reload ✅, no supervision ❌)
+Production:  launchd → bot (supervision ✅, no auto-reload ❌)
+```
+
+**After**:
+```
+Development: bot-dev.sh → watchexec → bot
+Production:  launchd → watchexec → bot-wrapper → bot
+```
+
+Both modes now have supervision AND auto-reload!
+
+### 🛠️ Implementation
+
+**Production Supervision Chain**:
+
+1. **launchd** (top supervisor)
+   - Auto-start on login
+   - Crash recovery (10s throttle)
+   - Supervises watchexec process
+   - Logs: `~/.claude/automation/lychee/logs/telegram-bot-launchd.log`
+
+2. **watchexec** (file watcher)
+   - Monitors `.py` files in bot/, lib/, orchestrator/
+   - Auto-reload on changes (100ms debounce)
+   - Graceful restart (SIGTERM → 5s timeout)
+   - Supervised by launchd
+
+3. **bot-wrapper-prod.sh** (crash monitor)
+   - Tracks restart count and rate
+   - Detects crash loops (5+ restarts in 60s)
+   - Sends Telegram alerts on crashes
+   - Supervised by watchexec
+
+4. **bot** (actual process)
+   - Multi-workspace workflow orchestration
+   - Internal health checks
+   - Supervised by watchexec
+
+### 📚 Files Changed
+
+**New Files**:
+- `run-bot-prod-watchexec.sh` - Production runner (launchd → watchexec)
+- `bot-wrapper-prod.sh` - Production wrapper with crash tracking
+
+**Modified Files**:
+- `com.terryli.telegram-bot.plist` - Now runs watchexec instead of bot directly
+- `bot-service.sh` - Updated status to show full supervision chain
+
+### 🚨 Health Monitoring Layers
+
+Each layer sends alerts on failures:
+
+| Layer | What It Monitors | Alert Trigger | Alert Channel |
+|-------|------------------|---------------|---------------|
+| launchd | watchexec crashes | 3+ crashes in 10s | System logs |
+| watchexec | Bot crashes/hangs | Process exits | Restarts automatically |
+| bot-wrapper | Crash loops | 5+ restarts in 60s | Telegram (critical) |
+| bot | Internal errors | Queue backlogs, API failures | Telegram (errors) |
+
+### 🎯 Benefits
+
+**Auto-Reload in Production**:
+- Deploy code updates without manual restart
+- watchexec detects `.py` changes and reloads automatically
+- 100ms debounce prevents multiple restarts on batch saves
+
+**Full Supervision**:
+- launchd ensures watchexec always runs (survives reboots)
+- watchexec ensures bot always runs (survives crashes)
+- bot-wrapper detects crash loops and alerts
+
+**Health Alerts**:
+- Crash notifications via Telegram
+- Restart rate monitoring (detects crash loops)
+- Full context in alerts (logs, stderr, exit codes)
+
+### 📝 Usage
+
+**Production Mode** (Recommended for always-on operation):
+```bash
+# Install launchd service (runs watchexec → bot)
+./bot-service.sh install
+
+# Check status (shows full supervision chain)
+./bot-service.sh status
+
+# View logs (launchd + bot)
+./bot-service.sh logs
+
+# Uninstall
+./bot-service.sh uninstall
+```
+
+**Development Mode** (Recommended for active coding):
+```bash
+# Start with lifecycle management
+./bot-dev.sh start
+
+# Check status
+./bot-dev.sh status
+
+# Stop cleanly
+./bot-dev.sh stop
+```
+
+### ⚠️ Breaking Changes
+
+**Production plist changed**:
+- Before: Ran `doppler → uv → bot` directly
+- After: Runs `run-bot-prod-watchexec.sh` (which starts watchexec)
+
+**If you have production service installed**:
+```bash
+# Uninstall old version
+./bot-service.sh uninstall
+
+# Reinstall new version (with watchexec supervision)
+./bot-service.sh install
+```
+
+### 🔧 Technical Details
+
+**Process Tree (Production)**:
+```
+launchd (PID from launchctl)
+  └─> run-bot-prod-watchexec.sh
+      └─> watchexec
+          └─> bot-wrapper-prod.sh
+              └─> doppler run
+                  └─> uv run
+                      └─> python3 multi-workspace-bot.py
+```
+
+**Auto-Reload Behavior**:
+- Edit `.py` file in bot/, lib/, or orchestrator/
+- Save file
+- watchexec detects change (100ms debounce)
+- Sends SIGTERM to bot-wrapper
+- Waits 5s for graceful shutdown
+- Starts new bot process
+- Total reload time: ~2-3 seconds
+
+**Crash Loop Detection**:
+- Tracks restart count in `/tmp/bot_restart_count`
+- Resets counter after 5 minutes of stability
+- Alerts if 5+ restarts in 60 seconds
+- Includes full crash context in alert
+
 ## [5.6.0] - 2025-10-30
 
 ### ✨ New Features
@@ -20,7 +184,7 @@
 **Problem**: Two-layer process management with only one-layer protection
 
 | Layer | Process | Before | After |
-|-------|---------|--------|-------|
+| --- | --- | --- | --- |
 | Service | watchexec | ❌ No PID management | ✅ PID file + singleton |
 | Wrapper | doppler + uv | ❌ No protection | ✅ Managed by watchexec |
 | Bot | Python script | ✅ Had PID file | ✅ Unchanged |
@@ -38,6 +202,7 @@ Created `/Users/terryli/.claude/automation/lychee/runtime/bot/bot-dev.sh ` with:
    - Handles PID reuse and orphaned processes
 
 2. **Service Commands**
+
    ```bash
    bot-dev.sh start    # Start (refuses if already running)
    bot-dev.sh stop     # Clean shutdown (SIGTERM → wait → SIGKILL)
@@ -60,6 +225,7 @@ Created `/Users/terryli/.claude/automation/lychee/runtime/bot/bot-dev.sh ` with:
 ### 📚 Usage
 
 **Before** (Ad-hoc, error-prone):
+
 ```bash
 # Start
 nohup run-bot-dev-watchexec.sh &  # ❌ No singleton check!
@@ -72,6 +238,7 @@ ps aux | grep watchexec  # ❌ Manual inspection
 ```
 
 **After** (Managed, safe):
+
 ```bash
 bot-dev.sh start   # ✅ Refuses if already running
 bot-dev.sh stop    # ✅ Clean shutdown
@@ -90,10 +257,12 @@ bot-dev.sh restart # ✅ Clean cycle
 ### 🔧 Technical Details
 
 **PID File Locations**:
+
 - Watchexec: `/Users/terryli/.claude/automation/lychee/state/watchexec.pid `
 - Bot: `/Users/terryli/.claude/automation/lychee/state/bot.pid `
 
 **Process Tree** (Normal, Expected):
+
 ```
 watchexec (PID from watchexec.pid)
   └─> bot-wrapper.sh
@@ -105,6 +274,7 @@ watchexec (PID from watchexec.pid)
 These 4 PIDs are NORMAL (parent→child chain), not multiple instances!
 
 **Shutdown Sequence**:
+
 1. Send SIGTERM to watchexec
 2. Watchexec propagates signal to children
 3. Wait up to 10 seconds for graceful shutdown
@@ -114,6 +284,7 @@ These 4 PIDs are NORMAL (parent→child chain), not multiple instances!
 ### 🚀 Next Steps
 
 Consider adding shell alias:
+
 ```bash
 alias bot='~/.claude/automation/lychee/runtime/bot/bot-dev.sh'
 ```
