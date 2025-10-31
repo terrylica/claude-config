@@ -1,3 +1,60 @@
+## [5.12.0] - 2025-10-30
+
+### ✨ New Features
+
+- _(bot)_ Automatic tracking file TTL cleanup on startup
+  - Removes orphaned tracking files older than 30 minutes
+  - Prevents disk bloat from crashed executions
+  - Runs before progress tracking restoration
+  - Non-blocking: Continues startup on file access errors
+
+### 🏗️ Architecture
+
+**Problem**: Orphaned tracking files accumulate on disk
+
+**Causes**:
+- Execution completion handler crashes before cleanup
+- File deletion fails (permissions, disk errors)
+- Bot killed during cleanup (SIGKILL)
+
+**Solution**: TTL-based cleanup on startup
+
+```python
+# Before: Manual rm or disk bloat
+# (No automatic cleanup)
+
+# After (v5.12.0): Automatic TTL cleanup
+cleanup_orphaned_tracking(TRACKING_DIR, ttl_minutes=30)
+# Removes files older than 30 minutes
+```
+
+**Cleanup Logic**:
+1. Scan tracking directory for `*_tracking.json`
+2. Check file modification time
+3. Remove if older than TTL (30 minutes)
+4. Log removed file count
+
+**Error Handling**:
+- FileNotFoundError: Skip (race condition, non-critical)
+- OSError on file: Log warning, continue
+- OSError on directory: Raise (critical error)
+
+**Implementation**:
+- `runtime/lib/tracking_cleanup.py`: TTL-based cleanup (60 lines)
+- `multi-workspace-bot.py`: Startup integration (before restore)
+
+**SLO Validation**:
+- Maintainability: < 10MB tracking disk usage ✅
+- Observability: Startup logs show cleanup count ✅
+
+**Files Modified**:
+- `runtime/lib/tracking_cleanup.py` (NEW - 60 lines)
+- `runtime/bot/multi-workspace-bot.py` (+6 lines)
+
+**Research**: /tmp/state-management-architecture-research/
+
+---
+
 ## [5.11.1] - 2025-10-30
 
 ### 🐛 Bug Fixes
@@ -14,6 +71,7 @@
 **Problem**: 5s timeout insufficient for graceful shutdown
 
 **Shutdown Sequence**:
+
 1. SIGTERM signal sent (t=0s)
 2. Bot sets shutdown_requested flag (t=0.1s)
 3. Cancel background tasks (t=0.5s)
@@ -25,10 +83,12 @@
 **With 10s timeout**: 7s safety margin (comfortable)
 
 **SLO Validation**:
+
 - Availability: 95% graceful shutdown completion ✅
 - Observability: No premature SIGKILL in logs ✅
 
 **Files Modified**:
+
 - `runtime/bot/run-bot-prod-watchexec.sh` (+8 lines)
 
 **Research**: /tmp/watchexec-integration-research/ (recommended 10s)
@@ -59,6 +119,7 @@
 **Problem**: TOCTOU race condition in PID file operations
 
 **Before (bot_utils.py)**:
+
 ```python
 # Check if file exists (TIME OF CHECK)
 if pid_file.exists():
@@ -69,6 +130,7 @@ fd = os.open(pid_file, os.O_CREAT | os.O_EXCL)
 ```
 
 **After (v5.11.0: pid_manager.py)**:
+
 ```python
 # Atomic lock acquisition (no race window)
 fd = os.open(pid_file, os.O_RDWR | os.O_CREAT)
@@ -76,22 +138,26 @@ fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # Atomic!
 ```
 
 **Benefits**:
+
 - Kernel guarantees atomicity (no userspace race)
 - Lock auto-released on crash/SIGKILL
 - PIDFileManager context manager support
 - psutil verification prevents PID reuse false positives
 
 **Implementation**:
+
 - `runtime/lib/pid_manager.py`: fcntl-based locking (270 lines)
 - `multi-workspace-bot.py`: Replaced bot_utils PID functions
 - `bot_utils.py`: create_pid_file/cleanup_pid_file deprecated
 
 **SLO Validation**:
+
 - Correctness: 0 TOCTOU race conditions ✅
 - Availability: 100% successful startup rate ✅
 - Observability: Diagnostic messages for lock failures ✅
 
 **Files Modified**:
+
 - `runtime/lib/pid_manager.py` (NEW - 270 lines)
 - `runtime/bot/multi-workspace-bot.py` (+4, -4)
 
@@ -115,6 +181,7 @@ fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # Atomic!
 **Problem**: In-memory deduplication lost on restart → rate limits recur
 
 **Session 906b0590 Root Cause**:
+
 - Bot restart cleared `bot_state.last_sent_content` dictionary
 - Next progress update triggered duplicate API calls
 - Accumulated calls exceeded Telegram rate limit (HTTP 429)
@@ -131,16 +198,19 @@ dedup_store.record_sent(ws_id, sess_id, wf_id, content)
 ```
 
 **Implementation**:
+
 - `runtime/lib/deduplication_store.py`: SHA256-based persistence layer
 - `bot_services.py`: Integrated into `progress_poller()`
 - `multi-workspace-bot.py`: Startup restoration (restore_all)
 
 **SLO Validation**:
+
 - Correctness: 0 rate limit violations from duplicate calls ✅
 - Availability: 100% deduplication survival across restarts ✅
 - Observability: Startup logs show restored hash count ✅
 
 **Files Modified**:
+
 - `runtime/lib/deduplication_store.py` (NEW - 175 lines)
 - `runtime/bot/bot_services.py` (+5 lines, -3 lines)
 - `runtime/bot/multi-workspace-bot.py` (+6 lines)

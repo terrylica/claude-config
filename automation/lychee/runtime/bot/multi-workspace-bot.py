@@ -159,6 +159,7 @@ from bot_services import (
     idle_timeout_monitor
 )
 from deduplication_store import DeduplicationStore
+from tracking_cleanup import cleanup_orphaned_tracking
 import bot_state
 from bot_state import (
     update_activity,
@@ -370,6 +371,12 @@ async def main() -> int:
         print(f"❌ Failed to load workflow registry: {type(e).__name__}: {e}", file=sys.stderr)
         print(f"   Registry path: {WORKFLOWS_REGISTRY}", file=sys.stderr)
         return 1
+
+    # v5.12.0: Cleanup orphaned tracking files (prevent disk bloat)
+    print("\n🧹 Cleaning up orphaned tracking files...")
+    removed_tracking = cleanup_orphaned_tracking(TRACKING_DIR, ttl_minutes=30)
+    if removed_tracking == 0:
+        print("   ✅ No orphaned tracking files found")
 
     # Phase 4 - v4.1.0: Restore progress tracking state (survives watchexec restarts)
     _restore_progress_tracking()
