@@ -1,3 +1,13 @@
+## [5.13.4] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(hook)_ Skip messages starting with ❓ emoji (Telegram notification marker)
+  - Root cause: Telegram notifications without code fences start with "❓", users quote these in feedback messages
+  - Impact: Extracted "❓ ···" instead of actual prompt "3nd time aroound now..."
+  - Fix: Added `startswith("❓") | not` filter alongside code fence filter
+  - Now filters both "```" and "❓" prefixed messages
+
 ## [5.13.3] - 2025-10-30
 
 ### 🐛 Bug Fixes
