@@ -1,3 +1,13 @@
+## [5.13.5] - 2025-10-31
+
+### 🐛 Bug Fixes
+
+- _(hook)_ **CRITICAL**: Add missing `tac` pipe to reverse transcript order
+  - Root cause: Line 186 did `tail -500` without `| tac`, so `first()` selected OLDEST message in window (chronologically first), not newest (most recent)
+  - Impact: Extracted "6nd time..." (23 minutes old, 23:58) instead of "8th time..." (current prompt, 00:21)
+  - Variable was misleadingly named `tac_output_user` but had no tac operation
+  - Fix: Added `| tac` to line 186: `tail -500 "$transcript_file" | tac`
+
 ## [5.13.4] - 2025-10-30
 
 ### 🐛 Bug Fixes
