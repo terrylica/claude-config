@@ -95,13 +95,16 @@
 
 ## Automation
 
-**Telegram Bot**: Multi-workspace workflow orchestration
+**Telegram Bot**: Multi-workspace workflow orchestration (Production Mode Only)
 
-- **Development**: ALWAYS start with watchexec: `/Users/terryli/.claude/automation/lychee/runtime/bot/run-bot-dev-watchexec.sh `
+- **Architecture**: `launchd → watchexec → bot` (full supervision + auto-reload)
+- **Management**: `bot-service.sh` - install/status/restart/logs/uninstall
 - **Auto-reload**: Enabled (100ms debounce, monitors `bot/`, `lib/`, `orchestrator/`)
-- **Verification**: `ps aux | grep watchexec | grep bot` should show process
+- **Auto-start**: Runs continuously, survives reboots (launchd)
+- **Health monitoring**: Crash detection, restart rate tracking, Telegram alerts
 - **Credentials**: Doppler `claude-config/dev`
-- **⚠️ NEVER**: Start bot directly without watchexec in development
+- **Verification**: `bot-service.sh status` shows full supervision chain
+- **Shell aliases**: `bot status`, `bot restart`, `bot logs`
 - **Documentation**: [`automation/lychee/runtime/bot/README.md`](/Users/terryli/.claude/automation/lychee/runtime/bot/README.md)
 
 ## Terminal & Shell Configuration

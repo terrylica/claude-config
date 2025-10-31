@@ -1,3 +1,72 @@
+## [5.8.0] - 2025-10-30
+
+### 🧹 Cleanup & Simplification
+
+- _(bot)_ Remove development mode entirely (production-only now)
+- Archive dev mode files to `archive/v5.8.0-development-mode/`
+- Simplify to ONE way of running bot: production mode with launchd + watchexec
+
+### 📚 Rationale
+
+With v5.7.0, production mode gained all development mode features:
+- Auto-reload (watchexec)
+- Full supervision (launchd)
+- Crash detection (bot-wrapper-prod)
+- Health monitoring (restart rate tracking)
+
+**Development mode became redundant.**
+
+### 🗑️ Archived Files
+
+| File | Purpose | Now Use |
+|------|---------|---------|
+| `bot-dev.sh` | Dev lifecycle manager | `bot-service.sh` |
+| `run-bot-dev-watchexec.sh` | Dev runner | `run-bot-prod-watchexec.sh` |
+| `bot-wrapper.sh` | Dev crash monitor | `bot-wrapper-prod.sh` |
+
+### 🔄 Migration
+
+**If you were using dev mode**:
+```bash
+# Stop dev mode (if running)
+./bot-dev.sh stop  # (archived)
+
+# Install production mode
+./bot-service.sh install
+
+# Verify
+./bot-service.sh status
+```
+
+**Production mode provides ALL features**:
+- ✅ Auto-reload for rapid iteration (dev need)
+- ✅ Full supervision for reliability (prod need)
+- ✅ Crash detection for debugging (dev need)
+- ✅ Always-on operation for workflows (prod need)
+
+### 📝 Updated
+
+- `CLAUDE.md`: Production-only instructions
+- `README.md`: Completely rewritten, production-only
+- `bot-management.sh` aliases: Now point to bot-service.sh
+
+### 🎯 Benefits
+
+**Simplicity**:
+- ONE way to run bot (no mode confusion)
+- ONE set of scripts (no duplication)
+- ONE documentation path (no branching)
+
+**Consistency**:
+- Same behavior in all environments
+- No dev/prod parity issues
+- Unified troubleshooting
+
+**Maintainability**:
+- Less code to maintain
+- Fewer edge cases
+- Clearer architecture
+
 ## [5.7.0] - 2025-10-30
 
 ### ✨ New Features
@@ -12,12 +81,14 @@
 **Problem**: Production mode (launchd) ran bot directly → No auto-reload
 
 **Before**:
+
 ```
 Development: watchexec → bot (auto-reload ✅, no supervision ❌)
 Production:  launchd → bot (supervision ✅, no auto-reload ❌)
 ```
 
 **After**:
+
 ```
 Development: bot-dev.sh → watchexec → bot
 Production:  launchd → watchexec → bot-wrapper → bot
@@ -55,10 +126,12 @@ Both modes now have supervision AND auto-reload!
 ### 📚 Files Changed
 
 **New Files**:
+
 - `run-bot-prod-watchexec.sh` - Production runner (launchd → watchexec)
 - `bot-wrapper-prod.sh` - Production wrapper with crash tracking
 
 **Modified Files**:
+
 - `com.terryli.telegram-bot.plist` - Now runs watchexec instead of bot directly
 - `bot-service.sh` - Updated status to show full supervision chain
 
@@ -67,7 +140,7 @@ Both modes now have supervision AND auto-reload!
 Each layer sends alerts on failures:
 
 | Layer | What It Monitors | Alert Trigger | Alert Channel |
-|-------|------------------|---------------|---------------|
+| --- | --- | --- | --- |
 | launchd | watchexec crashes | 3+ crashes in 10s | System logs |
 | watchexec | Bot crashes/hangs | Process exits | Restarts automatically |
 | bot-wrapper | Crash loops | 5+ restarts in 60s | Telegram (critical) |
@@ -76,16 +149,19 @@ Each layer sends alerts on failures:
 ### 🎯 Benefits
 
 **Auto-Reload in Production**:
+
 - Deploy code updates without manual restart
 - watchexec detects `.py` changes and reloads automatically
 - 100ms debounce prevents multiple restarts on batch saves
 
 **Full Supervision**:
+
 - launchd ensures watchexec always runs (survives reboots)
 - watchexec ensures bot always runs (survives crashes)
 - bot-wrapper detects crash loops and alerts
 
 **Health Alerts**:
+
 - Crash notifications via Telegram
 - Restart rate monitoring (detects crash loops)
 - Full context in alerts (logs, stderr, exit codes)
@@ -93,6 +169,7 @@ Each layer sends alerts on failures:
 ### 📝 Usage
 
 **Production Mode** (Recommended for always-on operation):
+
 ```bash
 # Install launchd service (runs watchexec → bot)
 ./bot-service.sh install
@@ -108,6 +185,7 @@ Each layer sends alerts on failures:
 ```
 
 **Development Mode** (Recommended for active coding):
+
 ```bash
 # Start with lifecycle management
 ./bot-dev.sh start
@@ -122,10 +200,12 @@ Each layer sends alerts on failures:
 ### ⚠️ Breaking Changes
 
 **Production plist changed**:
+
 - Before: Ran `doppler → uv → bot` directly
 - After: Runs `run-bot-prod-watchexec.sh` (which starts watchexec)
 
 **If you have production service installed**:
+
 ```bash
 # Uninstall old version
 ./bot-service.sh uninstall
@@ -137,6 +217,7 @@ Each layer sends alerts on failures:
 ### 🔧 Technical Details
 
 **Process Tree (Production)**:
+
 ```
 launchd (PID from launchctl)
   └─> run-bot-prod-watchexec.sh
@@ -148,6 +229,7 @@ launchd (PID from launchctl)
 ```
 
 **Auto-Reload Behavior**:
+
 - Edit `.py` file in bot/, lib/, or orchestrator/
 - Save file
 - watchexec detects change (100ms debounce)
@@ -157,6 +239,7 @@ launchd (PID from launchctl)
 - Total reload time: ~2-3 seconds
 
 **Crash Loop Detection**:
+
 - Tracks restart count in `/tmp/bot_restart_count`
 - Resets counter after 5 minutes of stability
 - Alerts if 5+ restarts in 60 seconds

@@ -3,18 +3,15 @@
 # Part of SAGE Aliases Tool - ~/.claude/tools/sage-aliases/
 
 # =============================================================================
-# BOT LIFECYCLE MANAGEMENT
+# BOT LIFECYCLE MANAGEMENT (Production Mode Only)
 # =============================================================================
 
-# Development mode (watchexec auto-reload)
-alias bot='~/.claude/automation/lychee/runtime/bot/bot-dev.sh'
-alias bot-start='~/.claude/automation/lychee/runtime/bot/bot-dev.sh start'
-alias bot-stop='~/.claude/automation/lychee/runtime/bot/bot-dev.sh stop'
-alias bot-restart='~/.claude/automation/lychee/runtime/bot/bot-dev.sh restart'
-alias bot-status='~/.claude/automation/lychee/runtime/bot/bot-dev.sh status'
-
-# Production mode (launchd service)
-alias bot-prod='~/.claude/automation/lychee/runtime/bot/bot-service.sh'
+# Production mode (launchd + watchexec supervision)
+alias bot='~/.claude/automation/lychee/runtime/bot/bot-service.sh'
+alias bot-start='~/.claude/automation/lychee/runtime/bot/bot-service.sh start'
+alias bot-stop='~/.claude/automation/lychee/runtime/bot/bot-service.sh stop'
+alias bot-restart='~/.claude/automation/lychee/runtime/bot/bot-service.sh restart'
+alias bot-status='~/.claude/automation/lychee/runtime/bot/bot-service.sh status'
 alias bot-install='~/.claude/automation/lychee/runtime/bot/bot-service.sh install'
 alias bot-uninstall='~/.claude/automation/lychee/runtime/bot/bot-service.sh uninstall'
 
