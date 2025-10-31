@@ -212,8 +212,10 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
                         ([.message.content[] | select(.type == "text")] | length > 0) and
                         ([.message.content[] | select(.type == "tool_result")] | length == 0)
                     else
-                        # String content must not be empty and not start with code fence
-                        .message.content != "" and (.message.content | startswith("```") | not)
+                        # String content must not be empty and not a quoted Telegram notification
+                        .message.content != "" and
+                        (.message.content | startswith("```") | not) and
+                        (.message.content | startswith("❓") | not)
                     end)
                 ) |
                 # Extract text content
