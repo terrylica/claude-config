@@ -183,7 +183,7 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
     # Research: tail reads ~100KB vs tac reading 21MB (prevents timeout)
     # 500 lines provides sufficient history for user prompts in long debugging sessions
     # Process forward and use tail -1 to get most recent matching message
-    tac_output_user=$(tail -500 "$transcript_file" 2>&1) || {
+    tac_output_user=$(tail -500 "$transcript_file" | tac 2>&1) || {
         tac_exit=$?
         {
             echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: tail command (user prompt) failed!"
