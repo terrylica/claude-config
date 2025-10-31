@@ -1,3 +1,13 @@
+## [5.13.2] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(hook)_ Fix Stop hook selecting older messages instead of most recent user prompt
+  - Root cause: jq outputs multiple messages, bash pipes process all at once, `head -1` selected first LINE not first MESSAGE
+  - Impact: Telegram notifications showed older prompts instead of most recent
+  - Sessions affected: 2c3e220c (wrong: "I'm totally happy..." vs correct: "find the dapative..."), 223e386b (wrong: "<command-message>clear</command-message>" vs correct: "generate pdf...")
+  - Fix: Use `first()` at jq level to select FIRST MESSAGE before text extraction, add filter requiring text content length > 0
+
 ## [5.13.1] - 2025-10-30
 
 ### 🐛 Bug Fixes
@@ -40,7 +50,7 @@ head -c 500
 
 **Correct Fix (v5.13.1 final)**:
 
-```bash
+````bash
 jq 'select(.message.role == "user") |
     select(if (.message.content | type) == "array" then
         # Skip messages with tool_result (debugging commands)
@@ -55,7 +65,7 @@ sed '/^```$/,/^```$/d' | \  # NEW: Remove quoted code blocks
 grep -v "^$" | \
 head -1 | \
 head -c 500
-```
+````
 
 **Key Changes**:
 

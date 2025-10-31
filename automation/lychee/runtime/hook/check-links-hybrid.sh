@@ -203,23 +203,30 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         # String format: {"content": "message"}  (legacy)
         # Note: Skip Telegram notification echoes (multi-line blocks starting with ``` and ending with ```)
         last_user_prompt=$(echo "$tac_output_user" | \
-            jq -r 'select(.message.role == "user") |
-                   select(if (.message.content | type) == "array" then
-                       # Skip messages with tool_result (debugging commands)
-                       ([.message.content[] | select(.type == "tool_result")] | length == 0)
-                   else true end) |
-                   if (.message.content | type) == "string" then
-                       .message.content
-                   elif (.message.content | type) == "array" then
-                       # Extract text parts, filter out tool_result entries
-                       ([.message.content[] | select(.type == "text") | .text] | join("\n"))
-                   else
-                       empty
-                   end' | \
-            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
+            jq -r '
+                # Get first user message with actual text content (not tool_result)
+                first(
+                    select(.message.role == "user") |
+                    select(if (.message.content | type) == "array" then
+                        # Must have text content and no tool_result
+                        ([.message.content[] | select(.type == "text")] | length > 0) and
+                        ([.message.content[] | select(.type == "tool_result")] | length == 0)
+                    else
+                        # String content must not be empty
+                        .message.content != ""
+                    end)
+                ) |
+                # Extract text content
+                if (.message.content | type) == "string" then
+                    .message.content
+                elif (.message.content | type) == "array" then
+                    ([.message.content[] | select(.type == "text") | .text] | join("\n"))
+                else
+                    empty
+                end' | \
             sed '/^```$/,/^```$/d' | \
-            grep -v "^$" | \
-            head -1 | \
+            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | grep -v "^```" | \
+            awk 'NF {print; exit}' | \
             head -c 500) || {
             {
                 echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: User prompt pipeline failed!"
