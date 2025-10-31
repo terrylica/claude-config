@@ -202,6 +202,7 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         # Array format: {"content": [{"type": "text", "text": "message"}]}
         # String format: {"content": "message"}  (legacy)
         # Note: Skip Telegram notification echoes (multi-line blocks starting with ``` and ending with ```)
+        # Note: Using Unicode escape for emoji to avoid encoding issues
         last_user_prompt=$(echo "$tac_output_user" | \
             jq -r '
                 # Get first user message with actual text content (not tool_result, not quoted notifications)
@@ -213,9 +214,10 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
                         ([.message.content[] | select(.type == "tool_result")] | length == 0)
                     else
                         # String content must not be empty and not a quoted Telegram notification
+                        # Using Unicode escape \u2753 for ❓ emoji
                         .message.content != "" and
                         (.message.content | startswith("```") | not) and
-                        (.message.content | startswith("❓") | not)
+                        (.message.content | startswith("\u2753") | not)
                     end)
                 ) |
                 # Extract text content
