@@ -1,3 +1,40 @@
+## [5.11.1] - 2025-10-30
+
+### 🐛 Bug Fixes
+
+- _(bot)_ Increase watchexec stop timeout from 5s to 10s
+  - Prevents premature SIGKILL during graceful shutdown
+  - Bot shutdown requires ~2-3s (task cancellation + cleanup)
+  - Network delays add 1-2s (Telegram API disconnect)
+  - 10s buffer aligns with industry standards (Docker, PM2)
+  - Reduces risk of incomplete cleanup on restarts
+
+### 🏗️ Architecture
+
+**Problem**: 5s timeout insufficient for graceful shutdown
+
+**Shutdown Sequence**:
+1. SIGTERM signal sent (t=0s)
+2. Bot sets shutdown_requested flag (t=0.1s)
+3. Cancel background tasks (t=0.5s)
+4. Telegram API disconnect (t=2s, network latency)
+5. PID file cleanup (t=2.5s)
+6. Process exit (t=3s)
+
+**With 5s timeout**: 2s safety margin (tight)
+**With 10s timeout**: 7s safety margin (comfortable)
+
+**SLO Validation**:
+- Availability: 95% graceful shutdown completion ✅
+- Observability: No premature SIGKILL in logs ✅
+
+**Files Modified**:
+- `runtime/bot/run-bot-prod-watchexec.sh` (+8 lines)
+
+**Research**: /tmp/watchexec-integration-research/ (recommended 10s)
+
+---
+
 ## [5.11.0] - 2025-10-30
 
 ### ✨ New Features

@@ -64,11 +64,18 @@ fi
 # Run watchexec with production wrapper
 # launchd will supervise THIS process
 # watchexec will supervise the bot
+#
+# v5.11.1: Increased --stop-timeout from 5s to 10s
+# Rationale: Bot shutdown requires ~2-3s (task cancellation + cleanup)
+#            + 1-2s network delays (Telegram API disconnect)
+#            = 10s provides comfortable buffer for graceful shutdown
+#            Prevents premature SIGKILL during cleanup.
+#            Industry standard: Docker (10s), PM2 (10s), Kubernetes (30s)
 exec watchexec \
     "${WATCH_ARGS[@]}" \
     --exts py \
     --restart \
     --debounce 100ms \
     --stop-signal SIGTERM \
-    --stop-timeout 5s \
+    --stop-timeout 10s \
     -- "$BOT_WRAPPER"
