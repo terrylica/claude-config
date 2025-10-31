@@ -185,15 +185,38 @@ Choose action:
             ]
 
             # Send message (AIORateLimiter handles rate limiting automatically)
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="MarkdownV2"
-            )
+            try:
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="MarkdownV2"
+                )
+                print(f"📤 Sent notification for {workspace_id} ({session_id})")
+                update_activity()  # Track activity for idle timeout
+            except Exception as send_error:
+                error_type = type(send_error).__name__
+                error_str = str(send_error)
 
-            print(f"📤 Sent notification for {workspace_id} ({session_id})")
-            update_activity()  # Track activity for idle timeout
+                if "RetryAfter" in error_type or "429" in error_str or "Too Many Requests" in error_str:
+                    # Rate limit hit - send Pushover alert
+                    retry_after = getattr(send_error, 'retry_after', 'unknown')
+                    print(f"   ⚠️  RATE LIMIT HIT: Retry after {retry_after}s", file=sys.stderr)
+
+                    # Send Pushover notification (fire-and-forget)
+                    import subprocess
+                    notify_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "bot" / "notify-rate-limit.sh"
+                    if notify_script.exists():
+                        subprocess.Popen([
+                            str(notify_script),
+                            workspace_id,
+                            session_id,
+                            str(retry_after),
+                            error_str[:500]
+                        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                # Re-raise all errors (maintain fail-fast behavior)
+                raise
 
             # Log notification processed event
             log_event(
@@ -273,6 +296,26 @@ class CompletionHandler(BaseHandler):
             print(error_msg, file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
+
+            # Check for rate limit errors and send Pushover alert
+            error_type = type(e).__name__
+            error_str = str(e)
+            if "RetryAfter" in error_type or "429" in error_str or "Too Many Requests" in error_str:
+                retry_after = getattr(e, 'retry_after', 'unknown')
+                print(f"   ⚠️  RATE LIMIT DETECTED: Retry after {retry_after}s", file=sys.stderr)
+
+                # Send Pushover notification (fire-and-forget)
+                import subprocess
+                notify_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "bot" / "notify-rate-limit.sh"
+                if notify_script.exists():
+                    subprocess.Popen([
+                        str(notify_script),
+                        workspace_id if workspace_id else "unknown",
+                        session_id if session_id else "unknown",
+                        str(retry_after),
+                        error_str[:500]
+                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
             # Re-raise to let caller handle
             raise
 
@@ -410,13 +453,37 @@ class WorkflowExecutionHandler(BaseHandler):
 
                 # Update message text with final status
                 print(f"   📝 Updating message with final status...")
-                await self.bot.edit_message_text(
-                    chat_id=self.chat_id,
-                    message_id=message_id,
-                    text=final_caption,
-                    parse_mode="MarkdownV2"
-                )
-                print(f"   ✅ Message updated successfully")
+                try:
+                    await self.bot.edit_message_text(
+                        chat_id=self.chat_id,
+                        message_id=message_id,
+                        text=final_caption,
+                        parse_mode="MarkdownV2"
+                    )
+                    print(f"   ✅ Message updated successfully")
+                except Exception as edit_error:
+                    error_type = type(edit_error).__name__
+                    error_str = str(edit_error)
+
+                    if "RetryAfter" in error_type or "429" in error_str or "Too Many Requests" in error_str:
+                        # Rate limit hit - send Pushover alert
+                        retry_after = getattr(edit_error, 'retry_after', 'unknown')
+                        print(f"   ⚠️  RATE LIMIT HIT: Retry after {retry_after}s", file=sys.stderr)
+
+                        # Send Pushover notification (fire-and-forget)
+                        import subprocess
+                        notify_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "bot" / "notify-rate-limit.sh"
+                        if notify_script.exists():
+                            subprocess.Popen([
+                                str(notify_script),
+                                workspace_id,
+                                session_id,
+                                str(retry_after),
+                                error_str[:500]
+                            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                    # Re-raise all errors
+                    raise
 
                 # Cleanup tracking (memory + file)
                 del bot_state.active_progress_updates[progress_key]
@@ -474,12 +541,36 @@ class WorkflowExecutionHandler(BaseHandler):
                 fallback_message = convert_to_telegram_markdown(markdown_fallback)
 
                 # Send new message (not updating existing message)
-                await self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=fallback_message,
-                    parse_mode="MarkdownV2"
-                )
-                print(f"   ✅ Fallback notification sent")
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=fallback_message,
+                        parse_mode="MarkdownV2"
+                    )
+                    print(f"   ✅ Fallback notification sent")
+                except Exception as send_error:
+                    error_type = type(send_error).__name__
+                    error_str = str(send_error)
+
+                    if "RetryAfter" in error_type or "429" in error_str or "Too Many Requests" in error_str:
+                        # Rate limit hit - send Pushover alert
+                        retry_after = getattr(send_error, 'retry_after', 'unknown')
+                        print(f"   ⚠️  RATE LIMIT HIT: Retry after {retry_after}s", file=sys.stderr)
+
+                        # Send Pushover notification (fire-and-forget)
+                        import subprocess
+                        notify_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "bot" / "notify-rate-limit.sh"
+                        if notify_script.exists():
+                            subprocess.Popen([
+                                str(notify_script),
+                                workspace_id,
+                                session_id,
+                                str(retry_after),
+                                error_str[:500]
+                            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                    # Re-raise all errors
+                    raise
 
             print(f"📤 ✅ Sent execution completion for {workspace_id} ({session_id}): {workflow_name}")
             update_activity()  # Track activity for idle timeout
@@ -711,16 +802,40 @@ class SummaryHandler(BaseHandler):
 
             # Send message (AIORateLimiter handles rate limiting automatically)
             print(f"   📡 Sending to Telegram (chat_id={self.chat_id}, message_len={len(message)} chars)...")
-            sent_message = await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="MarkdownV2"
-            )
-            print(f"   ✅ Telegram API responded: message_id={sent_message.message_id}, chat_id={sent_message.chat_id}")
+            try:
+                sent_message = await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="MarkdownV2"
+                )
+                print(f"   ✅ Telegram API responded: message_id={sent_message.message_id}, chat_id={sent_message.chat_id}")
 
-            print(f"📤 Sent workflow menu for {workspace_id} ({session_id}): {len(available_workflows)} workflows")
-            update_activity()
+                print(f"📤 Sent workflow menu for {workspace_id} ({session_id}): {len(available_workflows)} workflows")
+                update_activity()
+            except Exception as send_error:
+                error_type = type(send_error).__name__
+                error_str = str(send_error)
+
+                if "RetryAfter" in error_type or "429" in error_str or "Too Many Requests" in error_str:
+                    # Rate limit hit - send Pushover alert
+                    retry_after = getattr(send_error, 'retry_after', 'unknown')
+                    print(f"   ⚠️  RATE LIMIT HIT: Retry after {retry_after}s", file=sys.stderr)
+
+                    # Send Pushover notification (fire-and-forget)
+                    import subprocess
+                    notify_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "bot" / "notify-rate-limit.sh"
+                    if notify_script.exists():
+                        subprocess.Popen([
+                            str(notify_script),
+                            workspace_id,
+                            session_id,
+                            str(retry_after),
+                            error_str[:500]
+                        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                # Re-raise all errors
+                raise
 
             # Log summary processed event
             log_event(

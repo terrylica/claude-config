@@ -178,6 +178,12 @@ async def progress_poller(
                 )
                 progress_text = convert_to_telegram_markdown(markdown_progress)
 
+                # Option 3: Compare content BEFORE calling API (prevents redundant calls)
+                if progress_key in bot_state.last_sent_content:
+                    if bot_state.last_sent_content[progress_key] == progress_text:
+                        print(f"   ⏭️  Skipped update (content unchanged - no API call)")
+                        continue
+
                 # Update message text
                 try:
                     await app.bot.edit_message_text(
@@ -186,12 +192,35 @@ async def progress_poller(
                         text=progress_text,
                         parse_mode="MarkdownV2"
                     )
+                    # Store content after successful send for deduplication
+                    bot_state.last_sent_content[progress_key] = progress_text
                     print(f"   ✅ Message updated successfully")
                 except Exception as edit_error:
-                    # Handle Telegram API errors gracefully (e.g., duplicate content)
+                    # Handle Telegram API errors gracefully (e.g., duplicate content, rate limits)
                     error_type = type(edit_error).__name__
-                    if "BadRequest" in error_type and "not modified" in str(edit_error).lower():
+                    error_str = str(edit_error)
+
+                    if "BadRequest" in error_type and "not modified" in error_str.lower():
                         print(f"   ⏭️  Skipped update (content unchanged)")
+                    elif "RetryAfter" in error_type or "429" in error_str or "Too Many Requests" in error_str:
+                        # Rate limit hit - send Pushover alert
+                        retry_after = getattr(edit_error, 'retry_after', 'unknown')
+                        print(f"   ⚠️  RATE LIMIT HIT: Retry after {retry_after}s", file=sys.stderr)
+
+                        # Send Pushover notification (fire-and-forget)
+                        import subprocess
+                        notify_script = Path.home() / ".claude" / "automation" / "lychee" / "runtime" / "bot" / "notify-rate-limit.sh"
+                        if notify_script.exists():
+                            subprocess.Popen([
+                                str(notify_script),
+                                workspace_id,
+                                session_id,
+                                str(retry_after),
+                                error_str[:500]  # Truncate error message
+                            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                        # Re-raise to maintain fail-fast behavior
+                        raise
                     else:
                         # Re-raise unexpected errors
                         raise
