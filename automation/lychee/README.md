@@ -56,8 +56,7 @@ automation/lychee/
 │   ├── bot/             # create-bot-automated.py (bot creation)
 │   └── registry/        # register-workspace.py (workspace registration)
 ├── config/               # Configuration files
-│   ├── launchd/         # macOS background service plists
-│   └── zellij/          # zellij-session-snapshot.kdl (terminal session)
+│   └── launchd/         # macOS background service plists
 ├── testing/              # Development & testing tools
 │   ├── test-notification-emit.py
 │   ├── test-notification-consume.py

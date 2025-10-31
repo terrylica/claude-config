@@ -46,7 +46,6 @@ Scripts for development, debugging, and validation:
 System integration and deployment configs:
 
 - **`launchd/`** - macOS background service plists
-- **`zellij/`** - Terminal multiplexer session config
 
 ### Documentation (`docs/`)
 

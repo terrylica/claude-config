@@ -29,7 +29,7 @@
 ## How It Works 🔄
 
 ```
-Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SSH → Ghostty → macOS clipboard
+Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SSH → iTerm2 → macOS clipboard
 ```
 
 **Critical Components**:
@@ -38,7 +38,7 @@ Claude Code → xclip wrapper → OSC 52 to stderr → tmux (passthrough) → SS
 1. **OSC 52** terminal-native clipboard protocol
 1. **stderr output** (>&2) works in non-interactive contexts
 1. **tmux detection** ($TMUX) applies correct wrapping
-1. **Ghostty config** (clipboard-write = allow) accepts sequences
+1. **iTerm2 config** (clipboard-write = allow) accepts sequences
 
 ## Verification ✓
 
@@ -111,10 +111,10 @@ Added to "Terminal Setup" section:
 ### SSH Clipboard Integration (OSC 52)
 
 **Purpose**: Enable Claude Code CLI `/export` to copy to macOS clipboard when SSH'd into remote Linux (works through tmux)
-**Mechanism**: `~/.local/bin/xclip` wrapper emits OSC 52 escape sequences to stderr (`>&2`), travels over SSH, interpreted by Ghostty
+**Mechanism**: `~/.local/bin/xclip` wrapper emits OSC 52 escape sequences to stderr (`>&2`), travels over SSH, interpreted by iTerm2
 **Requirements**:
 
-- Ghostty config: `clipboard-write = allow` (macOS)
+- iTerm2 config: `clipboard-write = allow` (macOS)
 - xclip wrapper: `~/.local/bin/xclip` (remote Linux)
   **Critical detail**: Use `>&2` not `/dev/tty` (non-interactive contexts like Claude Code tool execution lack controlling terminal)
   **Docs**:
@@ -213,7 +213,7 @@ Each piece essential for the solution to work.
 ### If issues arise:
 
 1. Check `~/.local/bin/xclip` is executable
-1. Verify Ghostty has `clipboard-write = allow`
+1. Verify iTerm2 has `clipboard-write = allow`
 1. Test outside Claude Code: `echo "test" | xclip -selection clipboard`
 1. Check stderr isn't being redirected: `2>/dev/null` would break it
 1. Consult deep dive doc for debugging techniques
@@ -234,6 +234,6 @@ Each piece essential for the solution to work.
 - Setup: `~/.claude/docs/setup/ssh-clipboard-osc52.md`
 - Deep dive: `~/.claude/docs/setup/osc52-deep-dive.md`
 
-**What's irreducible**: xclip wrapper → OSC 52 → Base64 → tmux wrapping → stderr output → SSH transport → Ghostty interpretation → macOS clipboard
+**What's irreducible**: xclip wrapper → OSC 52 → Base64 → tmux wrapping → stderr output → SSH transport → iTerm2 interpretation → macOS clipboard
 
 Done. ✨

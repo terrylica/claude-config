@@ -1,34 +1,30 @@
 # Terminal Setup Guide
 
-## Ghostty Terminal Emulator
+## iTerm2 Terminal Emulator
 
 ### Session Management & Window Restoration
 
-**Config**: `~/.config/ghostty/config`
+**Preferences**: iTerm2 → Preferences → General → Startup
 
-```toml
-# Session management (macOS only)
-window-save-state = always
-window-inherit-working-directory = true
-
-# Tab bar style - native macOS tabs for drag-to-merge support
-macos-titlebar-style = native
-
-# Disable shell integration title to allow custom emoji titles
-shell-integration-features = no-title
+```
+✓ Use System Window Restoration Setting
+✓ Restore only hotkey window after restart
 ```
 
 **Features**:
 
-- `window-save-state = always` - Restores window position, size, tabs, and splits on restart
-- `window-inherit-working-directory = true` - New tabs/splits inherit current directory
-- `macos-titlebar-style = native` - Enables native macOS tab drag-to-merge (drag window onto another window)
+- Native macOS window state restoration - Restores window position, size, tabs, and splits
+- "Restore only hotkey window after restart" - Only restores specific windows you've configured
+- Full session restoration via iTerm2 sessions (saved manually or automatically)
 
-**Merging Windows**: With native titlebar, drag a Ghostty window onto another window's titlebar to merge as tabs.
+**Saving Sessions**:
+
+- Window → Save Window Arrangement (Cmd+Shift+S)
+- Window → Restore Window Arrangement
 
 ### Custom Emoji Tab Titles by Directory
 
-**Zsh Config**: Add to `~/.zshrc`:
+**Zsh Config**: Already configured in `~/.zshrc`:
 
 ```zsh
 # Disable Oh-My-Zsh auto-title to allow custom emoji titles
@@ -36,7 +32,7 @@ DISABLE_AUTO_TITLE="true"
 
 # Dynamic tab title based on ~/eon/ subdirectory
 eon_set_tab_title() {
-  if [[ -n "$GHOSTTY_RESOURCES_DIR" ]]; then
+  if [[ "$TERM_PROGRAM" == "iTerm.app" ]]; then
     local title_prefix=""
     local dir_name=$(basename "$PWD")
 
@@ -90,11 +86,25 @@ add-zsh-hook precmd eon_set_tab_title
 
 **Result**: Claude Code respects custom emoji titles and doesn't override them during operation.
 
+### Split Panes
+
+**Native Split Commands**:
+
+- Cmd+D - Split vertically
+- Cmd+Shift+D - Split horizontally
+- Cmd+Option+Arrow - Navigate between splits
+- Cmd+W - Close current split/pane
+
+**Advanced Split Configuration**:
+
+- Preferences → Keys → Key Bindings
+- Customize split navigation and creation keybindings
+
 ### Remote SSH Focus Tracking Issue
 
 **Problem**: `[O[I[O[I` escape sequences appearing in input when clicking outside terminal during SSH sessions.
 
-**Root Cause**: Terminal focus event tracking mode (DECSET 1004) enabled by shell configuration (Oh My Zsh, zsh-autosuggestions, or tmux).
+**Root Cause**: Terminal focus event tracking mode (DECSET 1004) enabled by shell configuration (Oh My Zsh, zsh-autosuggestions).
 
 **Solution**: Disable focus events in shell initialization.
 
@@ -103,65 +113,11 @@ add-zsh-hook precmd eon_set_tab_title
 Add to `~/.zshrc` after instant prompt section:
 
 ```zsh
-# Disable focus tracking (prevents [O[I escape sequences in Ghostty)
+# Disable focus tracking (prevents [O[I escape sequences)
 printf '\033[?1004l' >/dev/null 2>&1
 ```
 
 **Placement**: Must be after Powerlevel10k instant prompt block (after line ~6) to avoid console output warnings.
-
-#### Fix for tmux
-
-Add to `~/.tmux.conf`:
-
-```tmux
-# Disable focus events
-set -g focus-events off
-```
-
-Apply: `tmux source-file ~/.tmux.conf`
-
-### Terminfo Installation for Remote Systems
-
-Ghostty uses `TERM=xterm-ghostty`. Install terminfo on remote servers:
-
-```bash
-# On local machine (with Ghostty)
-infocmp xterm-ghostty > /tmp/xterm-ghostty.ti
-scp /tmp/xterm-ghostty.ti remote-host:/tmp/
-
-# On remote machine
-tic -x /tmp/xterm-ghostty.ti  # Installs to ~/.terminfo/
-rm /tmp/xterm-ghostty.ti
-```
-
-#### Enable TERM Forwarding
-
-**Local** `~/.ssh/config`:
-
-```ssh
-Host remote-host
-    SendEnv TERM
-```
-
-**Remote** `/etc/ssh/sshd_config` (requires sudo):
-
-```
-AcceptEnv TERM
-```
-
-Restart sshd: `sudo systemctl restart sshd`
-
-### Dark Theme Syntax Highlighting
-
-For zsh-syntax-highlighting on dark backgrounds, add to `~/.zshrc`:
-
-```zsh
-# Fix comment visibility on dark backgrounds
-ZSH_HIGHLIGHT_STYLES[comment]='fg=244,italic'  # Gray
-ZSH_HIGHLIGHT_STYLES[alias]='fg=cyan,bold'
-ZSH_HIGHLIGHT_STYLES[builtin]='fg=cyan'
-ZSH_HIGHLIGHT_STYLES[command]='fg=green'
-```
 
 ### SSH Clipboard Integration (OSC 52)
 
@@ -171,10 +127,41 @@ Enable Claude Code `/export` to copy to macOS clipboard over SSH:
 
 **Quick setup**:
 
-1. Local Ghostty: Add `clipboard-write = allow` to `~/.config/ghostty/config`
-1. Remote Linux: Install xclip wrapper to `~/.local/bin/xclip`
+1. **iTerm2**: Preferences → General → Selection → ✓ Applications in terminal may access clipboard
+2. **Remote Linux**: Install xclip wrapper to `~/.local/bin/xclip`
 
-The wrapper emits OSC 52 escape sequences that travel over SSH and are interpreted by Ghostty to update the macOS system clipboard.
+The wrapper emits OSC 52 escape sequences that travel over SSH and are interpreted by iTerm2 to update the macOS system clipboard.
+
+### Theme & Appearance
+
+**Recommended Settings**:
+
+- Preferences → Profiles → Colors → Color Presets → Import → Choose a theme
+- Popular themes: Dracula, Nord, Tokyo Night, Solarized Dark
+- Preferences → Appearance → Theme → Minimal (for clean UI)
+
+**Font Configuration**:
+
+- Preferences → Profiles → Text → Font
+- Recommended: JetBrains Mono, Fira Code, SF Mono
+- Enable ligatures if using Fira Code
+
+### iTerm2-Specific Features
+
+**Smart Selection**:
+
+- Cmd+Click to open URLs
+- Double-click to select words
+- Triple-click to select lines
+
+**Instant Replay**:
+
+- Cmd+Option+B - View terminal scrollback history with timeline
+
+**Shell Integration**:
+
+- iTerm2 → Install Shell Integration
+- Provides command history navigation, status indicators, and more
 
 ## Kitty Terminal Emulator
 

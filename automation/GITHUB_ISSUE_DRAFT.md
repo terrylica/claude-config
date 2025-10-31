@@ -8,7 +8,7 @@ Claude Code v2.0.28 displays "⎿ Stop hook error" after every response, even th
 
 - **Claude Code Version**: 2.0.28
 - **Platform**: macOS Darwin 24.6.0
-- **Terminal**: iTerm.app / Ghostty
+- **Terminal**: iTerm.app / iTerm2
 - **Installation**: npm global (`~/.claude/local/node_modules/.bin/claude`)
 - **Configuration**: `~/.claude/settings.json`
 

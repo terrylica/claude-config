@@ -94,12 +94,6 @@ Project reports and analysis documentation:
 
 - **Command**: `cns-notify`
 
-- **Tmux Session Management**: `tmux/`
-
-- **Documentation**: [Tmux Tools Documentation](../tmux/docs/README.md)
-
-- **Commands**: `tmux-session`, `tmux-list`, `tmux-kill`
-
 ### Agent Configurations
 
 - **Location**: `agents/`

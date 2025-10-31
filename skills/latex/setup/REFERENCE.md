@@ -403,13 +403,13 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## Real-World Example: Ghostty Cheat Sheet
+## Real-World Example: iTerm2 Cheat Sheet
 
 **Files**:
 
-- Source: `/tmp/ghostty-keybindings-fixed.tex`
+- Source: `/tmp/iTerm2-keybindings-fixed.tex`
 - Config: `/tmp/.latexmkrc`
-- Output: `~/Downloads/ghostty-keybindings-FIXED.pdf`
+- Output: `~/Downloads/iTerm2-keybindings-FIXED.pdf`
 
 **Key features**:
 
@@ -423,7 +423,7 @@ ______________________________________________________________________
 
 ```bash
 cd /tmp
-latexmk -pdf -pvc ghostty-keybindings-fixed.tex
+latexmk -pdf -pvc iTerm2-keybindings-fixed.tex
 ```
 
 Edit in Helix → Save → See changes in \<1 second

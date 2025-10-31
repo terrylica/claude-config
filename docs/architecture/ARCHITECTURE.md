@@ -28,12 +28,7 @@ This document describes the refactored architecture of the Claude Code workspace
 │   ├── sessions/              # Current project sessions
 │   ├── statsig/               # Telemetry cache
 │   └── todos/                 # Active todo tracking (JSON files)
-├── tmux/                      # [NEW] Tmux integration system
-│   ├── bin/                   # Tmux management scripts
-│   ├── config/                # Shell integration and aliases
-│   ├── docs/                  # Tmux setup documentation
-│   └── data/                  # Tmux session data
-├── tools/                     # [NEW] Development tools
+├── tools/                     # Development tools
 │   └── gfm-link-checker/      # GitHub Flavored Markdown link validator
 └── docs/                      # [NEW] Documentation
     ├── README.md              # Main workspace documentation
@@ -82,18 +77,6 @@ This document describes the refactored architecture of the Claude Code workspace
 - `cns-notify`: Manual CNS notification trigger for testing functionality
 
 **Usage**: Independent testing and manual operation of CNS features
-
-### 🖥️ Tmux Integration
-
-**Location**: `tmux/`
-**Purpose**: Simple tmux session management with smart naming
-**Components**:
-
-- `bin/`: Core session management scripts (`tmux-session`, `tmux-list`, `tmux-kill`)
-- `config/`: Clean tmux configuration and shell integration
-- `SIMPLE-USAGE.md`: Complete documentation
-
-**Philosophy**: Clean, transparent tmux wrapper without plugins or persistence. Pure tmux commands with intelligent folder-based session naming.
 
 ### 🔗 Development Tools
 

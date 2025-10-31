@@ -52,9 +52,9 @@ This happened even though we SSH'd from macOS (which has clipboard) into a Linux
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ macOS Client (Ghostty Terminal)                             │
+│ macOS Client (iTerm2 Terminal)                             │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │ Ghostty Config:                                       │   │
+│  │ iTerm2 Config:                                       │   │
 │  │   clipboard-read = allow                             │   │
 │  │   clipboard-write = allow                            │   │
 │  │   osc-color-report-format = 8-bit # OSC 52 support   │   │
@@ -93,7 +93,7 @@ This happened even though we SSH'd from macOS (which has clipboard) into a Linux
                             │ travels back over SSH
                             ▼
 ┌───────────────────────────────────────────────────────────────┐
-│ Ghostty Terminal (receives sequence)                          │
+│ iTerm2 Terminal (receives sequence)                          │
 │  • Parses OSC 52 sequence                                     │
 │  • Base64 decodes payload                                     │
 │  • Writes to macOS system clipboard (NSPasteboard)            │
@@ -128,7 +128,7 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 1. Escape sequences written to stderr are processed by terminal emulator
 1. Terminal emulators read from both stdout and stderr for control sequences
 1. Claude Code doesn't suppress stderr (it displays tool output)
-1. Ghostty receives the sequence regardless of which stream it's on
+1. iTerm2 receives the sequence regardless of which stream it's on
 
 ### The Complete Flow
 
@@ -148,15 +148,15 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 1. **Escape sequence travels**:
    - Through tmux (if present) → unwrapped
    - Through SSH connection → transparent passthrough
-   - To Ghostty terminal → interpreted
-1. **Ghostty updates**: macOS system clipboard
+   - To iTerm2 terminal → interpreted
+1. **iTerm2 updates**: macOS system clipboard
 1. **User can paste**: `⌘V` anywhere on macOS
 
 ### Terminal Support Matrix
 
 | Terminal | OSC 52 Support | Notes |
 | --- | --- | --- |
-| Ghostty | ✅ Full | Native, requires `clipboard-write = allow` |
+| iTerm2 | ✅ Full | Native, requires `clipboard-write = allow` |
 | iTerm2 | ✅ Full | Native since v3.4.0 |
 | WezTerm | ✅ Full | Native |
 | Kitty | ✅ Full | Native |
@@ -165,9 +165,9 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 | Terminal.app | ❌ None | Does not support OSC 52 |
 | xterm | ⚠️ Partial | Requires compile-time flag |
 
-### Ghostty Specific Configuration
+### iTerm2 Specific Configuration
 
-Required in `~/.config/ghostty/config` (macOS side):
+Required in `~/.config/iTerm2/config` (macOS side):
 
 ```
 clipboard-read = allow
@@ -272,7 +272,7 @@ ssh ${SSH_CLIENT%% *} pbcopy
 **Payload size limits:**
 
 - Most terminals: 100KB - 1MB safe
-- Ghostty: tested up to 10MB
+- iTerm2: tested up to 10MB
 - tmux: may require `set -g set-clipboard on`
 - Base64 overhead: ~33% size increase
 
@@ -355,7 +355,7 @@ tmux show-options -g | grep clipboard
 
 1. `~/.local/bin/xclip` - Wrapper script (created)
 1. `~/.zshrc` - Optional: `osc52-copy()` function and `pbcopy` alias
-1. Ghostty config - Must have `clipboard-write = allow`
+1. iTerm2 config - Must have `clipboard-write = allow`
 1. Claude Code - Uses via `/export` command (no changes needed)
 1. tmux - Transparent passthrough (no config changes needed)
 
@@ -369,7 +369,7 @@ tmux show-options -g | grep clipboard
 ### Further Reading
 
 - [OSC 52 Specification](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands)
-- [Ghostty Documentation](https://ghostty.org/docs/config/reference)
+- [iTerm2 Documentation](https://iTerm2.org/docs/config/reference)
 - [tmux Control Mode](https://github.com/tmux/tmux/wiki/Control-Mode)
 - [Terminal Feature Detection](https://github.com/termstandard/colors)
 
@@ -390,7 +390,7 @@ tmux show-options -g | grep clipboard
 **Why it works:**
 
 - Escape sequences travel back over SSH
-- Ghostty terminal intercepts OSC 52
+- iTerm2 terminal intercepts OSC 52
 - Updates macOS system clipboard
 - Claude Code none the wiser (still thinks it's calling xclip)
 

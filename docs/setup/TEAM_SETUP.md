@@ -20,7 +20,6 @@ cd ~/.claude
 - ✅ Install SAGE development tools (sage-dev, sage-sync, sage-status, gpu-ws)
 - ✅ Install GFM link checker (gfm-check)
 - ✅ Install CNS notification system (cns-notify)
-- ✅ Install tmux session management (tmux-session, tmux-list, tmux-kill)
 - ✅ Configure your PATH automatically if needed
 - ✅ **Backup existing files before overwriting (safety feature)**
 - ✅ **Automatic rollback on installation failure**
@@ -62,9 +61,6 @@ tmux-session --help
 #### System & Productivity Tools:
 
 - **`cns-notify`** - Audio notification system for Claude Code
-- **`tmux-session`** - Terminal session management
-- **`tmux-list`** - List active terminal sessions
-- **`tmux-kill`** - Kill terminal sessions
 
 ### Example Usage:
 
@@ -80,11 +76,6 @@ sage-sync --push-workspace --sync-sessions     # Sync between environments
 gfm-check                                      # Check markdown links in current directory
 gfm-check --fix                                # Auto-fix broken internal links
 gfm-check /path/to/docs --no-external         # Check specific directory, skip external URLs
-
-# Session Management
-tmux-session my-project                        # Create/attach to session
-tmux-list                                      # List all sessions
-tmux-kill my-project                           # Kill specific session
 
 # System Tools
 cns-notify                                     # Test audio notification

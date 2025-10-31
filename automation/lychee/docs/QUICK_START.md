@@ -62,7 +62,7 @@ TELEGRAM_CHAT_ID: 123456789
 **Problem: "EOF when reading a line"**
 
 - Cause: Running through Claude Code instead of your terminal
-- Solution: Run commands directly in Terminal.app, iTerm2, or Ghostty
+- Solution: Run commands directly in Terminal.app, iTerm2, or iTerm2
 
 **Problem: "Session already exists"**
 

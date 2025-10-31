@@ -11,7 +11,7 @@
 ## Conventions
 
 - Apply neutral, promotional-free language to generated docs/comments and new identifiers only; never alter user text
-- **File Paths**: ALWAYS output absolute paths starting with `/` with space after extension before punctuation (e.g., `/path/to/file.md ` not `path/to/file.md.`) - Ghostty Cmd+click requires this, no exceptions
+- **File Paths**: ALWAYS output absolute paths starting with `/` with space after extension before punctuation (e.g., `/path/to/file.md ` not `path/to/file.md.`) - iTerm2 Cmd+click requires this, no exceptions
 
 ### Version Management
 
@@ -109,7 +109,6 @@
 
 ## Terminal & Shell Configuration
 
-**Terminals**: [Ghostty](docs/setup/terminal-setup.md) (emoji tabs, session restore) | [Kitty](docs/setup/terminal-setup.md) (splits)
+**Terminals**: iTerm2 (native splits, session restore, customizable)
 **Editor**: Helix (`hx`) - Modal editor with LSP, tree-sitter
-**Multiplexer**: [Zellij](docs/setup/README.md) - Crash recovery, balanced power-user setup (50K scrollback, 10K recovery)
 **Shell**: [Atuin](specifications/atuin-shell-history.yaml) (history sync) | [ccstatusline](https://github.com/sirmalloc/ccstatusline) (status bar) | [OSC52](docs/setup/ssh-clipboard-osc52.md) (SSH clipboard)

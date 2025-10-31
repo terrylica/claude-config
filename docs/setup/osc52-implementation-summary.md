@@ -44,7 +44,7 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 1. **Terminal emulators read both stdout and stderr** for control sequences
 1. **Escape sequences are invisible** - terminal interprets them, doesn't display
 1. **Claude Code doesn't suppress stderr** - it displays tool output streams
-1. **Ghostty receives sequence** regardless of which stream carries it
+1. **iTerm2 receives sequence** regardless of which stream carries it
 
 ## Data Flow
 
@@ -92,7 +92,7 @@ printf '\033]52;c;%s\007' "$encoded" >&2
 └────────────────────────┬─────────────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────────────┐
-│ 7. Ghostty Terminal (macOS)                                       │
+│ 7. iTerm2 Terminal (macOS)                                       │
 │    • Config: clipboard-write = allow                              │
 │    • Receives: \033]52;c;SGVsbG8gd29ybGQ=\007                    │
 │    • Parses OSC 52 sequence                                       │
@@ -164,7 +164,7 @@ osc52-copy "direct text"
 
 ### Terminal Support Verified
 
-- ✅ Ghostty (with clipboard-write = allow)
+- ✅ iTerm2 (with clipboard-write = allow)
 - ✅ Through tmux 3.x
 - ✅ Over SSH (any distance, any latency)
 
@@ -329,7 +329,7 @@ The solution cannot be simplified further:
 1. **Base64** → encoding for binary safety
 1. **tmux wrapping** → passthrough for multiplexer
 1. **stderr** → guaranteed stream in subprocess
-1. **Ghostty config** → enables clipboard acceptance
+1. **iTerm2 config** → enables clipboard acceptance
 
 Remove any one → solution breaks.
 
@@ -388,7 +388,7 @@ Same architecture applies to all clipboard tools—just need to match CLI interf
 Using `>&2` instead of `/dev/tty` in the xclip wrapper, because Claude Code (and similar non-interactive tool execution contexts) doesn't allocate a controlling terminal, but stderr is always available and terminal emulators read from it for escape sequences.
 
 **Why it works**:
-OSC 52 escape sequences travel over SSH transparently, tmux passes them through when properly wrapped, Ghostty interprets them to update macOS clipboard, and Claude Code remains oblivious—it just thinks xclip worked normally.
+OSC 52 escape sequences travel over SSH transparently, tmux passes them through when properly wrapped, iTerm2 interprets them to update macOS clipboard, and Claude Code remains oblivious—it just thinks xclip worked normally.
 
 **Documentation strategy**:
 CLAUDE.md as link farm with irreducible essentials (the `>&2` detail), detailed docs in proper locations (`docs/setup/`), hub-and-spoke architecture maintained, single source of truth preserved.

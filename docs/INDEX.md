@@ -23,7 +23,6 @@ Central navigation point for all workspace documentation with direct links to mo
 ## **⚙️ Tools & Utilities**
 
 - **[Tool Management](../install-all-tools)** - Installation and maintenance of workspace tools
-- **[Tmux Integration](../tmux/docs/README.md)** - Terminal multiplexer configuration and usage
 - **[GFM Link Checker](../gfm-link-checker/)** - Documentation link validation
 - **[Automation System](../automation/)** - CNS and other automated processes
 
@@ -80,7 +79,7 @@ Central navigation point for all workspace documentation with direct links to mo
 ### By Component Type
 
 - **Agents**: [Registry](agents/AGENTS.md) | [Development](agents/)
-- **Tools**: [Installation](../install-all-tools) | [Tmux](../tmux/) | [GFM Checker](../gfm-link-checker/)
+- **Tools**: [Installation](../install-all-tools) | [GFM Checker](../gfm-link-checker/)
 - **Configuration**: [Standards](standards/) | [Setup](setup/) | [Sync](sync/)
 
 ### By Task Type
