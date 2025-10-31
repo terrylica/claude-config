@@ -123,11 +123,8 @@ from workflow_utils import (
     load_workflow_registry,
     filter_workflows_by_triggers
 )
-from bot_utils import (
-    log_event,
-    create_pid_file,
-    cleanup_pid_file
-)
+from bot_utils import log_event
+from pid_manager import PIDFileManager
 from message_builders import (
     build_workflow_start_message,
     build_completion_message,
@@ -383,10 +380,13 @@ async def main() -> int:
     restored_dedup = dedup_store.restore_all()
     print(f"✅ Deduplication store initialized ({restored_dedup} valid hash files)")
 
-    try:
-        # Create PID file (fails if another instance running)
-        create_pid_file(PID_FILE)
+    # v5.11.0: Acquire PID file lock (atomic, prevents race conditions)
+    pid_manager = PIDFileManager(PID_FILE, "multi-workspace-bot.py")
+    if not pid_manager.acquire():
+        print("❌ Failed to acquire PID lock (another instance running or stale lock)", file=sys.stderr)
+        return 1
 
+    try:
         # Initialize activity tracking
         bot_state.last_activity_time = asyncio.get_event_loop().time()
         print(f"⏱️  Activity timer initialized")
@@ -502,8 +502,8 @@ async def main() -> int:
         traceback.print_exc(file=sys.stderr)
         return 1
     finally:
-        # Always cleanup PID file
-        cleanup_pid_file(PID_FILE)
+        # v5.11.0: PID file auto-cleanup via atexit (no manual cleanup needed)
+        pass
 
 
 if __name__ == "__main__":
