@@ -82,6 +82,7 @@ SELECTIONS_DIR = STATE_DIR / "selections"  # Phase 3 - v4.0.0
 EXECUTIONS_DIR = STATE_DIR / "executions"  # Phase 4 - WorkflowExecution results
 PROGRESS_DIR = STATE_DIR / "progress"  # Phase 4 - P2 streaming progress
 TRACKING_DIR = STATE_DIR / "tracking"  # Phase 4 - Progress tracking persistence
+DEDUP_DIR = STATE_DIR / "deduplication"  # v5.10.0 - Content deduplication persistence
 PID_FILE = STATE_DIR / "bot.pid"
 WORKFLOWS_REGISTRY = STATE_DIR / "workflows.json"  # Phase 3 - v4.0.0
 
@@ -160,6 +161,7 @@ from bot_services import (
     progress_poller,
     idle_timeout_monitor
 )
+from deduplication_store import DeduplicationStore
 import bot_state
 from bot_state import (
     update_activity,
@@ -375,6 +377,12 @@ async def main() -> int:
     # Phase 4 - v4.1.0: Restore progress tracking state (survives watchexec restarts)
     _restore_progress_tracking()
 
+    # v5.10.0: Initialize deduplication store (prevents rate limits on restart)
+    print("\n🔄 Initializing deduplication store...")
+    dedup_store = DeduplicationStore(DEDUP_DIR, ttl_minutes=30)
+    restored_dedup = dedup_store.restore_all()
+    print(f"✅ Deduplication store initialized ({restored_dedup} valid hash files)")
+
     try:
         # Create PID file (fails if another instance running)
         create_pid_file(PID_FILE)
@@ -444,7 +452,7 @@ async def main() -> int:
         scanner_task = asyncio.create_task(periodic_file_scanner(
             app, NOTIFICATION_DIR, COMPLETION_DIR, SUMMARIES_DIR, EXECUTIONS_DIR, int(CHAT_ID)
         ))
-        progress_task = asyncio.create_task(progress_poller(app, PROGRESS_DIR, int(CHAT_ID), PROGRESS_POLL_INTERVAL))
+        progress_task = asyncio.create_task(progress_poller(app, PROGRESS_DIR, int(CHAT_ID), dedup_store, PROGRESS_POLL_INTERVAL))
 
         # Event loop - wait for shutdown
         print("\n✅ Bot running (polling for updates + scanning for files + progress updates)")

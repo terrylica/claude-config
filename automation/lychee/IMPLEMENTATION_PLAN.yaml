@@ -1,0 +1,268 @@
+---
+title: "Telegram Bot State Management Implementation Plan"
+version: "1.0.0"
+session_reference: "906b0590-fba9-4b39-ab69-cbf11f8f1b9c"
+created: "2025-10-30"
+current_version: "v5.9.0"
+
+objectives:
+  - Prevent future module import caching issues through persistent state
+  - Eliminate PID file race conditions through atomic locking
+  - Ensure graceful shutdown under watchexec restarts
+  - Remove orphaned tracking files automatically
+  - Maintain conversation context across restarts
+
+slos:
+  correctness:
+    content_deduplication:
+      target: "0 rate limit violations from duplicate API calls"
+      measurement: "Telegram API HTTP 429 errors per 24h"
+      validation: "Monitor bot logs for 'Too Many Requests' errors"
+
+    pid_management:
+      target: "0 TOCTOU race conditions in PID file operations"
+      measurement: "Concurrent startup failures per 1000 restarts"
+      validation: "Stress test with parallel watchexec restarts"
+
+    state_persistence:
+      target: "100% conversation context retention across restarts"
+      measurement: "User conversation state loss incidents per month"
+      validation: "Test mid-conversation restart scenarios"
+
+  availability:
+    dedup_survival:
+      target: "100% deduplication state survival across restarts"
+      measurement: "Hash files successfully restored on startup"
+      validation: "Verify last_sent_content after watchexec restart"
+
+    startup_reliability:
+      target: "100% successful startup rate (no stale PID failures)"
+      measurement: "Failed startups due to PID file issues per 100 restarts"
+      validation: "Automated startup after SIGKILL simulation"
+
+    graceful_shutdown:
+      target: "95% graceful shutdown completion within timeout"
+      measurement: "SIGKILL forced kills per 100 restarts"
+      validation: "Monitor watchexec logs for premature kills"
+
+  observability:
+    state_restoration:
+      target: "Log all state restoration operations at startup"
+      measurement: "Startup logs contain dedup/tracking/PID metrics"
+      validation: "Verify logs show restored file counts"
+
+    error_propagation:
+      target: "All state management errors propagated to stderr"
+      measurement: "Silent failure count (should be 0)"
+      validation: "Grep logs for error patterns without stack traces"
+
+  maintainability:
+    disk_usage:
+      target: "< 10MB tracking file disk usage at steady state"
+      measurement: "du -sh state/tracking/ output"
+      validation: "Check disk usage after 24h operation"
+
+    ttl_cleanup:
+      target: "0 orphaned files older than 30 minutes"
+      measurement: "find state/ -mmin +30 | wc -l"
+      validation: "Automated cleanup verification in startup logs"
+
+phases:
+  - id: phase_1
+    version: v5.10.0
+    title: "Content Deduplication Persistence"
+    priority: critical
+    estimate_minutes: 15
+    slos: ["correctness.content_deduplication", "availability.dedup_survival"]
+
+    tasks:
+      - Create state/deduplication/ directory structure
+      - Implement DeduplicationStore class (from research)
+      - Integrate with bot_services.py progress_poller
+      - Add startup restoration logic
+      - Validate: Trigger restart mid-progress, verify skip behavior
+
+    files_modified:
+      - automation/lychee/runtime/lib/deduplication_store.py (NEW)
+      - automation/lychee/runtime/bot/bot_services.py (MODIFIED)
+      - automation/lychee/runtime/bot/multi-workspace-bot.py (MODIFIED)
+
+    validation:
+      - "Start bot with active progress update"
+      - "Send progress message, record hash"
+      - "Restart bot via watchexec (touch bot file)"
+      - "Verify next progress check shows 'Cache HIT (disk)'"
+      - "Confirm no API call made for duplicate content"
+
+    error_handling:
+      - Hash file read error → Log warning, treat as cache miss, continue
+      - Hash file write error → Raise exception, halt bot startup
+      - TTL expiration → Silent cleanup, log count
+      - Missing dedup directory → Create on demand, log creation
+
+  - id: phase_2
+    version: v5.11.0
+    title: "PID File Race Condition Fix"
+    priority: critical
+    estimate_minutes: 25
+    slos: ["correctness.pid_management", "availability.startup_reliability"]
+
+    tasks:
+      - Implement PIDFileManager with fcntl locking (from research)
+      - Replace bot_utils.py PID functions
+      - Update multi-workspace-bot.py startup sequence
+      - Add psutil-based stale PID detection
+      - Validate: Concurrent startup attempt, verify one wins
+
+    files_modified:
+      - automation/lychee/runtime/lib/pid_manager.py (NEW)
+      - automation/lychee/runtime/bot/multi-workspace-bot.py (MODIFIED)
+      - automation/lychee/runtime/bot/bot_utils.py (DEPRECATED)
+
+    validation:
+      - "Start bot normally, verify PID lock acquired"
+      - "Attempt second bot start, verify rejection with diagnostic"
+      - "Kill -9 first bot, verify lock auto-released"
+      - "Start bot again, verify successful startup"
+      - "Check no stale PID file warnings"
+
+    error_handling:
+      - fcntl lock failure (EAGAIN) → Diagnose with psutil, exit 1
+      - Stale lock detected → Print manual cleanup instructions, exit 1
+      - PID file read error → Treat as corrupted, exit 1
+      - Lock acquisition timeout → No retry, immediate exit 1
+
+  - id: phase_3
+    version: v5.11.1
+    title: "Watchexec Stop Timeout Increase"
+    priority: high
+    estimate_minutes: 2
+    slos: ["availability.graceful_shutdown"]
+
+    tasks:
+      - Update --stop-timeout from 5s to 10s
+      - Apply to both dev and prod watchexec scripts
+      - Document rationale in script comments
+      - Validate: Monitor SIGTERM→SIGKILL timing
+
+    files_modified:
+      - automation/lychee/runtime/bot/run-bot-dev-watchexec.sh (MODIFIED)
+      - automation/lychee/runtime/bot/run-bot-prod-watchexec.sh (MODIFIED)
+
+    validation:
+      - "Start bot, trigger watchexec restart (touch file)"
+      - "Check logs for shutdown timing"
+      - "Verify no SIGKILL messages (should be SIGTERM only)"
+      - "Confirm shutdown completes within 10s"
+
+    error_handling:
+      - Timeout exceeded → SIGKILL sent by watchexec (logged)
+      - Immediate exit → No error (expected behavior)
+
+  - id: phase_4
+    version: v5.12.0
+    title: "Tracking File TTL Cleanup"
+    priority: high
+    estimate_minutes: 10
+    slos: ["maintainability.disk_usage", "maintainability.ttl_cleanup"]
+
+    tasks:
+      - Add cleanup_orphaned_tracking() function
+      - Call on bot startup before restoration
+      - Set TTL to 30 minutes (matches workflow timeout)
+      - Log cleanup count in startup sequence
+      - Validate: Create old file, verify removal
+
+    files_modified:
+      - automation/lychee/runtime/lib/tracking_cleanup.py (NEW)
+      - automation/lychee/runtime/bot/multi-workspace-bot.py (MODIFIED)
+
+    validation:
+      - "Create fake tracking file dated 2 hours ago"
+      - "Start bot, check startup logs"
+      - "Verify 'Removed 1 orphaned file' message"
+      - "Confirm file deleted from state/tracking/"
+      - "Check recent tracking files NOT deleted"
+
+    error_handling:
+      - File stat error → Skip file, log warning, continue
+      - File unlink error → Skip file, log error, continue
+      - Directory missing → Skip cleanup, continue (no error)
+      - Permission denied → Log error, continue startup
+
+  - id: phase_5
+    version: v5.13.0
+    title: "State Persistence with PicklePersistence"
+    priority: medium
+    estimate_minutes: 8
+    slos: ["correctness.state_persistence", "observability.state_restoration"]
+
+    tasks:
+      - Add PicklePersistence to Application builder
+      - Configure persistence_file path
+      - Validate conversation state survives restart
+      - Document limitations (callback_data not persisted)
+
+    files_modified:
+      - automation/lychee/runtime/bot/multi-workspace-bot.py (MODIFIED)
+
+    validation:
+      - "Start conversation with bot"
+      - "Send /start, receive workflow menu"
+      - "Restart bot via watchexec"
+      - "Resume conversation, verify context retained"
+      - "Check persistence file created in state/"
+
+    error_handling:
+      - Persistence file corrupted → Delete file, log warning, start fresh
+      - Persistence file read error → Log warning, start without persistence
+      - Persistence file write error → Log error, continue (no crash)
+      - Schema version mismatch → Auto-migration or fresh start
+
+implementation_findings:
+  session_906b0590:
+    root_cause: "Python module import caching prevented bot_state.py attributes from loading after file creation"
+    impact: "Bot crashed on restart, failed to process SessionSummary, no Telegram notification sent"
+    resolution: "Full process restart required (watchexec), not importlib.reload()"
+    prevention: "Persist critical state to disk to survive restarts (this plan)"
+
+  research_consensus:
+    python_import_cache:
+      recommendation: "Process restart (99.9% reliability) over module reload (60-70%)"
+      industry_adoption: "Django, Flask, FastAPI all use process restart"
+      source: "/tmp/python-import-cache-research/"
+
+    pid_management:
+      recommendation: "fcntl + psutil (Strategy 5) over O_EXCL"
+      atomic_guarantee: "Kernel-level lock prevents TOCTOU race"
+      source: "/tmp/pid-file-management-research/"
+
+    hot_reload:
+      recommendation: "Current watchexec setup optimal (9/10 score)"
+      improvement: "Increase --stop-timeout to 10s only"
+      source: "/tmp/hot-reload-patterns-research/"
+
+    state_management:
+      critical_issue: "last_sent_content in-memory only, lost on restart"
+      risk: "Rate limit recurrence after restart"
+      source: "/tmp/state-management-architecture-research/"
+
+success_criteria:
+  - All 5 phases completed with version tags
+  - All SLOs validated with passing tests
+  - No rate limit incidents for 7 days post-deployment
+  - No PID file startup failures for 7 days
+  - Tracking directory disk usage stable under 10MB
+  - GitHub releases created for each version
+
+error_propagation_policy:
+  - "Raise and propagate all errors (no silent handling)"
+  - "No fallback defaults (fail fast)"
+  - "No automatic retries (explicit user action required)"
+  - "Log to stderr before raising exceptions"
+
+oss_dependencies:
+  - fcntl: "POSIX file locking (stdlib)"
+  - psutil: "Process management (pip install psutil)"
+  - pickle: "State serialization (stdlib)"
+  - hashlib: "Content hashing (stdlib)"

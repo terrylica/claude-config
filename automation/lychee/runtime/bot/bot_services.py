@@ -22,6 +22,7 @@ from handler_classes import (
     WorkflowExecutionHandler,
     SummaryHandler
 )
+from deduplication_store import DeduplicationStore
 import bot_state
 
 
@@ -61,6 +62,7 @@ async def progress_poller(
     app: "Application",
     progress_dir: Path,
     chat_id: int,
+    dedup_store: DeduplicationStore,
     poll_interval: float = 2.0
 ) -> None:
     """Poll progress files and update Telegram messages with streaming progress."""
@@ -178,11 +180,9 @@ async def progress_poller(
                 )
                 progress_text = convert_to_telegram_markdown(markdown_progress)
 
-                # Option 3: Compare content BEFORE calling API (prevents redundant calls)
-                if progress_key in bot_state.last_sent_content:
-                    if bot_state.last_sent_content[progress_key] == progress_text:
-                        print(f"   ⏭️  Skipped update (content unchanged - no API call)")
-                        continue
+                # Check deduplication BEFORE calling API (prevents redundant calls)
+                if dedup_store.check_duplicate(workspace_id, session_id, workflow_id, progress_text):
+                    continue
 
                 # Update message text
                 try:
@@ -192,8 +192,8 @@ async def progress_poller(
                         text=progress_text,
                         parse_mode="MarkdownV2"
                     )
-                    # Store content after successful send for deduplication
-                    bot_state.last_sent_content[progress_key] = progress_text
+                    # Record successful send for deduplication
+                    dedup_store.record_sent(workspace_id, session_id, workflow_id, progress_text)
                     print(f"   ✅ Message updated successfully")
                 except Exception as edit_error:
                     # Handle Telegram API errors gracefully (e.g., duplicate content, rate limits)
@@ -229,6 +229,8 @@ async def progress_poller(
                 if stage == "completed":
                     print(f"   🗑️  Removing completed progress file: {progress_file.name}")
                     progress_file.unlink()
+                    # Clean up deduplication state for completed workflow
+                    dedup_store.cleanup(workspace_id, session_id, workflow_id)
                     print(f"   ℹ️  Keeping tracking active for execution completion handler")
 
             except KeyError as e:
