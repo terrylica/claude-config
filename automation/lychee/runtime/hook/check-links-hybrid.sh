@@ -108,15 +108,57 @@ else
 fi
 
 if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
-    echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 Found transcript: $transcript_file" >> "$log_file"
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 Found transcript: $transcript_file"
+        echo "   → File size: $(ls -lh "$transcript_file" 2>/dev/null | awk '{print $5}' || echo 'unknown')"
+        echo "   → Line count: $(wc -l < "$transcript_file" 2>/dev/null || echo 'unknown')"
+    } >> "$log_file"
 
     # Extract last assistant message (text block content)
     # JSONL format: each line is a wrapper object with nested message
     # Structure: {message: {role: "assistant", content: [...]}}
-    last_assistant_message=$(tac "$transcript_file" | \
-        jq -r '.message | select(.role == "assistant") | .content[] | select(.type == "text") | .text' 2>/dev/null | \
-        head -1 | \
-        head -c 200)  # Limit to 200 chars for title
+
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: Starting tac command on transcript..."
+        echo "   → About to run: tac on $(ls -lh "$transcript_file" 2>/dev/null | awk '{print $5}' || echo 'unknown') file"
+    } >> "$log_file"
+
+    # Run tac with timeout and capture any errors
+    tac_output=$(timeout 30s tac "$transcript_file" 2>&1) || {
+        tac_exit=$?
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: tac command failed!"
+            echo "   → Exit code: $tac_exit"
+            echo "   → Error output: ${tac_output:0:500}"
+        } >> "$log_file"
+        last_assistant_message=""
+    }
+
+    if [[ -n "${tac_output:-}" ]]; then
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: tac completed successfully"
+            echo "   → Output length: ${#tac_output} bytes"
+            echo "   → Starting jq parsing..."
+        } >> "$log_file"
+
+        # Parse with jq
+        last_assistant_message=$(echo "$tac_output" | \
+            jq -r '.message | select(.role == "assistant") | .content[] | select(.type == "text") | .text' 2>&1 | \
+            head -1 | \
+            head -c 200) || {
+            jq_exit=$?
+            {
+                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: jq command failed!"
+                echo "   → Exit code: $jq_exit"
+            } >> "$log_file"
+            last_assistant_message=""
+        }
+
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: jq parsing completed"
+            echo "   → Extracted message length: ${#last_assistant_message} chars"
+        } >> "$log_file"
+    fi
 
     # Extract first line only (often a summary or heading)
     if [[ -n "$last_assistant_message" ]]; then
@@ -129,11 +171,54 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
     # Extract last user prompt (the question that triggered the response)
     # Skip tool_result messages (content is array) and system messages (content starts with <)
     # Only extract actual user text prompts (content is string)
-    last_user_prompt=$(tac "$transcript_file" | \
-        jq -r 'select(.message.role == "user") | select(.message.content | type == "string") | .message.content' 2>/dev/null | \
-        grep -v "^<" | grep -v "^Caveat:" | \
-        head -1 | \
-        head -c 150)  # Limit to 150 chars
+
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: Starting user prompt extraction..."
+        echo "   → Running second tac command on transcript"
+    } >> "$log_file"
+
+    # Run tac again with timeout
+    tac_output_user=$(timeout 30s tac "$transcript_file" 2>&1) || {
+        tac_exit=$?
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: tac command (user prompt) failed!"
+            echo "   → Exit code: $tac_exit"
+        } >> "$log_file"
+        last_user_prompt=""
+    }
+
+    if [[ -n "${tac_output_user:-}" ]]; then
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: tac (user prompt) completed"
+            echo "   → Starting jq + grep pipeline..."
+        } >> "$log_file"
+
+        # Extract last user prompt (handles both string and array content formats)
+        # Array format: {"content": [{"type": "text", "text": "message"}]}
+        # String format: {"content": "message"}  (legacy)
+        last_user_prompt=$(echo "$tac_output_user" | \
+            jq -r 'select(.message.role == "user") |
+                   if (.message.content | type) == "string" then
+                       .message.content
+                   elif (.message.content | type) == "array" then
+                       [.message.content[] | select(.type == "text") | .text] | join(" ")
+                   else
+                       empty
+                   end' 2>/dev/null | \
+            grep -v "^<" | grep -v "^Caveat:" | \
+            head -1 | \
+            head -c 150) || {
+            {
+                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: User prompt pipeline failed!"
+            } >> "$log_file"
+            last_user_prompt=""
+        }
+
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: User prompt extraction completed"
+            echo "   → Extracted prompt length: ${#last_user_prompt} chars"
+        } >> "$log_file"
+    fi
 
     # Clean up user prompt
     if [[ -n "$last_user_prompt" ]]; then
@@ -280,14 +365,49 @@ write_session_summary() {
     local broken_links_count="$3"
     local results_file_path="$4"
 
+    {
+        echo ""
+        echo "=========================================================================="
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: INSIDE write_session_summary function"
+        echo "=========================================================================="
+        echo "   → summary_file: $summary_file"
+        echo "   → lychee_ran: $lychee_ran"
+        echo "   → broken_links_count: $broken_links_count"
+        echo "   → results_file_path: $results_file_path"
+        echo "   → modified_files: $modified_files"
+        echo "   → session_duration: $session_duration"
+        echo "   → last_assistant_message length: ${#last_assistant_message}"
+        echo "   → last_user_prompt length: ${#last_user_prompt}"
+        echo "=========================================================================="
+    } >> "$log_file" 2>&1
+
     # Calculate available workflows using helper script
     local lib_dir="$HOME/.claude/automation/lychee/runtime/lib"
     local state_dir="$HOME/.claude/automation/lychee/state"
 
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: Calling calculate_workflows.py..."
+        echo "   → lib_dir: $lib_dir"
+        echo "   → state_dir: $state_dir"
+    } >> "$log_file" 2>&1
+
     available_wfs_json=$("$lib_dir/calculate_workflows.py" \
         --error-count "$broken_links_count" \
         --modified-files "$modified_files" \
-        --registry "$state_dir/workflows.json" 2>/dev/null || echo "[]")
+        --registry "$state_dir/workflows.json" 2>&1) || {
+        wf_exit=$?
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: calculate_workflows.py FAILED!"
+            echo "   → Exit code: $wf_exit"
+            echo "   → Output: $available_wfs_json"
+        } >> "$log_file" 2>&1
+        available_wfs_json="[]"
+    }
+
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: calculate_workflows.py completed"
+        echo "   → Result: $available_wfs_json"
+    } >> "$log_file" 2>&1
 
     # Prepare lychee status details
     local lychee_details=""
@@ -298,7 +418,24 @@ write_session_summary() {
     fi
 
     # Write SessionSummary JSON
-    cat > "$summary_file" <<EOF
+    {
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: About to write JSON file..."
+        echo "   → Target file: $summary_file"
+        echo "   → Target directory: $(dirname "$summary_file")"
+        echo "   → Directory exists: $([ -d "$(dirname "$summary_file")" ] && echo 'YES' || echo 'NO')"
+        echo "   → Directory writable: $([ -w "$(dirname "$summary_file")" ] && echo 'YES' || echo 'NO')"
+    } >> "$log_file" 2>&1
+
+    # Ensure directory exists
+    mkdir -p "$(dirname "$summary_file")" 2>> "$log_file" || {
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: Failed to create directory!"
+            echo "   → Directory: $(dirname "$summary_file")"
+        } >> "$log_file" 2>&1
+        return 1
+    }
+
+    cat > "$summary_file" 2>> "$log_file" <<EOF
 {
   "correlation_id": "$CORRELATION_ID",
   "workspace_path": "$workspace_dir",
@@ -329,10 +466,25 @@ write_session_summary() {
 }
 EOF
 
+    cat_exit=$?
+    {
+        if [[ $cat_exit -eq 0 ]]; then
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: cat > command succeeded"
+        else
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: cat > command FAILED!"
+            echo "   → Exit code: $cat_exit"
+        fi
+    } >> "$log_file" 2>&1
+
     {
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 SessionSummary written to: $summary_file"
-        echo "   → File size: $(ls -lh "$summary_file" 2>/dev/null | awk '{print $5}' || echo 'unknown')"
-        echo "   → Available workflows: $(echo "$available_wfs_json" | jq -r 'length' 2>/dev/null || echo 'unknown')"
+        if [[ -f "$summary_file" ]]; then
+            echo "   → ✅ File exists after write"
+            echo "   → File size: $(ls -lh "$summary_file" 2>/dev/null | awk '{print $5}' || echo 'unknown')"
+            echo "   → Available workflows: $(echo "$available_wfs_json" | jq -r 'length' 2>/dev/null || echo 'unknown')"
+        else
+            echo "   → ❌ FILE DOES NOT EXIST AFTER WRITE!"
+        fi
     } >> "$log_file" 2>&1
 }
 
@@ -400,7 +552,23 @@ fi
 # =============================================================================
 
 {
+    # Set up trap to catch any exits in background job
+    trap 'exit_code=$?; { echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: Background job exiting with code $exit_code at line $LINENO"; echo "   → Command: $BASH_COMMAND"; } >> "$log_file" 2>&1' EXIT ERR
+
     {
+        echo ""
+        echo "=========================================================================="
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: BACKGROUND JOB STARTED"
+        echo "=========================================================================="
+        echo "   → Background PID: $$"
+        echo "   → Parent PID: $PPID"
+        echo "   → Workspace: $workspace_dir"
+        echo "   → Session ID: $session_id"
+        echo "   → set -e is active: $(set -o | grep errexit | awk '{print $2}')"
+        echo "   → set -u is active: $(set -o | grep nounset | awk '{print $2}')"
+        echo "   → set -o pipefail is active: $(set -o | grep pipefail | awk '{print $2}')"
+        echo "=========================================================================="
+        echo ""
         echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 TIER 1: Starting background validation"
         echo "   → Finding markdown files in: $workspace_dir"
     } >> "$log_file" 2>&1
@@ -501,11 +669,45 @@ fi
         # Emit SessionSummary (v4 format) - ALWAYS, regardless of error count
         {
             echo ""
+            echo "=========================================================================="
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 DEBUG: About to emit SessionSummary"
+            echo "=========================================================================="
+            echo "   → Session ID: $session_id"
+            echo "   → Workspace hash: $workspace_hash"
+            echo "   → Error count: $error_count"
+            echo "   → Last assistant message: ${last_assistant_message:0:80}"
+            echo "   → Last user prompt: ${last_user_prompt:0:60}"
+            echo "   → Full results: $full_results"
+            echo "=========================================================================="
+            echo ""
             echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 📝 Emitting SessionSummary (v4.0.0)..."
         } >> "$log_file" 2>&1
 
         summary_file="$HOME/.claude/automation/lychee/state/summaries/summary_${session_id}_${workspace_hash}.json"
-        write_session_summary "$summary_file" "true" "$error_count" "$full_results"
+
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] 🔍 DEBUG: Calling write_session_summary function..."
+            echo "   → Arguments: $summary_file, true, $error_count, $full_results"
+        } >> "$log_file" 2>&1
+
+        write_session_summary "$summary_file" "true" "$error_count" "$full_results" 2>> "$log_file" || {
+            write_exit=$?
+            {
+                echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ❌ DEBUG: write_session_summary FAILED!"
+                echo "   → Exit code: $write_exit"
+            } >> "$log_file" 2>&1
+        }
+
+        {
+            echo "[$(date +%Y-%m-%d\ %H:%M:%S)] ✅ DEBUG: write_session_summary completed"
+            echo "   → Checking if file was created..."
+            if [[ -f "$summary_file" ]]; then
+                echo "   → ✅ File exists: $summary_file"
+                echo "   → File size: $(ls -lh "$summary_file" 2>/dev/null | awk '{print $5}' || echo 'unknown')"
+            else
+                echo "   → ❌ FILE NOT CREATED: $summary_file"
+            fi
+        } >> "$log_file" 2>&1
 
         # Log summary.created event
         "$HOME/.claude/automation/lychee/runtime/lib/event_logger.py" \
