@@ -9,6 +9,7 @@
 ### 📚 Rationale
 
 With v5.7.0, production mode gained all development mode features:
+
 - Auto-reload (watchexec)
 - Full supervision (launchd)
 - Crash detection (bot-wrapper-prod)
@@ -19,7 +20,7 @@ With v5.7.0, production mode gained all development mode features:
 ### 🗑️ Archived Files
 
 | File | Purpose | Now Use |
-|------|---------|---------|
+| --- | --- | --- |
 | `bot-dev.sh` | Dev lifecycle manager | `bot-service.sh` |
 | `run-bot-dev-watchexec.sh` | Dev runner | `run-bot-prod-watchexec.sh` |
 | `bot-wrapper.sh` | Dev crash monitor | `bot-wrapper-prod.sh` |
@@ -27,6 +28,7 @@ With v5.7.0, production mode gained all development mode features:
 ### 🔄 Migration
 
 **If you were using dev mode**:
+
 ```bash
 # Stop dev mode (if running)
 ./bot-dev.sh stop  # (archived)
@@ -39,6 +41,7 @@ With v5.7.0, production mode gained all development mode features:
 ```
 
 **Production mode provides ALL features**:
+
 - ✅ Auto-reload for rapid iteration (dev need)
 - ✅ Full supervision for reliability (prod need)
 - ✅ Crash detection for debugging (dev need)
@@ -53,16 +56,19 @@ With v5.7.0, production mode gained all development mode features:
 ### 🎯 Benefits
 
 **Simplicity**:
+
 - ONE way to run bot (no mode confusion)
 - ONE set of scripts (no duplication)
 - ONE documentation path (no branching)
 
 **Consistency**:
+
 - Same behavior in all environments
 - No dev/prod parity issues
 - Unified troubleshooting
 
 **Maintainability**:
+
 - Less code to maintain
 - Fewer edge cases
 - Clearer architecture

@@ -21,6 +21,7 @@ cd /Users/terryli/.claude/automation/lychee/runtime/bot
 ```
 
 This installs the bot as a launchd service that:
+
 - Starts automatically on login
 - Runs continuously (survives reboots)
 - Auto-restarts on crashes
@@ -81,7 +82,7 @@ launchd (macOS top supervisor)
 ### Health Monitoring Layers
 
 | Layer | Monitors | Alert Trigger | Action |
-|-------|----------|---------------|--------|
+| --- | --- | --- | --- |
 | **launchd** | watchexec crashes | 3+ crashes in 10s | Auto-restart watchexec |
 | **watchexec** | Bot crashes | Process exits | Auto-restart bot |
 | **bot-wrapper** | Crash loops | 5+ restarts in 60s | Telegram alert (critical) |
@@ -100,6 +101,7 @@ launchd (macOS top supervisor)
 5. New code is loaded
 
 **Watched Directories**:
+
 - `/Users/terryli/.claude/automation/lychee/runtime/bot/*.py`
 - `/Users/terryli/.claude/automation/lychee/runtime/lib/*.py`
 - `/Users/terryli/.claude/automation/lychee/runtime/orchestrator/*.py`
@@ -107,12 +109,14 @@ launchd (macOS top supervisor)
 ### ✅ Full Supervision
 
 **Survives Everything**:
+
 - ✅ Reboots (launchd auto-start on login)
 - ✅ Crashes (launchd auto-restart watchexec)
 - ✅ Code changes (watchexec auto-reload bot)
 - ✅ Hangs/freezes (process monitoring)
 
 **Process Monitoring**:
+
 - launchd ensures watchexec always runs
 - watchexec ensures bot always runs
 - bot-wrapper detects crash loops
@@ -121,18 +125,21 @@ launchd (macOS top supervisor)
 ### ✅ Health Monitoring
 
 **Crash Detection**:
+
 - Captures exit code
 - Records last 20 lines of logs
 - Includes stderr output
 - Sends full context to Telegram
 
 **Restart Rate Tracking**:
+
 - Monitors restart frequency
 - Alerts if 5+ restarts in 60 seconds
 - Resets counter after 5 minutes of stability
 - Prevents runaway restart loops
 
 **Multi-Channel Alerts**:
+
 - Telegram (primary): Crash/loop/error alerts
 - System logs: launchd events
 - Bot logs: Internal diagnostics
@@ -172,6 +179,7 @@ launchd (macOS top supervisor)
 - ✅ Crash throttling (prevents restart loops)
 
 **vs. alternatives**:
+
 - ❌ `cron`: No process supervision
 - ❌ Manual scripts: No auto-restart
 - ❌ Docker: Overkill for single service
@@ -184,6 +192,7 @@ launchd (macOS top supervisor)
 No need to run `bot restart` after editing code. watchexec handles this automatically.
 
 The only time you need manual restart:
+
 - Changing environment variables
 - Updating launchd plist
 - Major architecture changes
@@ -191,6 +200,7 @@ The only time you need manual restart:
 ### Always Running
 
 The bot runs continuously. To stop it completely:
+
 - Temporary: `bot stop` (launchd won't restart until you run `bot start`)
 - Permanent: `bot uninstall` (removes launchd service)
 
@@ -224,10 +234,12 @@ launchd (PID 1)
 ### Logs
 
 **Launchd logs**:
+
 - `~/.claude/automation/lychee/logs/telegram-bot-launchd.log`
 - `~/.claude/automation/lychee/logs/telegram-bot-launchd-error.log`
 
 **Bot logs**:
+
 - `~/.claude/automation/lychee/logs/telegram-handler.log`
 
 **View all logs**: `bot logs` (tails all log files)
