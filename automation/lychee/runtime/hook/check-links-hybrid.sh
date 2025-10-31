@@ -204,7 +204,7 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
         # Note: Skip Telegram notification echoes (multi-line blocks starting with ``` and ending with ```)
         last_user_prompt=$(echo "$tac_output_user" | \
             jq -r '
-                # Get first user message with actual text content (not tool_result)
+                # Get first user message with actual text content (not tool_result, not quoted notifications)
                 first(
                     select(.message.role == "user") |
                     select(if (.message.content | type) == "array" then
@@ -212,8 +212,8 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
                         ([.message.content[] | select(.type == "text")] | length > 0) and
                         ([.message.content[] | select(.type == "tool_result")] | length == 0)
                     else
-                        # String content must not be empty
-                        .message.content != ""
+                        # String content must not be empty and not start with code fence
+                        .message.content != "" and (.message.content | startswith("```") | not)
                     end)
                 ) |
                 # Extract text content
@@ -224,8 +224,7 @@ if [[ -n "$transcript_file" && -f "$transcript_file" ]]; then
                 else
                     empty
                 end' | \
-            sed '/^```$/,/^```$/d' | \
-            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | grep -v '^\`\`\`' | \
+            grep -v "^$" | grep -v "^<" | grep -v "^Caveat:" | \
             awk 'NF {print; exit}' | \
             head -c 500) || {
             {
