@@ -838,7 +838,7 @@ class WorkflowOrchestrator:
             message=f"Starting workflow: {workflow_name}"
         )
 
-        # Create state file to prevent feedback loop (headless session won't trigger new workflow menu)
+        # Create state file to prevent feedback loop (headless mode session won't trigger new workflow menu)
         state_file_created = False
         try:
             AUTOFIX_STATE_FILE.write_text(json.dumps({
@@ -907,7 +907,8 @@ class WorkflowOrchestrator:
             )
             raise
 
-        # Invoke Claude CLI
+        # Invoke Claude CLI in headless mode (non-interactive)
+        # Using -p flag to run in headless mode with JSON output
         completion_status = "success"
         exit_code = 0
         stdout_text = ""
@@ -915,10 +916,10 @@ class WorkflowOrchestrator:
         headless_session_id = None
 
         try:
-            print(f"   🔧 Starting Claude CLI...")
+            print(f"   🔧 Starting Claude CLI in headless mode...")
             process = await asyncio.create_subprocess_exec(
                 "/opt/homebrew/bin/claude",
-                "-p", prompt,
+                "-p", prompt,  # Headless mode flag (--print)
                 "--output-format", "json",
                 cwd=workspace_path,
                 stdout=asyncio.subprocess.PIPE,
@@ -986,16 +987,17 @@ class WorkflowOrchestrator:
             stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
             exit_code = process.returncode
 
-            # Extract headless session ID from JSON output
+            # Extract headless mode session ID from JSON output
+            # Headless mode creates a new session that can be resumed with --continue
             headless_session_id = None
             try:
                 if stdout_text:
                     result_json = json.loads(stdout_text)
                     headless_session_id = result_json.get("session_id")
                     if headless_session_id:
-                        print(f"   📋 Headless session ID: {headless_session_id}")
+                        print(f"   📋 Headless mode session ID: {headless_session_id}")
             except json.JSONDecodeError:
-                print(f"   ⚠️  Could not parse JSON output to extract headless session ID")
+                print(f"   ⚠️  Could not parse JSON output to extract headless mode session ID")
 
             print(f"   ✓ Process completed")
             print(f"   📊 Exit code: {exit_code}")
@@ -1107,7 +1109,7 @@ class WorkflowOrchestrator:
             stderr: Standard error
             duration: Execution duration in seconds
             workflow_metadata: Workflow manifest data
-            headless_session_id: Session ID from headless Claude CLI execution
+            headless_session_id: Session ID from Claude CLI headless mode execution (via -p flag)
 
         Raises:
             All errors propagate (fail-fast)

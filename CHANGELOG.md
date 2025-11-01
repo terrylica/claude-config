@@ -3,196 +3,213 @@
 ### 🚜 Refactor
 
 - [**breaking**] Migrate to iTerm2 and remove Zellij/Ghostty/tmux
+
 ## [6.0.0] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(hook)* Add missing tac pipe to reverse transcript order
+- _(hook)_ Add missing tac pipe to reverse transcript order
 
 ### 📚 Documentation
 
-- *(lychee)* Add v5.13.5 CRITICAL fix to CHANGELOG
+- _(lychee)_ Add v5.13.5 CRITICAL fix to CHANGELOG
+
 ## [5.13.4] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(hook)* Skip messages starting with ❓ emoji
-- *(hook)* Use Unicode escape for emoji to avoid encoding issues
-- *(hook)* Filter out emoji-prefixed lines with grep
+- _(hook)_ Skip messages starting with ❓ emoji
+- _(hook)_ Use Unicode escape for emoji to avoid encoding issues
+- _(hook)_ Filter out emoji-prefixed lines with grep
 
 ### 📚 Documentation
 
-- *(lychee)* Add v5.13.4 to CHANGELOG
+- _(lychee)_ Add v5.13.4 to CHANGELOG
+
 ## [5.13.3] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(hook)* Escape backticks to prevent command substitution
-- *(hook)* Skip messages starting with code fence
+- _(hook)_ Escape backticks to prevent command substitution
+- _(hook)_ Skip messages starting with code fence
 
 ### 📚 Documentation
 
-- *(lychee)* Add v5.13.2 to implementation plan
-- *(lychee)* Add v5.13.3 to CHANGELOG
+- _(lychee)_ Add v5.13.2 to implementation plan
+- _(lychee)_ Add v5.13.3 to CHANGELOG
+
 ## [5.13.2] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(hook)* Use first() to select most recent user message
+- _(hook)_ Use first() to select most recent user message
 
 ### 📚 Documentation
 
-- *(lychee)* Update plan with v5.13.1 final commit
+- _(lychee)_ Update plan with v5.13.1 final commit
+
 ## [5.13.1] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(hook)* Preserve multi-line user prompts in Stop hook (v5.13.1)
-- *(hook)* Filter Telegram echo to extract actual user prompts
-- *(hook)* Extract user comments from quoted notifications
+- _(hook)_ Preserve multi-line user prompts in Stop hook (v5.13.1)
+- _(hook)_ Filter Telegram echo to extract actual user prompts
+- _(hook)_ Extract user comments from quoted notifications
 
 ### 📚 Documentation
 
 - Mark all phases complete in SSoT plan file
-- *(lychee)* Update plan with v5.13.1 Telegram echo fix
+- _(lychee)_ Update plan with v5.13.1 Telegram echo fix
+
 ## [5.13.0] - 2025-10-31
 
 ### 🚀 Features
 
-- *(bot)* Conversation state persistence with PicklePersistence (v5.13.0)
+- _(bot)_ Conversation state persistence with PicklePersistence (v5.13.0)
+
 ## [5.12.0] - 2025-10-31
 
 ### 🚀 Features
 
-- *(bot)* Automatic tracking file TTL cleanup (v5.12.0)
+- _(bot)_ Automatic tracking file TTL cleanup (v5.12.0)
+
 ## [5.11.1] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(bot)* Increase watchexec stop timeout to 10s (v5.11.1)
+- _(bot)_ Increase watchexec stop timeout to 10s (v5.11.1)
+
 ## [5.11.0] - 2025-10-31
 
 ### 🐛 Bug Fixes
 
-- *(bot)* Atomic PID file locking with fcntl (v5.11.0)
+- _(bot)_ Atomic PID file locking with fcntl (v5.11.0)
+
 ## [5.10.0] - 2025-10-31
 
 ### 🚀 Features
 
-- *(bot)* Persist content deduplication state across restarts (v5.10.0)
+- _(bot)_ Persist content deduplication state across restarts (v5.10.0)
+
 ## [5.9.0] - 2025-10-31
 
 ### 🚀 Features
 
-- *(bot)* Add comprehensive lifecycle management system (v5.6.0)
-- *(bot)* Add full supervision chain with launchd + watchexec (v5.7.0)
-- *(bot)* [**breaking**] Add rate limit protection and Pushover alerts (v5.9.0)
+- _(bot)_ Add comprehensive lifecycle management system (v5.6.0)
+- _(bot)_ Add full supervision chain with launchd + watchexec (v5.7.0)
+- _(bot)_ [**breaking**] Add rate limit protection and Pushover alerts (v5.9.0)
 
 ### 🐛 Bug Fixes
 
-- *(bot)* Disable idle timeout for development mode
-- *(lychee)* Extract user prompts from array-format transcript messages
+- _(bot)_ Disable idle timeout for development mode
+- _(lychee)_ Extract user prompts from array-format transcript messages
 
 ### 🚜 Refactor
 
-- *(lychee)* Archive and remove v3 notification dead code
-- *(bot)* Remove development mode, production-only (v5.8.0)
+- _(lychee)_ Archive and remove v3 notification dead code
+- _(bot)_ Remove development mode, production-only (v5.8.0)
 
 ### ⚡ Performance
 
-- *(lychee)* Optimize transcript extraction to prevent hook timeouts
+- _(lychee)_ Optimize transcript extraction to prevent hook timeouts
 
 ### ⚙️ Miscellaneous Tasks
 
 - Complete dev mode cleanup and align shell config (v5.8.0)
-- *(lychee)* Comprehensive cleanup - remove obsolete scripts and docs
+- _(lychee)_ Comprehensive cleanup - remove obsolete scripts and docs
+
 ## [5.5.1] - 2025-10-30
 
 ### 🚀 Features
 
-- *(docs)* Add multi-layered bot startup enforcement
-- *(bot)* Integrate notification system with watchexec
+- _(docs)_ Add multi-layered bot startup enforcement
+- _(bot)_ Integrate notification system with watchexec
 
 ### 🐛 Bug Fixes
 
-- *(lychee)* Strip whitespace from user_prompt before italic formatting
-- *(lychee)* Replace newlines in user_prompt for italic formatting
-- *(lychee)* Change session debug format to two lines
-- *(bot)* Load doppler credentials for restart notifications
-- *(lychee)* Fix MarkdownV2 backtick wrapping and user prompt rendering
-- *(hook)* Extract actual user prompts, skip tool results
+- _(lychee)_ Strip whitespace from user_prompt before italic formatting
+- _(lychee)_ Replace newlines in user_prompt for italic formatting
+- _(lychee)_ Change session debug format to two lines
+- _(bot)_ Load doppler credentials for restart notifications
+- _(lychee)_ Fix MarkdownV2 backtick wrapping and user prompt rendering
+- _(hook)_ Extract actual user prompts, skip tool results
 
 ### 🚜 Refactor
 
-- *(lychee)* Remove legacy bot starter from Stop hook
+- _(lychee)_ Remove legacy bot starter from Stop hook
 
 ### 📚 Documentation
 
-- *(lychee)* Add v5.4.0 to CHANGELOG
-- *(lychee)* Add v5.5.0 to CHANGELOG for Stop hook refactoring
-- *(lychee)* Add v5.5.1 to CHANGELOG for transcript extraction fix
+- _(lychee)_ Add v5.4.0 to CHANGELOG
+- _(lychee)_ Add v5.5.0 to CHANGELOG for Stop hook refactoring
+- _(lychee)_ Add v5.5.1 to CHANGELOG for transcript extraction fix
+
 ## [5.4.0] - 2025-10-30
 
 ### 🚀 Features
 
-- *(lychee)* Complete Phase 2 - migrate all messages to MarkdownV2
+- _(lychee)_ Complete Phase 2 - migrate all messages to MarkdownV2
 
 ### 📚 Documentation
 
-- *(lychee)* Update changelog and SSoT plan for v5.3.0
+- _(lychee)_ Update changelog and SSoT plan for v5.3.0
+
 ## [5.3.0] - 2025-10-30
 
 ### 🚀 Features
 
-- *(lychee)* Add telegramify-markdown library (Phase 1 - MarkdownV2 support)
+- _(lychee)_ Add telegramify-markdown library (Phase 1 - MarkdownV2 support)
 
 ### 🐛 Bug Fixes
 
-- *(lychee)* Fix session ID extraction (remove xargs for reliability)
+- _(lychee)_ Fix session ID extraction (remove xargs for reliability)
 
 ### 🚜 Refactor
 
-- *(lychee)* Simplify bot restart notifications (match system format)
+- _(lychee)_ Simplify bot restart notifications (match system format)
 
 ### 📚 Documentation
 
-- *(lychee)* Update changelog for v5.2.0
+- _(lychee)_ Update changelog for v5.2.0
 - Update SSoT plan with Phase 1 implementation findings
+
 ## [5.2.0] - 2025-10-30
 
 ### 🚀 Features
 
-- *(lychee)* Migrate PID management to psutil (industry-standard)
+- _(lychee)_ Migrate PID management to psutil (industry-standard)
+
 ## [5.1.1] - 2025-10-30
 
 ### 🐛 Bug Fixes
 
-- *(bot)* Handle stale PID files during watchexec restarts
+- _(bot)_ Handle stale PID files during watchexec restarts
+
 ## [5.1.0] - 2025-10-30
 
 ### 🚀 Features
 
-- *(telegram)* Add markdown-safe formatting utilities
-- *(skills)* Add MQL5 indicator patterns skill
-- *(monitoring)* Add dual-channel restart notifications
-- *(monitoring)* Enhance restart notifications with detailed diagnostics
-- *(skills)* Add dual-channel watchexec notification skill
-- *(telegram)* Migrate all messages from Markdown to HTML parse mode
+- _(telegram)_ Add markdown-safe formatting utilities
+- _(skills)_ Add MQL5 indicator patterns skill
+- _(monitoring)_ Add dual-channel restart notifications
+- _(monitoring)_ Enhance restart notifications with detailed diagnostics
+- _(skills)_ Add dual-channel watchexec notification skill
+- _(telegram)_ Migrate all messages from Markdown to HTML parse mode
 
 ### 🐛 Bug Fixes
 
-- *(orchestrator)* Initialize headless_session_id to prevent UnboundLocalError
-- *(telegram)* Add fallback notification and fix markdown escaping
-- *(telegram)* Handle duplicate message update errors gracefully
-- *(monitoring)* Improve file detection and add message archiving
-- *(notifications)* Fix MESSAGE variable expansion in heredoc
-- *(notifications)* Remove markdown escaping for paths in backticks
-- *(notifications)* Escape literal underscores in monitoring footer
-- *(telegram)* Migrate notification system from Markdown to HTML parse mode
+- _(orchestrator)_ Initialize headless_session_id to prevent UnboundLocalError
+- _(telegram)_ Add fallback notification and fix markdown escaping
+- _(telegram)_ Handle duplicate message update errors gracefully
+- _(monitoring)_ Improve file detection and add message archiving
+- _(notifications)_ Fix MESSAGE variable expansion in heredoc
+- _(notifications)_ Remove markdown escaping for paths in backticks
+- _(notifications)_ Escape literal underscores in monitoring footer
+- _(telegram)_ Migrate notification system from Markdown to HTML parse mode
 
 ### 🚜 Refactor
 
-- *(skills)* Make dual-channel-watchexec skill self-contained
+- _(skills)_ Make dual-channel-watchexec skill self-contained
 
 ### 📚 Documentation
 
@@ -201,26 +218,28 @@
 
 ### 🎨 Styling
 
-- *(changelog)* Standardize markdown formatting
+- _(changelog)_ Standardize markdown formatting
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update changelog for v5.0.0
 - Migrate stop hook from prettier to mdformat
+
 ## [5.0.0] - 2025-10-29
 
 ### 🚜 Refactor
 
-- *(bot)* Extract async services to dedicated module (Phase 5)
+- _(bot)_ Extract async services to dedicated module (Phase 5)
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update changelog for v4.9.0
+
 ## [4.9.0] - 2025-10-29
 
 ### 🚜 Refactor
 
-- *(bot)* Extract handler classes to dedicated module (Phase 4)
+- _(bot)_ Extract handler classes to dedicated module (Phase 4)
 
 ### 📚 Documentation
 
@@ -230,11 +249,12 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update changelog for v4.8.0
+
 ## [4.8.0] - 2025-10-29
 
 ### 🚜 Refactor
 
-- *(bot)* Extract handler functions to dedicated module (Phase 3)
+- _(bot)_ Extract handler functions to dedicated module (Phase 3)
 
 ### 📚 Documentation
 
@@ -243,11 +263,12 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update changelog for v4.7.0
+
 ## [4.7.0] - 2025-10-29
 
 ### 🚜 Refactor
 
-- *(bot)* Extract file processors and progress tracking (Phase 2)
+- _(bot)_ Extract file processors and progress tracking (Phase 2)
 
 ### 📚 Documentation
 
@@ -256,101 +277,107 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update changelog for v4.6.0
+
 ## [4.6.0] - 2025-10-29
 
 ### 🚜 Refactor
 
-- *(bot)* Extract validators, formatters, keyboards to modules (Phase 1)
+- _(bot)_ Extract validators, formatters, keyboards to modules (Phase 1)
+
 ## [4.5.1] - 2025-10-29
 
 ### 🚀 Features
 
-- *(telegram)* Preserve user prompt and assistant response context in workflow completion messages
+- _(telegram)_ Preserve user prompt and assistant response context in workflow completion messages
 
 ### 🐛 Bug Fixes
 
-- *(lychee)* Use bot_state.workflow_registry in summary handler
-- *(lychee)* Detect lychee crashes and malformed output as errors
-- *(telegram)* Escape markdown characters in workflow completion context
+- _(lychee)_ Use bot_state.workflow_registry in summary handler
+- _(lychee)_ Detect lychee crashes and malformed output as errors
+- _(telegram)_ Escape markdown characters in workflow completion context
 
 ### 🚜 Refactor
 
-- *(lychee)* Extract shared utilities and consolidate handler base class
-- *(lychee)* Extract formatting and workflow utilities into dedicated modules
-- *(lychee)* Extract bot state, utilities, and message builders into dedicated modules
+- _(lychee)_ Extract shared utilities and consolidate handler base class
+- _(lychee)_ Extract formatting and workflow utilities into dedicated modules
+- _(lychee)_ Extract bot state, utilities, and message builders into dedicated modules
 
 ### ⚙️ Miscellaneous Tasks
 
-- *(todos)* Update CCI indicator task tracking for Strategy Tester phase
-- *(todos)* Clear completed CCI indicator Strategy Tester session tasks
+- _(todos)_ Update CCI indicator task tracking for Strategy Tester phase
+- _(todos)_ Clear completed CCI indicator Strategy Tester session tasks
 - Bump version to 4.5.1
+
 ## [4.5.0] - 2025-10-29
 
 ### 🚀 Features
 
-- *(lychee)* Enhance workflow context display and session tracking
+- _(lychee)_ Enhance workflow context display and session tracking
 
 ### 🐛 Bug Fixes
 
-- *(lychee)* Align workspace tracking and improve workflow ID parsing
-- *(lychee)* Use workspace_hash for progress tracking consistency
+- _(lychee)_ Align workspace tracking and improve workflow ID parsing
+- _(lychee)_ Use workspace_hash for progress tracking consistency
 
 ### 💼 Other
 
 - Re-disable always-thinking mode
 - Enable always-thinking mode
 - Disable always-thinking mode
-- *(lychee)* Add workspace tracking debug output and improve code organization
+- _(lychee)_ Add workspace tracking debug output and improve code organization
 
 ### 🚜 Refactor
 
-- *(telegram)* Remove document attachments, use inline truncated messages
-- *(lychee)* Improve progress tracking lifecycle and error handling
+- _(telegram)_ Remove document attachments, use inline truncated messages
+- _(lychee)_ Improve progress tracking lifecycle and error handling
 
 ### 📚 Documentation
 
-- *(lychee)* Release v4.5.0 - fix critical workspace ID mismatch bug
+- _(lychee)_ Release v4.5.0 - fix critical workspace ID mismatch bug
 
 ### ⚙️ Miscellaneous Tasks
 
-- *(todos)* Update task tracking for CCI Neutrality indicator implementation
-- *(todos)* Update CCI indicator task tracking for compilation phase
-- *(todos)* Clear completed CCI indicator agent session tasks
+- _(todos)_ Update task tracking for CCI Neutrality indicator implementation
+- _(todos)_ Update CCI indicator task tracking for compilation phase
+- _(todos)_ Clear completed CCI indicator agent session tasks
+
 ## [4.4.0] - 2025-10-28
 
 ### 🚜 Refactor
 
-- *(lychee)* Remove inject-results SessionStart hook
+- _(lychee)_ Remove inject-results SessionStart hook
+
 ## [4.3.0] - 2025-10-28
 
 ### 🚜 Refactor
 
-- *(telegram)* Migrate to AIORateLimiter for library-maintained rate limiting
+- _(telegram)_ Migrate to AIORateLimiter for library-maintained rate limiting
+
 ## [4.2.0] - 2025-10-28
 
 ### 🚀 Features
 
-- *(telegram)* Add git porcelain display and commit-changes workflow
-- *(plugins)* Add skills-powerkit plugin and enable always-thinking mode
-- *(skills)* Add MQL5 article extraction and Python workspace skills
-- *(skills)* Add MLflow experiment tracking query skill
-- *(skills)* Add MQL5 data ingestion research skill
-- *(telegram)* Add single-message progress streaming specification
-- *(telegram)* Implement single-message progress streaming for workflows
-- *(telegram)* Enhance progress tracking with persistent git context
-- *(telegram)* Add development and production runner scripts
-- *(telegram)* Add launchd service manager and watchexec auto-reload
-- *(telegram)* Add user prompt to SessionSummary messages
-- *(telegram)* Compact git status format with persistent tracking
+- _(telegram)_ Add git porcelain display and commit-changes workflow
+- _(plugins)_ Add skills-powerkit plugin and enable always-thinking mode
+- _(skills)_ Add MQL5 article extraction and Python workspace skills
+- _(skills)_ Add MLflow experiment tracking query skill
+- _(skills)_ Add MQL5 data ingestion research skill
+- _(telegram)_ Add single-message progress streaming specification
+- _(telegram)_ Implement single-message progress streaming for workflows
+- _(telegram)_ Enhance progress tracking with persistent git context
+- _(telegram)_ Add development and production runner scripts
+- _(telegram)_ Add launchd service manager and watchexec auto-reload
+- _(telegram)_ Add user prompt to SessionSummary messages
+- _(telegram)_ Compact git status format with persistent tracking
 
 ### 🐛 Bug Fixes
 
-- *(prettier)* Use /private/tmp instead of /tmp for macOS symlink compatibility
-- *(telegram)* Redirect orchestrator output to log file instead of pipes
-- *(orchestrator)* Add missing SUMMARIES_DIR constant
-- *(telegram)* Embed summary_data in WorkflowSelection to prevent race condition
-- *(telegram)* Use uv run instead of python for dev script
-- *(telegram)* Extract last Claude CLI response for SessionSummary title
+- _(prettier)_ Use /private/tmp instead of /tmp for macOS symlink compatibility
+- _(telegram)_ Redirect orchestrator output to log file instead of pipes
+- _(orchestrator)_ Add missing SUMMARIES_DIR constant
+- _(telegram)_ Embed summary_data in WorkflowSelection to prevent race condition
+- _(telegram)_ Use uv run instead of python for dev script
+- _(telegram)_ Extract last Claude CLI response for SessionSummary title
 
 ### 💼 Other
 
@@ -358,22 +385,24 @@
 
 ### 📚 Documentation
 
-- *(telegram)* Add docstring to template validator
-- *(doc-intelligence)* Add comprehensive docstrings to tools
-- *(telegram)* Add bot documentation with auto-reload guide
-- *(skills)* Document official MQL5 docs extraction capability
+- _(telegram)_ Add docstring to template validator
+- _(doc-intelligence)_ Add comprehensive docstrings to tools
+- _(telegram)_ Add bot documentation with auto-reload guide
+- _(skills)_ Document official MQL5 docs extraction capability
 
 ### ⚙️ Miscellaneous Tasks
 
-- *(submodule)* Update github-issues-skills to latest commit
-- *(todos)* Update agent task list for config tracking
-- *(submodule)* Update anthropic-agent-skills with documentation improvements
-- *(todos)* Clear completed agent task list
+- _(submodule)_ Update github-issues-skills to latest commit
+- _(todos)_ Update agent task list for config tracking
+- _(submodule)_ Update anthropic-agent-skills with documentation improvements
+- _(todos)_ Clear completed agent task list
+
 ## [4.1.0] - 2025-10-28
 
 ### 🚀 Features
 
-- *(telegram)* Add WorkflowExecution completion messages
+- _(telegram)_ Add WorkflowExecution completion messages
+
 ## [backup-before-telegram-merge] - 2025-10-28
 
 ### 🚀 Features
@@ -382,28 +411,29 @@
 
 ### 🐛 Bug Fixes
 
-- *(cleanup)* Handle sourcing in non-BASH_SOURCE environments
-- *(skills)* Standardize chezmoi-workflows YAML frontmatter
-- *(skills)* Standardize doppler-workflows YAML frontmatter
-- *(skills)* Standardize all latex skill YAML frontmatter
-- *(skills)* Standardize python and troubleshooting skill YAML frontmatter
-- *(telegram)* Make all workflows show consistently across workspaces
-- *(telegram)* Make all workflows show consistently across workspaces
-- *(settings)* Switch to custom statusline script
+- _(cleanup)_ Handle sourcing in non-BASH_SOURCE environments
+- _(skills)_ Standardize chezmoi-workflows YAML frontmatter
+- _(skills)_ Standardize doppler-workflows YAML frontmatter
+- _(skills)_ Standardize all latex skill YAML frontmatter
+- _(skills)_ Standardize python and troubleshooting skill YAML frontmatter
+- _(telegram)_ Make all workflows show consistently across workspaces
+- _(telegram)_ Make all workflows show consistently across workspaces
+- _(settings)_ Switch to custom statusline script
 
 ### 🚜 Refactor
 
-- *(skills)* Split code-clone-assistant for token efficiency
+- _(skills)_ Split code-clone-assistant for token efficiency
 
 ### 📚 Documentation
 
 - Add GitHub issue draft and code-clone-assistant skill
-- *(specs)* Update SSoT with phase-1 outcomes
-- *(specs)* Update SSoT to v1.2.0 - phase 2 complete
+- _(specs)_ Update SSoT with phase-1 outcomes
+- _(specs)_ Update SSoT to v1.2.0 - phase 2 complete
 
 ### ⚙️ Miscellaneous Tasks
 
 - Add lock file patterns to .gitignore
+
 ## [0.3.0-single-instance-protection] - 2025-10-27
 
 ### 🚀 Features
@@ -413,67 +443,70 @@
 ### 📚 Documentation
 
 - Add comprehensive hook testing recommendations
+
 ## [0.2.1-cns-output-fix] - 2025-10-27
 
 ### 🐛 Bug Fixes
 
-- *(cns)* Add output redirection to all CNS hook background processes
+- _(cns)_ Add output redirection to all CNS hook background processes
+
 ## [0.2.0-stop-hook-error-fixed] - 2025-10-27
 
 ### 🚀 Features
 
-- *(telegram)* Implement P1 rate limiting and markdown safety
-- *(telegram)* Implement P2 streaming progress updates
+- _(telegram)_ Implement P1 rate limiting and markdown safety
+- _(telegram)_ Implement P2 streaming progress updates
 
 ### 🐛 Bug Fixes
 
-- *(v4)* Strip newlines from wc output to prevent malformed JSON
-- *(v4)* Prevent double-zero in JSON by using grep || true
-- *(v4)* Shorten workflow button names for Telegram display
-- *(v4)* Support all workspaces with fallback for unregistered ones
-- *(lychee)* Add workspace fallback to CompletionHandler
-- *(lychee)* Invoke orchestrator when workflow button clicked
-- *(lychee)* Add workspace fallback to button confirmation messages
-- *(lychee)* Add extensive logging to progress poller and improve schema.json filtering
-- *(lychee)* Suppress uv debug output in hook to prevent false error in Claude Code CLI
-- *(lychee)* Suppress event_logger stdout to prevent hook error in Claude Code CLI
-- *(cns)* Add missing exit 0 to prevent hook output
-- *(hooks)* Add block-level output redirection to all background processes
+- _(v4)_ Strip newlines from wc output to prevent malformed JSON
+- _(v4)_ Prevent double-zero in JSON by using grep || true
+- _(v4)_ Shorten workflow button names for Telegram display
+- _(v4)_ Support all workspaces with fallback for unregistered ones
+- _(lychee)_ Add workspace fallback to CompletionHandler
+- _(lychee)_ Invoke orchestrator when workflow button clicked
+- _(lychee)_ Add workspace fallback to button confirmation messages
+- _(lychee)_ Add extensive logging to progress poller and improve schema.json filtering
+- _(lychee)_ Suppress uv debug output in hook to prevent false error in Claude Code CLI
+- _(lychee)_ Suppress event_logger stdout to prevent hook error in Claude Code CLI
+- _(cns)_ Add missing exit 0 to prevent hook output
+- _(hooks)_ Add block-level output redirection to all background processes
 
 ### 💼 Other
 
-- *(lychee)* Increase timeouts from 5/10min to 30min
+- _(lychee)_ Increase timeouts from 5/10min to 30min
 
 ### 🚜 Refactor
 
-- *(lychee)* Disable v3 notification emission (prevents duplicates)
+- _(lychee)_ Disable v3 notification emission (prevents duplicates)
 
 ### 📚 Documentation
 
-- *(lychee)* Add implementation plan for P1/P2 telegram improvements
-- *(telegram)* Update SSoT with P1 findings and completion status
-- *(telegram)* Update SSoT with P2 completion (commit 0dab467)
+- _(lychee)_ Add implementation plan for P1/P2 telegram improvements
+- _(telegram)_ Update SSoT with P1 findings and completion status
+- _(telegram)_ Update SSoT with P2 completion (commit 0dab467)
 
 ### ⚙️ Miscellaneous Tasks
 
 - Ignore agent todo files in todos/ directory
-- *(lychee)* Consolidate telegram files and fix logging paths
+- _(lychee)_ Consolidate telegram files and fix logging paths
+
 ## [4.0.0] - 2025-10-26
 
 ### 🚀 Features
 
-- *(telegram-workflows)* Add v4.0.0 architecture specification and migration plan
-- *(v4)* Apply pre-migration fixes for v3.0.1→v4.0.0
-- *(v4)* Establish v3.0.1 baseline and archive verification docs
-- *(v4)* Complete Phase 0 pre-migration validation
-- *(v4)* Complete Phase 1 - create workflow registry
-- *(v4)* Implement Phase 2 - hook emits session summaries with git status and duration
-- *(v4)* Implement Phase 3 - bot refactor with workflow menu system
-- *(v4)* Implement Phase 4 - orchestrator with multi-workflow execution and Jinja2 templates
+- _(telegram-workflows)_ Add v4.0.0 architecture specification and migration plan
+- _(v4)_ Apply pre-migration fixes for v3.0.1→v4.0.0
+- _(v4)_ Establish v3.0.1 baseline and archive verification docs
+- _(v4)_ Complete Phase 0 pre-migration validation
+- _(v4)_ Complete Phase 1 - create workflow registry
+- _(v4)_ Implement Phase 2 - hook emits session summaries with git status and duration
+- _(v4)_ Implement Phase 3 - bot refactor with workflow menu system
+- _(v4)_ Implement Phase 4 - orchestrator with multi-workflow execution and Jinja2 templates
 
 ### 💼 Other
 
-- *(v4)* Phase 4 scaffolding - orchestrator infrastructure
+- _(v4)_ Phase 4 scaffolding - orchestrator infrastructure
 
 ### 🚜 Refactor
 
@@ -481,22 +514,23 @@
 
 ### 📚 Documentation
 
-- *(lychee)* Update lifecycle analysis and workflow docs to v3.0.1
-- *(migration)* Add critical audit of v4.0.0 migration plan
-- *(v4)* Update SSoT with Phase 0-1 completion and continuation plan
-- *(v4)* Finalize v4.0.0 release documentation
+- _(lychee)_ Update lifecycle analysis and workflow docs to v3.0.1
+- _(migration)_ Add critical audit of v4.0.0 migration plan
+- _(v4)_ Update SSoT with Phase 0-1 completion and continuation plan
+- _(v4)_ Finalize v4.0.0 release documentation
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update .gitignore and add architecture docs
 - Add remaining workspace baseline files
 - Update session state and SSoT formatting
-- *(skills)* Rename skill-builder to agent-skill-builder
+- _(skills)_ Rename skill-builder to agent-skill-builder
+
 ## [pruning-baseline-2025-10-25] - 2025-10-23
 
 ### 🚀 Features
 
-- *(automation)* Add Prettier markdown formatting Stop hook
+- _(automation)_ Add Prettier markdown formatting Stop hook
 
 ### 🎨 Styling
 
@@ -505,74 +539,76 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Bump version to 2.2.0
+
 ## [2.1.0] - 2025-10-22
 
 ### 🚀 Features
 
-- *(shells,zellij)* Configure Zellij session recovery in zsh
-- *(skills)* [**breaking**] Implement hierarchical global skills architecture
+- _(shells,zellij)_ Configure Zellij session recovery in zsh
+- _(skills)_ [**breaking**] Implement hierarchical global skills architecture
 
 ### 📚 Documentation
 
 - Update CHANGELOG and RELEASE_NOTES for v2.9.0
-- *(memory)* Optimize context consumption via progressive disclosure
+- _(memory)_ Optimize context consumption via progressive disclosure
 - Update CHANGELOG and RELEASE_NOTES for v2.9.0
 - Update repository references from Eon-Labs to terrylica
-- *(audit)* Exhaustive documentation audit and consistency fixes
-- *(ssh)* Analyze caching issue and document solutions for next session
-- *(zellij)* Add balanced power-user configuration and comprehensive historical tracking guide
-- *(zellij)* Document Shift+Click workaround for hyperlink clicking
-- *(zellij)* Document macOS-specific Shift+Cmd+Click for links
+- _(audit)_ Exhaustive documentation audit and consistency fixes
+- _(ssh)_ Analyze caching issue and document solutions for next session
+- _(zellij)_ Add balanced power-user configuration and comprehensive historical tracking guide
+- _(zellij)_ Document Shift+Click workaround for hyperlink clicking
+- _(zellij)_ Document macOS-specific Shift+Cmd+Click for links
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update session tracking
+
 ## [2.9.0] - 2025-10-13
 
 ### 🚀 Features
 
-- *(development)* Integrate comprehensive tmux workspace management system
-- *(monitoring)* Capture comprehensive session analytics with extended followup trigger data
-- *(sessions)* Organize session data structure and agent todo system management
-- *(tooling)* Implement GitHub Flavored Markdown link checker with user memory updates
-- *(monitoring)* Capture GitHub Flavored Markdown link checker session analytics
-- *(agents)* Create `research-scout` agent with comprehensive research direction generation
-- *(tts)* Implement Phase 1 modular TTS foundation with comprehensive architecture
-- *(commands)* Implement comprehensive APCF slash command documentation
-- *(gfm-checker)* Implement comprehensive short flag compatibility for command-line interface
-- *(commands)* Implement comprehensive command validation infrastructure with auto-fix capabilities
-- *(tts)* Implement separated content-type processing with JSON-driven configuration management
-- *(tts)* Implement intelligent command detection with content-type differentiation for enhanced audio feedback
-- *(tts)* Implement ultra-aggressive content filtering with dual-mode clipboard integration
-- *(hooks)* Implement automated conversation export system with claude-code-exporter integration
-- *(cns)* Expand documentation architecture and enhance Mac IIx sound notification system
-- *(tools)* Implement automated Python code quality system with ruff integration
-- *(cns)* Update notification sound from Mac IIx to Toy Story audio
-- *(cns)* Optimize audio timing and enhance dot-folder pronunciation
-- *(cns)* Add configurable volume control for notification audio
-- *(infrastructure)* Establish organizational repository foundation with migration audit trail
-- *(gfm-checker)* Implement README completeness validation with workspace navigation repairs
-- *(utilities)* Implement direct execution utilities with structured documentation framework
-- *(link-checker)* Implement sub-repository ignore functionality with case-insensitive pattern matching
-- *(tools)* Implement SAGE development productivity tool with comprehensive alias system
-- *(sync)* Implement comprehensive SAGE dual-environment synchronization tool with error handling and validation
-- *(commands)* Implement command extension documentation consolidation with workflow integration
-- *(agents)* Implement Python import validation agent with comprehensive static analysis pipeline
-- *(automation)* Implement comprehensive CNS notification system with asynchronous hook architecture
-- *(tools)* Implement GitHub Flavored Markdown link integrity validation with intelligent auto-fix
-- *(qa)* Implement comprehensive command validation and Python code quality automation tools
-- *(infrastructure)* Implement SAGE development aliases with universal access pattern and dual-environment workflow integration
-- *(infrastructure)* Implement bulletproof SAGE sync v2.0 with emergency backup system
-- *(architecture)* Implement CAAP framework with comprehensive agent standards
-- *(consolidation)* Implement Python QA consolidation with unified quality assurance
-- *(enhancement)* Implement sophisticated research-scout with multi-perspective analysis
-- *(architecture)* Implement CAAP-compliant APCF agent with command delegation
-- *(tools)* Add Claude session sync utility for cross-platform session management
-- *(sync)* Implement bidirectional sync with official session format
-- *(tmux)* Add smart detach command with session auto-detection EL-1009
-- *(EPMS)* Add Universal Workspace Integration principles
-- *(fdap)* Add Fail-Fast Data Authenticity Precept to user memory
-- *(uv)* Enforce module-only execution pattern
+- _(development)_ Integrate comprehensive tmux workspace management system
+- _(monitoring)_ Capture comprehensive session analytics with extended followup trigger data
+- _(sessions)_ Organize session data structure and agent todo system management
+- _(tooling)_ Implement GitHub Flavored Markdown link checker with user memory updates
+- _(monitoring)_ Capture GitHub Flavored Markdown link checker session analytics
+- _(agents)_ Create `research-scout` agent with comprehensive research direction generation
+- _(tts)_ Implement Phase 1 modular TTS foundation with comprehensive architecture
+- _(commands)_ Implement comprehensive APCF slash command documentation
+- _(gfm-checker)_ Implement comprehensive short flag compatibility for command-line interface
+- _(commands)_ Implement comprehensive command validation infrastructure with auto-fix capabilities
+- _(tts)_ Implement separated content-type processing with JSON-driven configuration management
+- _(tts)_ Implement intelligent command detection with content-type differentiation for enhanced audio feedback
+- _(tts)_ Implement ultra-aggressive content filtering with dual-mode clipboard integration
+- _(hooks)_ Implement automated conversation export system with claude-code-exporter integration
+- _(cns)_ Expand documentation architecture and enhance Mac IIx sound notification system
+- _(tools)_ Implement automated Python code quality system with ruff integration
+- _(cns)_ Update notification sound from Mac IIx to Toy Story audio
+- _(cns)_ Optimize audio timing and enhance dot-folder pronunciation
+- _(cns)_ Add configurable volume control for notification audio
+- _(infrastructure)_ Establish organizational repository foundation with migration audit trail
+- _(gfm-checker)_ Implement README completeness validation with workspace navigation repairs
+- _(utilities)_ Implement direct execution utilities with structured documentation framework
+- _(link-checker)_ Implement sub-repository ignore functionality with case-insensitive pattern matching
+- _(tools)_ Implement SAGE development productivity tool with comprehensive alias system
+- _(sync)_ Implement comprehensive SAGE dual-environment synchronization tool with error handling and validation
+- _(commands)_ Implement command extension documentation consolidation with workflow integration
+- _(agents)_ Implement Python import validation agent with comprehensive static analysis pipeline
+- _(automation)_ Implement comprehensive CNS notification system with asynchronous hook architecture
+- _(tools)_ Implement GitHub Flavored Markdown link integrity validation with intelligent auto-fix
+- _(qa)_ Implement comprehensive command validation and Python code quality automation tools
+- _(infrastructure)_ Implement SAGE development aliases with universal access pattern and dual-environment workflow integration
+- _(infrastructure)_ Implement bulletproof SAGE sync v2.0 with emergency backup system
+- _(architecture)_ Implement CAAP framework with comprehensive agent standards
+- _(consolidation)_ Implement Python QA consolidation with unified quality assurance
+- _(enhancement)_ Implement sophisticated research-scout with multi-perspective analysis
+- _(architecture)_ Implement CAAP-compliant APCF agent with command delegation
+- _(tools)_ Add Claude session sync utility for cross-platform session management
+- _(sync)_ Implement bidirectional sync with official session format
+- _(tmux)_ Add smart detach command with session auto-detection EL-1009
+- _(EPMS)_ Add Universal Workspace Integration principles
+- _(fdap)_ Add Fail-Fast Data Authenticity Precept to user memory
+- _(uv)_ Enforce module-only execution pattern
 - Integrate comprehensive workspace system improvements
 - Add comprehensive quantitative development standards and CCXT mandate
 - Consolidate quantitative development standards after c9c968a merge
@@ -582,38 +618,38 @@
 - Implement CNS Remote Alert System with hybrid SSH tunnel architecture
 - CNS Remote Alert System production implementation
 - Pushover notification integration with emergency retry system
-- *(tools)* Add git-cliff release automation templates and AI agent workflow
-- *(cns)* Complete Pushover integration with git-based credentials
-- *(cns)* Enable dual SSH tunnel and Pushover notifications
-- *(cns)* Add configurable Pushover notification sound
+- _(tools)_ Add git-cliff release automation templates and AI agent workflow
+- _(cns)_ Complete Pushover integration with git-based credentials
+- _(cns)_ Enable dual SSH tunnel and Pushover notifications
+- _(cns)_ Add configurable Pushover notification sound
 - Enable Claude Code session history tracking
-- *(hooks,docs)* Add session ID display and ccstatusline integration
+- _(hooks,docs)_ Add session ID display and ccstatusline integration
 
 ### 🐛 Bug Fixes
 
-- *(hooks)* Update settings.json paths after automation script reorganization
-- *(tts)* Correct automation script path after directory reorganization
-- *(tts)* Resolve clipboard debug functionality for user content capture and refine command detection accuracy
-- *(tts)* Enhance slash command detection and clipboard filtering for command workflows
-- *(command-interface)* Resolve flag completeness gap with comprehensive wrapper synchronization
-- *(sage)* Update hardcoded paths after directory restructure
+- _(hooks)_ Update settings.json paths after automation script reorganization
+- _(tts)_ Correct automation script path after directory reorganization
+- _(tts)_ Resolve clipboard debug functionality for user content capture and refine command detection accuracy
+- _(tts)_ Enhance slash command detection and clipboard filtering for command workflows
+- _(command-interface)_ Resolve flag completeness gap with comprehensive wrapper synchronization
+- _(sage)_ Update hardcoded paths after directory restructure
 
 ### 💼 Other
 
-- *(attribution)* Disable automatic Claude attribution in commit messages
-- *(documentation)* Reorganize tool usage preferences in Claude Code user memory
-- *(httpx)* Optimize GFM link checker dependencies with modern HTTP client
-- *(gfm-checker)* Modernize Python dependency management with \`httpx\` optimization
-- *(ide)* Implement comprehensive basedpyright/pyright disabler for Cursor IDE development environment
-- *(cns)* Implement configurable clipboard control mechanism
-- *(claude)* Restructure principle hierarchy for workspace-wide evolutionary development application
-- *(workspace)* Establish working directory preservation principle with universal path construction enforcement
-- *(infrastructure)* Establish universal access shell integration with working directory preservation
-- *(architecture)* Refine universal access principles with dependency management consolidation
-- *(architecture)* Implement hybrid tool access architecture with industry standard ~/.local/bin pattern
-- *(system)* Investigate Claude Code workspace configuration optimization
-- *(infrastructure)* Implement universal tool installation system with cross-platform automation
-- *(infrastructure)* Implement SAGE sync command with workspace synchronization capabilities
+- _(attribution)_ Disable automatic Claude attribution in commit messages
+- _(documentation)_ Reorganize tool usage preferences in Claude Code user memory
+- _(httpx)_ Optimize GFM link checker dependencies with modern HTTP client
+- _(gfm-checker)_ Modernize Python dependency management with \`httpx\` optimization
+- _(ide)_ Implement comprehensive basedpyright/pyright disabler for Cursor IDE development environment
+- _(cns)_ Implement configurable clipboard control mechanism
+- _(claude)_ Restructure principle hierarchy for workspace-wide evolutionary development application
+- _(workspace)_ Establish working directory preservation principle with universal path construction enforcement
+- _(infrastructure)_ Establish universal access shell integration with working directory preservation
+- _(architecture)_ Refine universal access principles with dependency management consolidation
+- _(architecture)_ Implement hybrid tool access architecture with industry standard ~/.local/bin pattern
+- _(system)_ Investigate Claude Code workspace configuration optimization
+- _(infrastructure)_ Implement universal tool installation system with cross-platform automation
+- _(infrastructure)_ Implement SAGE sync command with workspace synchronization capabilities
 - Pre-MHR modularization state for rollback reference
 - Merge conflicts by accepting remote changes after sync
 - Remove obsolete statsig and todos directories
@@ -669,70 +705,70 @@
 
 ### 🚜 Refactor
 
-- *(architecture)* Implement hierarchical configuration management system
-- *(structure)* Rename scripts directory to tools for clarity
-- *(automation)* Organize scripts into logical subdirectories
-- *(agents)* Standardize all agent configurations to consistent YAML frontmatter template
-- *(config)* Streamline APCF documentation in user memory file
-- *(tts)* Simplify clipboard functionality to preserve raw conversation content
-- *(tts)* Remove TTS functionality and implement clipboard-only system with glass sound
+- _(architecture)_ Implement hierarchical configuration management system
+- _(structure)_ Rename scripts directory to tools for clarity
+- _(automation)_ Organize scripts into logical subdirectories
+- _(agents)_ Standardize all agent configurations to consistent YAML frontmatter template
+- _(config)_ Streamline APCF documentation in user memory file
+- _(tts)_ Simplify clipboard functionality to preserve raw conversation content
+- _(tts)_ Remove TTS functionality and implement clipboard-only system with glass sound
 - Complete TTS to CNS rename - eliminate misleading terminology across entire system
-- *(cns)* Eliminate TTS legacy contamination and optimize workspace architecture
-- *(automation)* Eliminate non-CNS hook system and consolidate to pure CNS architecture
-- *(automation)* Implement cross-platform compatibility for CNS system
-- *(tmux)* Eliminate complex automation and implement simple session management
-- *(agents)* Optimize agent definitions through complexity reduction investigation
-- *(docs)* Systematic documentation architecture optimization for maintainability
-- *(integration)* Consolidate cross-platform system integration documentation
-- *(tools)* Implement development tool integration research with documentation consolidation
-- *(workspace)* Implement systematic workspace organization with documentation consolidation architecture
-- *(agents)* Migrate to official Claude Code agent directory structure
-- *(commands)* Streamline APCF command for CAAP delegation efficiency
-- *(agents)* Restructure agent system and workspace configuration EL-1009
-- *(exception-only)* Implement strict exception-only failure principles across workspace
-- *(agents)* Update milestone-commit-logger for workplace agnosticism
-- *(agents)* Rename mhr-refactor to workspace-refactor
+- _(cns)_ Eliminate TTS legacy contamination and optimize workspace architecture
+- _(automation)_ Eliminate non-CNS hook system and consolidate to pure CNS architecture
+- _(automation)_ Implement cross-platform compatibility for CNS system
+- _(tmux)_ Eliminate complex automation and implement simple session management
+- _(agents)_ Optimize agent definitions through complexity reduction investigation
+- _(docs)_ Systematic documentation architecture optimization for maintainability
+- _(integration)_ Consolidate cross-platform system integration documentation
+- _(tools)_ Implement development tool integration research with documentation consolidation
+- _(workspace)_ Implement systematic workspace organization with documentation consolidation architecture
+- _(agents)_ Migrate to official Claude Code agent directory structure
+- _(commands)_ Streamline APCF command for CAAP delegation efficiency
+- _(agents)_ Restructure agent system and workspace configuration EL-1009
+- _(exception-only)_ Implement strict exception-only failure principles across workspace
+- _(agents)_ Update milestone-commit-logger for workplace agnosticism
+- _(agents)_ Rename mhr-refactor to workspace-refactor
 - Externalize extension specifications to YAML files
 - Implement agent session handoff with todo list continuity
 
 ### 📚 Documentation
 
-- *(infrastructure)* Establish comprehensive configuration documentation and protective measures
-- *(readme)* Fix broken links and add missing documentation files
-- *(sessions)* Add project memory documentation for cross-session context
+- _(infrastructure)_ Establish comprehensive configuration documentation and protective measures
+- _(readme)_ Fix broken links and add missing documentation files
+- _(sessions)_ Add project memory documentation for cross-session context
 - Update references to renamed tools directory
 - Add comprehensive directory documentation and Claude Code file safety guide
 - Add Claude Code official file warnings to main documentation
 - Update system architecture for current directory structure
 - Comprehensive accuracy audit and system architecture updates
-- *(memory)* Update TTS system documentation for modular architecture transition
-- *(architecture)* Synchronize documentation with modular TTS foundation implementation
-- *(config)* Modernize Python library preferences in user memory
-- *(gfm-check)* Synchronize command documentation with implemented flag behavior
+- _(memory)_ Update TTS system documentation for modular architecture transition
+- _(architecture)_ Synchronize documentation with modular TTS foundation implementation
+- _(config)_ Modernize Python library preferences in user memory
+- _(gfm-check)_ Synchronize command documentation with implemented flag behavior
 - Update all documentation for TTS removal and clipboard-only system
 - Finalize CNS documentation updates and hook path corrections
-- *(workspace)* Update ARCHITECTURE.md v2.2 - comprehensive workspace modernization
-- *(cns)* Eliminate glass sound legacy terminology across workspace architecture
-- *(workspace)* Update documentation for portable architecture and simplified workflows
-- *(apcf)* Enhance command documentation with execution best practices
-- *(claude)* Enhance documentation structure with planning methodology principles
-- *(readme)* Optimize root documentation for new Claude Code user onboarding
-- *(workspace)* Implement evolutionary language principles with categorized documentation structure
-- *(readme)* Establish repository identity as Claude Code global configuration template
-- *(cleanup)* Remove legacy migration documentation and correct CNS clipboard status
-- *(tooling)* Implement universal workspace access for GFM link checker cross-platform tooling
-- *(consolidation)* Establish repository identity with legacy documentation cleanup
-- *(apcf)* Refine authenticity template to eliminate timestamp redundancy with unique developer insight focus
-- *(workflow)* Establish dual-environment synchronization strategy with comprehensive setup documentation
-- *(architecture)* Establish consolidated documentation structure with GitHub rendering compatibility
+- _(workspace)_ Update ARCHITECTURE.md v2.2 - comprehensive workspace modernization
+- _(cns)_ Eliminate glass sound legacy terminology across workspace architecture
+- _(workspace)_ Update documentation for portable architecture and simplified workflows
+- _(apcf)_ Enhance command documentation with execution best practices
+- _(claude)_ Enhance documentation structure with planning methodology principles
+- _(readme)_ Optimize root documentation for new Claude Code user onboarding
+- _(workspace)_ Implement evolutionary language principles with categorized documentation structure
+- _(readme)_ Establish repository identity as Claude Code global configuration template
+- _(cleanup)_ Remove legacy migration documentation and correct CNS clipboard status
+- _(tooling)_ Implement universal workspace access for GFM link checker cross-platform tooling
+- _(consolidation)_ Establish repository identity with legacy documentation cleanup
+- _(apcf)_ Refine authenticity template to eliminate timestamp redundancy with unique developer insight focus
+- _(workflow)_ Establish dual-environment synchronization strategy with comprehensive setup documentation
+- _(architecture)_ Establish consolidated documentation structure with GitHub rendering compatibility
 - Add workspace overview documentation with agent directory structure
-- *(config)* Add module housekeep refactoring methodology with import stability guardrails
-- *(methodology)* Add standalone APCF commit format reference with SR&ED evidence generation
-- *(agents)* Implement comprehensive agent documentation system with APCF gitignore conflict detection
-- *(standards)* Add verified Claude session storage standard; reorganize docs structure and fix links
-- *(standards)* Add recovery/troubleshooting; add session-recovery.sh; remove legacy projects symlink EL-1009
-- *(sync)* Update command documentation for bidirectional sync capability
-- *(architecture)* Add session storage standards and reorganize docs structure
+- _(config)_ Add module housekeep refactoring methodology with import stability guardrails
+- _(methodology)_ Add standalone APCF commit format reference with SR&ED evidence generation
+- _(agents)_ Implement comprehensive agent documentation system with APCF gitignore conflict detection
+- _(standards)_ Add verified Claude session storage standard; reorganize docs structure and fix links
+- _(standards)_ Add recovery/troubleshooting; add session-recovery.sh; remove legacy projects symlink EL-1009
+- _(sync)_ Update command documentation for bidirectional sync capability
+- _(architecture)_ Add session storage standards and reorganize docs structure
 - Add comprehensive milestone log for workspace system integration
 - Comprehensive documentation audit and workspace hygiene improvements
 - Add GPT-5 research integration and secure sudo helper
@@ -742,9 +778,9 @@
 - Expand toolchain preferences with PDF processing and Python package guidelines
 - Standardize Python build toolchain with uv and hatchling
 - Consolidate documentation and add git-cliff comprehensive workflow
-- *(pushover)* Add emergency priority specification and implementation
-- *(credentials)* Migrate Pushover credentials to Doppler
-- *(terminal)* Add Ghostty terminal setup guide and enable session tracking
+- _(pushover)_ Add emergency priority specification and implementation
+- _(credentials)_ Migrate Pushover credentials to Doppler
+- _(terminal)_ Add Ghostty terminal setup guide and enable session tracking
 - Update PyPI token management to use Doppler
 - Clarify Doppler as exclusive PyPI publishing method
 - Add Kitty terminal configuration and session tracking
@@ -752,24 +788,24 @@
 
 ### ⚡ Performance
 
-- *(cns)* Implement asynchronous hook architecture to eliminate session delays
+- _(cns)_ Implement asynchronous hook architecture to eliminate session delays
 
 ### ⚙️ Miscellaneous Tasks
 
-- *(cleanup)* Remove unused audio assets and correct documentation references
-- *(artifacts)* Archive development shell snapshots from extended session workflow
-- *(artifacts)* Archive comprehensive zsh development environment snapshot
-- *(config)* Optimize repository tracking strategy with runtime data exclusion
-- *(hooks)* Remove followup.log from version control tracking
-- *(commands)* Remove deprecated hub command documentation files
-- *(system)* Remove deprecated IDE lock file from workspace cleanup
-- *(workspace)* Add manual glass sound utility and improve gitignore patterns
-- *(gitignore)* Resolve tracking conflicts with ignore patterns
-- *(maintenance)* Consolidate legacy tooling with enhanced agent deployment
-- *(cleanup)* Resolve root workspace clutter with strategic cleanup
-- *(git)* Resolve gitignore conflict with emergency backup preservation
-- *(housekeeping)* Enhance gitignore for comprehensive repository cleanup
-- *(cleanup)* Archive legacy session system components
+- _(cleanup)_ Remove unused audio assets and correct documentation references
+- _(artifacts)_ Archive development shell snapshots from extended session workflow
+- _(artifacts)_ Archive comprehensive zsh development environment snapshot
+- _(config)_ Optimize repository tracking strategy with runtime data exclusion
+- _(hooks)_ Remove followup.log from version control tracking
+- _(commands)_ Remove deprecated hub command documentation files
+- _(system)_ Remove deprecated IDE lock file from workspace cleanup
+- _(workspace)_ Add manual glass sound utility and improve gitignore patterns
+- _(gitignore)_ Resolve tracking conflicts with ignore patterns
+- _(maintenance)_ Consolidate legacy tooling with enhanced agent deployment
+- _(cleanup)_ Resolve root workspace clutter with strategic cleanup
+- _(git)_ Resolve gitignore conflict with emergency backup preservation
+- _(housekeeping)_ Enhance gitignore for comprehensive repository cleanup
+- _(cleanup)_ Archive legacy session system components
 - Update session artifacts and agent state
 - Update session artifacts and documentation
 - Clean up session artifacts and IDE lock files

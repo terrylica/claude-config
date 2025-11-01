@@ -417,7 +417,8 @@ class WorkflowExecutionHandler(BaseHandler):
                 # Compact git status (always show all counters)
                 git_status_line = format_git_status_compact(git_modified, git_staged, git_untracked)
 
-                # Session + debug log lines (show both original + headless if present)
+                # Session + debug log lines (show both original + headless mode session if present)
+                # Headless mode (-p flag) creates separate session ID for non-interactive execution
                 # Use separate inline code blocks - single backticks can't contain newlines in MarkdownV2
                 headless_session_id = execution.get("headless_session_id")
                 if headless_session_id:
